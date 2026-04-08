@@ -20,7 +20,22 @@ The original codebase is preserved in a separate repository and must not be modi
 
 ---
 
-## Code Style & Standards
+## Data Schema
+
+All three task dataframes share a common column schema. When writing code
+that queries these files, always use these column names:
+
+- `pid`         — participant ID
+- `trial`       — trial index
+- `observation` — sequential observation index within trial (all tasks)
+- `stage`       — social round index, jiang only (retained for analysis)
+- `value`       — stimulus input
+- `response`    — participant output
+
+Jiang-specific: `network`, `who`, `degree`, `rd`, `stage`
+Carrabin-specific: `qid`
+
+---
 
 - **Language:** Python 3.11 (conda env: `PY311`; venv: `evidence_integration/venv`)
 - **Style:** PEP 8; use `black` formatting
@@ -53,6 +68,8 @@ When porting a file from the original repository:
 ## What Cursor Should NOT Do
 
 - Do not modify files outside the scope of the current prompt
+- Do not create nested project folders — the root of all work is the project root, never a subfolder named `evidence_integration/`
+- All file paths in prompts are relative to the project root (e.g. `utils/paths.py`, not `evidence_integration/utils/paths.py`)
 - Do not refactor code that wasn't mentioned in the prompt
 - Do not install new dependencies without adding them to `requirements.txt` or `environment.yml`
 - Do not push to git — commits are made manually by the researcher after review

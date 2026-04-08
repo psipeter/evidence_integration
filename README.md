@@ -18,15 +18,32 @@ To navigate uncertain environments, the brain must continuously integrate new in
 
 ```
 evidence_integration/
-├── data/                  # Raw and preprocessed task data (not tracked by git)
+├── data/                  # Task data — only carrabin.pkl, jiang.pkl, yoo.pkl are tracked
 ├── models/                # Mathematical and neural network model implementations
 ├── fitting/               # Model fitting and parameter estimation routines
 ├── analysis/              # Analysis scripts and notebooks
 ├── figures/               # Generated figures (not tracked by git)
 ├── experiments/           # New experiment definitions and simulations
 ├── utils/                 # Shared utility functions
-└── notebooks/             # Exploratory notebooks (clearly dated/labeled)
+├── jobs/                  # SLURM job scripts for cluster runs
+└── notebooks/             # Exploratory notebooks
 ```
+
+## Data Schema
+
+All three task dataframes share a common column schema:
+
+| Column | Description |
+|---|---|
+| `pid` | Participant ID |
+| `trial` | Trial index |
+| `observation` | Sequential observation index within trial (all tasks) |
+| `stage` | Social round index, jiang only (retained for analysis) |
+| `value` | Stimulus input seen by participant or model |
+| `response` | Participant output |
+
+Jiang-specific columns: `network`, `who`, `degree`, `rd`, `stage`
+Carrabin-specific columns: `qid` (unique stimulus sequence identifier)
 
 > **Note:** This repo is a clean refactor. The original codebase is preserved in a separate private repository and should not be modified. Files are ported here selectively and rewritten for clarity and reproducibility.
 
