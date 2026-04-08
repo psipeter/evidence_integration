@@ -1,0 +1,58 @@
+# Cursor Rules — evidence_integration
+
+## Project Context
+
+This repository is a clean refactor of a research codebase for modeling individual variability in evidence integration. The project involves mathematical models, behavioral data fitting, and biophysical neural network simulations applied to cognitive task data in humans.
+
+The original codebase is preserved in a separate repository and must not be modified. Code is ported here selectively and rewritten for clarity and reproducibility.
+
+---
+
+## Workflow
+
+**Cursor is the code execution layer in a three-stage workflow:**
+
+1. The researcher and Claude (claude.ai) discuss goals, design decisions, and scope at a high level
+2. Claude drafts an explicit Cursor prompt describing exactly what to implement
+3. Cursor executes that prompt — writing, editing, or refactoring code as instructed
+
+**Cursor should follow the prompt as written.** If the prompt is ambiguous or the implementation requires a non-obvious decision, add a clearly marked `# TODO: [decision needed]` comment and proceed with the most conservative interpretation.
+
+---
+
+## Code Style & Standards
+
+- **Language:** Python 3.11 (conda env: `PY311`; venv: `evidence_integration/venv`)
+- **Style:** PEP 8; use `black` formatting
+- **Scripts:** Each script has a module-level docstring describing inputs, outputs, and dependencies
+- **No hardcoded paths** — use `pathlib.Path` with paths relative to the `evidence_integration/` project root
+- **No silent failures** — use assertions or explicit error messages for unexpected states
+
+---
+
+## Reproducibility Requirements
+
+- All stochastic operations receive an explicit random seed
+- Model fitting runs save: parameters, seed, timestamp, and output path
+- Do not modify files in `data/raw/` — all preprocessing writes to `data/processed/`
+- Figures are always generated programmatically; never edit output files manually
+
+---
+
+## Porting from the Old Codebase
+
+When porting a file from the original repository:
+
+1. Rewrite for clarity — do not copy-paste blindly
+2. Remove dead code, commented-out blocks, and notebook-style script fragments
+3. Add a docstring noting the original file it was derived from
+4. Flag any logic that is unclear or potentially incorrect with `# REVIEW: [reason]`
+
+---
+
+## What Cursor Should NOT Do
+
+- Do not modify files outside the scope of the current prompt
+- Do not refactor code that wasn't mentioned in the prompt
+- Do not install new dependencies without adding them to `requirements.txt` or `environment.yml`
+- Do not push to git — commits are made manually by the researcher after review
