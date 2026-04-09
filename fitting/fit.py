@@ -9,8 +9,28 @@ full-dataset analyses managed by ``rerun.py`` and ``collect.py``.
 Cluster parallelism is supported via shared MySQL Optuna storage; complete
 ``make_storage()`` before cluster use.
 
+Parameter-free optimal models (``Bayes`` on carrabin and jiang, ``Mean`` on yoo)
+should be simulated first (e.g. via ``python -m fitting.rerun`` after saving
+``params`` that identify the model), producing
+``data/{model_type}_{dataset}_{pid}_responses.pkl``; then call ``fit_noise_only()``
+to fit only ``sigma`` (carrabin/yoo) or ``beta`` (jiang) against those responses.
+
 Entry point:
 ``python -m fitting.fit {dataset} {model_type} {pid}``
+
+**Carrabin models (``fitting`` search spaces):** ``Bayes`` and ``NoisyCounting``
+use only ``sigma`` (no model parameters in the search space for Bayes;
+NoisyCounting is a stub). ``RL`` uses ``sigma`` and ``alpha``. Observation
+noise is not injected inside ``math_models``; ``sigma`` is read only in the loss
+layer.
+
+**Jiang models:** ``Bayes`` uses ``beta`` only (stub until network data exists).
+``DeGroot`` uses ``beta`` and ``zeta``. ``RL`` uses ``beta`` and ``eta`` (naive
+baseline; ignores ``rd`` in the update). ``beta`` is consumed only in
+``losses.nll``.
+
+**Yoo models:** ``Mean`` uses only ``sigma``. ``RL`` uses ``sigma`` and
+``alpha``. ``ADM`` uses ``primacy``, ``recency``, ``nu``, and ``sigma``.
 """
 
 import logging
@@ -47,30 +67,30 @@ def _suggest_params(
 
     if dataset == "carrabin":
         params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
-        if model_type == "RL_n":
+        if model_type == "RL":
             params["alpha"] = trial.suggest_float("alpha", 0.001, 1.0, step=0.001)
-        elif model_type in ("B_n", "DG_n"):
+        elif model_type in ("Bayes", "NoisyCounting"):
             pass
         else:
             raise ValueError(f"Unsupported carrabin model_type: {model_type!r}")
 
     elif dataset == "jiang":
         params["beta"] = trial.suggest_float("beta", 0.01, 10.0, step=0.01)
-        if model_type == "DG_z":
-            params["z"] = trial.suggest_float("z", 0.01, 1.0, step=0.01)
-        elif model_type == "RL_z":
-            params["alpha"] = trial.suggest_float("alpha", 0.01, 1.5, step=0.01)
-            params["z"] = trial.suggest_float("z", 0.01, 1.0, step=0.01)
+        if model_type == "Bayes":
+            pass
+        elif model_type == "DeGroot":
+            params["zeta"] = trial.suggest_float("zeta", 0.01, 2.0, step=0.01)
+        elif model_type == "RL":
+            params["eta"] = trial.suggest_float("eta", 0.01, 1.5, step=0.01)
         else:
             raise ValueError(f"Unsupported jiang model_type: {model_type!r}")
 
     elif dataset == "yoo":
         params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
-        if model_type == "DG":
+        if model_type == "Mean":
             pass
-        elif model_type == "RL_l":
-            params["alpha"] = trial.suggest_float("alpha", 0.001, 3.0, step=0.001)
-            params["lambda"] = trial.suggest_float("lambda", 0.001, 3.0, step=0.001)
+        elif model_type == "RL":
+            params["alpha"] = trial.suggest_float("alpha", 0.001, 1.0, step=0.001)
         elif model_type == "ADM":
             params["primacy"] = trial.suggest_float("primacy", 0.001, 1.0, step=0.001)
             params["recency"] = trial.suggest_float("recency", 0.001, 1.0, step=0.001)
@@ -81,6 +101,20 @@ def _suggest_params(
     else:
         raise ValueError(f"Unsupported dataset: {dataset!r}")
 
+    return params
+
+
+def _suggest_noise_only(
+    trial: optuna.trial.Trial, dataset: str, model_type: str, pid: int
+) -> dict:
+    """Sample only sigma (carrabin/yoo) or beta (jiang) for precomputed responses."""
+    params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
+    if dataset in ("carrabin", "yoo"):
+        params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
+    elif dataset == "jiang":
+        params["beta"] = trial.suggest_float("beta", 0.01, 10.0, step=0.01)
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset!r}")
     return params
 
 
@@ -102,6 +136,41 @@ def _cross_validate(params: dict, human: pd.DataFrame, k: int = 5) -> tuple[floa
             continue
 
         model_fold = math_models.run(params, trials=holdout_trials)
+        human_fold = human[human["trial"].isin(holdout_trials)]
+
+        fold_nll = losses.nll(params, model_fold, human_fold)
+        fold_nlls.append(float(fold_nll))
+
+    if not fold_nlls:
+        raise ValueError("No non-empty CV folds were generated")
+
+    mean_nll = float(np.mean(fold_nlls))
+    return mean_nll, fold_nlls
+
+
+def _cross_validate_precomputed(
+    params: dict,
+    human: pd.DataFrame,
+    model_responses: pd.DataFrame,
+    k: int = 5,
+) -> tuple[float, list[float]]:
+    """K-fold CV using fixed model responses (no ``math_models.run`` per fold)."""
+    trials = np.asarray(sorted(human["trial"].unique()))
+    if trials.size == 0:
+        raise ValueError("Human dataframe has no trials for cross-validation")
+
+    rng = np.random.RandomState(seed=int(params["pid"]))
+    shuffled = trials.copy()
+    rng.shuffle(shuffled)
+    folds = np.array_split(shuffled, k)
+
+    fold_nlls: list[float] = []
+    for fold_trials in folds:
+        holdout_trials = [int(t) for t in fold_trials.tolist()]
+        if not holdout_trials:
+            continue
+
+        model_fold = model_responses[model_responses["trial"].isin(holdout_trials)]
         human_fold = human[human["trial"].isin(holdout_trials)]
 
         fold_nll = losses.nll(params, model_fold, human_fold)
@@ -139,6 +208,87 @@ def fit(
     def objective(trial: optuna.trial.Trial) -> float:
         params = _suggest_params(trial, model_type, dataset, pid)
         mean_nll, fold_nlls = _cross_validate(params, human, k=k)
+        trial.set_user_attr("cv_nll_folds", fold_nlls)
+        return mean_nll
+
+    study.optimize(objective, n_trials=n_trials)
+
+    best_trial = study.best_trial
+    best_params = dict(best_trial.params)
+    best_params.update({"model_type": model_type, "dataset": dataset, "pid": int(pid)})
+    best_folds = list(best_trial.user_attrs.get("cv_nll_folds", []))
+
+    runtime = (time.time() - start) / 60.0
+    params_df = pd.DataFrame([best_params])
+    performance_df = pd.DataFrame(
+        [
+            {
+                "model_type": model_type,
+                "dataset": dataset,
+                "pid": int(pid),
+                "cv_nll_mean": float(best_trial.value),
+                "runtime": float(runtime),
+            }
+        ]
+    )
+    cv_folds_df = pd.DataFrame(
+        [
+            {
+                "model_type": model_type,
+                "dataset": dataset,
+                "pid": int(pid),
+                "fold": int(i + 1),
+                "nll": float(nll_val),
+            }
+            for i, nll_val in enumerate(best_folds)
+        ]
+    )
+
+    params_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_params.pkl"))
+    performance_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_performance.pkl"))
+    cv_folds_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_cv_folds.pkl"))
+
+    return params_df, performance_df
+
+
+def fit_noise_only(
+    dataset: str,
+    model_type: str,
+    pid: int,
+    n_trials: int = 100,
+    k: int = 5,
+    storage: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Fit only observation/decision noise (sigma or beta) given pre-saved model
+    responses at ``data/{model_type}_{dataset}_{pid}_responses.pkl``.
+    """
+    start = time.time()
+    responses_path = data_path(f"{model_type}_{dataset}_{pid}_responses.pkl")
+    if not responses_path.exists():
+        raise FileNotFoundError(
+            f"Pre-saved responses not found: {responses_path}. "
+            "Run rerun (or equivalent) after fixing model params first."
+        )
+    model_responses = pd.read_pickle(responses_path)
+
+    human = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    human = human.query("pid == @pid")
+    if human.empty:
+        raise ValueError(f"No rows for pid={pid} in dataset={dataset!r}")
+
+    study = optuna.create_study(
+        direction="minimize",
+        study_name=f"{model_type}_{dataset}_{pid}__noise_only",
+        storage=storage,
+        load_if_exists=True,
+    )
+
+    def objective(trial: optuna.trial.Trial) -> float:
+        params = _suggest_noise_only(trial, dataset, model_type, pid)
+        mean_nll, fold_nlls = _cross_validate_precomputed(
+            params, human, model_responses, k=k
+        )
         trial.set_user_attr("cv_nll_folds", fold_nlls)
         return mean_nll
 

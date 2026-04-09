@@ -67,6 +67,18 @@ Loss functions live in `fitting/losses.py`. The universal loss is NLL:
 - Gaussian noise (sigma) for carrabin and yoo
 - Sigmoid decision rule (beta) for jiang
 
+### Parameter-free models
+
+Some models have no free parameters beyond the noise term (sigma or beta).
+These follow a two-step workflow:
+1. **Simulate once** via `rerun.py` directly (no fitting loop needed) — saves `data/{model_type}_{dataset}_{pid}_responses.pkl`
+2. **Fit noise only** via `fit_noise_only()` in `fit.py` — lightweight optuna study searching only over sigma or beta, loading pre-saved responses rather than rerunning the model
+
+Parameter-free models:
+- carrabin: `Bayes`
+- jiang: `Bayes`
+- yoo: `Mean`
+
 ---
 
 ## Code Style & Standards

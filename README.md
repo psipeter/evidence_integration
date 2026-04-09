@@ -81,16 +81,19 @@ estimates = run(params, save=False, trials=None)
 
 `params` is a dict containing at minimum `"model_type"`, `"dataset"`, `"pid"`. Additional keys are model-specific.
 
-| Dataset | Model | Parameters |
-|---|---|---|
-| carrabin | `RL_n` | alpha, sigma |
-| carrabin | `B_n` | sigma |
-| carrabin | `DG_n` | sigma |
-| jiang | `DG_z` | z, beta |
-| jiang | `RL_z` | alpha, z, beta |
-| yoo | `DG` | sigma |
-| yoo | `RL_l` | alpha, lambda, sigma |
-| yoo | `ADM` | primacy, recency, nu, sigma |
+| Dataset | Model | Type | Parameters |
+|---|---|---|---|
+| carrabin | `Bayes` | optimal | sigma only |
+| carrabin | `NoisyCounting` | human-matching | TBD, sigma |
+| carrabin | `RL` | naive baseline | alpha, sigma |
+| jiang | `Bayes` | optimal | beta only |
+| jiang | `DeGroot` | human-matching | zeta, beta |
+| jiang | `RL` | naive baseline | eta, zeta, beta |
+| yoo | `Mean` | optimal | sigma only |
+| yoo | `ADM` | human-matching | primacy, recency, nu, sigma |
+| yoo | `RL` | naive baseline | alpha, sigma |
+
+Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) are simulated once via `rerun.py` and then fitted for noise only via `fit_noise_only()` in `fit.py`.
 
 ### NEF models (`models/synaptic.py`, `models/recurrent.py`)
 Biophysical Nengo models — not yet ported. Will expose the same `run(params)` interface.
@@ -136,6 +139,32 @@ Both environments are kept in sync. `environment.yml` and `requirements.txt` are
 3. **Review and commit** by the researcher before any changes are pushed
 
 See `.cursorrules` for Cursor's operating instructions.
+
+### Cursor prompt format
+
+When drafting Cursor prompts, Claude should always format them as follows:
+
+- Title: `Cursor Prompt 00X — Brief description of what the prompt does`
+- Body: a single fenced code block with language set to `markdown`, containing the full prompt as plain prose with `##` section headers for each distinct task
+- Numbering: prompts are numbered sequentially across the entire project (001, 002, ...) — never reset between chats
+- One prompt per response — if multiple files need changes, combine them into clearly labeled sections within a single prompt
+- File paths are always relative to the project root (e.g. `models/math_models.py`, not `evidence_integration/models/math_models.py`)
+- The prompt should be self-contained — Cursor should be able to execute it without reading the conversation history
+
+Example structure:
+````
+```markdown
+Edit `models/example.py` to make the following changes.
+
+## 1. First change
+Description of what to do.
+
+## 2. Second change
+Description of what to do.
+
+Do not change any other logic. Do not create any other files.
+```
+````
 
 ---
 

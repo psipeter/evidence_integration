@@ -9,9 +9,9 @@ Ported and redesigned from
 
 **Datasets and model types**
 
-- **carrabin:** ``RL_n``, ``B_n``, ``DG_n``
-- **jiang:** ``DG_z``, ``RL_z``
-- **yoo:** ``DG``, ``RL_l``, ``ADM``
+- **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive)
+- **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
+- **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
 
 **Unified interface**
 
@@ -31,9 +31,9 @@ import pandas as pd
 
 from utils.paths import data_path
 
-_CARRABIN_MODELS = frozenset({"RL_n", "B_n", "DG_n"})
-_JIANG_MODELS = frozenset({"DG_z", "RL_z"})
-_YOO_MODELS = frozenset({"DG", "RL_l", "ADM"})
+_CARRABIN_MODELS = frozenset({"Bayes", "NoisyCounting", "RL"})
+_JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL"})
+_YOO_MODELS = frozenset({"Mean", "ADM", "RL"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -96,7 +96,7 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
 
     out = pd.DataFrame(rows)
     if save:
-        fname = f"{model_type}_{dataset}_{pid}_estimates.pkl"
+        fname = f"{model_type}_{dataset}_{pid}_responses.pkl"
         out.to_pickle(data_path(fname))
     return out
 
@@ -121,10 +121,9 @@ def _validate_model_dataset(model_type: str, dataset: str) -> None:
 
 def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
     dataset = params["dataset"]
-    pid = int(params["pid"])
 
     if dataset == "carrabin":
-        return _run_carrabin(params, human_pid, trial, step, pid)
+        return _run_carrabin(params, human_pid, trial, step)
     if dataset == "jiang":
         return _run_jiang(params, human_pid, trial, step)
     if dataset == "yoo":
@@ -133,30 +132,29 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
 
 
 def _run_carrabin(
-    params: dict, human_pid: pd.DataFrame, trial: int, observation: int, pid: int
+    params: dict, human_pid: pd.DataFrame, trial: int, observation: int
 ) -> float:
     model_type = params["model_type"]
-    rng = np.random.RandomState(seed=100 * pid + 1000 * trial)
-
     subdata = human_pid.query("trial == @trial & observation <= @observation")
     values = subdata["value"].to_numpy()
-    expectation = 0.0
-    for c, value in enumerate(values):
-        error = value - expectation
-        if model_type == "B_n":
-            weight = 1.0 / (c + 3)
-            eps = rng.normal(0, params["sigma"])
-        elif model_type == "DG_n":
-            weight = 1.0 / (c + 1)
-            eps = rng.normal(0, params["sigma"])
-        elif model_type == "RL_n":
-            weight = params["alpha"]
-            eps = rng.normal(0, params["sigma"])
-        else:
-            raise AssertionError("unreachable")
-        expectation += weight * error + eps
-        expectation = float(np.clip(expectation, -1, 1))
-    return expectation
+    t = len(values)
+    n_R = np.sum((values + 1) / 2)
+
+    if model_type == "Bayes":
+        p_star = (n_R + 1) / (t + 2)
+        expectation = 2 * p_star - 1
+        return float(expectation)
+    if model_type == "NoisyCounting":
+        # TODO: implement noisy counting model from Prat-Carrabin & Woodford
+        raise NotImplementedError("NoisyCounting model not yet implemented")
+    if model_type == "RL":
+        expectation = 0.0
+        for value in values:
+            error = value - expectation
+            expectation += params["alpha"] * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
+    raise AssertionError("unreachable")
 
 
 def _run_jiang(
@@ -164,24 +162,31 @@ def _run_jiang(
 ) -> float:
     model_type = params["model_type"]
     subdata = human_pid.query("trial == @trial & stage <= @stage")
-    values = subdata["value"].to_numpy()
-    rds = subdata["rd"].to_numpy()
-    expectation = 0.0
-    for c, value in enumerate(values):
-        stg = int(subdata.iloc[c]["stage"])
-        error = value - expectation
-        # REVIEW: rd forced to 0 for early stages matches fit.py; confirm this matches task design.
-        rd = 0.0 if stg in (0, 1) else float(rds[c])
-        if model_type == "DG_z":
-            weight = 1.0 / (c + 1) + params["z"] * rd
-        elif model_type == "RL_z":
-            weight = 1.0 if stg == 0 else params["alpha"] + params["z"] * rd
-        else:
-            raise AssertionError("unreachable")
-        weight = float(np.clip(weight, 0, 1))
-        expectation += weight * error
-        expectation = float(np.clip(expectation, -1, 1))
-    return expectation
+    values = subdata["value"].to_numpy(dtype=float)
+    rds = subdata["rd"].to_numpy(dtype=float)
+
+    if model_type == "Bayes":
+        # TODO: implement full Bayesian model from Jiang & Zhu appendix
+        # Requires network adjacency data (jiang_networks.pkl, not yet available)
+        raise NotImplementedError("Bayes model for jiang not yet implemented")
+    if model_type == "DeGroot":
+        zeta = params["zeta"]
+        weights = 1.0 + zeta * rds
+        wsum = np.sum(weights)
+        if wsum == 0:
+            return 0.0
+        expectation = float(np.dot(weights, values) / wsum)
+        return float(np.clip(expectation, -1, 1))
+    if model_type == "RL":
+        eta = params["eta"]
+        weight = eta
+        expectation = 0.0
+        for value in values:
+            error = value - expectation
+            expectation += weight * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
+    raise AssertionError("unreachable")
 
 
 def _run_yoo(
@@ -194,14 +199,13 @@ def _run_yoo(
     subdata = human_pid.query("trial == @trial & observation <= @observation")
     values = subdata["value"].to_numpy()
 
-    if model_type == "DG":
+    if model_type == "Mean":
         return float(np.mean(values))
-    if model_type == "RL_l":
+    if model_type == "RL":
         expectation = 0.0
-        for o, value in enumerate(values):
+        for value in values:
             error = value - expectation
-            weight = params["alpha"] * np.power(o + 1, -params["lambda"])
-            expectation += weight * error
+            expectation += params["alpha"] * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
     if model_type == "ADM":
