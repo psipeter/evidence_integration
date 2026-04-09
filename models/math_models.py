@@ -170,16 +170,16 @@ def _run_jiang(
         # Requires network adjacency data (jiang_networks.pkl, not yet available)
         raise NotImplementedError("Bayes model for jiang not yet implemented")
     if model_type == "DeGroot":
-        zeta = params["zeta"]
-        weights = 1.0 + zeta * rds
+        omega = params["omega"]
+        weights = 1.0 + omega * rds
         wsum = np.sum(weights)
         if wsum == 0:
             return 0.0
         expectation = float(np.dot(weights, values) / wsum)
         return float(np.clip(expectation, -1, 1))
     if model_type == "RL":
-        eta = params["eta"]
-        weight = eta
+        alpha = params["alpha"]
+        weight = alpha
         expectation = 0.0
         for value in values:
             error = value - expectation
@@ -209,14 +209,14 @@ def _run_yoo(
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
     if model_type == "ADM":
-        primacy = params["primacy"]
-        recency = params["recency"]
+        phi = params["phi"]
+        rho = params["rho"]
         nu = params["nu"]
         n = len(values)
         # REVIEW: Exponent uses outer ``observation`` (target index) and loop index ``o``; matches fit.py ADM loop with stage renamed.
         weights = np.array(
             [
-                (1.0 - (1.0 - primacy ** (o + 1)) * (1.0 - recency ** (observation - o)))
+                (1.0 - (1.0 - phi ** (o + 1)) * (1.0 - rho ** (observation - o)))
                 * (1.0 - nu)
                 + nu
                 for o in range(n)

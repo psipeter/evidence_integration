@@ -47,7 +47,23 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 - `params` must contain `"model_type"`, `"dataset"`, `"pid"` plus model-specific keys
 - Returns a DataFrame with columns: `"model_type"`, `"pid"`, `"trial"`, `"observation"` or `"stage"`, `"response"`
 - If `trials` is not None, only those trials are run
-- If `save=True`, output is saved to `data/{model_type}_{dataset}_{pid}_estimates.pkl`
+- If `save=True`, output is saved to `data/{model_type}_{dataset}_{pid}_responses.pkl`
+
+---
+
+## Parameter Naming Convention
+
+All model parameters use consistent Greek letter names throughout the
+codebase. Never introduce synonyms or alternatives.
+
+| Parameter | Symbol | Used in |
+|---|---|---|
+| Learning rate | `alpha` | RL (all tasks) |
+| RD social weighting | `omega` | jiang DeGroot |
+| Primacy | `phi` | yoo ADM |
+| Recency | `rho` | yoo ADM |
+| Baseline | `nu` | yoo ADM |
+| Inverse noise temperature | `beta` | jiang (switch loss only) |
 
 ---
 

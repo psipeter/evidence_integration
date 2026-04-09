@@ -1,36 +1,36 @@
 """
 Model-fitting orchestration layer for participant-level parameter estimation.
 
-This module coordinates parameter search with Optuna and cross-validation,
-writing participant-specific outputs to ``data/`` for downstream aggregation.
-In practice this is a two-stage workflow: first, cross-validation identifies a
-good parameter region; second, the selected parameters are saved for downstream
-full-dataset analyses managed by ``rerun.py`` and ``collect.py``.
-Cluster parallelism is supported via shared MySQL Optuna storage; complete
-``make_storage()`` before cluster use.
+Coordinates Optuna search with k-fold cross-validation over a chosen loss
+(``loss_type``), writing participant-specific outputs to ``data/`` for downstream
+aggregation. Two experiment regimes:
 
-Parameter-free optimal models (``Bayes`` on carrabin and jiang, ``Mean`` on yoo)
-should be simulated first (e.g. via ``python -m fitting.rerun`` after saving
-``params`` that identify the model), producing
-``data/{model_type}_{dataset}_{pid}_responses.pkl``; then call ``fit_noise_only()``
-to fit only ``sigma`` (carrabin/yoo) or ``beta`` (jiang) against those responses.
+- **Experiment 1 (``loss_type="mse"``):** Mean squared error between model and
+  human responses. No ``sigma`` (carrabin/yoo) or ``beta`` (jiang) in the search
+  space; jiang uses raw prediction error vs. human ``response``.
+- **Experiment 2:** Task-specific losses (``excursion``, ``switch``, ``decay``)
+  — wired through ``losses.compute_loss``; stubs except where implemented.
+
+``fit_noise_only()`` is reserved for NLL-style noise fitting when those losses
+are implemented; it is not used for ``mse``.
 
 Entry point:
-``python -m fitting.fit {dataset} {model_type} {pid}``
+``python -m fitting.fit {dataset} {model_type} {pid} [loss_type] [n_trials]``
 
-**Carrabin models (``fitting`` search spaces):** ``Bayes`` and ``NoisyCounting``
-use only ``sigma`` (no model parameters in the search space for Bayes;
-NoisyCounting is a stub). ``RL`` uses ``sigma`` and ``alpha``. Observation
-noise is not injected inside ``math_models``; ``sigma`` is read only in the loss
-layer.
+Optional ``loss_type`` (default ``"mse"``); optional ``n_trials`` (default 100)
+when a fifth argument is provided (use ``mse`` explicitly if passing ``n_trials``
+as the fifth token).
 
-**Jiang models:** ``Bayes`` uses ``beta`` only (stub until network data exists).
-``DeGroot`` uses ``beta`` and ``zeta``. ``RL`` uses ``beta`` and ``eta`` (naive
-baseline; ignores ``rd`` in the update). ``beta`` is consumed only in
-``losses.nll``.
+**Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
-**Yoo models:** ``Mean`` uses only ``sigma``. ``RL`` uses ``sigma`` and
-``alpha``. ``ADM`` uses ``primacy``, ``recency``, ``nu``, and ``sigma``.
+**Jiang:** With ``mse``, no ``beta``. Otherwise ``beta`` is suggested where needed
+for likelihood-style losses. ``DeGroot`` — ``omega``; ``RL`` — ``alpha`` (naive
+update, ignores ``rd``).
+
+**Yoo:** ``Mean`` — no params. ``RL`` — ``alpha``. ``ADM`` — ``phi``, ``rho``, ``nu``.
+
+Cluster parallelism: shared MySQL Optuna storage; complete ``make_storage()``
+before cluster use.
 """
 
 import logging
@@ -59,14 +59,26 @@ def make_storage(host: str, user: str, password: str, study_name: str) -> str:
     raise NotImplementedError
 
 
+def _log_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+    """Log progress every 10 trials."""
+    if trial.number % 10 == 0:
+        logging.info(
+            f"Trial {trial.number}: loss={trial.value:.4f} | "
+            f"best={study.best_value:.4f} | params={trial.params}"
+        )
+
+
 def _suggest_params(
-    trial: optuna.trial.Trial, model_type: str, dataset: str, pid: int
+    trial: optuna.trial.Trial,
+    model_type: str,
+    dataset: str,
+    pid: int,
+    loss_type: str,
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
 
     if dataset == "carrabin":
-        params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
         if model_type == "RL":
             params["alpha"] = trial.suggest_float("alpha", 0.001, 1.0, step=0.001)
         elif model_type in ("Bayes", "NoisyCounting"):
@@ -75,25 +87,25 @@ def _suggest_params(
             raise ValueError(f"Unsupported carrabin model_type: {model_type!r}")
 
     elif dataset == "jiang":
-        params["beta"] = trial.suggest_float("beta", 0.01, 10.0, step=0.01)
+        if loss_type != "mse":
+            params["beta"] = trial.suggest_float("beta", 0.01, 10.0, step=0.01)
         if model_type == "Bayes":
             pass
         elif model_type == "DeGroot":
-            params["zeta"] = trial.suggest_float("zeta", 0.01, 2.0, step=0.01)
+            params["omega"] = trial.suggest_float("omega", 0.01, 2.0, step=0.01)
         elif model_type == "RL":
-            params["eta"] = trial.suggest_float("eta", 0.01, 1.5, step=0.01)
+            params["alpha"] = trial.suggest_float("alpha", 0.01, 1.5, step=0.01)
         else:
             raise ValueError(f"Unsupported jiang model_type: {model_type!r}")
 
     elif dataset == "yoo":
-        params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
         if model_type == "Mean":
             pass
         elif model_type == "RL":
             params["alpha"] = trial.suggest_float("alpha", 0.001, 1.0, step=0.001)
         elif model_type == "ADM":
-            params["primacy"] = trial.suggest_float("primacy", 0.001, 1.0, step=0.001)
-            params["recency"] = trial.suggest_float("recency", 0.001, 1.0, step=0.001)
+            params["phi"] = trial.suggest_float("phi", 0.001, 1.0, step=0.001)
+            params["rho"] = trial.suggest_float("rho", 0.001, 1.0, step=0.001)
             params["nu"] = trial.suggest_float("nu", 0.001, 0.5, step=0.001)
         else:
             raise ValueError(f"Unsupported yoo model_type: {model_type!r}")
@@ -105,9 +117,18 @@ def _suggest_params(
 
 
 def _suggest_noise_only(
-    trial: optuna.trial.Trial, dataset: str, model_type: str, pid: int
+    trial: optuna.trial.Trial,
+    dataset: str,
+    model_type: str,
+    pid: int,
+    loss_type: str,
 ) -> dict:
-    """Sample only sigma (carrabin/yoo) or beta (jiang) for precomputed responses."""
+    """Sample only noise parameters for precomputed responses (NLL-style fits)."""
+    if loss_type == "mse":
+        raise NotImplementedError(
+            "fit_noise_only() is only meaningful for NLL-based (or other) loss "
+            "functions that include a noise parameter; MSE fits use fit() instead."
+        )
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
     if dataset in ("carrabin", "yoo"):
         params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
@@ -118,8 +139,13 @@ def _suggest_noise_only(
     return params
 
 
-def _cross_validate(params: dict, human: pd.DataFrame, k: int = 5) -> tuple[float, list[float]]:
-    """Run k-fold CV over trials and return mean NLL and fold NLLs."""
+def _cross_validate(
+    params: dict,
+    human: pd.DataFrame,
+    k: int = 5,
+    loss_type: str = "mse",
+) -> tuple[float, list[float]]:
+    """Run k-fold CV over trials and return mean loss and per-fold losses."""
     trials = np.asarray(sorted(human["trial"].unique()))
     if trials.size == 0:
         raise ValueError("Human dataframe has no trials for cross-validation")
@@ -129,7 +155,7 @@ def _cross_validate(params: dict, human: pd.DataFrame, k: int = 5) -> tuple[floa
     rng.shuffle(shuffled)
     folds = np.array_split(shuffled, k)
 
-    fold_nlls: list[float] = []
+    fold_losses: list[float] = []
     for fold_trials in folds:
         holdout_trials = [int(t) for t in fold_trials.tolist()]
         if not holdout_trials:
@@ -138,14 +164,14 @@ def _cross_validate(params: dict, human: pd.DataFrame, k: int = 5) -> tuple[floa
         model_fold = math_models.run(params, trials=holdout_trials)
         human_fold = human[human["trial"].isin(holdout_trials)]
 
-        fold_nll = losses.nll(params, model_fold, human_fold)
-        fold_nlls.append(float(fold_nll))
+        fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
+        fold_losses.append(float(fold_loss))
 
-    if not fold_nlls:
+    if not fold_losses:
         raise ValueError("No non-empty CV folds were generated")
 
-    mean_nll = float(np.mean(fold_nlls))
-    return mean_nll, fold_nlls
+    mean_loss = float(np.mean(fold_losses))
+    return mean_loss, fold_losses
 
 
 def _cross_validate_precomputed(
@@ -153,6 +179,7 @@ def _cross_validate_precomputed(
     human: pd.DataFrame,
     model_responses: pd.DataFrame,
     k: int = 5,
+    loss_type: str = "mse",
 ) -> tuple[float, list[float]]:
     """K-fold CV using fixed model responses (no ``math_models.run`` per fold)."""
     trials = np.asarray(sorted(human["trial"].unique()))
@@ -164,7 +191,7 @@ def _cross_validate_precomputed(
     rng.shuffle(shuffled)
     folds = np.array_split(shuffled, k)
 
-    fold_nlls: list[float] = []
+    fold_losses: list[float] = []
     for fold_trials in folds:
         holdout_trials = [int(t) for t in fold_trials.tolist()]
         if not holdout_trials:
@@ -173,23 +200,24 @@ def _cross_validate_precomputed(
         model_fold = model_responses[model_responses["trial"].isin(holdout_trials)]
         human_fold = human[human["trial"].isin(holdout_trials)]
 
-        fold_nll = losses.nll(params, model_fold, human_fold)
-        fold_nlls.append(float(fold_nll))
+        fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
+        fold_losses.append(float(fold_loss))
 
-    if not fold_nlls:
+    if not fold_losses:
         raise ValueError("No non-empty CV folds were generated")
 
-    mean_nll = float(np.mean(fold_nlls))
-    return mean_nll, fold_nlls
+    mean_loss = float(np.mean(fold_losses))
+    return mean_loss, fold_losses
 
 
 def fit(
     dataset: str,
     model_type: str,
     pid: int,
-    n_trials: int = 200,
+    n_trials: int = 100,
     k: int = 5,
     storage: str | None = None,
+    loss_type: str = "mse",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
     start = time.time()
@@ -206,17 +234,24 @@ def fit(
     )
 
     def objective(trial: optuna.trial.Trial) -> float:
-        params = _suggest_params(trial, model_type, dataset, pid)
-        mean_nll, fold_nlls = _cross_validate(params, human, k=k)
-        trial.set_user_attr("cv_nll_folds", fold_nlls)
-        return mean_nll
+        params = _suggest_params(trial, model_type, dataset, pid, loss_type)
+        mean_loss, fold_losses = _cross_validate(params, human, k=k, loss_type=loss_type)
+        trial.set_user_attr("cv_loss_folds", fold_losses)
+        return mean_loss
 
-    study.optimize(objective, n_trials=n_trials)
+    study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
 
     best_trial = study.best_trial
     best_params = dict(best_trial.params)
-    best_params.update({"model_type": model_type, "dataset": dataset, "pid": int(pid)})
-    best_folds = list(best_trial.user_attrs.get("cv_nll_folds", []))
+    best_params.update(
+        {
+            "model_type": model_type,
+            "dataset": dataset,
+            "pid": int(pid),
+            "loss_type": loss_type,
+        }
+    )
+    best_folds = list(best_trial.user_attrs.get("cv_loss_folds", []))
 
     runtime = (time.time() - start) / 60.0
     params_df = pd.DataFrame([best_params])
@@ -226,7 +261,7 @@ def fit(
                 "model_type": model_type,
                 "dataset": dataset,
                 "pid": int(pid),
-                "cv_nll_mean": float(best_trial.value),
+                "cv_loss_mean": float(best_trial.value),
                 "runtime": float(runtime),
             }
         ]
@@ -238,9 +273,9 @@ def fit(
                 "dataset": dataset,
                 "pid": int(pid),
                 "fold": int(i + 1),
-                "nll": float(nll_val),
+                "loss": float(loss_val),
             }
-            for i, nll_val in enumerate(best_folds)
+            for i, loss_val in enumerate(best_folds)
         ]
     )
 
@@ -258,6 +293,7 @@ def fit_noise_only(
     n_trials: int = 100,
     k: int = 5,
     storage: str | None = None,
+    loss_type: str = "mse",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fit only observation/decision noise (sigma or beta) given pre-saved model
@@ -285,19 +321,26 @@ def fit_noise_only(
     )
 
     def objective(trial: optuna.trial.Trial) -> float:
-        params = _suggest_noise_only(trial, dataset, model_type, pid)
-        mean_nll, fold_nlls = _cross_validate_precomputed(
-            params, human, model_responses, k=k
+        params = _suggest_noise_only(trial, dataset, model_type, pid, loss_type)
+        mean_loss, fold_losses = _cross_validate_precomputed(
+            params, human, model_responses, k=k, loss_type=loss_type
         )
-        trial.set_user_attr("cv_nll_folds", fold_nlls)
-        return mean_nll
+        trial.set_user_attr("cv_loss_folds", fold_losses)
+        return mean_loss
 
-    study.optimize(objective, n_trials=n_trials)
+    study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
 
     best_trial = study.best_trial
     best_params = dict(best_trial.params)
-    best_params.update({"model_type": model_type, "dataset": dataset, "pid": int(pid)})
-    best_folds = list(best_trial.user_attrs.get("cv_nll_folds", []))
+    best_params.update(
+        {
+            "model_type": model_type,
+            "dataset": dataset,
+            "pid": int(pid),
+            "loss_type": loss_type,
+        }
+    )
+    best_folds = list(best_trial.user_attrs.get("cv_loss_folds", []))
 
     runtime = (time.time() - start) / 60.0
     params_df = pd.DataFrame([best_params])
@@ -307,7 +350,7 @@ def fit_noise_only(
                 "model_type": model_type,
                 "dataset": dataset,
                 "pid": int(pid),
-                "cv_nll_mean": float(best_trial.value),
+                "cv_loss_mean": float(best_trial.value),
                 "runtime": float(runtime),
             }
         ]
@@ -319,9 +362,9 @@ def fit_noise_only(
                 "dataset": dataset,
                 "pid": int(pid),
                 "fold": int(i + 1),
-                "nll": float(nll_val),
+                "loss": float(loss_val),
             }
-            for i, nll_val in enumerate(best_folds)
+            for i, loss_val in enumerate(best_folds)
         ]
     )
 
@@ -336,9 +379,13 @@ if __name__ == "__main__":
     dataset = sys.argv[1]
     model_type = sys.argv[2]
     pid = int(sys.argv[3])
+    loss_type = sys.argv[4] if len(sys.argv) > 4 else "mse"
+    n_trials = int(sys.argv[5]) if len(sys.argv) > 5 else 100
 
     logging.basicConfig(level=logging.INFO)
-    params_df, performance_df = fit(dataset, model_type, pid)
+    params_df, performance_df = fit(
+        dataset, model_type, pid, n_trials=n_trials, loss_type=loss_type
+    )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")
     logging.info(performance_df.to_string())
