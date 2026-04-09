@@ -6,8 +6,10 @@ Coordinates Optuna search with k-fold cross-validation over a chosen loss
 aggregation. Two experiment regimes:
 
 - **Experiment 1 (``loss_type="mse"``):** Mean squared error between model and
-  human responses. No ``sigma`` (carrabin/yoo) or ``beta`` (jiang) in the search
-  space; jiang uses raw prediction error vs. human ``response``.
+  human responses. Carrabin/yoo compare continuous values directly; jiang maps
+  the model expectation through ``sigmoid(beta * x)`` and thresholds at 0.5 to
+  a binary ``±1`` prediction before squaring error vs. human ``response``. All
+  jiang fits suggest ``beta`` (inverse temperature for that map).
 - **Experiment 2:** Task-specific losses (``excursion``, ``switch``, ``decay``)
   — wired through ``losses.compute_loss``; stubs except where implemented.
 
@@ -23,9 +25,10 @@ as the fifth token).
 
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
-**Jiang:** With ``mse``, no ``beta``. Otherwise ``beta`` is suggested where needed
-for likelihood-style losses. ``DeGroot`` — ``omega``; ``RL`` — ``alpha`` (naive
-update, ignores ``rd``).
+**Jiang:** ``beta`` is always suggested (threshold sharpness for MSE binarization
+and for other losses as needed). ``DeGroot`` — ``omega`` (0.01–10.0); ``RL`` —
+``alpha`` (naive update, ignores ``rd``). ``Bayes`` — no structural params beyond
+``beta``.
 
 **Yoo:** ``Mean`` — no params. ``RL`` — ``alpha``. ``ADM`` — ``phi``, ``rho``, ``nu``.
 
@@ -43,6 +46,7 @@ import pandas as pd
 
 import fitting.losses as losses
 import models.math_models as math_models
+from fitting.param_ranges import MODEL_PARAMS
 from utils.paths import data_path
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -77,42 +81,14 @@ def _suggest_params(
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
-
-    if dataset == "carrabin":
-        if model_type == "RL":
-            params["alpha"] = trial.suggest_float("alpha", 0.001, 1.0, step=0.001)
-        elif model_type in ("Bayes", "NoisyCounting"):
-            pass
-        else:
-            raise ValueError(f"Unsupported carrabin model_type: {model_type!r}")
-
-    elif dataset == "jiang":
-        if loss_type != "mse":
-            params["beta"] = trial.suggest_float("beta", 0.01, 10.0, step=0.01)
-        if model_type == "Bayes":
-            pass
-        elif model_type == "DeGroot":
-            params["omega"] = trial.suggest_float("omega", 0.01, 2.0, step=0.01)
-        elif model_type == "RL":
-            params["alpha"] = trial.suggest_float("alpha", 0.01, 1.5, step=0.01)
-        else:
-            raise ValueError(f"Unsupported jiang model_type: {model_type!r}")
-
-    elif dataset == "yoo":
-        if model_type == "Mean":
-            pass
-        elif model_type == "RL":
-            params["alpha"] = trial.suggest_float("alpha", 0.001, 1.0, step=0.001)
-        elif model_type == "ADM":
-            params["phi"] = trial.suggest_float("phi", 0.001, 1.0, step=0.001)
-            params["rho"] = trial.suggest_float("rho", 0.001, 1.0, step=0.001)
-            params["nu"] = trial.suggest_float("nu", 0.001, 0.5, step=0.001)
-        else:
-            raise ValueError(f"Unsupported yoo model_type: {model_type!r}")
-
-    else:
+    if dataset not in MODEL_PARAMS:
         raise ValueError(f"Unsupported dataset: {dataset!r}")
-
+    if model_type not in MODEL_PARAMS[dataset]:
+        raise ValueError(
+            f"Unsupported model_type {model_type!r} for dataset {dataset!r}"
+        )
+    for param, (low, high, step) in MODEL_PARAMS[dataset][model_type].items():
+        params[param] = trial.suggest_float(param, low, high, step=step)
     return params
 
 
@@ -225,6 +201,12 @@ def fit(
     human = human.query("pid == @pid")
     if human.empty:
         raise ValueError(f"No rows for pid={pid} in dataset={dataset!r}")
+
+    if not MODEL_PARAMS[dataset][model_type]:
+        n_trials = 1
+        logging.info(
+            f"{model_type} has no free parameters; running single evaluation."
+        )
 
     study = optuna.create_study(
         direction="minimize",

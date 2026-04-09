@@ -47,6 +47,9 @@ def mse(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
             sq_errors.append(err**2)
 
     elif dataset == "jiang":
+        if "beta" not in params:
+            raise ValueError("params must include 'beta' for jiang MSE computation")
+        beta = float(params["beta"])
         pairs = (
             human[["trial", "stage"]].drop_duplicates().sort_values(["trial", "stage"])
         )
@@ -63,7 +66,9 @@ def mse(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
                 )
             human_response = float(h.iloc[0])
             model_response = float(m.iloc[0])
-            err = human_response - model_response
+            p = float(scipy.special.expit(beta * model_response))
+            model_binary = 1.0 if p > 0.5 else -1.0
+            err = human_response - model_binary
             sq_errors.append(err**2)
 
     else:
