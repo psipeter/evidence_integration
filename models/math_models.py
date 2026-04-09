@@ -2,7 +2,8 @@
 Mathematical (non-NEF) models of evidence integration.
 
 Expectations are computed from empirical sequences in per-dataset pickle files
-and collected into a single tabular format. Ported and redesigned from
+and collected into a single tabular format with model ``response`` values.
+Ported and redesigned from
 ``get_expectations_carrabin``, ``get_expectations_jiang``, and
 ``get_expectations_yoo`` in ``observational-learning-social-networks/fit.py``.
 
@@ -14,14 +15,15 @@ and collected into a single tabular format. Ported and redesigned from
 
 **Unified interface**
 
-Every model is run via ``run(params, save=False)``. Required keys in
+Every model is run via ``run(params, save=False, trials=None)``. Required keys in
 ``params`` for all models:
 
 - ``"model_type"`` (``str``): one of the strings above for the chosen dataset
 - ``"dataset"`` (``str``): ``"carrabin"``, ``"jiang"``, or ``"yoo"``
 - ``"pid"`` (``int``): participant id
 
-Additional keys are model-specific (learning rates, noise scales, etc.).
+Additional keys are model-specific (learning rates, noise scales, etc.). The
+optional ``trials`` argument restricts execution to a subset of trial ids.
 """
 
 import numpy as np
@@ -34,7 +36,7 @@ _JIANG_MODELS = frozenset({"DG_z", "RL_z"})
 _YOO_MODELS = frozenset({"DG", "RL_l", "ADM"})
 
 
-def run(params: dict, save: bool = False) -> pd.DataFrame:
+def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
     for key in ("model_type", "dataset", "pid"):
         if key not in params:
             raise KeyError(f"params must include {key!r}")
@@ -49,6 +51,8 @@ def run(params: dict, save: bool = False) -> pd.DataFrame:
     human_pid = human.query("pid == @pid")
     if human_pid.empty:
         raise ValueError(f"No rows for pid={pid} in dataset {dataset!r}")
+    if trials is not None:
+        human_pid = human_pid[human_pid["trial"].isin(trials)]
 
     rows: list[dict] = []
     if dataset in ("carrabin", "yoo"):
@@ -67,7 +71,7 @@ def run(params: dict, save: bool = False) -> pd.DataFrame:
                     "pid": pid,
                     "trial": trial,
                     "observation": observation,
-                    "estimate": estimate,
+                    "response": estimate,
                 }
             )
     else:
@@ -86,7 +90,7 @@ def run(params: dict, save: bool = False) -> pd.DataFrame:
                     "pid": pid,
                     "trial": trial,
                     "stage": stage,
-                    "estimate": estimate,
+                    "response": estimate,
                 }
             )
 
