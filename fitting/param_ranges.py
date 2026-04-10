@@ -16,14 +16,14 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, tuple[float, float, float]]]] = {
     },
     "jiang": {
         "Bayes": {
-            "beta": (0.01, 10.0, 0.01),
+            "beta": (0.01, 15.0, 0.01),
         },
         "DeGroot": {
-            "beta": (0.01, 10.0, 0.01),
+            "beta": (0.01, 15.0, 0.01),
             "omega": (0.01, 10.0, 0.01),
         },
         "RL": {
-            "beta": (0.01, 10.0, 0.01),
+            "beta": (0.01, 15.0, 0.01),
             "alpha": (0.01, 1.5, 0.01),
         },
     },

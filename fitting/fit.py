@@ -3,15 +3,21 @@ Model-fitting orchestration layer for participant-level parameter estimation.
 
 Coordinates Optuna search with k-fold cross-validation over a chosen loss
 (``loss_type``), writing participant-specific outputs to ``data/`` for downstream
-aggregation. Two experiment regimes:
+aggregation. When ``loss_type`` is omitted (``None``), the default is
+task-aware: ``mse`` for carrabin and yoo, ``nll`` for jiang; pass a string
+explicitly to override.
+
+Two experiment regimes:
 
 - **Experiment 1 (``loss_type="mse"``):** Mean squared error between model and
   human responses. Carrabin/yoo compare continuous values directly; jiang maps
   the model expectation through ``sigmoid(beta * x)`` and thresholds at 0.5 to
   a binary ``±1`` prediction before squaring error vs. human ``response``. All
   jiang fits suggest ``beta`` (inverse temperature for that map).
-- **Experiment 2:** Task-specific losses (``excursion``, ``switch``, ``decay``)
-  — wired through ``losses.compute_loss``; stubs except where implemented.
+- **Experiment 2:** Task-specific losses wired through ``losses.compute_loss``.
+  For jiang, ``loss_type="nll"`` uses standard binary NLL with a sigmoid decision
+  rule on model expectation (see ``fitting.losses.nll``). Other codes
+  (``excursion``, ``switch``, ``decay``) are stubs except where implemented.
 
 ``fit_noise_only()`` is reserved for NLL-style noise fitting when those losses
 are implemented; it is not used for ``mse``.
@@ -19,9 +25,9 @@ are implemented; it is not used for ``mse``.
 Entry point:
 ``python -m fitting.fit {dataset} {model_type} {pid} [loss_type] [n_trials]``
 
-Optional ``loss_type`` (default ``"mse"``); optional ``n_trials`` (default 100)
-when a fifth argument is provided (use ``mse`` explicitly if passing ``n_trials``
-as the fifth token).
+Optional ``loss_type`` (omit for task-aware default; see above); optional
+``n_trials`` (default 100) when a fifth argument is provided (pass the desired
+``loss_type`` explicitly if the fifth token should be ``n_trials``).
 
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
@@ -50,6 +56,12 @@ from fitting.param_ranges import MODEL_PARAMS
 from utils.paths import data_path
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+DEFAULT_LOSS: dict[str, str] = {
+    "carrabin": "mse",
+    "jiang": "nll",
+    "yoo": "mse",
+}
 
 
 def make_storage(host: str, user: str, password: str, study_name: str) -> str:
@@ -193,9 +205,11 @@ def fit(
     n_trials: int = 100,
     k: int = 5,
     storage: str | None = None,
-    loss_type: str = "mse",
+    loss_type: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
+    if loss_type is None:
+        loss_type = DEFAULT_LOSS.get(dataset, "mse")
     start = time.time()
     human = pd.read_pickle(data_path(f"{dataset}.pkl"))
     human = human.query("pid == @pid")
@@ -275,12 +289,14 @@ def fit_noise_only(
     n_trials: int = 100,
     k: int = 5,
     storage: str | None = None,
-    loss_type: str = "mse",
+    loss_type: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fit only observation/decision noise (sigma or beta) given pre-saved model
     responses at ``data/{model_type}_{dataset}_{pid}_responses.pkl``.
     """
+    if loss_type is None:
+        loss_type = DEFAULT_LOSS.get(dataset, "mse")
     start = time.time()
     responses_path = data_path(f"{model_type}_{dataset}_{pid}_responses.pkl")
     if not responses_path.exists():
@@ -361,8 +377,8 @@ if __name__ == "__main__":
     dataset = sys.argv[1]
     model_type = sys.argv[2]
     pid = int(sys.argv[3])
-    loss_type = sys.argv[4] if len(sys.argv) > 4 else "mse"
-    n_trials = int(sys.argv[5]) if len(sys.argv) > 5 else 100
+    n_trials = int(sys.argv[4]) if len(sys.argv) > 4 else 100
+    loss_type = sys.argv[5] if len(sys.argv) > 5 else None
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(

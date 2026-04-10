@@ -5,9 +5,11 @@ Supports multiple objectives:
 
 - **Experiment 1:** ``mse`` — mean squared error between model and human
   responses; task-agnostic baseline for all three datasets.
-- **Experiment 2:** Task-specific losses (stubs): ``excursion`` (carrabin:
-  distributional / sequence variance), ``switch`` (jiang: switch probability
-  vs. conflict), ``decay`` (yoo: power-law decay of update magnitude).
+- **Experiment 2:** ``nll`` — jiang only; negative log-likelihood with a sigmoid
+  decision rule on model expectation (requires ``beta`` in ``params``). Task-specific
+  stubs: ``excursion`` (carrabin: distributional / sequence variance), ``switch``
+  (jiang: switch probability vs. conflict), ``decay`` (yoo: power-law decay of update
+  magnitude).
 
 This module does not depend on the model implementation layer.
 """
@@ -80,6 +82,60 @@ def mse(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
     return out
 
 
+def nll(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
+    """
+    Negative log-likelihood for jiang binary choice data.
+
+    Maps model expectation through sigmoid(beta * expectation) to get
+    predicted probability of response==1, then computes NLL against
+    the human binary response at each (trial, stage).
+
+    Only valid for dataset=="jiang".
+    """
+    dataset = params["dataset"]
+    if dataset != "jiang":
+        raise ValueError(
+            f"nll() is only implemented for jiang; got dataset={dataset!r}"
+        )
+    if "beta" not in params:
+        raise ValueError("params must include 'beta' for nll computation")
+
+    beta = float(params["beta"])
+    total_logp = 0.0
+
+    pairs = (
+        human[["trial", "stage"]]
+        .drop_duplicates()
+        .sort_values(["trial", "stage"])
+    )
+    for _, pair in pairs.iterrows():
+        trial = int(pair["trial"])
+        stage = int(pair["stage"])
+        h = human.query("trial == @trial & stage == @stage")["response"]
+        m = model.query("trial == @trial & stage == @stage")["response"]
+        if h.empty or m.empty:
+            raise ValueError(
+                f"Missing response for (trial={trial}, stage={stage})"
+            )
+        if h.nunique() != 1:
+            raise ValueError(
+                f"Non-unique human response at (trial={trial}, stage={stage})"
+            )
+        human_response = float(h.iloc[0])
+        model_response = float(m.iloc[0])
+        p = float(
+            np.clip(
+                scipy.special.expit(beta * model_response), 1e-10, 1 - 1e-10
+            )
+        )
+        total_logp += np.log(p) if human_response == 1 else np.log(1.0 - p)
+
+    total_nll = float(-total_logp)
+    if not np.isfinite(total_nll):
+        raise ValueError(f"NLL is not finite: {total_nll}")
+    return total_nll
+
+
 def excursion_loss(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
     # TODO: distributional loss over response variance per qid sequence
     # Used in Experiment 2 for carrabin
@@ -103,6 +159,8 @@ def compute_loss(
 ) -> float:
     if loss_type == "mse":
         return mse(params, model, human)
+    if loss_type == "nll":
+        return nll(params, model, human)
     if loss_type == "excursion":
         return excursion_loss(params, model, human)
     if loss_type == "switch":
