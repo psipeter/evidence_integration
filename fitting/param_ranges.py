@@ -9,7 +9,11 @@ Parameter-free models map to an empty dict.
 MODEL_PARAMS: dict[str, dict[str, dict[str, tuple[float, float, float]]]] = {
     "carrabin": {
         "Bayes": {},
-        "NoisyCounting": {},
+        "NoisyCounting": {
+            "mu": (0.001, 2.0, 0.001),
+            "sigma_c": (0.001, 1.0, 0.001),
+            "nu": (0.001, 1.0, 0.001),
+        },
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
         },

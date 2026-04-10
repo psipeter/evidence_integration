@@ -22,12 +22,16 @@ Two experiment regimes:
 ``fit_noise_only()`` is reserved for NLL-style noise fitting when those losses
 are implemented; it is not used for ``mse``.
 
-Entry point:
-``python -m fitting.fit {dataset} {model_type} {pid} [loss_type] [n_trials]``
+Optional ``n_runs`` (default ``1``) is forwarded into model ``params`` when
+``> 1`` to control Monte Carlo averaging for stochastic models (e.g. carrabin
+``NoisyCounting``, future NEF models). Use ``1`` for fast local runs;
+``n_runs >= 20`` is a reasonable choice for cluster fits.
 
-Optional ``loss_type`` (omit for task-aware default; see above); optional
-``n_trials`` (default 100) when a fifth argument is provided (pass the desired
-``loss_type`` explicitly if the fifth token should be ``n_trials``).
+Entry point:
+``python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs]``
+
+Optional 4th token ``n_trials`` (default 100); optional 5th ``loss_type`` (omit
+for task-aware default); optional 6th ``n_runs`` (default 1).
 
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
@@ -90,9 +94,12 @@ def _suggest_params(
     dataset: str,
     pid: int,
     loss_type: str,
+    n_runs: int = 1,
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
+    if n_runs > 1:
+        params["n_runs"] = n_runs
     if dataset not in MODEL_PARAMS:
         raise ValueError(f"Unsupported dataset: {dataset!r}")
     if model_type not in MODEL_PARAMS[dataset]:
@@ -206,6 +213,7 @@ def fit(
     k: int = 5,
     storage: str | None = None,
     loss_type: str | None = None,
+    n_runs: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
     if loss_type is None:
@@ -230,7 +238,9 @@ def fit(
     )
 
     def objective(trial: optuna.trial.Trial) -> float:
-        params = _suggest_params(trial, model_type, dataset, pid, loss_type)
+        params = _suggest_params(
+            trial, model_type, dataset, pid, loss_type, n_runs
+        )
         mean_loss, fold_losses = _cross_validate(params, human, k=k, loss_type=loss_type)
         trial.set_user_attr("cv_loss_folds", fold_losses)
         return mean_loss
@@ -379,10 +389,16 @@ if __name__ == "__main__":
     pid = int(sys.argv[3])
     n_trials = int(sys.argv[4]) if len(sys.argv) > 4 else 100
     loss_type = sys.argv[5] if len(sys.argv) > 5 else None
+    n_runs = int(sys.argv[6]) if len(sys.argv) > 6 else 1
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(
-        dataset, model_type, pid, n_trials=n_trials, loss_type=loss_type
+        dataset,
+        model_type,
+        pid,
+        n_trials=n_trials,
+        loss_type=loss_type,
+        n_runs=n_runs,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")
