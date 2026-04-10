@@ -12,6 +12,7 @@ Entry point: ``python -m fitting.rerun {dataset} {model_type} {pid}``
 import sys
 
 import pandas as pd
+import logging
 
 import models.math_models as math_models
 from utils.paths import data_path
