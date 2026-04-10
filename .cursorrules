@@ -47,7 +47,7 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 - `params` must contain `"model_type"`, `"dataset"`, `"pid"` plus model-specific keys
 - Returns a DataFrame with columns: `"model_type"`, `"pid"`, `"trial"`, `"observation"` or `"stage"`, `"response"`
 - If `trials` is not None, only those trials are run
-- If `save=True`, output is saved to `data/{model_type}_{dataset}_{pid}_responses.pkl`
+- If `save=True`, output is saved to `data/{model_type}_{dataset}_{pid}_estimates.pkl`
 
 ---
 
@@ -67,7 +67,26 @@ codebase. Never introduce synonyms or alternatives.
 
 ---
 
-## Fitting Interface
+## Jiang Bayes Model
+
+The Bayes model for jiang is implemented in `_bayes_p_blue()` and
+`_bayes_posterior()` in `models/math_models.py`. The approach:
+
+- Marginalizes over all 128 signal vectors d = (d_1,...,d_7)
+- Uses soft probabilistic likelihoods — `_bayes_p_blue(agent, stage, d, adj)`
+  returns P(agent chooses blue) as a float, not a hard 0/1
+- At stage 0: P(blue) = 5/7 if d[agent]==1 else 2/7
+- At stage s>0: recursive Bayesian update on neighbors' stage s-1 beliefs
+- Focal agent updates only on directly observed neighbor actions
+- Network adjacency loaded from `data/jiang_networks.npy`, shape (7,7,43)
+- Network index in jiang.pkl is 1-indexed: use `networks[:,:,network_id-1]`
+- Agent indices are 1-indexed in jiang.pkl: use `who - 1` for 0-indexed array
+- Stage-0 posteriors verified correct in isolation
+- Full participant run currently prints unexpected timing output — under debug
+
+---
+
+
 
 Fitting is orchestrated by `fitting/fit.py`:
 

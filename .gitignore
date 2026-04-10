@@ -30,6 +30,7 @@ data/
 !data/carrabin.pkl
 !data/jiang.pkl
 !data/yoo.pkl
+!data/jiang_networks.npy
 figures/
 
 # =============================================================================

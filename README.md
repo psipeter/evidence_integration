@@ -64,7 +64,20 @@ All three task dataframes share a common column schema:
 | `response` | Participant or model output |
 
 Jiang-specific columns: `network`, `who`, `degree`, `rd`, `stage`
-Carrabin-specific columns: `qid` (unique stimulus sequence identifier)
+Carrabin-specific columns: `qid`
+
+### Jiang network data
+
+Network adjacency matrices are stored in `data/jiang_networks.npy`,
+shape `(7, 7, 43)` — 43 networks × 7×7 binary symmetric adjacency
+matrices. Networks are 0-indexed in the array; the `network` column in
+`jiang.pkl` maps directly to the third dimension
+(`graphs[:, :, network_id]`). Networks 0-3 exist in the array but were
+not used in the experiment; only networks 4-43 appear in `jiang.pkl`.
+
+Each network has 7 agents (indexed 0-6). The focal participant's agent
+index is `who - 1` from the stage-0 row of that (pid, trial). Neighbor
+agent indices are similarly `who - 1` from stages 1-3. (unique stimulus sequence identifier)
 
 ---
 
