@@ -3,7 +3,9 @@ Model-fitting orchestration layer for participant-level parameter estimation.
 
 Coordinates Optuna search with k-fold cross-validation over a chosen loss
 (``loss_type``), writing participant-specific outputs to ``data/`` for downstream
-aggregation. When ``loss_type`` is omitted (``None``), the default is
+aggregation. Output files use the pattern
+``{model_type}_{dataset}_{pid}_{loss_type}_*.pkl`` (params, performance,
+cv_folds). When ``loss_type`` is omitted (``None``), the default is
 task-aware: ``mse`` for carrabin and yoo, ``nll`` for jiang; pass a string
 explicitly to override.
 
@@ -233,9 +235,10 @@ def fit(
 
     study = optuna.create_study(
         direction="minimize",
-        study_name=f"{model_type}_{dataset}_{pid}",
+        study_name=f"{model_type}_{dataset}_{pid}_{loss_type}",
         storage=storage,
         load_if_exists=True,
+        sampler=optuna.samplers.TPESampler(seed=42),
     )
 
     def objective(trial: optuna.trial.Trial) -> float:
@@ -286,9 +289,15 @@ def fit(
         ]
     )
 
-    params_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_params.pkl"))
-    performance_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_performance.pkl"))
-    cv_folds_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_cv_folds.pkl"))
+    params_df.to_pickle(
+        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_params.pkl")
+    )
+    performance_df.to_pickle(
+        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_performance.pkl")
+    )
+    cv_folds_df.to_pickle(
+        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_cv_folds.pkl")
+    )
 
     return params_df, performance_df
 
@@ -304,12 +313,14 @@ def fit_noise_only(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fit only observation/decision noise (sigma or beta) given pre-saved model
-    responses at ``data/{model_type}_{dataset}_{pid}_responses.pkl``.
+    responses at ``data/{model_type}_{dataset}_{pid}_{loss_type}_responses.pkl``.
     """
     if loss_type is None:
         loss_type = DEFAULT_LOSS.get(dataset, "mse")
     start = time.time()
-    responses_path = data_path(f"{model_type}_{dataset}_{pid}_responses.pkl")
+    responses_path = data_path(
+        f"{model_type}_{dataset}_{pid}_{loss_type}_responses.pkl"
+    )
     if not responses_path.exists():
         raise FileNotFoundError(
             f"Pre-saved responses not found: {responses_path}. "
@@ -324,9 +335,10 @@ def fit_noise_only(
 
     study = optuna.create_study(
         direction="minimize",
-        study_name=f"{model_type}_{dataset}_{pid}__noise_only",
+        study_name=f"{model_type}_{dataset}_{pid}_{loss_type}",
         storage=storage,
         load_if_exists=True,
+        sampler=optuna.samplers.TPESampler(seed=42),
     )
 
     def objective(trial: optuna.trial.Trial) -> float:
@@ -377,9 +389,15 @@ def fit_noise_only(
         ]
     )
 
-    params_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_params.pkl"))
-    performance_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_performance.pkl"))
-    cv_folds_df.to_pickle(data_path(f"{model_type}_{dataset}_{pid}_cv_folds.pkl"))
+    params_df.to_pickle(
+        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_params.pkl")
+    )
+    performance_df.to_pickle(
+        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_performance.pkl")
+    )
+    cv_folds_df.to_pickle(
+        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_cv_folds.pkl")
+    )
 
     return params_df, performance_df
 

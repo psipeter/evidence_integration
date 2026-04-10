@@ -3,15 +3,18 @@ Utility to detect participants without saved fit outputs and resubmit their
 SLURM job scripts.
 
 Use after a batch run to catch failures: compares ``data/{dataset}.pkl`` pids
-against per-participant ``*_params.pkl`` files, then ``sbatch`` the matching
-``jobs/{model_type}_{dataset}_{pid}.sh`` scripts when not in dry-run mode.
+against per-participant
+``{model_type}_{dataset}_{pid}_{loss_type}_params.pkl`` files, then
+``sbatch`` the matching ``jobs/{model_type}_{dataset}_{pid}.sh`` scripts when
+not in dry-run mode.
 
 Entry point::
 
     Usage:
-        python -m jobs.resubmit_missing                        # all models
-        python -m jobs.resubmit_missing {dataset} {model_type} # one model
-        add --dry-run to either form to list without submitting
+        python -m jobs.resubmit_missing                              # all models
+        python -m jobs.resubmit_missing {dataset} {model_type}       # one model
+        python -m jobs.resubmit_missing {dataset} {model_type} {loss_type}
+        add --dry-run to any form to list without submitting
 """
 
 import subprocess
@@ -20,6 +23,7 @@ import time
 
 import pandas as pd
 
+from fitting.fit import DEFAULT_LOSS
 from fitting.param_ranges import MODEL_PARAMS
 from utils.paths import PROJECT_ROOT, data_path
 
@@ -29,12 +33,20 @@ ALL_MODELS = {
 }
 
 
-def find_missing(dataset: str, model_type: str) -> list[int]:
+def find_missing(
+    dataset: str,
+    model_type: str,
+    loss_type: str | None = None,
+) -> list[int]:
+    if loss_type is None:
+        loss_type = DEFAULT_LOSS.get(dataset, "mse")
     human = pd.read_pickle(data_path(f"{dataset}.pkl"))
     pids = sorted(int(x) for x in human["pid"].unique())
     missing: list[int] = []
     for pid in pids:
-        params_path = data_path(f"{model_type}_{dataset}_{pid}_params.pkl")
+        params_path = data_path(
+            f"{model_type}_{dataset}_{pid}_{loss_type}_params.pkl"
+        )
         if not params_path.is_file():
             missing.append(pid)
     return missing
@@ -43,9 +55,10 @@ def find_missing(dataset: str, model_type: str) -> list[int]:
 def _usage_error() -> None:
     print(
         "Usage:\n"
-        "  python -m jobs.resubmit_missing                        # all models\n"
-        "  python -m jobs.resubmit_missing {dataset} {model_type} # one model\n"
-        "  add --dry-run to either form to list without submitting",
+        "  python -m jobs.resubmit_missing                              # all models\n"
+        "  python -m jobs.resubmit_missing {dataset} {model_type}       # one model\n"
+        "  python -m jobs.resubmit_missing {dataset} {model_type} {loss_type}\n"
+        "  add --dry-run to any form to list without submitting",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -58,13 +71,20 @@ def main() -> None:
     if len(pos_args) == 0:
         _run_all_models(dry_run)
     elif len(pos_args) == 2:
-        _run_single(pos_args[0], pos_args[1], dry_run)
+        _run_single(pos_args[0], pos_args[1], dry_run, None)
+    elif len(pos_args) == 3:
+        _run_single(pos_args[0], pos_args[1], dry_run, pos_args[2])
     else:
         _usage_error()
 
 
-def _run_single(dataset: str, model_type: str, dry_run: bool) -> None:
-    missing = find_missing(dataset, model_type)
+def _run_single(
+    dataset: str,
+    model_type: str,
+    dry_run: bool,
+    loss_type: str | None,
+) -> None:
+    missing = find_missing(dataset, model_type, loss_type)
     if not missing:
         print(f"All participants complete for {model_type} {dataset}")
         return
@@ -104,7 +124,7 @@ def _run_all_models(dry_run: bool) -> None:
 
     for dataset in sorted(ALL_MODELS.keys()):
         for model_type in ALL_MODELS[dataset]:
-            missing = find_missing(dataset, model_type)
+            missing = find_missing(dataset, model_type, None)
             missing_by_pair[(dataset, model_type)] = missing
             for pid in missing:
                 missing_triples.append((dataset, model_type, pid))

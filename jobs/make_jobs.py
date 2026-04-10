@@ -67,7 +67,12 @@ def main() -> None:
             else:
                 fit_cmd += f" {n_runs}"
 
-        rerun_cmd = f"python -m fitting.rerun {dataset} {model_type} {pid}"
+        if loss_type is not None:
+            rerun_cmd = (
+                f"python -m fitting.rerun {dataset} {model_type} {pid} {loss_type}"
+            )
+        else:
+            rerun_cmd = f"python -m fitting.rerun {dataset} {model_type} {pid}"
 
         script = f"""#!/bin/bash
 #SBATCH --mem=8G
