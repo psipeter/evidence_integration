@@ -17,7 +17,8 @@ Two experiment regimes:
 - **Experiment 2:** Task-specific losses wired through ``losses.compute_loss``.
   For jiang, ``loss_type="nll"`` uses standard binary NLL with a sigmoid decision
   rule on model expectation (see ``fitting.losses.nll``). Other codes
-  (``excursion``, ``switch``, ``decay``) are stubs except where implemented.
+  (``wasserstein``, ``switch``, ``decay``); ``wasserstein`` is implemented for
+  carrabin; ``switch`` and ``decay`` remain stubs until implemented.
 
 ``fit_noise_only()`` is reserved for NLL-style noise fitting when those losses
 are implemented; it is not used for ``mse``.

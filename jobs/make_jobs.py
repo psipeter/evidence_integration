@@ -4,9 +4,13 @@ SLURM job script generator for participant-level fitting and rerun.
 Writes one ``.sh`` file per participant under ``jobs/``, with SBATCH
 directives and commands to run ``fitting.fit`` then ``fitting.rerun``.
 
+Optional ``loss_type`` (``sys.argv[5]``, after ``n_trials`` and ``n_runs``)
+is forwarded to ``fitting.fit``; omit it to use the task-aware default
+(``nll`` for jiang, ``mse`` for carrabin and yoo).
+
 Entry point::
 
-    python -m jobs.make_jobs {dataset} {model_type} [n_trials] [n_runs]
+    python -m jobs.make_jobs {dataset} {model_type} [n_trials] [n_runs] [loss_type]
 """
 
 import sys
@@ -34,6 +38,7 @@ def main() -> None:
     model_type = sys.argv[2]
     n_trials = int(sys.argv[3]) if len(sys.argv) > 3 else 200
     n_runs = int(sys.argv[4]) if len(sys.argv) > 4 else 1
+    loss_type = sys.argv[5] if len(sys.argv) > 5 else None
 
     if model_type not in TIME_LIMITS:
         raise ValueError(
@@ -51,12 +56,16 @@ def main() -> None:
     count = 0
     for pid in pids:
         pid = int(pid)
-        fit_cmd = f"python -m fitting.fit {dataset} {model_type} {pid} {n_trials}"
+        fit_cmd = (
+            f"python -m fitting.fit {dataset} {model_type} {pid} {n_trials}"
+        )
+        if loss_type is not None:
+            fit_cmd += f" {loss_type}"
         if model_type not in PARAM_FREE and n_runs > 1:
-            fit_cmd = (
-                f"python -m fitting.fit {dataset} {model_type} {pid} "
-                f"{n_trials} mse {n_runs}"
-            )
+            if loss_type is None:
+                fit_cmd += f" mse {n_runs}"
+            else:
+                fit_cmd += f" {n_runs}"
 
         rerun_cmd = f"python -m fitting.rerun {dataset} {model_type} {pid}"
 

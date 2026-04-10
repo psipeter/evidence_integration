@@ -7,9 +7,9 @@ Supports multiple objectives:
   responses; task-agnostic baseline for all three datasets.
 - **Experiment 2:** ``nll`` — jiang only; negative log-likelihood with a sigmoid
   decision rule on model expectation (requires ``beta`` in ``params``). Task-specific
-  stubs: ``excursion`` (carrabin: distributional / sequence variance), ``switch``
-  (jiang: switch probability vs. conflict), ``decay`` (yoo: power-law decay of update
-  magnitude).
+  losses: ``wasserstein`` (carrabin: Wasserstein distance between response
+  distributions), ``switch`` (jiang: switch probability vs. conflict), ``decay`` (yoo:
+  power-law decay of update magnitude).
 
 This module does not depend on the model implementation layer.
 """
@@ -17,6 +17,7 @@ This module does not depend on the model implementation layer.
 import numpy as np
 import pandas as pd
 import scipy.special
+from scipy.stats import wasserstein_distance
 
 
 def mse(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
@@ -136,10 +137,33 @@ def nll(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
     return total_nll
 
 
-def excursion_loss(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
-    # TODO: distributional loss over response variance per qid sequence
-    # Used in Experiment 2 for carrabin
-    raise NotImplementedError
+def wasserstein_loss(
+    params: dict, model: pd.DataFrame, human: pd.DataFrame
+) -> float:
+    """
+    Wasserstein distance between human and model response distributions
+    across all trials for one participant (carrabin only).
+
+    Measures how well the model captures the full shape of the
+    participant's response distribution, including trial-to-trial
+    variability. Lower is better; 0 means identical distributions.
+
+    Used in Experiment 2 for carrabin.
+    """
+    dataset = params["dataset"]
+    if dataset != "carrabin":
+        raise ValueError(
+            f"wasserstein_loss() is only implemented for carrabin; "
+            f"got dataset={dataset!r}"
+        )
+    human_responses = human["response"].to_numpy(dtype=float)
+    model_responses = model["response"].to_numpy(dtype=float)
+    if len(human_responses) == 0 or len(model_responses) == 0:
+        raise ValueError("Empty response arrays in wasserstein_loss")
+    result = float(wasserstein_distance(human_responses, model_responses))
+    if not np.isfinite(result):
+        raise ValueError(f"wasserstein_loss is not finite: {result}")
+    return result
 
 
 def switch_loss(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
@@ -161,8 +185,8 @@ def compute_loss(
         return mse(params, model, human)
     if loss_type == "nll":
         return nll(params, model, human)
-    if loss_type == "excursion":
-        return excursion_loss(params, model, human)
+    if loss_type == "wasserstein":
+        return wasserstein_loss(params, model, human)
     if loss_type == "switch":
         return switch_loss(params, model, human)
     if loss_type == "decay":
