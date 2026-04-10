@@ -32,6 +32,8 @@ data/
 !data/yoo.pkl
 !data/jiang_networks.npy
 figures/
+jobs/*.sh
+jobs/*.out
 
 # =============================================================================
 # Model Fitting Outputs
