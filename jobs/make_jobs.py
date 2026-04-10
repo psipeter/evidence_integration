@@ -65,6 +65,8 @@ def main() -> None:
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time={time_limit}
+#SBATCH --output={root}/jobs/logs/%j.out
+
 
 # assumes PY311 conda env and venv are inherited from submitting shell
 cd {root}
