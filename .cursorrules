@@ -2,7 +2,7 @@
 
 ## Project Context
 
-This repository is a clean refactor of a research codebase for modeling individual variability in evidence integration across three cognitive tasks (carrabin, jiang, yoo). The project involves mathematical models, behavioral data fitting with Optuna, and biophysical neural network simulations in Nengo applied to human data.
+This repository is a clean refactor of a research codebase for modeling individual variability in evidence integration across three cognitive tasks (carrabin, jiang, yoo). The project involves mathematical models, behavioral data fitting with Optuna, and biophysical neural network simulations in Nengo.
 
 The original codebase is preserved in `~/observational-learning-social-networks/` and must not be modified. Code is ported here selectively and rewritten for clarity and reproducibility.
 
@@ -12,49 +12,63 @@ The original codebase is preserved in `~/observational-learning-social-networks/
 
 **Cursor is the code execution layer in a three-stage workflow:**
 
-1. The researcher and Claude (claude.ai) discuss goals, design decisions, and scope at a high level
+1. The researcher and Claude (claude.ai) discuss goals and design decisions
 2. Claude drafts an explicit Cursor prompt describing exactly what to implement
-3. Cursor executes that prompt — writing, editing, or refactoring code as instructed
+3. Cursor executes that prompt
 
-**Cursor should follow the prompt as written.** If the prompt is ambiguous or the implementation requires a non-obvious decision, add a clearly marked `# TODO: [decision needed]` comment and proceed with the most conservative interpretation.
+Follow prompts as written. Add `# TODO: [decision needed]` for ambiguous decisions and proceed conservatively.
+
+---
+
+## Cursor Prompt Format
+
+- Title: `Cursor Prompt 00X — Brief description`
+- Body: single fenced code block with language `markdown`
+- Numbering: sequential across entire project, never reset
+- One prompt per response; combine multi-file changes into labeled sections
+- File paths always relative to project root
+- Self-contained — Cursor should execute without reading conversation history
 
 ---
 
 ## Data Schema
 
-All three task dataframes share a common column schema. When writing code that queries these files, always use these column names:
+All three task dataframes share a common column schema:
 
 - `pid`         — participant ID
 - `trial`       — trial index
-- `observation` — sequential observation index within trial (all tasks)
-- `stage`       — social round index, jiang only (retained for analysis)
+- `observation` — sequential observation index within trial (carrabin, yoo)
+- `stage`       — social round index, jiang only
 - `value`       — stimulus input
 - `response`    — participant or model output
 
 Jiang-specific: `network`, `who`, `degree`, `rd`, `stage`
 Carrabin-specific: `qid`
 
+### Jiang network data
+- Stored in `data/jiang_networks.npy`, shape (7, 7, 43)
+- Network index in jiang.pkl is 1-indexed: use `networks[:,:,network_id-1]`
+- Agent indices are 1-indexed: use `who - 1` for 0-indexed array
+- Focal participant = `who` from stage-0 row
+
 ---
 
 ## Model Interface
 
-All models (math and NEF) expose a unified interface:
+All models expose a unified interface:
 
 ```python
 run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame
 ```
 
 - `params` must contain `"model_type"`, `"dataset"`, `"pid"` plus model-specific keys
-- Returns a DataFrame with columns: `"model_type"`, `"pid"`, `"trial"`, `"observation"` or `"stage"`, `"response"`
-- If `trials` is not None, only those trials are run
-- If `save=True`, output is saved to `data/{model_type}_{dataset}_{pid}_estimates.pkl`
+- Returns DataFrame with columns: `"model_type"`, `"pid"`, `"trial"`, `"observation"` or `"stage"`, `"response"`
+- `trials` restricts execution to a subset of trial ids
+- `n_runs` in params controls Monte Carlo averaging for stochastic models
 
 ---
 
 ## Parameter Naming Convention
-
-All model parameters use consistent Greek letter names throughout the
-codebase. Never introduce synonyms or alternatives.
 
 | Parameter | Symbol | Used in |
 |---|---|---|
@@ -63,70 +77,78 @@ codebase. Never introduce synonyms or alternatives.
 | Primacy | `phi` | yoo ADM |
 | Recency | `rho` | yoo ADM |
 | Baseline | `nu` | yoo ADM |
-| Inverse noise temperature | `beta` | jiang (switch loss only) |
+| Cognitive noise | `sigma_c` | carrabin NoisyCounting |
+| Response noise | `nu` | carrabin NoisyCounting |
+| Mean increment | `mu` | carrabin NoisyCounting |
+| Inverse temperature | `beta` | jiang (all models) |
+
+---
+
+## Fitting Interface
+
+```python
+fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
+    loss_type=None, n_runs=1, run_folder=None)
+```
+
+- Default loss: `mse` for carrabin/yoo, `nll` for jiang
+- All outputs saved to `run_folder` (defaults to `data/runs/default`)
+- Loss type stored inside `params.pkl`, not in filename
+- Seed: `optuna.samplers.TPESampler(seed=42)` for reproducibility
+
+Loss functions in `fitting/losses.py`:
+- `mse` — universal baseline (Experiment 1)
+- `nll` — binary NLL for jiang (Experiment 2)
+- `wasserstein` — response distribution match for carrabin (Experiment 2)
+- `switch`, `decay` — stubs (not yet implemented)
+
+---
+
+## Job Management
+
+Single entry point: `python -m jobs.run`
+
+```bash
+python -m jobs.run all --n_trials 500          # submit all to SLURM
+python -m jobs.run carrabin RL --local         # run locally
+python -m jobs.run --resubmit Apr12_632pm      # resubmit missing
+python -m jobs.run --collect Apr12_632pm       # collect results
+python -m jobs.run all --dry_run               # preview
+```
+
+Run folders are timestamped (`Apr12_632pm`) and created under `data/runs/`.
+Rename folders manually to track experiments. Delete folders to clear data.
+`run_config.json` in each folder records all job specs and git commit.
 
 ---
 
 ## Plotting Conventions
 
-All notebooks and figures use consistent aesthetics:
-
-- **Theme:** `sns.set_theme(style='ticks', context='paper', font_scale=1.3)`
-- **Palette:** `sns.color_palette("colorblind")` — colorblind-safe, journal-friendly
-- **Color assignment by model role** (consistent across tasks):
-  - Optimal (`Bayes`, `Mean`): `palette[0]` (blue)
-  - Naive (`RL`): `palette[1]` (orange)
-  - Human-matching (`NoisyCounting`, `DeGroot`, `ADM`): `palette[2]` (green)
-- **Figure output:** always saved to `figures/` at 300 dpi
-
----
-
-
-
-The Bayes model for jiang is implemented in `_bayes_p_blue()` and
-`_bayes_posterior()` in `models/math_models.py`. The approach:
-
-- Marginalizes over all 128 signal vectors d = (d_1,...,d_7)
-- Uses soft probabilistic likelihoods — `_bayes_p_blue(agent, stage, d, adj)`
-  returns P(agent chooses blue) as a float, not a hard 0/1
-- At stage 0: P(blue) = 5/7 if d[agent]==1 else 2/7
-- At stage s>0: recursive Bayesian update on neighbors' stage s-1 beliefs
-- Focal agent updates only on directly observed neighbor actions
-- Network adjacency loaded from `data/jiang_networks.npy`, shape (7,7,43)
-- Network index in jiang.pkl is 1-indexed: use `networks[:,:,network_id-1]`
-- Agent indices are 1-indexed in jiang.pkl: use `who - 1` for 0-indexed array
-- Stage-0 posteriors verified correct in isolation
-- Full participant run currently prints unexpected timing output — under debug
-
----
-
-
-
-Fitting is orchestrated by `fitting/fit.py`:
-
 ```python
-fit(dataset, model_type, pid, n_trials=200, k=5, storage=None)
+from utils.plot_style import apply_style
+apply_style()
+palette = sns.color_palette("colorblind")
+PALETTE = {
+    'Bayes': palette[0], 'Mean': palette[0],      # optimal
+    'RL': palette[1],                              # naive
+    'NoisyCounting': palette[2], 'DeGroot': palette[2], 'ADM': palette[2],  # human-matching
+}
 ```
 
-- Each Optuna trial suggests parameters and evaluates mean k-fold CV NLL as the objective
-- `storage=None` runs in-memory (local); pass a MySQL URL for cluster use
-- Outputs saved to `data/`: `_params.pkl`, `_performance.pkl`, `_cv_folds.pkl`
+Save figures as both PNG (300 dpi) and PDF to `figures/`.
 
-Loss functions live in `fitting/losses.py`. The universal loss is NLL:
-- Gaussian noise (sigma) for carrabin and yoo
-- Sigmoid decision rule (beta) for jiang
+---
 
-### Parameter-free models
+## Jiang Bayes Model
 
-Some models have no free parameters beyond the noise term (sigma or beta).
-These follow a two-step workflow:
-1. **Simulate once** via `rerun.py` directly (no fitting loop needed) — saves `data/{model_type}_{dataset}_{pid}_responses.pkl`
-2. **Fit noise only** via `fit_noise_only()` in `fit.py` — lightweight optuna study searching only over sigma or beta, loading pre-saved responses rather than rerunning the model
+Implemented in `_bayes_p_blue()` and `_bayes_posterior()` in `models/math_models.py`:
 
-Parameter-free models:
-- carrabin: `Bayes`
-- jiang: `Bayes`
-- yoo: `Mean`
+- Marginalizes over all 128 signal vectors d = (d_1,...,d_7)
+- Uses soft probabilistic likelihoods via `_bayes_p_blue(agent, stage, d, adj)`
+- At stage 0: P(blue) = 5/7 if d[agent]==1 else 2/7 (`_SIGNAL_ACCURACY = 5/7`)
+- At stage s>0: recursive Bayesian update on neighbors' stage s-1 beliefs
+- Focal agent updates only on directly observed neighbor actions
+- Network loaded from `data/jiang_networks.npy`
 
 ---
 
@@ -134,37 +156,39 @@ Parameter-free models:
 
 - **Language:** Python 3.11 (conda env: `PY311`; venv: `venv/`)
 - **Style:** PEP 8; use `black` formatting
-- **Scripts:** Each script has a module-level docstring describing inputs, outputs, and dependencies
-- **No hardcoded paths** — use `data_path()` from `utils/paths.py` for all file I/O
-- **No silent failures** — use assertions or explicit error messages for unexpected states
-- All file paths in prompts are relative to the project root (e.g. `utils/paths.py`, not `evidence_integration/utils/paths.py`)
+- **No hardcoded paths** — use `data_path()` or path constants from `utils/paths.py`
+- **No silent failures** — use assertions or explicit error messages
+- All file paths in prompts are relative to project root
+- Do not create nested project folders
+- Do not push to git — commits are made manually
 
 ---
 
-## Reproducibility Requirements
+## Reproducibility
 
-- All stochastic operations receive an explicit random seed
-- Fitting runs save parameters, CV NLL scores, and runtime to `data/`
-- Do not modify files in `data/carrabin.pkl`, `data/jiang.pkl`, `data/yoo.pkl`
-- Figures are always generated programmatically; never edit output files manually
+- All stochastic operations receive explicit random seeds
+- Optuna uses `TPESampler(seed=42)`
+- CV fold shuffling seeded with `pid`
+- NoisyCounting runs seeded with `100*pid + 1000*trial + run_idx`
+- `run_config.json` records git commit hash per run
 
 ---
 
-## Porting from the Old Codebase
+## Porting from Old Codebase
 
-When porting a file from `~/observational-learning-social-networks/`:
+When porting from `~/observational-learning-social-networks/`:
 
 1. Rewrite for clarity — do not copy-paste blindly
-2. Remove dead code, commented-out blocks, and notebook-style fragments
-3. Add a docstring noting the original file it was derived from
-4. Flag any logic that is unclear or potentially incorrect with `# REVIEW: [reason]`
+2. Remove dead code and notebook-style fragments
+3. Add docstring noting original file
+4. Flag unclear logic with `# REVIEW: [reason]`
 
 ---
 
 ## What Cursor Should NOT Do
 
-- Do not modify files outside the scope of the current prompt
-- Do not refactor code that wasn't mentioned in the prompt
-- Do not install new dependencies without adding them to `requirements.txt` or `environment.yml`
-- Do not push to git — commits are made manually by the researcher after review
-- Do not create nested project folders — all paths are relative to the project root
+- Modify files outside the scope of the current prompt
+- Refactor code not mentioned in the prompt
+- Install dependencies without updating `requirements.txt`
+- Push to git
+- Create nested `evidence_integration/evidence_integration/` folders

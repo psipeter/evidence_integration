@@ -8,9 +8,9 @@ This repository contains code for modeling and analyzing individual variability 
 
 To navigate uncertain environments, the brain must continuously integrate new information while weighing recent observations against longer-horizon outcomes. This project investigates the mechanisms underlying individual variability in this process using:
 
-- **Mathematical models** — a prediction-error update rule scaled by the number of observations, capturing a spectrum of integration strategies (recency-biased to temporally discounted)
+- **Mathematical models** — a prediction-error update rule scaled by the number of observations, capturing a spectrum of integration strategies
 - **Behavioral analysis** — applied to three cognitive tasks, capturing trial-by-trial estimation variability, action switching under incongruent social information, and decay in update magnitude
-- **Biophysical neural network models** — linking cognitive parameters (representational noise, synaptic weight distributions) to observable behavioral heterogeneity, implemented in Nengo (Neural Engineering Framework)
+- **Biophysical neural network models** — linking cognitive parameters to observable behavioral heterogeneity, implemented in Nengo (Neural Engineering Framework)
 
 ---
 
@@ -18,8 +18,8 @@ To navigate uncertain environments, the brain must continuously integrate new in
 
 | Name | Reference | n | Response type | Key measure |
 |---|---|---|---|---|
-| `carrabin` | Prat-Carrabin & Woodford (2024) | 21 | Continuous slider | Excursion (response variability per sequence) |
-| `jiang` | Jiang et al. (2023) | 224 | Binary choice | Switch probability as function of social conflict |
+| `carrabin` | Prat-Carrabin & Woodford (2024) | 21 | Continuous slider | Response distribution variability |
+| `jiang` | Jiang et al. (2023) | 224 | Binary choice | Switch probability vs. social conflict |
 | `yoo` | Yoo et al. (2025) | 38 | Continuous slider | Power-law decay of update magnitude |
 
 ---
@@ -28,24 +28,32 @@ To navigate uncertain environments, the brain must continuously integrate new in
 
 ```
 evidence_integration/
-├── data/                  # Task data — only carrabin.pkl, jiang.pkl, yoo.pkl are tracked
-├── models/                # Mathematical and neural network model implementations
-│   ├── math_models.py     # All math models: RL_n, B_n, DG_n, DG_z, RL_z, DG, RL_l, ADM
-│   ├── synaptic.py        # NEF synaptic model (Nengo) — TODO
-│   └── recurrent.py       # NEF recurrent model (Nengo) — TODO
-├── fitting/               # Model fitting and parameter estimation
-│   ├── losses.py          # Universal NLL loss function
-│   └── fit.py             # Optuna fitting loop with k-fold CV
-├── analysis/              # Analysis scripts and notebooks — TODO
-├── experiments/           # New experiment definitions — TODO
-├── utils/                 # Shared utilities
-│   ├── paths.py           # Central path config — import data_path from here
-│   └── uniform_encoders.py # Quasi-Monte Carlo encoder distributions for Nengo
-├── jobs/                  # SLURM job scripts for cluster runs — TODO
-│   ├── make_jobs.py
-│   ├── submit_jobs.py
-│   └── collect_jobs.py
-└── notebooks/             # Exploratory notebooks
+├── data/
+│   ├── carrabin.pkl          # human behavioral data (tracked)
+│   ├── jiang.pkl             # human behavioral data (tracked)
+│   ├── yoo.pkl               # human behavioral data (tracked)
+│   ├── jiang_networks.npy    # social network adjacency matrices (tracked)
+│   └── runs/                 # model fitting outputs (not tracked by git)
+│       └── Apr12_632pm/      # example run folder (rename manually)
+│           ├── run_config.json
+│           ├── RL_carrabin_1_params.pkl
+│           └── ...
+├── models/
+│   ├── math_models.py        # all mathematical models
+│   ├── synaptic.py           # NEF synaptic model (TODO)
+│   └── recurrent.py          # NEF recurrent model (TODO)
+├── fitting/
+│   ├── losses.py             # MSE, NLL, Wasserstein loss functions
+│   ├── fit.py                # Optuna fitting with k-fold CV
+│   └── param_ranges.py       # parameter search spaces
+├── jobs/
+│   └── run.py                # single entry point for all job management
+├── utils/
+│   ├── paths.py              # central path config
+│   ├── plot_style.py         # shared matplotlib/seaborn style
+│   └── uniform_encoders.py   # quasi-Monte Carlo encoders for Nengo
+└── notebooks/
+    └── performance_mse_nll.ipynb
 ```
 
 ---
@@ -58,139 +66,142 @@ All three task dataframes share a common column schema:
 |---|---|
 | `pid` | Participant ID |
 | `trial` | Trial index |
-| `observation` | Sequential observation index within trial (all tasks) |
-| `stage` | Social round index — jiang only, retained for analysis |
-| `value` | Stimulus input seen by participant or model |
+| `observation` | Sequential observation index within trial (carrabin, yoo) |
+| `stage` | Social round index — jiang only |
+| `value` | Stimulus input |
 | `response` | Participant or model output |
 
-Jiang-specific columns: `network`, `who`, `degree`, `rd`, `stage`
-Carrabin-specific columns: `qid`
+Jiang-specific: `network`, `who`, `degree`, `rd`, `stage`
+Carrabin-specific: `qid`
 
 ### Jiang network data
 
-Network adjacency matrices are stored in `data/jiang_networks.npy`,
-shape `(7, 7, 43)` — 43 networks × 7×7 binary symmetric adjacency
-matrices. Networks are 0-indexed in the array; the `network` column in
-`jiang.pkl` maps directly to the third dimension
-(`graphs[:, :, network_id]`). Networks 0-3 exist in the array but were
-not used in the experiment; only networks 4-43 appear in `jiang.pkl`.
-
-Each network has 7 agents (indexed 0-6). The focal participant's agent
-index is `who - 1` from the stage-0 row of that (pid, trial). Neighbor
-agent indices are similarly `who - 1` from stages 1-3. (unique stimulus sequence identifier)
+Network adjacency matrices are stored in `data/jiang_networks.npy`, shape
+`(7, 7, 43)`. The `network` column in `jiang.pkl` maps directly to the third
+dimension (`graphs[:, :, network_id - 1]`, 1-indexed). Networks 0-3 exist
+in the array but were not used in the experiment. Each network has 7 agents
+(indexed 0-6); focal participant index = `who - 1` from the stage-0 row.
 
 ---
 
 ## Models
 
-### Mathematical models (`models/math_models.py`)
-
 All models expose a unified interface:
 
 ```python
 from models.math_models import run
-estimates = run(params, save=False, trials=None)
+responses = run(params)  # params dict with model_type, dataset, pid, ...
 ```
 
-`params` is a dict containing at minimum `"model_type"`, `"dataset"`, `"pid"`. Additional keys are model-specific.
-
-| Dataset | Model | Type | Parameters |
+| Dataset | Model | Role | Parameters |
 |---|---|---|---|
 | carrabin | `Bayes` | optimal | sigma only |
-| carrabin | `NoisyCounting` | human-matching | TBD, sigma |
-| carrabin | `RL` | naive baseline | alpha, sigma |
+| carrabin | `NoisyCounting` | human-matching | mu, sigma_c, nu |
+| carrabin | `RL` | naive | alpha |
 | jiang | `Bayes` | optimal | beta only |
-| jiang | `DeGroot` | human-matching | zeta, beta |
-| jiang | `RL` | naive baseline | eta, zeta, beta |
+| jiang | `DeGroot` | human-matching | omega, beta |
+| jiang | `RL` | naive | alpha, beta |
 | yoo | `Mean` | optimal | sigma only |
-| yoo | `ADM` | human-matching | primacy, recency, nu, sigma |
-| yoo | `RL` | naive baseline | alpha, sigma |
+| yoo | `ADM` | human-matching | phi, rho, nu |
+| yoo | `RL` | naive | alpha |
 
-Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) are simulated once via `rerun.py` and then fitted for noise only via `fit_noise_only()` in `fit.py`.
-
-### NEF models (`models/synaptic.py`, `models/recurrent.py`)
-Biophysical Nengo models — not yet ported. Will expose the same `run(params)` interface.
+Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) skip
+the Optuna loop and fit only the noise parameter (sigma or beta).
 
 ---
 
 ## Fitting
 
-Fitting uses Optuna with k-fold cross-validation (k=5 default). The objective function for each Optuna trial is the mean held-out NLL across folds. The universal loss is NLL with Gaussian noise for continuous tasks (carrabin, yoo) and a sigmoid decision rule for jiang.
+Fitting uses Optuna with k-fold cross-validation (k=5). The loss function
+is task-aware by default: MSE for carrabin and yoo, NLL for jiang.
+All outputs are saved to a timestamped run folder under `data/runs/`.
 
-```bash
-python -m fitting.fit {dataset} {model_type} {pid}
+```python
+# fit.py entry point
+python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs] [run_folder]
 ```
 
-Outputs saved per participant to `data/`:
-- `{model_type}_{dataset}_{pid}_params.pkl`
-- `{model_type}_{dataset}_{pid}_performance.pkl`
-- `{model_type}_{dataset}_{pid}_cv_folds.pkl`
+Loss type is stored inside `params.pkl` — not in the filename. Rename run
+folders manually to track experiment type (e.g. `Apr12_carrabin_mse`).
 
-After fitting, run `rerun.py` to generate full model responses, then `collect.py` to aggregate into `{dataset}_models.pkl` for analysis. Both scripts are TODO.
+---
 
-Cluster parallelism is supported via MySQL Optuna storage — see `make_storage()` in `fitting/fit.py`.
+## Job Management
+
+All job operations go through a single entry point:
+
+```bash
+# Submit a new run (SLURM)
+python -m jobs.run all --n_trials 500
+python -m jobs.run carrabin RL --n_trials 500
+python -m jobs.run carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type wasserstein
+
+# Run locally (no SLURM)
+python -m jobs.run carrabin RL --n_trials 10 --local
+
+# Resubmit missing jobs from an existing run
+python -m jobs.run --resubmit Apr12_632pm
+
+# Collect results into combined files
+python -m jobs.run --collect Apr12_632pm
+
+# Dry run
+python -m jobs.run all --dry_run
+```
+
+Run folders are created automatically with timestamp names (`Apr12_632pm`).
+Rename them manually to reflect the experiment. To clear a run, delete the
+folder: `rm -rf data/runs/Apr12_632pm`.
+
+---
+
+## Plotting Conventions
+
+All notebooks use `from utils.plot_style import apply_style` for consistent
+aesthetics. Colors are assigned by model role using the `colorblind` palette:
+- Optimal (Bayes, Mean): `palette[0]`
+- Naive (RL): `palette[1]`
+- Human-matching (NoisyCounting, DeGroot, ADM): `palette[2]`
+
+Figures are saved as both PNG (300 dpi) and PDF to `figures/`.
 
 ---
 
 ## Environment
-
-This project uses two coordinated environments to ensure identical reproduction locally and on the compute cluster:
 
 ```bash
 conda activate PY311
 source venv/bin/activate
 ```
 
-Both environments are kept in sync. `environment.yml` and `requirements.txt` are the sources of truth.
+Both environments are kept in sync via `requirements.txt`.
 
 ---
 
-## Workflow
-
-1. **Discussion** between researcher and Claude (claude.ai) to scope changes or new experiments
-2. **Cursor prompts** drafted by Claude and executed by Cursor in the local environment
-3. **Review and commit** by the researcher before any changes are pushed
-
-See `.cursorrules` for Cursor's operating instructions.
-
-### Cursor prompt format
+## Cursor Prompt Format
 
 When drafting Cursor prompts, Claude should always format them as follows:
 
-- Title: `Cursor Prompt 00X — Brief description of what the prompt does`
-- Body: a single fenced code block with language set to `markdown`, containing the full prompt as plain prose with `##` section headers for each distinct task
-- Numbering: prompts are numbered sequentially across the entire project (001, 002, ...) — never reset between chats
-- One prompt per response — if multiple files need changes, combine them into clearly labeled sections within a single prompt
-- File paths are always relative to the project root (e.g. `models/math_models.py`, not `evidence_integration/models/math_models.py`)
-- The prompt should be self-contained — Cursor should be able to execute it without reading the conversation history
-
-Example structure:
-````
-```markdown
-Edit `models/example.py` to make the following changes.
-
-## 1. First change
-Description of what to do.
-
-## 2. Second change
-Description of what to do.
-
-Do not change any other logic. Do not create any other files.
-```
-````
+- Title: `Cursor Prompt 00X — Brief description`
+- Body: single fenced code block with language `markdown`
+- Numbering: sequential across entire project, never reset
+- One prompt per response; combine multi-file changes into labeled sections
+- File paths relative to project root
+- Self-contained — Cursor should execute without reading conversation history
 
 ---
 
 ## Status
 
-- [x] Port and refactor core utility code (`uniform_encoders.py`, `paths.py`)
+- [x] Port core utility code (`uniform_encoders.py`, `paths.py`, `plot_style.py`)
 - [x] Standardize data schema across all three task dataframes
 - [x] Port and refactor mathematical models (`math_models.py`)
-- [x] Implement universal NLL loss function (`losses.py`)
+- [x] Implement MSE, NLL, Wasserstein loss functions (`losses.py`)
 - [x] Implement Optuna fitting loop with k-fold CV (`fit.py`)
+- [x] Implement unified job management (`jobs/run.py`)
+- [x] Run population-level math model fits on cluster
 - [ ] Port NEF models (`synaptic.py`, `recurrent.py`)
-- [ ] Implement `rerun.py` and `collect.py`
-- [ ] Implement SLURM job scripts (`jobs/`)
 - [ ] Validate refactored code reproduces original results
+- [ ] Implement task-specific Experiment 2 losses (switch, decay)
 - [ ] Design and implement new experiments
 - [ ] Final analysis and figure generation
