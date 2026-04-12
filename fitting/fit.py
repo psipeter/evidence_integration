@@ -226,7 +226,6 @@ def fit(
     if run_folder is None:
         run_folder = RUNS_DIR / "default"
     run_folder = Path(run_folder)
-    run_folder.mkdir(parents=True, exist_ok=True)
     if loss_type is None:
         loss_type = DEFAULT_LOSS.get(dataset, "mse")
     start = time.time()
