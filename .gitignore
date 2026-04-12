@@ -31,6 +31,7 @@ data/
 !data/jiang.pkl
 !data/yoo.pkl
 !data/jiang_networks.npy
+data/runs/
 figures/
 
 # =============================================================================

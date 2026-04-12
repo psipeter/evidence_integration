@@ -14,6 +14,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT: Path = _THIS_DIR.parent
 
 DATA_DIR: Path = PROJECT_ROOT / "data"
+RUNS_DIR: Path = DATA_DIR / "runs"
 MODELS_DIR: Path = PROJECT_ROOT / "models"
 FITTING_DIR: Path = PROJECT_ROOT / "fitting"
 ANALYSIS_DIR: Path = PROJECT_ROOT / "analysis"

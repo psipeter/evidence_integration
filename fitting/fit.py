@@ -2,12 +2,13 @@
 Model-fitting orchestration layer for participant-level parameter estimation.
 
 Coordinates Optuna search with k-fold cross-validation over a chosen loss
-(``loss_type``), writing participant-specific outputs to ``data/`` for downstream
-aggregation. Output files use the pattern
-``{model_type}_{dataset}_{pid}_{loss_type}_*.pkl`` (params, performance,
-cv_folds). When ``loss_type`` is omitted (``None``), the default is
-task-aware: ``mse`` for carrabin and yoo, ``nll`` for jiang; pass a string
-explicitly to override.
+(``loss_type``), writing participant-specific outputs under a run folder
+(see ``run_folder``) for downstream aggregation. Filenames are
+``{model_type}_{dataset}_{pid}_params.pkl``, ``_performance.pkl``, and
+``_cv_folds.pkl`` (loss type is stored in the params row, not in the name).
+When ``loss_type`` is omitted (``None``), the default is task-aware:
+``mse`` for carrabin and yoo, ``nll`` for jiang; pass a string explicitly to
+override.
 
 Two experiment regimes:
 
@@ -31,10 +32,11 @@ Optional ``n_runs`` (default ``1``) is forwarded into model ``params`` when
 ``n_runs >= 20`` is a reasonable choice for cluster fits.
 
 Entry point:
-``python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs]``
+``python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs] [run_folder]``
 
 Optional 4th token ``n_trials`` (default 100); optional 5th ``loss_type`` (omit
-for task-aware default); optional 6th ``n_runs`` (default 1).
+for task-aware default); optional 6th ``n_runs`` (default 1); optional 7th
+``run_folder`` (omit for ``data/runs/default``).
 
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
@@ -52,6 +54,7 @@ before cluster use.
 import logging
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import optuna
@@ -60,7 +63,7 @@ import pandas as pd
 import fitting.losses as losses
 import models.math_models as math_models
 from fitting.param_ranges import MODEL_PARAMS
-from utils.paths import data_path
+from utils.paths import RUNS_DIR, data_path
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -217,8 +220,13 @@ def fit(
     storage: str | None = None,
     loss_type: str | None = None,
     n_runs: int = 1,
+    run_folder: Path | str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
+    if run_folder is None:
+        run_folder = RUNS_DIR / "default"
+    run_folder = Path(run_folder)
+    run_folder.mkdir(parents=True, exist_ok=True)
     if loss_type is None:
         loss_type = DEFAULT_LOSS.get(dataset, "mse")
     start = time.time()
@@ -289,14 +297,12 @@ def fit(
         ]
     )
 
-    params_df.to_pickle(
-        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_params.pkl")
-    )
+    params_df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_params.pkl")
     performance_df.to_pickle(
-        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_performance.pkl")
+        run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
     )
     cv_folds_df.to_pickle(
-        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_cv_folds.pkl")
+        run_folder / f"{model_type}_{dataset}_{pid}_cv_folds.pkl"
     )
 
     return params_df, performance_df
@@ -310,21 +316,25 @@ def fit_noise_only(
     k: int = 5,
     storage: str | None = None,
     loss_type: str | None = None,
+    run_folder: Path | str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fit only observation/decision noise (sigma or beta) given pre-saved model
-    responses at ``data/{model_type}_{dataset}_{pid}_{loss_type}_responses.pkl``.
+    responses at ``{run_folder}/{model_type}_{dataset}_{pid}_responses.pkl``.
     """
+    if run_folder is None:
+        run_folder = RUNS_DIR / "default"
+    run_folder = Path(run_folder)
+    run_folder.mkdir(parents=True, exist_ok=True)
     if loss_type is None:
         loss_type = DEFAULT_LOSS.get(dataset, "mse")
     start = time.time()
-    responses_path = data_path(
-        f"{model_type}_{dataset}_{pid}_{loss_type}_responses.pkl"
-    )
+    responses_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
     if not responses_path.exists():
         raise FileNotFoundError(
             f"Pre-saved responses not found: {responses_path}. "
-            "Run rerun (or equivalent) after fixing model params first."
+            "Generate responses in the run folder (e.g. python -m jobs.run --rerun ...) "
+            "after fitting structural parameters."
         )
     model_responses = pd.read_pickle(responses_path)
 
@@ -389,14 +399,12 @@ def fit_noise_only(
         ]
     )
 
-    params_df.to_pickle(
-        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_params.pkl")
-    )
+    params_df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_params.pkl")
     performance_df.to_pickle(
-        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_performance.pkl")
+        run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
     )
     cv_folds_df.to_pickle(
-        data_path(f"{model_type}_{dataset}_{pid}_{loss_type}_cv_folds.pkl")
+        run_folder / f"{model_type}_{dataset}_{pid}_cv_folds.pkl"
     )
 
     return params_df, performance_df
@@ -409,6 +417,7 @@ if __name__ == "__main__":
     n_trials = int(sys.argv[4]) if len(sys.argv) > 4 else 100
     loss_type = sys.argv[5] if len(sys.argv) > 5 else None
     n_runs = int(sys.argv[6]) if len(sys.argv) > 6 else 1
+    run_folder = sys.argv[7] if len(sys.argv) > 7 else None
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(
@@ -418,6 +427,7 @@ if __name__ == "__main__":
         n_trials=n_trials,
         loss_type=loss_type,
         n_runs=n_runs,
+        run_folder=run_folder,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")
