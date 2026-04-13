@@ -11,6 +11,7 @@ Default run_folder: MSE
 Edit configuration variables at the top of this file.
 """
 
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -127,11 +128,14 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
         ax, pairs, data=subset, x="model_type", y="cv_loss_mean", order=order
     )
     annotator.configure(test="Wilcoxon", text_format="star", loc="inside")
-    annotator.apply_and_annotate()
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        annotator.apply_and_annotate()
+        sys.stdout = old_stdout
 
 fig_dir = PROJ / "figures"
 fig_dir.mkdir(parents=True, exist_ok=True)
 plt.savefig(fig_dir / "performance_mse_nll.png", dpi=300)
 plt.savefig(fig_dir / "performance_mse_nll.pdf")
-plt.show()
 print(f"Saved figures/performance_mse_nll.{{png,pdf}}")
