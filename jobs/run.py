@@ -41,14 +41,14 @@ from models.math_models import run as model_run
 from utils.paths import DATA_DIR, RUNS_DIR, data_path
 
 TIME_LIMITS = {
-    "Bayes": "1:0:0",
+    "Bayes":         "0:30:0",
     "NoisyCounting": "24:0:0",
-    "RL": "4:0:0",
-    "DeGroot": "4:0:0",
-    "Mean": "1:0:0",
-    "ADM": "4:0:0",
-    "recurrent": "48:0:0",
-    "synaptic": "48:0:0",
+    "RL":            "2:0:0",
+    "DeGroot":       "1:0:0",
+    "Mean":          "0:30:0",
+    "ADM":           "2:0:0",
+    "recurrent":     "48:0:0",
+    "synaptic":      "48:0:0",
 }
 
 PROTECTED = frozenset(
