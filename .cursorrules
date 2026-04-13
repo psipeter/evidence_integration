@@ -152,6 +152,20 @@ logic.
 
 Use `notebooks/` for exploratory analysis only, not for finalized figures.
 
+### Conventions for all figure scripts
+- No `plt.show()` — save to file and inspect via file browser
+- Suppress `statannotations` stdout around `annotator.apply_and_annotate()`
+  calls using `os.devnull`:
+
+```python
+import os, sys
+with open(os.devnull, "w") as devnull:
+    old_stdout = sys.stdout
+    sys.stdout = devnull
+    annotator.apply_and_annotate()
+    sys.stdout = old_stdout
+```
+
 ---
 
 ## Run Folders

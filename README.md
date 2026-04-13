@@ -203,6 +203,13 @@ python figures/variability_carrabin.py               # edit SAMPLE_PIDS inside
 Scripts save both PNG (300 dpi) and PDF to `figures/`. Use `notebooks/`
 for exploratory analysis only.
 
+### Conventions for figure scripts
+- No `plt.show()` — save to file and inspect via file browser
+- Suppress `statannotations` stdout by redirecting to `os.devnull` around
+  `annotator.apply_and_annotate()` calls
+- Configuration variables (run folders, sample pids, etc.) live at the top
+  of each script — edit there, not in the plotting logic
+
 ### Editing sample participants (variability_carrabin.py)
 Run once to print the pid/std table, then set `SAMPLE_PIDS` at the top
 of the script and rerun:
@@ -218,7 +225,7 @@ Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
 | Folder | Contents |
 |---|---|
 | `MSE` | All math models, MSE/NLL loss, 500 trials |
-| `wasserstein` | Carrabin models (Bayes, RL, NoisyCounting), Wasserstein loss, 500 trials, n_runs=50 for NoisyCounting |
+| `wasserstein` | Carrabin models (Bayes, RL, NoisyCounting), Wasserstein loss, 500 trials, n_runs=50 for NoisyCounting. Contains `{model_type}_carrabin_responses.pkl` and `{model_type}_carrabin_performance.pkl`. |
 
 Rename run folders manually to reflect experiment type. Inspect
 `run_config.json` inside any folder to see exact hyperparameters used.

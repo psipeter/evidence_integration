@@ -32,7 +32,8 @@ data/
 !data/yoo.pkl
 !data/jiang_networks.npy
 data/runs/
-figures/
+figures/*
+!figures/*.py
 
 # =============================================================================
 # Model Fitting Outputs
