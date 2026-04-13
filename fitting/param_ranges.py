@@ -39,7 +39,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, tuple[float, float, float]]]] = {
         "ADM": {
             "phi": (0.001, 1.0, 0.001),
             "rho": (0.001, 1.0, 0.001),
-            "nu": (0.001, 0.5, 0.001),
         },
     },
 }

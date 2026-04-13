@@ -399,9 +399,8 @@ def _run_yoo(
     if model_type == "ADM":
         phi = params["phi"]
         rho = params["rho"]
-        nu = params["nu"]
+        nu = params.get("nu", 0.01)  # fixed per Yoo et al.; not a free parameter
         n = len(values)
-        # REVIEW: Exponent uses outer ``observation`` (target index) and loop index ``o``; matches fit.py ADM loop with stage renamed.
         weights = np.array(
             [
                 (1.0 - (1.0 - phi ** (o + 1)) * (1.0 - rho ** (observation - o)))
