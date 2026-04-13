@@ -139,7 +139,65 @@ Save figures as both PNG (300 dpi) and PDF to `figures/`.
 
 ---
 
-## Jiang Bayes Model
+## Figure Scripts
+
+All finalized figures are standalone Python scripts in `figures/`:
+- `figures/performance_mse_nll.py` — model performance under MSE/NLL
+- `figures/variability_carrabin.py` — intertrial variability, carrabin
+
+Run with `python figures/{script}.py`. Scripts save PNG (300 dpi) and
+PDF to `figures/`. Configuration variables (run folders, sample pids,
+etc.) live at the top of each script — edit there, not in the plotting
+logic.
+
+Use `notebooks/` for exploratory analysis only, not for finalized figures.
+
+---
+
+## Run Folders
+
+Key run folders under `data/runs/` (not tracked by git):
+
+- `MSE` — all math models, default losses (mse/nll), 500 trials
+- `wasserstein` — carrabin Bayes/RL/NoisyCounting, wasserstein loss,
+  500 trials, NoisyCounting n_runs=50
+
+Each folder contains `run_config.json` with full hyperparameter record.
+
+---
+
+## Current Model Status
+
+**Math models — complete:**
+- carrabin: Bayes (optimal), NoisyCounting (human-matching, n_runs=50),
+  RL (naive)
+- jiang: Bayes (optimal, soft probabilistic), DeGroot (human-matching),
+  RL (naive)
+- yoo: Mean (optimal), ADM (human-matching, nu fixed=0.01), RL (naive)
+
+**NEF models — not yet ported:**
+- `models/synaptic.py` (stub)
+- `models/recurrent.py` (stub)
+
+**Known model details:**
+- NoisyCounting: sigma_c and nu upper bounds widened to 2.0
+- ADM: nu fixed at 0.01 per Yoo et al.; only phi and rho are fitted
+- Jiang Bayes: soft probabilistic via `_bayes_p_blue()` and
+  `_bayes_posterior()`; signal accuracy = 5/7; network adjacency from
+  `data/jiang_networks.npy` (1-indexed, subtract 1 for array access)
+
+---
+
+## Experiment 2 Analysis Plan
+
+- **Carrabin:** Wasserstein distance between response distributions
+  (already fitted); shows NoisyCounting captures intertrial variability
+- **Jiang:** Post-hoc switch probability vs conflict curves; logistic
+  fit for steepness and threshold; fitted with NLL
+- **Yoo:** Post-hoc linear regression slope of |Δresponse| vs
+  observation index; weighted by R² when comparing models to humans
+
+
 
 Implemented in `_bayes_p_blue()` and `_bayes_posterior()` in `models/math_models.py`:
 

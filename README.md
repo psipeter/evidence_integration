@@ -191,6 +191,40 @@ When drafting Cursor prompts, Claude should always format them as follows:
 
 ---
 
+## Figures
+
+All finalized figures are standalone Python scripts in `figures/`:
+
+```bash
+python figures/performance_mse_nll.py [run_folder]   # default: MSE
+python figures/variability_carrabin.py               # edit SAMPLE_PIDS inside
+```
+
+Scripts save both PNG (300 dpi) and PDF to `figures/`. Use `notebooks/`
+for exploratory analysis only.
+
+### Editing sample participants (variability_carrabin.py)
+Run once to print the pid/std table, then set `SAMPLE_PIDS` at the top
+of the script and rerun:
+
+    SAMPLE_PIDS = {'narrow': 15, 'medium': 7, 'broad': 4}
+
+---
+
+## Run Folders
+
+Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
+
+| Folder | Contents |
+|---|---|
+| `MSE` | All math models, MSE/NLL loss, 500 trials |
+| `wasserstein` | Carrabin models (Bayes, RL, NoisyCounting), Wasserstein loss, 500 trials, n_runs=50 for NoisyCounting |
+
+Rename run folders manually to reflect experiment type. Inspect
+`run_config.json` inside any folder to see exact hyperparameters used.
+
+---
+
 ## Status
 
 - [x] Port core utility code (`uniform_encoders.py`, `paths.py`, `plot_style.py`)
@@ -199,9 +233,16 @@ When drafting Cursor prompts, Claude should always format them as follows:
 - [x] Implement MSE, NLL, Wasserstein loss functions (`losses.py`)
 - [x] Implement Optuna fitting loop with k-fold CV (`fit.py`)
 - [x] Implement unified job management (`jobs/run.py`)
-- [x] Run population-level math model fits on cluster
+- [x] Run population-level math model fits on cluster (folder: MSE)
+- [x] Run Wasserstein fits for carrabin (folder: wasserstein)
+- [x] Create performance figure (`figures/performance_mse_nll.py`)
+- [x] Create variability figure (`figures/variability_carrabin.py`)
+- [x] Fix ADM model: nu fixed at 0.01 per Yoo et al.
+- [x] Fix NoisyCounting: n_runs=50, widened sigma_c/nu bounds to 2.0
 - [ ] Port NEF models (`synaptic.py`, `recurrent.py`)
-- [ ] Validate refactored code reproduces original results
-- [ ] Implement task-specific Experiment 2 losses (switch, decay)
+- [ ] Implement switch loss for jiang (Experiment 2)
+- [ ] Implement decay loss for yoo (Experiment 2)
+- [ ] Post-hoc analysis: switch probability curves (jiang)
+- [ ] Post-hoc analysis: update magnitude decay (yoo)
 - [ ] Design and implement new experiments
 - [ ] Final analysis and figure generation
