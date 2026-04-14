@@ -11,7 +11,7 @@ On first run (SAMPLE_PIDS = None), prints pid / threshold / steepness for
 humans (sorted by threshold), then exits. Set SAMPLE_PIDS and rerun.
 
 Usage:
-    python figures/switch_probability_jiang.py
+    python scripts/switch_probability_jiang.py
 
 Data: data/jiang.pkl and data/runs/switch_probability/*_jiang_responses.pkl
 No other run folders. Does not write pickle/CSV outputs (figures only).
@@ -34,10 +34,9 @@ from scipy.special import expit  # sigmoid function
 from statannotations.Annotator import Annotator
 
 # -- path setup ----------------------------------------------------------------
-PROJ = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJ))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import data_path
+from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import apply_style
 
 # -- configuration (edit here) -------------------------------------------------
@@ -54,6 +53,7 @@ SAMPLE_LABELS = ["low", "medium", "high"]
 
 # Exclude participants whose max loss across models exceeds this (violin panel).
 LOSS_CUTOFF = 50.0
+BETA_SAMPLE_SEED = 42
 
 # -- style ---------------------------------------------------------------------
 apply_style()
@@ -72,6 +72,30 @@ def _model_lookup_series(mdf: pd.DataFrame) -> pd.Series:
     if s.index.duplicated().any():
         s = s[~s.index.duplicated(keep="first")]
     return s
+
+
+def apply_beta_sampling(
+    responses_df: pd.DataFrame,
+    params_df: pd.DataFrame,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Replace continuous model responses with stochastic binary choices.
+    For each (pid, trial, stage):
+        P(choose +1) = sigmoid(beta * response)
+        choice ~ Bernoulli(P), mapped to {-1, +1}
+    Uses per-participant beta from params_df.
+    """
+    rng = np.random.RandomState(seed)
+    df = responses_df.copy()
+    beta_map = dict(zip(params_df["pid"], params_df["beta"]))
+    p_pos = expit(
+        df["response"].to_numpy(dtype=float)
+        * df["pid"].map(beta_map).to_numpy(dtype=float)
+    )
+    samples = rng.binomial(1, p_pos)
+    df["response"] = np.where(samples == 1, 1, -1).astype(float)
+    return df
 
 
 def observations_switch_conflict(
@@ -187,6 +211,20 @@ def fit_all_pids(obs: pd.DataFrame) -> dict[int, tuple[float, float]]:
     return out
 
 
+def params_to_tidy(params: dict[int, tuple[float, float]]) -> pd.DataFrame:
+    rows = []
+    for pid, (threshold, steepness) in params.items():
+        rows.append(
+            {
+                "pid": int(pid),
+                "midpoint": float(threshold),
+                "steepness": float(steepness),
+                "tangent": float(steepness) / 4.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_loss_long(
     human_params: dict[int, tuple[float, float]],
     model_params: dict[str, dict[int, tuple[float, float]]],
@@ -235,25 +273,25 @@ run_dir = data_path("runs") / RUN_FOLDER
 models: dict[str, pd.DataFrame] = {}
 for mt in MODEL_ORDER:
     path = run_dir / f"{mt}_jiang_responses.pkl"
+    params_path = run_dir / f"{mt}_jiang_params.pkl"
     assert path.exists(), f"Missing model responses: {path}"
-    models[mt] = pd.read_pickle(path)
+    assert params_path.exists(), f"Missing model params: {params_path}"
+    responses = pd.read_pickle(path)
+    params_mt = pd.read_pickle(params_path)
+    models[mt] = apply_beta_sampling(responses, params_mt, seed=BETA_SAMPLE_SEED)
 
 params_models: dict[str, dict[int, tuple[float, float]]] = {}
-agg_by_pid: dict[tuple[str, int], pd.DataFrame] = {}
-
-for pid in obs_human["pid"].unique():
-    agg_by_pid[("Human", int(pid))] = agg_conflict_switch(
-        obs_human[obs_human["pid"] == pid]
-    )
+obs_models: dict[str, pd.DataFrame] = {}
 
 for mt, mdf in models.items():
     lookup = _model_lookup_series(mdf)
     obs_m = observations_switch_conflict(human, lookup)
+    obs_models[mt] = obs_m
     params_models[mt] = fit_all_pids(obs_m)
-    for pid in obs_m["pid"].unique():
-        agg_by_pid[(mt, int(pid))] = agg_conflict_switch(
-            obs_m[obs_m["pid"] == pid]
-        )
+
+params_by_source: dict[str, pd.DataFrame] = {"Human": params_to_tidy(params_human)}
+for mt in MODEL_ORDER:
+    params_by_source[mt] = params_to_tidy(params_models[mt])
 
 sample_pids = [int(SAMPLE_PIDS[k]) for k in SAMPLE_LABELS]
 for lab, pid in zip(SAMPLE_LABELS, sample_pids):
@@ -267,37 +305,9 @@ if _complete.empty:
     raise RuntimeError("No participants with valid loss for all three models.")
 loss_plot = _complete.copy()
 
-# Shared axis limits row 1
-all_conflicts: list[float] = []
-all_means: list[float] = []
-all_curve_max_y = 0.0
-xc = np.linspace(0.0, 1.0, 200)
-
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
 ]
-
-for label, _df in sources:
-    for pid in sample_pids:
-        agg = agg_by_pid.get((label, pid))
-        if agg is None or len(agg) == 0:
-            continue
-        all_conflicts.extend(agg["conflict"].tolist())
-        all_means.extend(agg["mean_switch"].tolist())
-        th, st = (
-            params_human[pid]
-            if label == "Human"
-            else params_models[label].get(pid, (np.nan, np.nan))
-        )
-        if np.isfinite(th) and np.isfinite(st):
-            yc = logistic(xc, th, st)
-            all_curve_max_y = max(all_curve_max_y, float(yc.max()))
-
-x_min = min(all_conflicts) if all_conflicts else 0.0
-x_max = max(all_conflicts) if all_conflicts else 1.0
-x_pad = (x_max - x_min) * 0.05 + 1e-6
-x_lo, x_hi = x_min - x_pad, x_max + x_pad
-y_hi = max(1.05, all_curve_max_y * 1.1, max(all_means) * 1.1 if all_means else 1.0)
 
 # -- figure --------------------------------------------------------------------
 fig = plt.figure(figsize=(14, 7), constrained_layout=True)
@@ -313,45 +323,54 @@ ax_viol = fig.add_subplot(gs[1, 2:])
 
 _markers = ["o", "s", "^"]
 
-# Row 1: scatter + logistic
+# Row 1: logistic regplot + midpoint/tangent overlays
+obs_by_source = {"Human": obs_human}
+obs_by_source.update(obs_models)
+conflict_bins = np.linspace(0, 1.0, 5)
+line_span = 0.25
+
 for ax, (label, _) in zip(ax_row1, sources):
     color = PALETTE[label]
+    obs_src = obs_by_source[label]
+    param_src = params_by_source[label]
     for pid, ls, mkr in zip(sample_pids, LINESTYLES, _markers):
-        agg = agg_by_pid.get((label, pid))
-        if agg is None or len(agg) == 0:
+        obs_pid = obs_src[obs_src["pid"] == pid]
+        if obs_pid.empty:
             continue
-        sizes = 15.0 + 80.0 * (agg["n"] / agg["n"].max())
-        ax.scatter(
-            agg["conflict"],
-            agg["mean_switch"],
-            s=sizes,
+        # Logistic curve with CI band
+        sns.regplot(
+            data=obs_pid,
+            x="conflict",
+            y="switch",
+            x_bins=conflict_bins,
+            logistic=True,
+            scatter=False,
             color=color,
-            alpha=0.75,
-            edgecolors="none",
-            marker=mkr,
-            zorder=3,
+            line_kws={"linestyle": ls, "linewidth": 1.5},
+            ax=ax,
         )
-        th, st = (
-            params_human[pid]
-            if label == "Human"
-            else params_models[label].get(pid, (np.nan, np.nan))
+        prow = param_src[param_src["pid"] == pid]
+        if prow.empty:
+            continue
+        midpoint = float(prow["midpoint"].iloc[0])
+        tangent = float(prow["tangent"].iloc[0])
+        # Midpoint marker
+        ax.scatter(midpoint, 0.5, color=color, marker=mkr, s=60, zorder=5)
+        # Tangent at inflection
+        x_tan = np.linspace(midpoint - line_span, midpoint + line_span, 100)
+        y_tan = tangent * (x_tan - midpoint) + 0.5
+        ax.plot(
+            x_tan,
+            y_tan,
+            color=color,
+            linestyle=ls,
+            linewidth=1.0,
+            alpha=0.7,
+            zorder=4,
         )
-        if np.isfinite(th) and np.isfinite(st):
-            xs = np.linspace(x_lo, x_hi, 200)
-            ax.plot(
-                xs,
-                logistic(xs, th, st),
-                color=color,
-                linestyle=ls,
-                linewidth=1.5,
-                marker=mkr,
-                markevery=20,
-                markersize=5,
-                zorder=2,
-            )
 
-    ax.set_xlim(x_lo, x_hi)
-    ax.set_ylim(-0.02, y_hi)
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
     ax.set_title(label)
     ax.set_xlabel("Conflict")
     ax.set_ylabel("P(switch)" if label == "Human" else "")
@@ -472,10 +491,9 @@ with open(os.devnull, "w") as devnull:
     sys.stdout = old_stdout
 
 # -- save ----------------------------------------------------------------------
-fig_dir = PROJ / "figures"
-fig_dir.mkdir(parents=True, exist_ok=True)
-plt.savefig(fig_dir / "switch_probability_jiang.png", dpi=300)
-plt.savefig(fig_dir / "switch_probability_jiang.pdf")
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+plt.savefig(FIGURES_DIR / "switch_probability_jiang.png", dpi=300)
+plt.savefig(FIGURES_DIR / "switch_probability_jiang.pdf")
 print("Saved figures/switch_probability_jiang.{png,pdf}")
 # bad_pids = loss_plot.groupby("pid")["loss"].max()
 # print(f"Pids excluded at cutoff 50: {(bad_pids > 50).sum()} / {len(bad_pids)}")

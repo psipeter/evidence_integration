@@ -141,16 +141,15 @@ Save figures as both PNG (300 dpi) and PDF to `figures/`.
 
 ## Figure Scripts
 
-All finalized figures are standalone Python scripts in `figures/`:
-- `figures/performance_mse_nll.py` — model performance under MSE/NLL
-- `figures/variability_carrabin.py` — intertrial variability, carrabin
+All finalized figures are standalone Python scripts in `scripts/`:
+- `scripts/performance_mse_nll.py` — model performance under MSE/NLL
+- `scripts/variability_carrabin.py` — intertrial variability, carrabin
+- `scripts/switch_probability_jiang.py` — switch probability vs conflict, jiang
 
-Run with `python figures/{script}.py`. Scripts save PNG (300 dpi) and
+Run with `python scripts/{script}.py`. Scripts save PNG (300 dpi) and
 PDF to `figures/`. Configuration variables (run folders, sample pids,
 etc.) live at the top of each script — edit there, not in the plotting
 logic.
-
-Use `notebooks/` for exploratory analysis only, not for finalized figures.
 
 ### Conventions for all figure scripts
 - No `plt.show()` — save to file and inspect via file browser
@@ -251,7 +250,7 @@ Implemented in `_bayes_p_blue()` and `_bayes_posterior()` in `models/math_models
 When porting from `~/observational-learning-social-networks/`:
 
 1. Rewrite for clarity — do not copy-paste blindly
-2. Remove dead code and notebook-style fragments
+2. Remove dead code and interactive-analysis fragments
 3. Add docstring noting original file
 4. Flag unclear logic with `# REVIEW: [reason]`
 
@@ -264,3 +263,5 @@ When porting from `~/observational-learning-social-networks/`:
 - Install dependencies without updating `requirements.txt`
 - Push to git
 - Create nested `evidence_integration/evidence_integration/` folders
+- Create Jupyter notebooks. All figures must be standalone Python scripts
+  in `scripts/`.

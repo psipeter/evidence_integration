@@ -48,12 +48,14 @@ evidence_integration/
 │   └── param_ranges.py       # parameter search spaces
 ├── jobs/
 │   └── run.py                # single entry point for all job management
+├── scripts/
+│   ├── performance_mse_nll.py
+│   ├── variability_carrabin.py
+│   └── switch_probability_jiang.py
 ├── utils/
 │   ├── paths.py              # central path config
 │   ├── plot_style.py         # shared matplotlib/seaborn style
 │   └── uniform_encoders.py   # quasi-Monte Carlo encoders for Nengo
-└── notebooks/
-    └── performance_mse_nll.ipynb
 ```
 
 ---
@@ -157,8 +159,7 @@ folder: `rm -rf data/runs/Apr12_632pm`.
 
 ## Plotting Conventions
 
-All notebooks use `from utils.plot_style import apply_style` for consistent
-aesthetics. Colors are assigned by model role using the `colorblind` palette:
+Colors are assigned by model role using the `colorblind` palette:
 - Optimal (Bayes, Mean): `palette[0]`
 - Naive (RL): `palette[1]`
 - Human-matching (NoisyCounting, DeGroot, ADM): `palette[2]`
@@ -193,15 +194,15 @@ When drafting Cursor prompts, Claude should always format them as follows:
 
 ## Figures
 
-All finalized figures are standalone Python scripts in `figures/`:
+All finalized figures are standalone Python scripts in `scripts/`:
 
 ```bash
-python figures/performance_mse_nll.py [run_folder]   # default: MSE
-python figures/variability_carrabin.py               # edit SAMPLE_PIDS inside
+python scripts/performance_mse_nll.py [run_folder]   # default: MSE
+python scripts/variability_carrabin.py
+python scripts/switch_probability_jiang.py
 ```
 
-Scripts save both PNG (300 dpi) and PDF to `figures/`. Use `notebooks/`
-for exploratory analysis only.
+Scripts save both PNG (300 dpi) and PDF to `figures/`.
 
 ### Conventions for figure scripts
 - No `plt.show()` — save to file and inspect via file browser
@@ -242,8 +243,8 @@ Rename run folders manually to reflect experiment type. Inspect
 - [x] Implement unified job management (`jobs/run.py`)
 - [x] Run population-level math model fits on cluster (folder: MSE)
 - [x] Run Wasserstein fits for carrabin (folder: wasserstein)
-- [x] Create performance figure (`figures/performance_mse_nll.py`)
-- [x] Create variability figure (`figures/variability_carrabin.py`)
+- [x] Create performance figure (`scripts/performance_mse_nll.py`)
+- [x] Create variability figure (`scripts/variability_carrabin.py`)
 - [x] Fix ADM model: nu fixed at 0.01 per Yoo et al.
 - [x] Fix NoisyCounting: n_runs=50, widened sigma_c/nu bounds to 2.0
 - [ ] Port NEF models (`synaptic.py`, `recurrent.py`)

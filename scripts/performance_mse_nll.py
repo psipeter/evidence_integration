@@ -5,7 +5,7 @@ Distribution of cross-validated loss across participants for each model and task
 One panel per task, 1 row x 3 columns.
 
 Usage:
-    python figures/performance_mse_nll.py [run_folder]
+    python scripts/performance_mse_nll.py [run_folder]
 
 Default run_folder: MSE
 Edit configuration variables at the top of this file.
@@ -22,10 +22,9 @@ from itertools import combinations
 from statannotations.Annotator import Annotator
 
 # -- path setup ----------------------------------------------------------------
-PROJ = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJ))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import data_path
+from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import apply_style
 
 # -- configuration (edit here) -------------------------------------------------
@@ -134,8 +133,7 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
         annotator.apply_and_annotate()
         sys.stdout = old_stdout
 
-fig_dir = PROJ / "figures"
-fig_dir.mkdir(parents=True, exist_ok=True)
-plt.savefig(fig_dir / "performance_mse_nll.png", dpi=300)
-plt.savefig(fig_dir / "performance_mse_nll.pdf")
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+plt.savefig(FIGURES_DIR / "performance_mse_nll.png", dpi=300)
+plt.savefig(FIGURES_DIR / "performance_mse_nll.pdf")
 print(f"Saved figures/performance_mse_nll.{{png,pdf}}")

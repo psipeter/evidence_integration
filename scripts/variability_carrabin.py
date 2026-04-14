@@ -7,7 +7,7 @@ representative participants, then exits. Set SAMPLE_PIDS at the top of this
 file and rerun to generate the figure.
 
 Usage:
-    python figures/variability_carrabin.py
+    python scripts/variability_carrabin.py
 """
 
 import sys
@@ -23,10 +23,9 @@ from scipy.stats import gaussian_kde
 from statannotations.Annotator import Annotator
 
 # -- path setup ----------------------------------------------------------------
-PROJ = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJ))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import data_path
+from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import apply_style
 
 # -- configuration (edit here) -------------------------------------------------
@@ -227,8 +226,7 @@ with open(os.devnull, "w") as devnull:
     sys.stdout = old_stdout
 
 # -- save ----------------------------------------------------------------------
-fig_dir = PROJ / "figures"
-fig_dir.mkdir(parents=True, exist_ok=True)
-plt.savefig(fig_dir / "variability_carrabin.png", dpi=300)
-plt.savefig(fig_dir / "variability_carrabin.pdf")
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+plt.savefig(FIGURES_DIR / "variability_carrabin.png", dpi=300)
+plt.savefig(FIGURES_DIR / "variability_carrabin.pdf")
 print(f"Saved figures/variability_carrabin.{{png,pdf}}")
