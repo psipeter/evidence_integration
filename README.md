@@ -49,8 +49,8 @@ evidence_integration/
 ├── jobs/
 │   └── run.py                # single entry point for all job management
 ├── scripts/
-│   ├── performance_mse_nll.py
-│   ├── variability_carrabin.py
+│   ├── model_performance.py
+│   ├── response_variability_carrabin.py
 │   └── switch_probability_jiang.py
 ├── utils/
 │   ├── paths.py              # central path config
@@ -197,8 +197,8 @@ When drafting Cursor prompts, Claude should always format them as follows:
 All finalized figures are standalone Python scripts in `scripts/`:
 
 ```bash
-python scripts/performance_mse_nll.py [run_folder]   # default: MSE
-python scripts/variability_carrabin.py
+python scripts/model_performance.py [run_folder]   # default: MSE
+python scripts/response_variability_carrabin.py
 python scripts/switch_probability_jiang.py
 ```
 
@@ -211,7 +211,7 @@ Scripts save both PNG (300 dpi) and PDF to `figures/`.
 - Configuration variables (run folders, sample pids, etc.) live at the top
   of each script — edit there, not in the plotting logic
 
-### Editing sample participants (variability_carrabin.py)
+### Editing sample participants (response_variability_carrabin.py)
 Run once to print the pid/std table, then set `SAMPLE_PIDS` at the top
 of the script and rerun:
 
@@ -243,8 +243,8 @@ Rename run folders manually to reflect experiment type. Inspect
 - [x] Implement unified job management (`jobs/run.py`)
 - [x] Run population-level math model fits on cluster (folder: MSE)
 - [x] Run Wasserstein fits for carrabin (folder: wasserstein)
-- [x] Create performance figure (`scripts/performance_mse_nll.py`)
-- [x] Create variability figure (`scripts/variability_carrabin.py`)
+- [x] Create performance figure (`scripts/model_performance.py`)
+- [x] Create variability figure (`scripts/response_variability_carrabin.py`)
 - [x] Fix ADM model: nu fixed at 0.01 per Yoo et al.
 - [x] Fix NoisyCounting: n_runs=50, widened sigma_c/nu bounds to 2.0
 - [ ] Port NEF models (`synaptic.py`, `recurrent.py`)

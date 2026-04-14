@@ -5,27 +5,24 @@ Distribution of cross-validated loss across participants for each model and task
 One panel per task, 1 row x 3 columns.
 
 Usage:
-    python scripts/performance_mse_nll.py [run_folder]
+    python scripts/model_performance.py [run_folder]
 
 Default run_folder: MSE
 Edit configuration variables at the top of this file.
 """
 
-import os
 import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from itertools import combinations
-from statannotations.Annotator import Annotator
 
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style, get_palette, FIGURE_SIZE
+from utils.plot_style import annotate_violins, apply_style, get_palette, FIGURE_SIZE
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = sys.argv[1] if len(sys.argv) > 1 else "MSE"
@@ -36,9 +33,9 @@ MODEL_ORDER = {
     "yoo": ["Mean", "RL", "ADM"],
 }
 YLABELS = {
-    "carrabin": "MSE",
-    "jiang": "NLL",
-    "yoo": "MSE",
+    "carrabin": "Mean Squared Error",
+    "jiang":    "Negative Log-Likelihood",
+    "yoo":      "Mean Squared Error",
 }
 TITLES = {
     "carrabin": "Ratio Estimation",
@@ -92,40 +89,31 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
         order=order,
         hue="model_type",
         palette=PALETTE,
-        inner="point",
+        inner=None,
         legend=False,
         cut=0,
         ax=ax,
     )
-    np.random.seed(42)
-    sns.stripplot(
-        data=subset,
-        x="model_type",
-        y="cv_loss_mean",
-        order=order,
-        color="0.2",
-        alpha=0.5,
-        jitter=0.2,
-        size=4,
-        ax=ax,
-    )
-    ax.set_title(TITLES[dataset])
+    # np.random.seed(42)
+    # sns.stripplot(
+    #     data=subset,
+    #     x="model_type",
+    #     y="cv_loss_mean",
+    #     order=order,
+    #     color="0.2",
+    #     alpha=0.5,
+    #     jitter=0.2,
+    #     size=4,
+    #     ax=ax,
+    # )
     ax.set_ylabel(YLABELS[dataset])
     ax.set_xlabel("")
     sns.despine(ax=ax, top=True, right=True)
 
-    pairs = list(combinations(order, 2))
-    annotator = Annotator(
-        ax, pairs, data=subset, x="model_type", y="cv_loss_mean", order=order
-    )
-    annotator.configure(test="Wilcoxon", text_format="star", loc="inside")
-    with open(os.devnull, "w") as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        annotator.apply_and_annotate()
-        sys.stdout = old_stdout
+    annotate_violins(ax, subset, "model_type", "cv_loss_mean", order)
+    ax.set_title(TITLES[dataset])
 
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-plt.savefig(FIGURES_DIR / "performance_mse_nll.png", dpi=300)
-plt.savefig(FIGURES_DIR / "performance_mse_nll.pdf")
-print(f"Saved figures/performance_mse_nll.{{png,pdf}}")
+plt.savefig(FIGURES_DIR / "model_performance.png", dpi=300)
+plt.savefig(FIGURES_DIR / "model_performance.pdf")
+print("Saved figures/model_performance.{png,pdf}")

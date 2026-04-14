@@ -7,26 +7,23 @@ representative participants, then exits. Set SAMPLE_PIDS at the top of this
 file and rerun to generate the figure.
 
 Usage:
-    python scripts/variability_carrabin.py
+    python scripts/response_variability_carrabin.py
 """
 
 import sys
 import numpy as np
 import pandas as pd
-import os
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import seaborn as sns
-from itertools import combinations
 from pathlib import Path
 from scipy.stats import gaussian_kde
-from statannotations.Annotator import Annotator
 
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style, FIGURE_SIZE, get_palette, SAMPLE_MARKERS
+from utils.plot_style import annotate_violins, apply_style, FIGURE_SIZE, get_palette
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = "wasserstein"
@@ -81,7 +78,6 @@ if SAMPLE_PIDS is None:
 
 sample_labels = ["narrow", "medium", "broad"]
 sample_pids = [SAMPLE_PIDS[l] for l in sample_labels]
-_markers = SAMPLE_MARKERS
 
 # -- figure layout -------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
@@ -141,22 +137,6 @@ for ax, (label, _) in zip(ax_kde, sources):
         plt.setp(ax.get_yticklabels(), visible=False)
     sns.despine(ax=ax, top=True, right=True)
 
-# Direct curve labels on Human panel
-ax_human = ax_kde[0]
-for pid, ls, lbl in zip(sample_pids, LINESTYLES, sample_labels):
-    density = kde_cache[("Human", pid)]
-    # Place label at the x position of peak density
-    peak_idx = np.argmax(density)
-    ax_human.text(
-        x_grid[peak_idx],
-        density[peak_idx] + y_max * 0.02,
-        lbl,
-        ha="center",
-        va="bottom",
-        fontsize=7,
-        color=PALETTE["Human"],
-    )
-
 # -- row 2a: population std distribution ---------------------------------------
 std_vals = pid_std["response_std"].values
 kde_pop = gaussian_kde(std_vals)
@@ -167,7 +147,11 @@ ax_std.plot(x_std, kde_pop(x_std), color="0.3", linewidth=1.5)
 # Mark sample participants
 for pid, ls in zip(sample_pids, LINESTYLES):
     std_val = pid_std.loc[pid_std["pid"] == pid, "response_std"].values[0]
-    ax_std.axvline(std_val, color="0.3", linestyle=ls, linewidth=1.5)
+    kde_height = float(kde_pop(np.array([std_val]))[0])
+    ax_std.plot(
+        [std_val, std_val], [0, kde_height],
+        color="0.3", linestyle=ls, linewidth=1.5,
+    )
 
 ax_std.set_xlabel("Response std")
 ax_std.set_ylabel("Density")
@@ -182,46 +166,32 @@ sns.violinplot(
     order=MODEL_ORDER,
     hue="model_type",
     palette=PALETTE,
-    inner="point",
+    inner=None,
     legend=False,
     cut=0,
     ax=ax_viol,
 )
-np.random.seed(42)
-sns.stripplot(
-    data=perf,
-    x="model_type",
-    y="cv_loss_mean",
-    order=MODEL_ORDER,
-    color="0.2",
-    alpha=0.5,
-    jitter=0.2,
-    size=4,
-    ax=ax_viol,
-)
-ax_viol.set_title("Wasserstein loss")
-ax_viol.set_ylabel("Wasserstein")
+# np.random.seed(42)
+# sns.stripplot(
+#     data=perf,
+#     x="model_type",
+#     y="cv_loss_mean",
+#     order=MODEL_ORDER,
+#     color="0.2",
+#     alpha=0.5,
+#     jitter=0.2,
+#     size=4,
+#     ax=ax_viol,
+# )
+ax_viol.set_title("Distance to human response distribution")
+ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-pairs = list(combinations(MODEL_ORDER, 2))
-annotator = Annotator(
-    ax_viol,
-    pairs,
-    data=perf,
-    x="model_type",
-    y="cv_loss_mean",
-    order=MODEL_ORDER,
-)
-annotator.configure(test="Wilcoxon", text_format="star", loc="inside")
-with open(os.devnull, "w") as devnull:
-    old_stdout = sys.stdout
-    sys.stdout = devnull
-    annotator.apply_and_annotate()
-    sys.stdout = old_stdout
+annotate_violins(ax_viol, perf, "model_type", "cv_loss_mean", MODEL_ORDER)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-plt.savefig(FIGURES_DIR / "variability_carrabin.png", dpi=300)
-plt.savefig(FIGURES_DIR / "variability_carrabin.pdf")
-print(f"Saved figures/variability_carrabin.{{png,pdf}}")
+plt.savefig(FIGURES_DIR / "response_variability_carrabin.png", dpi=300)
+plt.savefig(FIGURES_DIR / "response_variability_carrabin.pdf")
+print("Saved figures/response_variability_carrabin.{png,pdf}")

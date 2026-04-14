@@ -5,7 +5,7 @@ Jiang task: switch probability vs social conflict (post-hoc logistic fit).
 Row 1: Human and three models — mean switch vs conflict with per-participant
 logistic fits for three sample participants (low / medium / high conflict
 sensitivity). Row 2: human (threshold, steepness) scatter with sample
-markers; violin plot of Euclidean parameter distance vs human per model.
+markers; violin plot of Wasserstein distance vs human per model.
 
 On first run (SAMPLE_PIDS = None), prints pid / threshold / steepness for
 humans (sorted by threshold), then exits. Set SAMPLE_PIDS and rerun.
@@ -19,9 +19,7 @@ No other run folders. Does not write pickle/CSV outputs (figures only).
 
 from __future__ import annotations
 
-import os
 import sys
-from itertools import combinations
 from pathlib import Path
 
 import matplotlib.gridspec as gridspec
@@ -31,13 +29,17 @@ import pandas as pd
 import seaborn as sns
 from scipy.optimize import minimize
 from scipy.special import expit  # sigmoid function
-from statannotations.Annotator import Annotator
-
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style, FIGURE_SIZE, get_palette, SAMPLE_MARKERS
+from utils.plot_style import (
+    annotate_violins,
+    apply_style,
+    FIGURE_SIZE,
+    get_palette,
+    SAMPLE_MARKERS,
+)
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = "switch_probability"
@@ -51,9 +53,6 @@ MODEL_ORDER = ["Bayes", "RL", "DeGroot"]
 LINESTYLES = ["solid", "dashed", "dotted"]  # low / medium / high sensitivity
 SAMPLE_LABELS = ["low", "medium", "high"]
 LINE_ARC = 0.2
-
-# Exclude participants whose max loss across models exceeds this (violin panel).
-LOSS_CUTOFF = 50.0
 BETA_SAMPLE_SEED = 42
 
 # -- style ---------------------------------------------------------------------
@@ -221,21 +220,49 @@ def params_to_tidy(params: dict[int, tuple[float, float]]) -> pd.DataFrame:
 
 
 def build_loss_long(
-    human_params: dict[int, tuple[float, float]],
-    model_params: dict[str, dict[int, tuple[float, float]]],
+    obs_human: pd.DataFrame,
+    obs_models: dict[str, pd.DataFrame],
 ) -> pd.DataFrame:
+    """
+    Per-participant Wasserstein distance between human and model
+    switch-probability-weighted conflict distributions.
+
+    For each pid, compute mean switch probability at each natural conflict
+    level for human and model. Use switch probabilities as weights and
+    conflict levels as values in wasserstein_distance — scipy normalizes
+    weights internally so incomplete CDFs are handled correctly.
+    """
+    from scipy.stats import wasserstein_distance
+
     rows: list[dict] = []
-    for pid, (th_h, st_h) in human_params.items():
-        if not (np.isfinite(th_h) and np.isfinite(st_h)):
+    pids = sorted(obs_human["pid"].unique())
+    for pid in pids:
+        h = obs_human[obs_human["pid"] == pid]
+        h_agg = (
+            h.groupby("conflict")
+            .agg(switch_prob=("switch", "mean"), n=("switch", "size"))
+            .reset_index()
+        )
+        if h_agg.empty or h_agg["switch_prob"].sum() == 0:
             continue
         for mt in MODEL_ORDER:
-            if pid not in model_params[mt]:
+            m = obs_models[mt][obs_models[mt]["pid"] == pid]
+            m_agg = (
+                m.groupby("conflict")
+                .agg(switch_prob=("switch", "mean"), n=("switch", "size"))
+                .reset_index()
+            )
+            if m_agg.empty or m_agg["switch_prob"].sum() == 0:
                 continue
-            th_m, st_m = model_params[mt][pid]
-            if not (np.isfinite(th_m) and np.isfinite(st_m)):
-                continue
-            loss = float(np.hypot(th_h - th_m, st_h - st_m))
-            rows.append({"pid": pid, "model_type": mt, "loss": loss})
+            loss = float(
+                wasserstein_distance(
+                    h_agg["conflict"].values,
+                    m_agg["conflict"].values,
+                    u_weights=h_agg["switch_prob"].values,
+                    v_weights=m_agg["switch_prob"].values,
+                )
+            )
+            rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
     return pd.DataFrame(rows)
 
 
@@ -293,7 +320,7 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
     if pid not in params_human or not np.isfinite(params_human[pid][0]):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid fit")
 
-loss_df = build_loss_long(params_human, params_models)
+loss_df = build_loss_long(obs_human, obs_models)
 # Paired tests: keep pids with all three models
 _complete = loss_df.groupby("pid").filter(lambda g: len(g) == 3)
 if _complete.empty:
@@ -378,16 +405,6 @@ h_tbl = pd.DataFrame(
     [{"pid": p, "threshold": params_human[p][0], "steepness": params_human[p][1]} for p in params_human]
 )
 h_tbl = h_tbl[np.isfinite(h_tbl["threshold"]) & np.isfinite(h_tbl["steepness"])]
-x_clip = float(np.percentile(h_tbl["threshold"], 99))
-n_outside = int((h_tbl["threshold"] > x_clip).sum())
-if n_outside > 0:
-    print(
-        f"Threshold axis clipped at {x_clip:.3f} "
-        f"({n_outside} participant(s) excluded from scatter and violin plots)"
-    )
-valid_pids = h_tbl[h_tbl["threshold"] <= x_clip]["pid"].values
-h_tbl = h_tbl[h_tbl["threshold"] <= x_clip].copy()
-loss_plot = loss_plot[loss_plot["pid"].isin(valid_pids)].copy()
 sns.kdeplot(
     data=h_tbl,
     x="threshold",
@@ -428,17 +445,6 @@ ax_param.set_xlim(0.4, 1.0)
 sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: loss violins
-# Temporary: exclude participants with extreme model losses pending
-# improved model fitting. Remove when model fits are fixed.
-bad_pids = loss_plot.groupby("pid")["loss"].max()
-extreme_pids = bad_pids[bad_pids > LOSS_CUTOFF].index
-if len(extreme_pids) > 0:
-    print(
-        f"Loss cutoff {LOSS_CUTOFF}: {len(extreme_pids)} participant(s) "
-        f"excluded from violin plot (pending model fit improvements)"
-    )
-loss_plot = loss_plot[~loss_plot["pid"].isin(extreme_pids)].copy()
-
 plot_palette = {k: PALETTE[k] for k in MODEL_ORDER}
 sns.violinplot(
     data=loss_plot,
@@ -447,48 +453,32 @@ sns.violinplot(
     order=MODEL_ORDER,
     hue="model_type",
     palette=plot_palette,
-    inner="point",
+    inner=None,
     legend=False,
     cut=0,
     ax=ax_viol,
 )
-np.random.seed(42)
-sns.stripplot(
-    data=loss_plot,
-    x="model_type",
-    y="loss",
-    order=MODEL_ORDER,
-    color="0.2",
-    alpha=0.5,
-    jitter=0.2,
-    size=4,
-    ax=ax_viol,
-)
-ax_viol.set_title("Distance to human parameters")
-ax_viol.set_ylabel("Euclidean loss")
+# np.random.seed(42)
+# sns.stripplot(
+#     data=loss_plot,
+#     x="model_type",
+#     y="loss",
+#     order=MODEL_ORDER,
+#     color="0.2",
+#     alpha=0.5,
+#     jitter=0.2,
+#     size=4,
+#     ax=ax_viol,
+# )
+ax_viol.set_title("Distance to human switch curve")
+ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-pairs = list(combinations(MODEL_ORDER, 2))
-annotator = Annotator(
-    ax_viol,
-    pairs,
-    data=loss_plot,
-    x="model_type",
-    y="loss",
-    order=MODEL_ORDER,
-)
-annotator.configure(test="Wilcoxon", text_format="star", loc="inside")
-with open(os.devnull, "w") as devnull:
-    old_stdout = sys.stdout
-    sys.stdout = devnull
-    annotator.apply_and_annotate()
-    sys.stdout = old_stdout
+annotate_violins(ax_viol, loss_plot, "model_type", "loss", MODEL_ORDER)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 plt.savefig(FIGURES_DIR / "switch_probability_jiang.png", dpi=300)
 plt.savefig(FIGURES_DIR / "switch_probability_jiang.pdf")
 print("Saved figures/switch_probability_jiang.{png,pdf}")
-# bad_pids = loss_plot.groupby("pid")["loss"].max()
-# print(f"Pids excluded at cutoff 50: {(bad_pids > 50).sum()} / {len(bad_pids)}")

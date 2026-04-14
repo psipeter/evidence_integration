@@ -19,9 +19,7 @@ No CSV/pickle outputs (figures only).
 
 from __future__ import annotations
 
-import os
 import sys
-from itertools import combinations
 from pathlib import Path
 
 import matplotlib.gridspec as gridspec
@@ -30,13 +28,17 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy.stats import wasserstein_distance
-from statannotations.Annotator import Annotator
-
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style, FIGURE_SIZE, get_palette, SAMPLE_MARKERS
+from utils.plot_style import (
+    annotate_violins,
+    apply_style,
+    FIGURE_SIZE,
+    get_palette,
+    SAMPLE_MARKERS,
+)
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = "MSE"
@@ -301,43 +303,29 @@ sns.violinplot(
     order=MODEL_ORDER,
     hue="model_type",
     palette=plot_palette,
-    inner="point",
+    inner=None,
     legend=False,
     cut=0,
     ax=ax_viol,
 )
-np.random.seed(42)
-sns.stripplot(
-    data=loss_plot,
-    x="model_type",
-    y="loss",
-    order=MODEL_ORDER,
-    color="0.2",
-    alpha=0.5,
-    jitter=0.2,
-    size=4,
-    ax=ax_viol,
-)
-ax_viol.set_title("Distance to human mean curve")
-ax_viol.set_ylabel("Wasserstein")
+# np.random.seed(42)
+# sns.stripplot(
+#     data=loss_plot,
+#     x="model_type",
+#     y="loss",
+#     order=MODEL_ORDER,
+#     color="0.2",
+#     alpha=0.5,
+#     jitter=0.2,
+#     size=4,
+#     ax=ax_viol,
+# )
+ax_viol.set_title("Distance to human response change curve")
+ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-pairs = list(combinations(MODEL_ORDER, 2))
-annotator = Annotator(
-    ax_viol,
-    pairs,
-    data=loss_plot,
-    x="model_type",
-    y="loss",
-    order=MODEL_ORDER,
-)
-annotator.configure(test="Wilcoxon", text_format="star", loc="inside")
-with open(os.devnull, "w") as devnull:
-    old_stdout = sys.stdout
-    sys.stdout = devnull
-    annotator.apply_and_annotate()
-    sys.stdout = old_stdout
+annotate_violins(ax_viol, loss_plot, "model_type", "loss", MODEL_ORDER)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)

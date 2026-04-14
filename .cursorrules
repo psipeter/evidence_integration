@@ -142,8 +142,8 @@ Save figures as both PNG (300 dpi) and PDF to `figures/`.
 ## Figure Scripts
 
 All finalized figures are standalone Python scripts in `scripts/`:
-- `scripts/performance_mse_nll.py` — model performance under MSE/NLL
-- `scripts/variability_carrabin.py` — intertrial variability, carrabin
+- `scripts/model_performance.py` — model performance under MSE/NLL
+- `scripts/response_variability_carrabin.py` — intertrial variability, carrabin
 - `scripts/switch_probability_jiang.py` — switch probability vs conflict, jiang
 
 Run with `python scripts/{script}.py`. Scripts save PNG (300 dpi) and
