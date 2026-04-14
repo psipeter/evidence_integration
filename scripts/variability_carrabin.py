@@ -26,7 +26,7 @@ from statannotations.Annotator import Annotator
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style
+from utils.plot_style import apply_style, FIGURE_SIZE, get_palette, SAMPLE_MARKERS
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = "wasserstein"
@@ -39,13 +39,7 @@ LINESTYLES = ["solid", "dashed", "dotted"]  # narrow / medium / broad
 
 # -- style ---------------------------------------------------------------------
 apply_style()
-palette = sns.color_palette("colorblind")
-PALETTE = {
-    "Human": "0.3",  # neutral grey for human data
-    "Bayes": palette[0],
-    "RL": palette[1],
-    "NoisyCounting": palette[2],
-}
+PALETTE = get_palette()
 
 # -- load data -----------------------------------------------------------------
 run_dir = data_path("runs") / RUN_FOLDER
@@ -87,9 +81,10 @@ if SAMPLE_PIDS is None:
 
 sample_labels = ["narrow", "medium", "broad"]
 sample_pids = [SAMPLE_PIDS[l] for l in sample_labels]
+_markers = SAMPLE_MARKERS
 
 # -- figure layout -------------------------------------------------------------
-fig = plt.figure(constrained_layout=True)
+fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
 gs = gridspec.GridSpec(
     2,
     4,

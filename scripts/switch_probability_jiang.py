@@ -37,7 +37,7 @@ from statannotations.Annotator import Annotator
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style
+from utils.plot_style import apply_style, FIGURE_SIZE, get_palette, SAMPLE_MARKERS
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = "switch_probability"
@@ -45,11 +45,12 @@ RUN_FOLDER = "switch_probability"
 # None: print human pid / threshold / steepness table and exit.
 # Else: e.g. {"low": 12, "medium": 88, "high": 156}
 # SAMPLE_PIDS: dict[str, int] | None = None
-SAMPLE_PIDS: dict[str, int] | None = {"low": 154, "medium": 88, "high": 33}
+SAMPLE_PIDS: dict[str, int] | None = {"low": 154, "medium": 88, "high": 173}
 
 MODEL_ORDER = ["Bayes", "RL", "DeGroot"]
 LINESTYLES = ["solid", "dashed", "dotted"]  # low / medium / high sensitivity
 SAMPLE_LABELS = ["low", "medium", "high"]
+LINE_ARC = 0.2
 
 # Exclude participants whose max loss across models exceeds this (violin panel).
 LOSS_CUTOFF = 50.0
@@ -57,13 +58,7 @@ BETA_SAMPLE_SEED = 42
 
 # -- style ---------------------------------------------------------------------
 apply_style()
-_palette = sns.color_palette("colorblind")
-PALETTE = {
-    "Human": "0.3",
-    "Bayes": _palette[0],
-    "RL": _palette[1],
-    "DeGroot": _palette[2],
-}
+PALETTE = get_palette()
 
 
 def _model_lookup_series(mdf: pd.DataFrame) -> pd.Series:
@@ -310,7 +305,7 @@ sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
 ]
 
 # -- figure --------------------------------------------------------------------
-fig = plt.figure(figsize=(14, 7), constrained_layout=True)
+fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
 gs = gridspec.GridSpec(2, 4, figure=fig, height_ratios=[1.0, 1.2])
 
 ax_row1: list = []
@@ -321,13 +316,12 @@ for i in range(4):
 ax_param = fig.add_subplot(gs[1, :2])
 ax_viol = fig.add_subplot(gs[1, 2:])
 
-_markers = ["o", "s", "^"]
+_markers = SAMPLE_MARKERS
 
 # Row 1: logistic regplot + midpoint/tangent overlays
 obs_by_source = {"Human": obs_human}
 obs_by_source.update(obs_models)
 conflict_bins = np.linspace(0, 1.0, 5)
-line_span = 0.25
 
 for ax, (label, _) in zip(ax_row1, sources):
     color = PALETTE[label]
@@ -357,16 +351,17 @@ for ax, (label, _) in zip(ax_row1, sources):
         # Midpoint marker
         ax.scatter(midpoint, 0.5, color=color, marker=mkr, s=60, zorder=5)
         # Tangent at inflection
+        line_span = LINE_ARC / np.sqrt(1.0 + tangent ** 2)
         x_tan = np.linspace(midpoint - line_span, midpoint + line_span, 100)
         y_tan = tangent * (x_tan - midpoint) + 0.5
         ax.plot(
             x_tan,
             y_tan,
-            color=color,
-            linestyle=ls,
-            linewidth=1.0,
-            alpha=0.7,
-            zorder=4,
+            color="black",
+            linestyle="-",
+            linewidth=2.0,
+            alpha=0.9,
+            zorder=6,
         )
 
     ax.set_xlim(0.0, 1.0)

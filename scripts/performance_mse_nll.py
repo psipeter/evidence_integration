@@ -25,7 +25,7 @@ from statannotations.Annotator import Annotator
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
-from utils.plot_style import apply_style
+from utils.plot_style import apply_style, get_palette, FIGURE_SIZE
 
 # -- configuration (edit here) -------------------------------------------------
 RUN_FOLDER = sys.argv[1] if len(sys.argv) > 1 else "MSE"
@@ -48,15 +48,7 @@ TITLES = {
 
 # -- style ---------------------------------------------------------------------
 apply_style()
-palette = sns.color_palette("colorblind")
-PALETTE = {
-    "Bayes": palette[0],
-    "Mean": palette[0],
-    "RL": palette[1],
-    "NoisyCounting": palette[2],
-    "DeGroot": palette[2],
-    "ADM": palette[2],
-}
+PALETTE = get_palette()
 
 # -- load data -----------------------------------------------------------------
 run_dir = data_path("runs") / RUN_FOLDER
@@ -74,7 +66,7 @@ assert dfs, f"No performance files found in {run_dir}"
 perf = pd.concat(dfs, ignore_index=True)
 
 # -- plot ----------------------------------------------------------------------
-fig, axes = plt.subplots(1, 3, constrained_layout=True)
+fig, axes = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
 
 for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
     subset = perf[perf["dataset"] == dataset]
