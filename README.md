@@ -270,20 +270,20 @@ python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200]
 |---|---|---|---|
 | `integrator` | Recurrent line-attractor | ~0.67 | Requires radius=n_obs; drifts at high n |
 | `lmu_math` | LMU via Nengo Nodes (no neurons) | ~0.17 | Best current accuracy; no radius problem |
-| `lmu_neural` | LMU via spiking EnsembleArray | stub | To be implemented |
+| `lmu_neural` | LMU via spiking EnsembleArray | ~0.33 | Generalizes across scales: ~0.19 (n=5), ~0.19 (n=4) |
 
 **LMU parameters (tuned):**
 - `LMU_ORDER = 32` — number of Legendre polynomials
 - `LMU_THETA_MULT = 1.1` — theta = n_obs * T_STEP * 1.1
 - ZOH discretization via `nengo.utils.filter_design.cont2discrete`
-- Static least-squares readout weights solved offline from ideal dynamics
+- Pretraining readout uses `LMU_N_OBS_MAX = 30` and generalizes across tasks (carrabin n=5, jiang n<=6, yoo n=30)
 
 **Key findings:**
 - Integrator drifts at high n due to boundary effects at `radius=n_obs`
 - LMU avoids radius problem entirely; state stays bounded regardless of n_obs
 - LMU requires theta ≥ total trial duration to retain all pulse history
 - theta=1.1x trial duration and order=32 give best accuracy
-- Next step: replace `lmu_node` (Node) with spiking EnsembleArray in `lmu_neural`
+- `lmu_neural` pretraining on `LMU_N_OBS_MAX=30` generalizes well across task scales
 
 ### Planned Full Model Architecture
 

@@ -213,13 +213,13 @@ python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200]
 **Mechanisms:**
 - `integrator` — recurrent line-attractor; RMSE~0.67; drifts at high n due to radius boundary
 - `lmu_math` — LMU via nengo.Node (no neurons); RMSE~0.17; no radius problem
-- `lmu_neural` — LMU via spiking EnsembleArray (stub; currently identical to lmu_math)
+- `lmu_neural` — LMU via spiking EnsembleArray; RMSE~0.33 (n=30), ~0.19 (n=5), ~0.19 (n=4)
 
 **LMU implementation details:**
 - ZOH discretization via `nengo.utils.filter_design.cont2discrete`
 - `LMU_ORDER = 32`, `LMU_THETA_MULT = 1.1` (theta = n_obs * T_STEP * 1.1)
-- Static readout weights solved offline via least-squares on ideal LMU dynamics
-- `lmu_math`: lmu_node is nengo.Node (exact math); `lmu_neural`: will use EnsembleArray
+- Pretraining uses `LMU_N_OBS_MAX = 30`; readout generalizes across carrabin (n=5), jiang (n<=6), yoo (n=30)
+- `lmu_math`: lmu_node is nengo.Node (exact math); `lmu_neural`: spiking EnsembleArray with pretrained readout
 - Both mechanisms share `_compute_lmu_matrices()` helper
 - PROBE_DT = 0.010s for efficient probe sampling
 

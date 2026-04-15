@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import matplotlib.gridspec as gridspec
@@ -46,12 +47,15 @@ T_STEP = T_OBS + T_ITI  # total time per observation
 PROBE_DT = 0.010   # probe sample interval (s) — 10ms
 
 # integrator parameters
-TAU_FB = 0.200   # feedback synapse time constant (s)
+TAU_FB = 0.2   # feedback synapse time constant (s)
 RECUR_W = 1.0     # recurrent weight for line attractor
 
 # LMU parameters
-LMU_ORDER = 32     # number of Legendre polynomials
+LMU_ORDER = 24     # number of Legendre polynomials
 LMU_THETA_MULT = 1.1    # theta = n_obs * T_STEP * LMU_THETA_MULT
+LMU_TAU = 0.2   # synaptic filter time constant for LMU neural connections
+                # matches official Nengo-Loihi LMU example (Voelker et al.)
+LMU_N_OBS_MAX = 30  # pretraining uses this n_obs for generalization across tasks
 
 
 def make_pulse_input(n_obs: int, amplitude: float = 1.0) -> callable:
@@ -141,7 +145,12 @@ def build_integrator(n_obs: int, n_neurons: int, seed: int) -> nengo.Network:
     return net
 
 
-def _compute_lmu_matrices(n_obs: int) -> tuple:
+def _compute_lmu_matrices(
+    n_obs: int,
+    lmu_order: int = LMU_ORDER,
+    lmu_tau: float = LMU_TAU,
+    verbose: bool = True,
+) -> tuple:
     """
     Compute LMU A, B matrices and offline readout weights W.
     Returns (A, B, W_readout) where:
@@ -152,7 +161,7 @@ def _compute_lmu_matrices(n_obs: int) -> tuple:
     from nengo.utils.filter_design import cont2discrete as nengo_c2d
 
     theta = n_obs * T_STEP * LMU_THETA_MULT
-    order = LMU_ORDER
+    order = lmu_order
     dt_lmu = 0.001
 
     Q = np.arange(order, dtype=np.float64)
@@ -178,17 +187,99 @@ def _compute_lmu_matrices(n_obs: int) -> tuple:
         targets.append(true_count(t_k, n_obs))
     states = np.array(states)
     targets = np.array(targets)
-    W_readout, _, _, _ = np.linalg.lstsq(states, targets, rcond=None)
+    # Normalize targets by n_obs to keep readout weights small (~2 vs ~60).
+    targets_norm = np.array(targets) / n_obs
+    W_readout, _, _, _ = np.linalg.lstsq(states, targets_norm, rcond=None)
 
-    pred = states @ W_readout
-    rmse = float(np.sqrt(np.mean((pred - targets) ** 2)))
-    print(f"  Offline readout RMSE: {rmse:.4f}, "
-          f"max error: {np.abs(pred - targets).max():.4f}")
+    pred = states @ W_readout * n_obs
+    rmse = float(np.sqrt(np.mean((pred - np.array(targets)) ** 2)))
+    if verbose:
+        print(f"  Offline readout RMSE: {rmse:.4f}, "
+              f"max error: {np.abs(pred - np.array(targets)).max():.4f}")
 
-    return A, B, W_readout
+    # Solve readout weights from tau-filtered trajectory for lmu_neural.
+    # The synaptic filter smooths the ideal state; W_readout_filt matches
+    # what the spiking EnsembleArray actually represents.
+    m_filt = np.zeros(order)
+    states_filt = []
+    for k in range(n_steps):
+        m_filt = m_filt + (dt_lmu / lmu_tau) * (states[k] - m_filt)
+        states_filt.append(m_filt.copy())
+    states_filt = np.array(states_filt)
+    W_readout_filt, _, _, _ = np.linalg.lstsq(
+        states_filt, targets_norm, rcond=None
+    )
+
+    return A, B, W_readout, W_readout_filt, A_cont, B_cont, theta, states_filt
 
 
-def build_lmu_math(n_obs: int, n_neurons: int, seed: int) -> nengo.Network:
+def _pretrain_lmu_readout(
+    n_obs_max: int,
+    n_neurons: int,
+    seed: int,
+    A: np.ndarray,
+    B: np.ndarray,
+    radius: float,
+    lmu_order: int = LMU_ORDER,
+    lmu_tau: float = LMU_TAU,
+) -> np.ndarray:
+    """
+    Run a pretraining simulation to collect actual EnsembleArray activities
+    and solve readout weights W such that lmu_ea.output @ W ≈ n(t).
+
+    Always uses n_obs_max observations for pretraining. The resulting
+    W_pretrained generalizes to smaller n_obs at inference time, so a
+    single pretrained network can serve all tasks.
+
+    Uses the same seed as the main network build to ensure identical
+    neuron tuning curves. Returns W_pretrained shape (lmu_order,).
+    """
+    order = lmu_order
+    tau = lmu_tau
+    pulse_fn = make_pulse_input(n_obs_max, amplitude=1.0)
+    t_total = n_obs_max * T_STEP + T_ITI
+    dt = 0.001
+
+    with nengo.Network(label="lmu_pretrain", seed=seed) as pre_net:
+        pre_input = nengo.Node(pulse_fn, label="input")
+        pre_ea = nengo.networks.EnsembleArray(
+            n_neurons=n_neurons,
+            n_ensembles=order,
+            neuron_type=nengo.SpikingRectifiedLinear(),
+            radius=radius,
+            label="lmu_ea",
+            seed=seed,
+        )
+        nengo.Connection(pre_input, pre_ea.input,
+                         transform=B, synapse=tau)
+        nengo.Connection(pre_ea.output, pre_ea.input,
+                         transform=A, synapse=tau)
+        probe_output = nengo.Probe(pre_ea.output, synapse=tau,
+                                   sample_every=PROBE_DT)
+        probe_input = nengo.Probe(pre_input, synapse=None,
+                                  sample_every=PROBE_DT)
+
+    with nengo.Simulator(pre_net, dt=dt, seed=seed, progress_bar=False) as sim:
+        sim.run(t_total)
+
+    t = sim.trange(dt=PROBE_DT)
+    activities = sim.data[probe_output]   # (T, order)
+    targets = np.array([true_count(ti, n_obs_max) for ti in t])
+
+    # solve W: activities @ W ≈ targets
+    W_pretrained, _, _, _ = np.linalg.lstsq(activities, targets, rcond=None)
+    pretrain_pred = activities @ W_pretrained
+    pretrain_rmse = float(np.sqrt(np.mean((pretrain_pred - targets) ** 2)))
+    return W_pretrained
+
+
+def build_lmu_math(
+    n_obs: int,
+    n_neurons: int,
+    seed: int,
+    lmu_order: int = LMU_ORDER,
+    lmu_tau: float = LMU_TAU,
+) -> nengo.Network:
     """
     LMU counting circuit — pure math implementation (no neurons).
 
@@ -196,14 +287,19 @@ def build_lmu_math(n_obs: int, n_neurons: int, seed: int) -> nengo.Network:
     n_neurons is unused but kept for API consistency with other mechanisms.
     Use this to verify the LMU math before introducing neural noise.
     """
-    A, B, W_readout = _compute_lmu_matrices(n_obs)
+    A, B, W_readout, _, _, _, _, _ = _compute_lmu_matrices(
+        n_obs,
+        lmu_order=lmu_order,
+        lmu_tau=lmu_tau,
+        verbose=False,
+    )
     pulse_fn = make_pulse_input(n_obs, amplitude=1.0)
 
     with nengo.Network(label="lmu_math", seed=seed) as net:
         # input node
         net.input = nengo.Node(pulse_fn, label="input")
 
-        net.lmu_node = nengo.Node(size_in=LMU_ORDER, label="lmu_node")
+        net.lmu_node = nengo.Node(size_in=lmu_order, label="lmu_node")
         nengo.Connection(net.input,    net.lmu_node, transform=B,
                          synapse=None)
         nengo.Connection(net.lmu_node, net.lmu_node, transform=A,
@@ -213,8 +309,8 @@ def build_lmu_math(n_obs: int, n_neurons: int, seed: int) -> nengo.Network:
         nengo.Connection(
             net.lmu_node,
             net.readout,
-            transform=W_readout[np.newaxis, :],
-            synapse=TAU_FB,
+            transform=W_readout[np.newaxis, :] * n_obs,
+            synapse=lmu_tau,
         )
 
         # probes
@@ -228,16 +324,121 @@ def build_lmu_math(n_obs: int, n_neurons: int, seed: int) -> nengo.Network:
     return net
 
 
-def build_lmu_neural(n_obs: int, n_neurons: int, seed: int) -> nengo.Network:
+def build_lmu_neural(
+    n_obs: int,
+    n_neurons: int,
+    seed: int,
+    lmu_order: int = LMU_ORDER,
+    lmu_tau: float = LMU_TAU,
+) -> nengo.Network:
     """
-    LMU counting circuit — spiking neural implementation (stub).
+    LMU counting circuit — spiking neural implementation.
 
-    TODO: replace lmu_node with a spiking EnsembleArray to represent the
-    LMU state in neurons. Currently identical to build_lmu_math.
-    n_neurons will control the size of the EnsembleArray.
+    Uses Euler discretization at the Nengo simulation dt level (Voelker 2019):
+        Ā = dt * A_cont + I
+        B̄ = dt * B_cont
+    where A_cont, B_cont are the continuous-time matrices (pre-scaled by 1/θ).
+    Spike filtering uses LMU_TAU as the synaptic time constant.
+
+    Parameters
+    ----------
+    n_neurons : int
+        Neurons per sub-ensemble. Total = n_neurons * LMU_ORDER.
     """
-    # stub: identical to math implementation for now
-    return build_lmu_math(n_obs, n_neurons, seed)
+    A, B, W_readout, _, _, _, _, _ = _compute_lmu_matrices(
+        n_obs,
+        lmu_order=lmu_order,
+        lmu_tau=lmu_tau,
+        verbose=False,
+    )
+    pulse_fn = make_pulse_input(n_obs, amplitude=1.0)
+    order = lmu_order
+    # Use ZOH-discretized A and B directly as transforms.
+    # These are already stable (eigenvalues ~0.999).
+    # synapse=tau filters spikes — it does not alter the dynamics.
+    tau = lmu_tau
+    A_H = A     # ZOH discretized, shape (order, order)
+    B_H = B     # ZOH discretized, shape (order, 1)
+    radius = 2.0
+    # Pretrain on LMU_N_OBS_MAX observations — generalizes to all task scales.
+    # A, B, radius are computed from the actual n_obs for task-appropriate dynamics.
+    W_pretrained = _pretrain_lmu_readout(
+        n_obs_max=LMU_N_OBS_MAX,
+        n_neurons=n_neurons,
+        seed=seed,
+        A=A,
+        B=B,
+        radius=radius,
+        lmu_order=lmu_order,
+        lmu_tau=lmu_tau,
+    )
+
+    with nengo.Network(label="lmu_neural", seed=seed) as net:
+        net.input = nengo.Node(pulse_fn, label="input")
+
+        # spiking EnsembleArray matching official Nengo-Loihi example
+        net.lmu_ea = nengo.networks.EnsembleArray(
+            n_neurons=n_neurons,
+            n_ensembles=order,
+            neuron_type=nengo.SpikingRectifiedLinear(),
+            radius=radius,
+            label="lmu_ea",
+            seed=seed,
+        )
+
+        # input -> LMU
+        nengo.Connection(
+            net.input,
+            net.lmu_ea.input,
+            transform=B_H,
+            synapse=tau,
+        )
+
+        # recurrent
+        nengo.Connection(
+            net.lmu_ea.output,
+            net.lmu_ea.input,
+            transform=A_H,
+            synapse=tau,
+        )
+
+        # lmu_ea.output is a passthrough Node — cannot use function= on it.
+        # Pass state through a Direct Ensemble first, then decode from that.
+        net.state_ens = nengo.Ensemble(
+            n_neurons=1,
+            dimensions=order,
+            neuron_type=nengo.Direct(),
+            label="state_ens",
+        )
+        nengo.Connection(
+            net.lmu_ea.output,
+            net.state_ens,
+            synapse=tau,
+        )
+
+        net.readout = nengo.Ensemble(
+            n_neurons=1,
+            dimensions=1,
+            neuron_type=nengo.Direct(),
+            label="readout",
+        )
+        nengo.Connection(
+            net.state_ens,
+            net.readout,
+            function=lambda x, W=W_pretrained: np.dot(W, x),
+            synapse=tau,
+            solver=nengo.solvers.LstsqL2(reg=1e-3),
+            transform=1.0,
+        )
+
+        net.probe_input  = nengo.Probe(net.input,   synapse=None,
+                                      sample_every=PROBE_DT,
+                                      label="probe_input")
+        net.probe_memory = nengo.Probe(net.readout, synapse=0.01,
+                                       sample_every=PROBE_DT,
+                                       label="probe_memory")
+
+    return net
 
 
 # -- simulation & analysis -----------------------------------------------------
@@ -249,15 +450,21 @@ def run_and_analyse(
     n_neurons: int,
     seed: int,
     n_seeds: int,
+    lmu_order: int = LMU_ORDER,
+    lmu_tau: float = LMU_TAU,
 ) -> None:
     apply_style()
 
     if mechanism == "integrator":
         net = build_integrator(n_obs, n_neurons, seed)
     elif mechanism == "lmu_math":
-        net = build_lmu_math(n_obs, n_neurons, seed)
+        net = build_lmu_math(
+            n_obs, n_neurons, seed, lmu_order=lmu_order, lmu_tau=lmu_tau
+        )
     elif mechanism == "lmu_neural":
-        net = build_lmu_neural(n_obs, n_neurons, seed)
+        net = build_lmu_neural(
+            n_obs, n_neurons, seed, lmu_order=lmu_order, lmu_tau=lmu_tau
+        )
     else:
         raise ValueError(f"Unknown mechanism: {mechanism!r}")
 
@@ -265,14 +472,18 @@ def run_and_analyse(
     dt = 0.001
     all_decoded = []
 
+    t0 = time.time()
     for s in range(seed, seed + n_seeds):
-        print(f"  Running seed {s} / {seed + n_seeds - 1} ...")
         if mechanism == "integrator":
             net_s = build_integrator(n_obs, n_neurons, seed=s)
         elif mechanism == "lmu_math":
-            net_s = build_lmu_math(n_obs, n_neurons, seed=s)
+            net_s = build_lmu_math(
+                n_obs, n_neurons, seed=s, lmu_order=lmu_order, lmu_tau=lmu_tau
+            )
         elif mechanism == "lmu_neural":
-            net_s = build_lmu_neural(n_obs, n_neurons, seed=s)
+            net_s = build_lmu_neural(
+                n_obs, n_neurons, seed=s, lmu_order=lmu_order, lmu_tau=lmu_tau
+            )
         else:
             raise ValueError(f"Unknown mechanism: {mechanism!r}")
         with nengo.Simulator(net_s, dt=dt, progress_bar=False) as sim:
@@ -284,6 +495,7 @@ def run_and_analyse(
     true = np.array([true_count(ti, n_obs) for ti in t])
 
     decoded_all = np.stack(all_decoded, axis=0)  # (n_seeds, T)
+    elapsed = time.time() - t0
     decoded_mean = decoded_all.mean(axis=0)
     decoded_std = decoded_all.std(axis=0)
 
@@ -294,9 +506,18 @@ def run_and_analyse(
     n_true_eval = true[eval_idx]
     n_decoded_eval = decoded_mean[eval_idx]
     rmse = float(np.sqrt(np.mean((n_decoded_eval - n_true_eval) ** 2)))
-    print(f"Mechanism : {mechanism}")
-    print(f"  n_obs={n_obs}, n_neurons={n_neurons}, seed={seed}")
-    print(f"  RMSE: {rmse:.4f}")
+    # compute per-seed RMSE for mean/std
+    per_seed_rmse = []
+    for dec in all_decoded:
+        r = float(np.sqrt(np.mean((dec[eval_idx] - n_true_eval) ** 2)))
+        per_seed_rmse.append(r)
+    rmse_mean = float(np.mean(per_seed_rmse))
+    rmse_std = float(np.std(per_seed_rmse))
+
+    print(f"Mechanism : {mechanism}  |  "
+          f"order={lmu_order}  tau={lmu_tau}  neurons={n_neurons}")
+    print(f"  RMSE: {rmse_mean:.3f} ± {rmse_std:.3f}  "
+          f"({n_seeds} seeds, {elapsed:.1f}s total, {elapsed/n_seeds:.1f}s/seed)")
 
     PALETTE = get_palette()
     nef_color = PALETTE["NEF"]
@@ -377,6 +598,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--n_seeds", type=int, default=5,
                    help="Number of random seeds to average over")
+    p.add_argument("--lmu_order", type=int, default=LMU_ORDER,
+                   help="Number of Legendre polynomials for LMU")
+    p.add_argument("--lmu_tau",   type=float, default=LMU_TAU,
+                   help="Synaptic time constant for LMU neural connections")
     return p.parse_args()
 
 
@@ -388,4 +613,6 @@ if __name__ == "__main__":
         n_neurons=args.n_neurons,
         seed=args.seed,
         n_seeds=args.n_seeds,
+        lmu_order=args.lmu_order,
+        lmu_tau=args.lmu_tau,
     )
