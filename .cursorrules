@@ -81,6 +81,7 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 | Response noise | `nu` | carrabin NoisyCounting |
 | Mean increment | `mu` | carrabin NoisyCounting |
 | Inverse temperature | `beta` | jiang (all models) |
+| Decay exponent | `lambda` | NEF synaptic model |
 
 ---
 
@@ -124,16 +125,26 @@ Rename folders manually to track experiments. Delete folders to clear data.
 
 ## Plotting Conventions
 
+All figure scripts import shared aesthetics from `utils/plot_style.py`:
+
 ```python
-from utils.plot_style import apply_style
-apply_style()
-palette = sns.color_palette("colorblind")
-PALETTE = {
-    'Bayes': palette[0], 'Mean': palette[0],      # optimal
-    'RL': palette[1],                              # naive
-    'NoisyCounting': palette[2], 'DeGroot': palette[2], 'ADM': palette[2],  # human-matching
+from utils.plot_style import apply_style, get_palette, FIGURE_SIZE, SAMPLE_MARKERS
+from utils.plot_style import annotate_violins
+```
+
+`get_palette()` returns:
+```python
+{
+    "Human": "0.3",
+    "Bayes": palette[0], "Mean": palette[0],       # optimal
+    "RL": palette[1],                               # naive
+    "NoisyCounting": palette[2], "DeGroot": palette[2], "ADM": palette[2],  # human-matching
+    "NEF": palette[3],                              # NEF models
 }
 ```
+
+`annotate_violins(ax, data, x_col, y_col, order)` runs paired Wilcoxon
+tests and draws manual significance brackets — use instead of statannotations.
 
 Save figures as both PNG (300 dpi) and PDF to `figures/`.
 
@@ -145,25 +156,15 @@ All finalized figures are standalone Python scripts in `scripts/`:
 - `scripts/model_performance.py` — model performance under MSE/NLL
 - `scripts/response_variability_carrabin.py` — intertrial variability, carrabin
 - `scripts/switch_probability_jiang.py` — switch probability vs conflict, jiang
+- `scripts/response_change_yoo.py` — power-law decay of update magnitude, yoo
 
 Run with `python scripts/{script}.py`. Scripts save PNG (300 dpi) and
-PDF to `figures/`. Configuration variables (run folders, sample pids,
-etc.) live at the top of each script — edit there, not in the plotting
-logic.
+PDF to `figures/`. Configuration variables live at the top of each script.
 
 ### Conventions for all figure scripts
 - No `plt.show()` — save to file and inspect via file browser
-- Suppress `statannotations` stdout around `annotator.apply_and_annotate()`
-  calls using `os.devnull`:
-
-```python
-import os, sys
-with open(os.devnull, "w") as devnull:
-    old_stdout = sys.stdout
-    sys.stdout = devnull
-    annotator.apply_and_annotate()
-    sys.stdout = old_stdout
-```
+- Use `annotate_violins()` from `utils/plot_style` for significance brackets
+- No Jupyter notebooks — all figures are standalone scripts
 
 ---
 
@@ -174,6 +175,7 @@ Key run folders under `data/runs/` (not tracked by git):
 - `MSE` — all math models, default losses (mse/nll), 500 trials
 - `wasserstein` — carrabin Bayes/RL/NoisyCounting, wasserstein loss,
   500 trials, NoisyCounting n_runs=50
+- `switch_probability` — jiang models with beta-sampled binary responses
 
 Each folder contains `run_config.json` with full hyperparameter record.
 
@@ -182,44 +184,67 @@ Each folder contains `run_config.json` with full hyperparameter record.
 ## Current Model Status
 
 **Math models — complete:**
-- carrabin: Bayes (optimal), NoisyCounting (human-matching, n_runs=50),
-  RL (naive)
-- jiang: Bayes (optimal, soft probabilistic), DeGroot (human-matching),
-  RL (naive)
+- carrabin: Bayes (optimal), NoisyCounting (human-matching, n_runs=50), RL (naive)
+- jiang: Bayes (optimal, soft probabilistic), DeGroot (human-matching), RL (naive)
 - yoo: Mean (optimal), ADM (human-matching, nu fixed=0.01), RL (naive)
 
-**NEF models — not yet ported:**
-- `models/synaptic.py` (stub)
-- `models/recurrent.py` (stub)
+**NEF models — in development:**
+- `models/counting.py` — standalone counting circuit testbed (complete)
+- `models/synaptic.py` — full synaptic NEF model (stub)
+- `models/recurrent.py` — recurrent NEF model (stub)
 
 **Known model details:**
 - NoisyCounting: sigma_c and nu upper bounds widened to 2.0
 - ADM: nu fixed at 0.01 per Yoo et al.; only phi and rho are fitted
-- Jiang Bayes: soft probabilistic via `_bayes_p_blue()` and
-  `_bayes_posterior()`; signal accuracy = 5/7; network adjacency from
-  `data/jiang_networks.npy` (1-indexed, subtract 1 for array access)
+- Jiang Bayes: soft probabilistic; signal accuracy = 5/7
+- Jiang models: continuous expectations saved in response files; beta
+  sampling applied post-hoc via `apply_beta_sampling()` in switch_probability_jiang.py
 
 ---
 
-## Experiment 2 Analysis Plan
+## NEF Counting Circuit (`models/counting.py`)
 
-- **Carrabin:** Wasserstein distance between response distributions
-  (already fitted); shows NoisyCounting captures intertrial variability
-- **Jiang:** Post-hoc switch probability vs conflict curves; logistic
-  fit for steepness and threshold; fitted with NLL
-- **Yoo:** Post-hoc linear regression slope of |Δresponse| vs
-  observation index; weighted by R² when comparing models to humans
+Standalone testbed for counting mechanisms. CLI:
 
+```bash
+python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200] [--seed 0] [--n_seeds 5]
+```
 
+**Mechanisms:**
+- `integrator` — recurrent line-attractor; RMSE~0.67; drifts at high n due to radius boundary
+- `lmu_math` — LMU via nengo.Node (no neurons); RMSE~0.17; no radius problem
+- `lmu_neural` — LMU via spiking EnsembleArray (stub; currently identical to lmu_math)
 
-Implemented in `_bayes_p_blue()` and `_bayes_posterior()` in `models/math_models.py`:
+**LMU implementation details:**
+- ZOH discretization via `nengo.utils.filter_design.cont2discrete`
+- `LMU_ORDER = 32`, `LMU_THETA_MULT = 1.1` (theta = n_obs * T_STEP * 1.1)
+- Static readout weights solved offline via least-squares on ideal LMU dynamics
+- `lmu_math`: lmu_node is nengo.Node (exact math); `lmu_neural`: will use EnsembleArray
+- Both mechanisms share `_compute_lmu_matrices()` helper
+- PROBE_DT = 0.010s for efficient probe sampling
 
-- Marginalizes over all 128 signal vectors d = (d_1,...,d_7)
-- Uses soft probabilistic likelihoods via `_bayes_p_blue(agent, stage, d, adj)`
-- At stage 0: P(blue) = 5/7 if d[agent]==1 else 2/7 (`_SIGNAL_ACCURACY = 5/7`)
-- At stage s>0: recursive Bayesian update on neighbors' stage s-1 beliefs
-- Focal agent updates only on directly observed neighbor actions
-- Network loaded from `data/jiang_networks.npy`
+**Timing constants:**
+- `T_OBS = 0.5s` — observation pulse duration
+- `T_ITI = 0.5s` — inter-stimulus interval
+- `TAU_FB = 0.2s` — feedback synapse time constant (integrator)
+
+---
+
+## NEF Full Model Plan (`models/synaptic.py`)
+
+Planned architecture for the synaptic NEF model:
+
+1. **Observation population** — represents o(t)
+2. **Delta circuit** — detects new observations, outputs pulse to counting circuit
+3. **Counting circuit** — tracks n(t) (best mechanism from counting.py testbed)
+4. **Weight population** — computes α(n, λ) from n(t) via learned PES weights
+5. **Error population** — computes e(t) = α(n) * (o(t) - v(t))
+6. **Context population** — constant input providing stable basis for learning
+7. **Value population** — represents current estimate v(t)
+8. **Estimate synapses** — learnable context→value connections (PES rule)
+
+Free parameters: λ (decay exponent), plus task-specific noise parameters.
+Will expose same `run(params)` interface as math models.
 
 ---
 
@@ -263,5 +288,4 @@ When porting from `~/observational-learning-social-networks/`:
 - Install dependencies without updating `requirements.txt`
 - Push to git
 - Create nested `evidence_integration/evidence_integration/` folders
-- Create Jupyter notebooks. All figures must be standalone Python scripts
-  in `scripts/`.
+- Create Jupyter notebooks. All figures must be standalone Python scripts in `scripts/`
