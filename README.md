@@ -34,14 +34,14 @@ evidence_integration/
 │   ├── yoo.pkl               # human behavioral data (tracked)
 │   ├── jiang_networks.npy    # social network adjacency matrices (tracked)
 │   └── runs/                 # model fitting outputs (not tracked by git)
-│       └── Apr12_632pm/      # example run folder (rename manually)
-│           ├── run_config.json
-│           ├── RL_carrabin_1_params.pkl
-│           └── ...
+│       ├── MSE/              # all math models, default losses, 500 trials
+│       ├── wasserstein/      # carrabin Bayes/RL/NoisyCounting, wasserstein loss
+│       └── switch_probability/ # jiang models with beta-sampled responses
 ├── models/
 │   ├── math_models.py        # all mathematical models
-│   ├── synaptic.py           # NEF synaptic model (TODO)
-│   └── recurrent.py          # NEF recurrent model (TODO)
+│   ├── counting.py           # NEF counting circuit testbed (integrator, LMU)
+│   ├── synaptic.py           # NEF synaptic model (stub)
+│   └── recurrent.py          # NEF recurrent model (stub)
 ├── fitting/
 │   ├── losses.py             # MSE, NLL, Wasserstein loss functions
 │   ├── fit.py                # Optuna fitting with k-fold CV
@@ -51,7 +51,8 @@ evidence_integration/
 ├── scripts/
 │   ├── model_performance.py
 │   ├── response_variability_carrabin.py
-│   └── switch_probability_jiang.py
+│   ├── switch_probability_jiang.py
+│   └── response_change_yoo.py
 ├── utils/
 │   ├── paths.py              # central path config
 │   ├── plot_style.py         # shared matplotlib/seaborn style
@@ -159,10 +160,19 @@ folder: `rm -rf data/runs/Apr12_632pm`.
 
 ## Plotting Conventions
 
-Colors are assigned by model role using the `colorblind` palette:
+Colors are assigned by model role using the `colorblind` palette via
+`get_palette()` in `utils/plot_style.py`:
 - Optimal (Bayes, Mean): `palette[0]`
 - Naive (RL): `palette[1]`
 - Human-matching (NoisyCounting, DeGroot, ADM): `palette[2]`
+- NEF models: `palette[3]`
+
+All figure scripts import from `utils/plot_style.py`:
+
+```python
+from utils.plot_style import apply_style, get_palette, FIGURE_SIZE, SAMPLE_MARKERS
+from utils.plot_style import annotate_violins
+```
 
 Figures are saved as both PNG (300 dpi) and PDF to `figures/`.
 
@@ -200,20 +210,20 @@ All finalized figures are standalone Python scripts in `scripts/`:
 python scripts/model_performance.py [run_folder]   # default: MSE
 python scripts/response_variability_carrabin.py
 python scripts/switch_probability_jiang.py
+python scripts/response_change_yoo.py
 ```
 
 Scripts save both PNG (300 dpi) and PDF to `figures/`.
 
 ### Conventions for figure scripts
 - No `plt.show()` — save to file and inspect via file browser
-- Suppress `statannotations` stdout by redirecting to `os.devnull` around
-  `annotator.apply_and_annotate()` calls
+- Use `annotate_violins()` from `utils/plot_style` for violin plot significance brackets
 - Configuration variables (run folders, sample pids, etc.) live at the top
   of each script — edit there, not in the plotting logic
 
-### Editing sample participants (response_variability_carrabin.py)
-Run once to print the pid/std table, then set `SAMPLE_PIDS` at the top
-of the script and rerun:
+### Editing sample participants
+Run once with `SAMPLE_PIDS = None` to print the pid/parameter table, then
+set `SAMPLE_PIDS` at the top of the script and rerun. Example:
 
     SAMPLE_PIDS = {'narrow': 15, 'medium': 7, 'broad': 4}
 
@@ -226,10 +236,71 @@ Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
 | Folder | Contents |
 |---|---|
 | `MSE` | All math models, MSE/NLL loss, 500 trials |
-| `wasserstein` | Carrabin models (Bayes, RL, NoisyCounting), Wasserstein loss, 500 trials, n_runs=50 for NoisyCounting. Contains `{model_type}_carrabin_responses.pkl` and `{model_type}_carrabin_performance.pkl`. |
+| `wasserstein` | Carrabin models (Bayes, RL, NoisyCounting), Wasserstein loss, 500 trials, n_runs=50 for NoisyCounting |
+| `switch_probability` | Jiang models with beta-sampled binary responses for switch probability analysis |
 
 Rename run folders manually to reflect experiment type. Inspect
 `run_config.json` inside any folder to see exact hyperparameters used.
+
+---
+
+## NEF Model Development
+
+The NEF model implements the prediction-error update rule in spiking neurons
+using the Neural Engineering Framework (Nengo). Two architectures are planned:
+
+- `models/synaptic.py` — synaptic weight accumulation (primary, in development)
+- `models/recurrent.py` — recurrent line-attractor (secondary, stub)
+
+Both will expose the same `run(params)` interface as the math models.
+
+### Counting Circuit (`models/counting.py`)
+
+A standalone testbed for neural counting mechanisms, used to develop and
+compare methods for tracking observation count n(t) before integrating into
+the full model. Run with:
+
+```bash
+python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200] [--seed 0] [--n_seeds 5]
+```
+
+**Mechanisms:**
+
+| Mechanism | Description | RMSE (n=30) | Notes |
+|---|---|---|---|
+| `integrator` | Recurrent line-attractor | ~0.67 | Requires radius=n_obs; drifts at high n |
+| `lmu_math` | LMU via Nengo Nodes (no neurons) | ~0.17 | Best current accuracy; no radius problem |
+| `lmu_neural` | LMU via spiking EnsembleArray | stub | To be implemented |
+
+**LMU parameters (tuned):**
+- `LMU_ORDER = 32` — number of Legendre polynomials
+- `LMU_THETA_MULT = 1.1` — theta = n_obs * T_STEP * 1.1
+- ZOH discretization via `nengo.utils.filter_design.cont2discrete`
+- Static least-squares readout weights solved offline from ideal dynamics
+
+**Key findings:**
+- Integrator drifts at high n due to boundary effects at `radius=n_obs`
+- LMU avoids radius problem entirely; state stays bounded regardless of n_obs
+- LMU requires theta ≥ total trial duration to retain all pulse history
+- theta=1.1x trial duration and order=32 give best accuracy
+- Next step: replace `lmu_node` (Node) with spiking EnsembleArray in `lmu_neural`
+
+### Planned Full Model Architecture
+
+The full synaptic NEF model will consist of:
+
+1. **Observation population** — represents current observation o(t)
+2. **Delta/differentiator circuit** — detects new observations, outputs pulse
+3. **Counting circuit** — tracks n(t) using best mechanism from testbed
+4. **Weight population** — computes α(n, λ) from n(t)
+5. **Error population** — computes weighted prediction error e(t) = α(n) * (o(t) - v(t))
+6. **Context population** — provides stable basis for learning (constant input)
+7. **Value population** — represents current estimate v(t)
+8. **Estimate synapses** — learnable connections from context to value (PES rule)
+
+The model will be fitted to behavioral data by optimizing λ (decay exponent)
+and any noise parameters per participant, using the same Optuna/CV pipeline
+as the math models.
 
 ---
 
@@ -243,14 +314,17 @@ Rename run folders manually to reflect experiment type. Inspect
 - [x] Implement unified job management (`jobs/run.py`)
 - [x] Run population-level math model fits on cluster (folder: MSE)
 - [x] Run Wasserstein fits for carrabin (folder: wasserstein)
-- [x] Create performance figure (`scripts/model_performance.py`)
-- [x] Create variability figure (`scripts/response_variability_carrabin.py`)
-- [x] Fix ADM model: nu fixed at 0.01 per Yoo et al.
-- [x] Fix NoisyCounting: n_runs=50, widened sigma_c/nu bounds to 2.0
-- [ ] Port NEF models (`synaptic.py`, `recurrent.py`)
-- [ ] Implement switch loss for jiang (Experiment 2)
-- [ ] Implement decay loss for yoo (Experiment 2)
-- [ ] Post-hoc analysis: switch probability curves (jiang)
-- [ ] Post-hoc analysis: update magnitude decay (yoo)
+- [x] Create model performance figure (`scripts/model_performance.py`)
+- [x] Create response variability figure (`scripts/response_variability_carrabin.py`)
+- [x] Create switch probability figure (`scripts/switch_probability_jiang.py`)
+- [x] Create response change figure (`scripts/response_change_yoo.py`)
+- [x] Implement counting circuit testbed (`models/counting.py`)
+- [x] Implement and tune integrator counting mechanism
+- [x] Implement and tune LMU math counting mechanism (RMSE~0.17)
+- [ ] Implement LMU neural counting mechanism (`lmu_neural`)
+- [ ] Compare integrator vs LMU neural accuracy with multiple seeds
+- [ ] Implement full synaptic NEF model (`models/synaptic.py`)
+- [ ] Fit NEF model to behavioral data (carrabin, jiang, yoo)
+- [ ] Create NEF model performance figures
 - [ ] Design and implement new experiments
 - [ ] Final analysis and figure generation

@@ -67,6 +67,7 @@ def get_palette() -> dict:
         "NoisyCounting": palette[2],
         "DeGroot":       palette[2],
         "ADM":           palette[2],
+        "NEF":           palette[3],
     }
 
 
