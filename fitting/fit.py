@@ -62,6 +62,7 @@ import pandas as pd
 
 import fitting.losses as losses
 import models.math_models as math_models
+import models.recurrent as recurrent
 from fitting.param_ranges import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path
 
@@ -104,6 +105,8 @@ def _suggest_params(
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
+    if model_type == "NEF_recurrent":
+        params["seed"] = int(pid)
     if n_runs > 1:
         params["n_runs"] = n_runs
     if dataset not in MODEL_PARAMS:
@@ -162,7 +165,10 @@ def _cross_validate(
         if not holdout_trials:
             continue
 
-        model_fold = math_models.run(params, trials=holdout_trials)
+        if params["model_type"] == "NEF_recurrent":
+            model_fold = recurrent.run(params, trials=holdout_trials)
+        else:
+            model_fold = math_models.run(params, trials=holdout_trials)
         human_fold = human[human["trial"].isin(holdout_trials)]
 
         fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
@@ -228,6 +234,8 @@ def fit(
     run_folder = Path(run_folder)
     if loss_type is None:
         loss_type = DEFAULT_LOSS.get(dataset, "mse")
+    if model_type == "NEF_recurrent" and n_runs > 1:
+        raise ValueError("NEF_recurrent does not support n_runs > 1")
     start = time.time()
     human = pd.read_pickle(data_path(f"{dataset}.pkl"))
     human = human.query("pid == @pid")
@@ -268,6 +276,8 @@ def fit(
             "loss_type": loss_type,
         }
     )
+    if model_type == "NEF_recurrent":
+        best_params["seed"] = int(pid)
     best_folds = list(best_trial.user_attrs.get("cv_loss_folds", []))
 
     runtime = (time.time() - start) / 60.0

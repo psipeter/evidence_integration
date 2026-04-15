@@ -35,8 +35,13 @@ from pathlib import Path
 
 import pandas as pd
 
+# Allow running both as module (`python -m jobs.run`) and script path
+# (`python jobs/run.py`) by ensuring project root is on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from fitting.fit import DEFAULT_LOSS, fit
 from fitting.param_ranges import MODEL_PARAMS
+from models import recurrent
 from models.math_models import run as model_run
 from utils.paths import DATA_DIR, RUNS_DIR, data_path
 
@@ -49,6 +54,7 @@ TIME_LIMITS = {
     "ADM":           "2:0:0",
     "recurrent":     "48:0:0",
     "synaptic":      "48:0:0",
+    "NEF_recurrent": "48:0:0",
 }
 
 PROTECTED = frozenset(
@@ -229,7 +235,10 @@ def _rerun_single(
         print(f"Warning: params not found for {model_type} {dataset} pid={pid}")
         return
     params = pd.read_pickle(params_path).loc[0].to_dict()
-    df = model_run(params)
+    if model_type == "NEF_recurrent":
+        df = recurrent.run(params)
+    else:
+        df = model_run(params)
     out_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
     df.to_pickle(out_path)
 
