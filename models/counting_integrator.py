@@ -23,12 +23,14 @@ def make_pulse_input(params: dict) -> callable:
     t_obs = float(params["t_obs"])
     t_iti = float(params["t_iti"])
     t_step = t_obs + t_iti
+    rng = np.random.default_rng(int(params["seed"]))
+    signs = rng.choice([-1.0, 1.0], size=n_obs)
 
     def pulse(t: float) -> float:
         step = int(t / t_step)
         phase = t - step * t_step
         if step < n_obs and phase < t_obs:
-            return 1.0
+            return float(signs[step])
         return 0.0
 
     return pulse
@@ -40,7 +42,7 @@ def _ideal_stream(params: dict) -> callable:
 
     def fn(t: float, x: np.ndarray) -> np.ndarray:
         inp = float(x[0])
-        if state["last_in"] <= 0.0 and inp > 0.0:
+        if abs(state["last_in"]) < 1e-12 and abs(inp) > 1e-12:
             state["count"] += 1.0
         state["last_in"] = inp
         c = state["count"]
@@ -66,9 +68,58 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
         net.memory = nengo.Ensemble(
             n_neurons=n_neurons, dimensions=1, radius=n_obs, label="memory", seed=seed
         )
-        nengo.Connection(net.node_input, net.memory, transform=tau_fb, synapse=None, seed=seed)
+        # onset_detector: fires only on 0→±1 transitions
+        # positive-only encoders + intercepts ensure it only fires when
+        # fast-filtered |input| > slow-filtered |input| (i.e. rising edge)
+        net.onset_detector = nengo.Ensemble(
+            n_neurons=n_neurons,
+            dimensions=1,
+            encoders=nengo.dists.Choice([[1]]),
+            intercepts=nengo.dists.Uniform(0, 1),
+            seed=seed,
+            label="onset_detector",
+        )
+        net.onset_to_memory = nengo.Ensemble(
+            n_neurons=1,
+            dimensions=1,
+            label="onset_to_memory",
+            seed=seed,
+            neuron_type=nengo.Direct(),
+        )
+        nengo.Connection(
+            net.node_input,
+            net.onset_detector,
+            synapse=float(params["tau_fast"]),
+            function=lambda x: np.abs(x),
+            seed=seed,
+        )
+        nengo.Connection(
+            net.node_input,
+            net.onset_detector,
+            synapse=float(params["tau_slow"]),
+            function=lambda x: -np.abs(x),
+            seed=seed,
+        )
+        amp = float(params["onset_detector_amp"])
+        nengo.Connection(
+            net.onset_detector,
+            net.memory,
+            synapse=tau_fb,
+            function=lambda x, amp=amp: amp,
+            seed=seed,
+        )
+        nengo.Connection(
+            net.onset_detector,
+            net.onset_to_memory,
+            synapse=tau_fb,
+            function=lambda x, amp=amp: amp,
+            seed=seed,
+        )
         nengo.Connection(net.memory, net.memory, transform=1.0, synapse=tau_fb, seed=seed)
+        net.probe_onset_to_memory = nengo.Probe(net.onset_to_memory, synapse=None)
         net.probe_memory_raw = nengo.Probe(net.memory.neurons, synapse=None)
+        net.probe_onset_detector = nengo.Probe(net.onset_detector, synapse=tau_probe)
+        net.probe_memory_default_decoded = nengo.Probe(net.memory, synapse=tau_probe)
 
         if not train:
             if decoders is None:
@@ -111,12 +162,18 @@ def simulate_network(net: nengo.Network, params: dict, train: bool) -> dict:
         return {
             "ideal": sim.data[net.probe_ideal_raw],
             "memory": sim.data[net.probe_memory_raw],
+            "onset_to_memory": sim.data[net.probe_onset_to_memory].squeeze(),
+            "onset_detector": sim.data[net.probe_onset_detector].squeeze(),
+            "memory_default_decoded": sim.data[net.probe_memory_default_decoded].squeeze(),
         }
     return {
         "ideal_count": sim.data[net.probe_ideal_raw][:, 0],
         "ideal_weight": sim.data[net.probe_ideal_raw][:, 1],
         "count": sim.data[net.probe_count].squeeze(),
         "weight": sim.data[net.probe_weight].squeeze(),
+        "onset_to_memory": sim.data[net.probe_onset_to_memory].squeeze(),
+        "onset_detector": sim.data[net.probe_onset_detector].squeeze(),
+        "memory_default_decoded": sim.data[net.probe_memory_default_decoded].squeeze(),
     }
 
 
@@ -205,6 +262,46 @@ def analysis(all_test_outputs: list[dict], params: dict) -> None:
     plt.savefig(FIGURES_DIR / "counting_integrator.pdf")
     print("Saved figures/counting_integrator.{png,pdf}")
 
+    otm_all = np.stack([o["onset_to_memory"] for o in all_test_outputs], axis=0)
+    otm_mean = otm_all.mean(axis=0)
+    otm_std = otm_all.std(axis=0)
+    onset_all = np.stack([o["onset_detector"] for o in all_test_outputs], axis=0)
+    onset_mean = onset_all.mean(axis=0)
+    onset_std = onset_all.std(axis=0)
+    mem_dec_all = np.stack([o["memory_default_decoded"] for o in all_test_outputs], axis=0)
+    mem_dec_mean = mem_dec_all.mean(axis=0)
+    mem_dec_std = mem_dec_all.std(axis=0)
+    pulse_fn = make_pulse_input(params)
+    true_pulse = np.array([pulse_fn(float(ti)) for ti in t])
+
+    fig2, (ax0, ax1, ax2, ax3) = plt.subplots(
+        4, 1, figsize=(FIGURE_SIZE[0] * 1.35, FIGURE_SIZE[1] * 1.6), constrained_layout=True
+    )
+    ax0.plot(t, true_pulse, color="0.35", linewidth=0.8)
+    ax0.set_ylabel("pulse")
+    ax0.set_title("Stimulus (node_input)")
+    ax1.fill_between(t, otm_mean - otm_std, otm_mean + otm_std, color="0.55", alpha=0.25)
+    ax1.plot(t, otm_mean, color="0.35", linewidth=0.8, label="onset→memory")
+    ax1.set_ylabel("drive")
+    ax1.set_title("Onset → memory (probe)")
+    ax1.legend(frameon=False, fontsize=7)
+    ax2.fill_between(t, onset_mean - onset_std, onset_mean + onset_std, color=nef_color, alpha=0.25)
+    ax2.plot(t, onset_mean, color=nef_color, linewidth=0.8, label="onset (default decoded)")
+    ax2.set_ylabel("onset")
+    ax2.set_title("Onset detector (default decoded)")
+    ax2.legend(frameon=False, fontsize=7)
+    ax3.fill_between(t, mem_dec_mean - mem_dec_std, mem_dec_mean + mem_dec_std, color=nef_color, alpha=0.2)
+    ax3.plot(t, mem_dec_mean, color=nef_color, linewidth=0.8, label="memory (default decoded)")
+    ax3.plot(t, ideal_count, "--", color="0.5", linewidth=0.8, label="ideal count")
+    ax3.set_ylabel("count")
+    ax3.set_xlabel("time (s)")
+    ax3.set_title("Memory (default decoded)")
+    ax3.legend(frameon=False, fontsize=7)
+    plt.savefig(FIGURES_DIR / "counting_integrator_onset.png", dpi=300)
+    plt.savefig(FIGURES_DIR / "counting_integrator_onset.pdf")
+    plt.close(fig2)
+    print("Saved figures/counting_integrator_onset.{png,pdf}")
+
 
 def run(params: dict) -> None:
     all_outputs = []
@@ -224,11 +321,14 @@ def run(params: dict) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Integrator counting and weight decoding")
     p.add_argument("--n_obs", type=int, default=30)
-    p.add_argument("--n_neurons", type=int, default=200)
+    p.add_argument("--n_neurons", type=int, default=1000)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--n_seeds", type=int, default=5)
+    p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)
     p.add_argument("--tau_fb", type=float, default=0.2)
+    p.add_argument("--onset_detector_amp", type=float, default=0.3)
+    p.add_argument("--tau_fast", type=float, default=0.01)
+    p.add_argument("--tau_slow", type=float, default=0.2)
     p.add_argument("--tau_probe", type=float, default=0.1)
     p.add_argument("--dt", type=float, default=0.001)
     p.add_argument("--t_obs", type=float, default=1.0)
