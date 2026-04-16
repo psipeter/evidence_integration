@@ -81,18 +81,20 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
     with nengo.Network(label="counting_lmu", seed=seed) as net:
         net.node_input = nengo.Node(make_pulse_input(params), label="node_input")
         net.ideal = nengo.Node(_ideal_stream(params), size_in=1, size_out=2, label="ideal")
-        nengo.Connection(net.node_input, net.ideal, synapse=None)
+        nengo.Connection(net.node_input, net.ideal, synapse=None, seed=seed)
         net.probe_ideal_raw = nengo.Probe(net.ideal, synapse=None)
 
-        # Stream 2 — lmu_math
+        # Stream 2 — lmu_math (Legendre coefficients on Node)
         net.lmu_math_node = nengo.Node(size_in=lmu_order, label="lmu_math_node")
-        nengo.Connection(net.node_input, net.lmu_math_node, transform=b_disc, synapse=None)
-        nengo.Connection(net.lmu_math_node, net.lmu_math_node, transform=a_disc, synapse=0.0)
-        net.lmu_math_state = nengo.Ensemble(1, lmu_order, neuron_type=nengo.Direct(), label="lmu_math_state")
-        nengo.Connection(net.lmu_math_node, net.lmu_math_state, synapse=None)
-        net.probe_lmu_math_raw = nengo.Probe(net.lmu_math_state, synapse=None)
+        nengo.Connection(
+            net.node_input, net.lmu_math_node, transform=b_disc, synapse=None, seed=seed
+        )
+        nengo.Connection(
+            net.lmu_math_node, net.lmu_math_node, transform=a_disc, synapse=0.0, seed=seed
+        )
+        net.probe_lmu_math_raw = nengo.Probe(net.lmu_math_node, synapse=None)
 
-        # Stream 3 — lmu_neural
+        # Stream 3 — lmu_neural (coefficients decoded from spikes inside EnsembleArray)
         net.lmu_ea = nengo.networks.EnsembleArray(
             n_neurons=n_neurons,
             n_ensembles=lmu_order,
@@ -101,50 +103,60 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
             seed=seed,
             label="lmu_ea",
         )
-        nengo.Connection(net.node_input, net.lmu_ea.input, transform=b_disc, synapse=lmu_tau)
-        nengo.Connection(net.lmu_ea.output, net.lmu_ea.input, transform=a_disc, synapse=lmu_tau)
-        net.lmu_state = nengo.Ensemble(1, lmu_order, neuron_type=nengo.Direct(), label="lmu_state")
-        nengo.Connection(net.lmu_ea.output, net.lmu_state, synapse=lmu_tau)
-        net.probe_lmu_neural_raw = nengo.Probe(net.lmu_state, synapse=None)
+        nengo.Connection(
+            net.node_input, net.lmu_ea.input, transform=b_disc, synapse=lmu_tau, seed=seed
+        )
+        nengo.Connection(
+            net.lmu_ea.output, net.lmu_ea.input, transform=a_disc, synapse=lmu_tau, seed=seed
+        )
+        net.probe_lmu_neural_raw = nengo.Probe(net.lmu_ea.output, synapse=lmu_tau)
 
         if not train:
             if decoders is None:
                 raise ValueError("decoders required when train=False")
-            # math decoded outputs
-            net.lmu_math_count_out = nengo.Ensemble(1, 1, neuron_type=nengo.Direct(), label="lmu_math_count_out")
-            net.lmu_math_weight_out = nengo.Ensemble(1, 1, neuron_type=nengo.Direct(), label="lmu_math_weight_out")
+            net.lmu_math_count_out = nengo.Ensemble(
+                1, 1, neuron_type=nengo.Direct(), label="lmu_math_count_out", seed=seed
+            )
+            net.lmu_math_weight_out = nengo.Ensemble(
+                1, 1, neuron_type=nengo.Direct(), label="lmu_math_weight_out", seed=seed
+            )
             nengo.Connection(
-                net.lmu_math_state,
+                net.lmu_math_node,
                 net.lmu_math_count_out,
-                function=lambda x, W=decoders["W_count_math"]: float(np.dot(W, x)),
+                transform=decoders["W_count_math"],
                 synapse=tau_probe,
+                seed=seed,
             )
             nengo.Connection(
-                net.lmu_math_state,
+                net.lmu_math_node,
                 net.lmu_math_weight_out,
-                function=lambda x, W=decoders["W_weight_math"]: float(np.dot(W, x)),
+                transform=decoders["W_weight_math"],
                 synapse=tau_probe,
+                seed=seed,
             )
-            # neural decoded outputs
-            net.lmu_neural_count_out = nengo.Ensemble(1, 1, neuron_type=nengo.Direct(), label="lmu_neural_count_out")
-            net.lmu_neural_weight_out = nengo.Ensemble(1, 1, neuron_type=nengo.Direct(), label="lmu_neural_weight_out")
+            net.lmu_neural_count_out = nengo.Ensemble(
+                1, 1, neuron_type=nengo.Direct(), label="lmu_neural_count_out", seed=seed
+            )
+            net.lmu_neural_weight_out = nengo.Ensemble(
+                1, 1, neuron_type=nengo.Direct(), label="lmu_neural_weight_out", seed=seed
+            )
             nengo.Connection(
-                net.lmu_state,
+                net.lmu_ea.output,
                 net.lmu_neural_count_out,
-                function=lambda x, W=decoders["W_count_neural"]: float(np.dot(W, x)),
+                transform=decoders["W_count_neural"],
                 synapse=tau_probe,
             )
             nengo.Connection(
-                net.lmu_state,
+                net.lmu_ea.output,
                 net.lmu_neural_weight_out,
-                function=lambda x, W=decoders["W_weight_neural"]: float(np.dot(W, x)),
+                transform=decoders["W_weight_neural"],
                 synapse=tau_probe,
             )
 
-            net.probe_lmu_math_count = nengo.Probe(net.lmu_math_count_out, synapse=None)
-            net.probe_lmu_math_weight = nengo.Probe(net.lmu_math_weight_out, synapse=None)
-            net.probe_lmu_neural_count = nengo.Probe(net.lmu_neural_count_out, synapse=None)
-            net.probe_lmu_neural_weight = nengo.Probe(net.lmu_neural_weight_out, synapse=None)
+            net.probe_lmu_math_count = nengo.Probe(net.lmu_math_count_out, synapse=tau_probe)
+            net.probe_lmu_math_weight = nengo.Probe(net.lmu_math_weight_out, synapse=tau_probe)
+            net.probe_lmu_neural_count = nengo.Probe(net.lmu_neural_count_out, synapse=tau_probe)
+            net.probe_lmu_neural_weight = nengo.Probe(net.lmu_neural_weight_out, synapse=tau_probe)
 
     return net
 
@@ -176,23 +188,25 @@ def simulate_network(net: nengo.Network, params: dict, train: bool) -> dict:
 def decode_outputs(raw: dict, params: dict) -> dict:
     dt = float(params["dt"])
     tau_probe = float(params["tau_probe"])
-
     syn = nengo.Lowpass(tau_probe)
+
+    # 1D ideal columns need (T, 1) for Lowpass.filt (same pattern as counting_integrator)
     ideal_count_filt = syn.filt(raw["ideal"][:, 0:1], dt=dt).ravel()
     ideal_weight_filt = syn.filt(raw["ideal"][:, 1:2], dt=dt).ravel()
     lmu_math_filt = syn.filt(raw["lmu_math"], dt=dt)
     lmu_neural_filt = syn.filt(raw["lmu_neural"], dt=dt)
 
-    W_count_math, _, _, _ = np.linalg.lstsq(lmu_math_filt, ideal_count_filt, rcond=None)
-    W_weight_math, _, _, _ = np.linalg.lstsq(lmu_math_filt, ideal_weight_filt, rcond=None)
-    W_count_neural, _, _, _ = np.linalg.lstsq(lmu_neural_filt, ideal_count_filt, rcond=None)
-    W_weight_neural, _, _, _ = np.linalg.lstsq(lmu_neural_filt, ideal_weight_filt, rcond=None)
+    solver = nengo.solvers.LstsqL2(reg=1e-3)
+    W_count_math, _ = solver(lmu_math_filt, ideal_count_filt[:, np.newaxis])
+    W_weight_math, _ = solver(lmu_math_filt, ideal_weight_filt[:, np.newaxis])
+    W_count_neural, _ = solver(lmu_neural_filt, ideal_count_filt[:, np.newaxis])
+    W_weight_neural, _ = solver(lmu_neural_filt, ideal_weight_filt[:, np.newaxis])
 
     return {
-        "W_count_math": W_count_math,
-        "W_weight_math": W_weight_math,
-        "W_count_neural": W_count_neural,
-        "W_weight_neural": W_weight_neural,
+        "W_count_math": W_count_math.T,
+        "W_weight_math": W_weight_math.T,
+        "W_count_neural": W_count_neural.T,
+        "W_weight_neural": W_weight_neural.T,
     }
 
 
@@ -280,19 +294,15 @@ def analysis(all_test_outputs: list[dict], params: dict) -> None:
 
 
 def run(params: dict) -> None:
-    # Training pass
-    net_train = build_network(params, train=True)
-    raw = simulate_network(net_train, params, train=True)
-    decoders = decode_outputs(raw, params)
-
-    # Testing pass
     all_outputs = []
     for s in range(int(params["seed"]), int(params["seed"]) + int(params["n_seeds"])):
         p = {**params, "seed": s}
+        net_train = build_network(p, train=True)
+        raw = simulate_network(net_train, p, train=True)
+        decoders = decode_outputs(raw, p)
         net_test = build_network(p, train=False, decoders=decoders)
         outputs = simulate_network(net_test, p, train=False)
         all_outputs.append(outputs)
-
     analysis(all_outputs, params)
 
 
