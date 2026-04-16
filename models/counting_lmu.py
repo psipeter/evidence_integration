@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import nengo
 import numpy as np
 
@@ -23,12 +24,14 @@ def make_pulse_input(params: dict) -> callable:
     t_obs = float(params["t_obs"])
     t_iti = float(params["t_iti"])
     t_step = t_obs + t_iti
+    rng = np.random.default_rng(int(params["seed"]))
+    signs = rng.choice([-1.0, 1.0], size=n_obs)
 
     def pulse(t: float) -> float:
         step = int(t / t_step)
         phase = t - step * t_step
         if step < n_obs and phase < t_obs:
-            return 1.0
+            return float(signs[step])
         return 0.0
 
     return pulse
@@ -59,7 +62,7 @@ def _ideal_stream(params: dict) -> callable:
 
     def fn(t: float, x: np.ndarray) -> np.ndarray:
         inp = float(x[0])
-        if state["last_in"] <= 0.0 and inp > 0.0:
+        if abs(state["last_in"]) < 1e-12 and abs(inp) > 1e-12:
             state["count"] += 1.0
         state["last_in"] = inp
         c = state["count"]
@@ -77,6 +80,7 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
     tau_probe = float(params["tau_probe"])
     a_disc, b_disc = _compute_lmu_matrices(params)
     radius = 2.0
+    synapse_onset_to_diag = lmu_tau
 
     with nengo.Network(label="counting_lmu", seed=seed) as net:
         net.node_input = nengo.Node(make_pulse_input(params), label="node_input")
@@ -84,11 +88,39 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
         nengo.Connection(net.node_input, net.ideal, synapse=None, seed=seed)
         net.probe_ideal_raw = nengo.Probe(net.ideal, synapse=None)
 
+        # onset_detector: fires only on 0→±1 transitions (same pattern as counting_integrator)
+        net.onset_detector = nengo.Ensemble(
+            n_neurons=n_neurons,
+            dimensions=1,
+            encoders=nengo.dists.Choice([[1]]),
+            intercepts=nengo.dists.Uniform(0, 1),
+            seed=seed,
+            label="onset_detector",
+        )
+        net.onset_to_memory = nengo.Ensemble(
+            n_neurons=1,
+            dimensions=1,
+            label="onset_to_memory",
+            seed=seed,
+            neuron_type=nengo.Direct(),
+        )
+        nengo.Connection(
+            net.node_input,
+            net.onset_detector,
+            synapse=float(params["tau_fast"]),
+            function=lambda x: np.abs(x),
+            seed=seed,
+        )
+        nengo.Connection(
+            net.node_input,
+            net.onset_detector,
+            synapse=float(params["tau_slow"]),
+            function=lambda x: -np.abs(x),
+            seed=seed,
+        )
+
         # Stream 2 — lmu_math (Legendre coefficients on Node)
         net.lmu_math_node = nengo.Node(size_in=lmu_order, label="lmu_math_node")
-        nengo.Connection(
-            net.node_input, net.lmu_math_node, transform=b_disc, synapse=None, seed=seed
-        )
         nengo.Connection(
             net.lmu_math_node, net.lmu_math_node, transform=a_disc, synapse=0.0, seed=seed
         )
@@ -104,12 +136,43 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
             label="lmu_ea",
         )
         nengo.Connection(
-            net.node_input, net.lmu_ea.input, transform=b_disc, synapse=lmu_tau, seed=seed
-        )
-        nengo.Connection(
             net.lmu_ea.output, net.lmu_ea.input, transform=a_disc, synapse=lmu_tau, seed=seed
         )
         net.probe_lmu_neural_raw = nengo.Probe(net.lmu_ea.output, synapse=lmu_tau)
+
+        amp = float(params["onset_detector_amp"])
+        nengo.Connection(
+            net.onset_detector,
+            net.onset_to_memory,
+            synapse=synapse_onset_to_diag,
+            function=lambda x, amp=amp: amp,
+            seed=seed,
+        )
+        nengo.Connection(
+            net.onset_detector,
+            net.lmu_math_node,
+            transform=b_disc,
+            function=lambda x, amp=amp: amp,
+            synapse=None,
+            seed=seed,
+        )
+        nengo.Connection(
+            net.onset_detector,
+            net.lmu_ea.input,
+            transform=b_disc,
+            function=lambda x, amp=amp: amp,
+            synapse=lmu_tau,
+            seed=seed,
+        )
+
+        net.probe_onset_to_memory = nengo.Probe(net.onset_to_memory, synapse=None)
+        net.probe_onset_detector = nengo.Probe(net.onset_detector, synapse=tau_probe)
+        net.probe_lmu_math_default_decoded = nengo.Probe(
+            net.lmu_math_node, synapse=tau_probe
+        )
+        net.probe_lmu_neural_default_decoded = nengo.Probe(
+            net.lmu_ea.output, synapse=tau_probe
+        )
 
         if not train:
             if decoders is None:
@@ -174,6 +237,10 @@ def simulate_network(net: nengo.Network, params: dict, train: bool) -> dict:
             "ideal": sim.data[net.probe_ideal_raw],
             "lmu_math": sim.data[net.probe_lmu_math_raw],
             "lmu_neural": sim.data[net.probe_lmu_neural_raw],
+            "onset_to_memory": sim.data[net.probe_onset_to_memory].squeeze(),
+            "onset_detector": sim.data[net.probe_onset_detector].squeeze(),
+            "lmu_math_default_decoded": sim.data[net.probe_lmu_math_default_decoded].squeeze(),
+            "lmu_neural_default_decoded": sim.data[net.probe_lmu_neural_default_decoded].squeeze(),
         }
     return {
         "ideal_count": sim.data[net.probe_ideal_raw][:, 0],
@@ -182,6 +249,10 @@ def simulate_network(net: nengo.Network, params: dict, train: bool) -> dict:
         "lmu_math_weight": sim.data[net.probe_lmu_math_weight].squeeze(),
         "lmu_neural_count": sim.data[net.probe_lmu_neural_count].squeeze(),
         "lmu_neural_weight": sim.data[net.probe_lmu_neural_weight].squeeze(),
+        "onset_to_memory": sim.data[net.probe_onset_to_memory].squeeze(),
+        "onset_detector": sim.data[net.probe_onset_detector].squeeze(),
+        "lmu_math_default_decoded": sim.data[net.probe_lmu_math_default_decoded].squeeze(),
+        "lmu_neural_default_decoded": sim.data[net.probe_lmu_neural_default_decoded].squeeze(),
     }
 
 
@@ -292,6 +363,55 @@ def analysis(all_test_outputs: list[dict], params: dict) -> None:
     plt.savefig(FIGURES_DIR / "counting_lmu.pdf")
     print("Saved figures/counting_lmu.{png,pdf}")
 
+    otm_all = np.stack([o["onset_to_memory"] for o in all_test_outputs], axis=0)
+    otm_mean = otm_all.mean(axis=0)
+    otm_std = otm_all.std(axis=0)
+    onset_all = np.stack([o["onset_detector"] for o in all_test_outputs], axis=0)
+    onset_mean = onset_all.mean(axis=0)
+    onset_std = onset_all.std(axis=0)
+    math_dec_all = np.stack([o["lmu_math_default_decoded"] for o in all_test_outputs], axis=0)
+    neural_dec_all = np.stack([o["lmu_neural_default_decoded"] for o in all_test_outputs], axis=0)
+    math_dec_mean = math_dec_all.mean(axis=0)
+    neural_dec_mean = neural_dec_all.mean(axis=0)
+    pulse_fn = make_pulse_input(params)
+    true_pulse = np.array([pulse_fn(float(ti)) for ti in t])
+
+    fig2, (ax0, ax1, ax2, ax3) = plt.subplots(
+        4, 1, figsize=(FIGURE_SIZE[0] * 1.35, FIGURE_SIZE[1] * 1.6), constrained_layout=True
+    )
+    ax0.plot(t, true_pulse, color="0.35", linewidth=0.8)
+    ax0.set_ylabel("pulse")
+    ax0.set_title("Stimulus (node_input)")
+    ax1.fill_between(t, otm_mean - otm_std, otm_mean + otm_std, color="0.55", alpha=0.25)
+    ax1.plot(t, otm_mean, color="0.35", linewidth=0.8, label="onset→memory")
+    ax1.set_ylabel("drive")
+    ax1.set_title("Onset → memory (probe)")
+    ax1.legend(frameon=False, fontsize=7)
+    ax2.fill_between(t, onset_mean - onset_std, onset_mean + onset_std, color=nef_color, alpha=0.25)
+    ax2.plot(t, onset_mean, color=nef_color, linewidth=0.8, label="onset (default decoded)")
+    ax2.set_ylabel("onset")
+    ax2.set_title("Onset detector (default decoded)")
+    ax2.legend(frameon=False, fontsize=7)
+    for dim in range(math_dec_mean.shape[1]):
+        ax3.plot(t, math_dec_mean[:, dim], color=grey, linewidth=0.4, alpha=0.6)
+    for dim in range(neural_dec_mean.shape[1]):
+        ax3.plot(t, neural_dec_mean[:, dim], color=nef_color, linewidth=0.4, alpha=0.6)
+    ax3.legend(
+        handles=[
+            Line2D([0], [0], color=grey, linewidth=1.5, label="lmu_math"),
+            Line2D([0], [0], color=nef_color, linewidth=1.5, label="lmu_neural"),
+        ],
+        frameon=False,
+        fontsize=7,
+    )
+    ax3.set_ylabel("coefficient")
+    ax3.set_xlabel("time (s)")
+    ax3.set_title("LMU Legendre coefficients (all dims)")
+    plt.savefig(FIGURES_DIR / "counting_lmu_onset.png", dpi=300)
+    plt.savefig(FIGURES_DIR / "counting_lmu_onset.pdf")
+    plt.close(fig2)
+    print("Saved figures/counting_lmu_onset.{png,pdf}")
+
 
 def run(params: dict) -> None:
     all_outputs = []
@@ -311,12 +431,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n_obs", type=int, default=30)
     p.add_argument("--n_neurons", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--n_seeds", type=int, default=5)
+    p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)
     p.add_argument("--lmu_order", type=int, default=24)
     p.add_argument("--lmu_tau", type=float, default=0.2)
     p.add_argument("--lmu_n_obs_max", type=int, default=30)
     p.add_argument("--lmu_theta_mult", type=float, default=1.1)
+    p.add_argument("--onset_detector_amp", type=float, default=0.3)
+    p.add_argument("--tau_fast", type=float, default=0.01)
+    p.add_argument("--tau_slow", type=float, default=0.2)
     p.add_argument("--tau_probe", type=float, default=0.1)
     p.add_argument("--dt", type=float, default=0.001)
     p.add_argument("--t_obs", type=float, default=1.0)
