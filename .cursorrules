@@ -221,7 +221,7 @@ python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200]
 - Pretraining uses `LMU_N_OBS_MAX = 30`; readout generalizes across carrabin (n=5), jiang (n<=6), yoo (n=30)
 - `lmu_math`: lmu_node is nengo.Node (exact math); `lmu_neural`: spiking EnsembleArray with pretrained readout
 - Both mechanisms share `_compute_lmu_matrices()` helper
-- PROBE_DT = 0.010s for efficient probe sampling
+- Probes use default sampling (every simulator ``dt``)
 
 **Timing constants:**
 - `T_OBS = 0.5s` — observation pulse duration
