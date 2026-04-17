@@ -40,6 +40,7 @@ def make_pulse_input(params: dict) -> callable:
 
 def _ideal_stream(params: dict) -> callable:
     lambda_ = float(params["lambda_"])
+    alpha_0 = float(params["alpha_0"])
     state = {"last_in": 0.0, "count": 0.0}
 
     def fn(t: float, x: np.ndarray) -> np.ndarray:
@@ -48,7 +49,7 @@ def _ideal_stream(params: dict) -> callable:
             state["count"] += 1.0
         state["last_in"] = inp
         c = state["count"]
-        w = 1.0 / max(c, 1.0) ** lambda_
+        w = alpha_0 / max(c, 1.0) ** lambda_
         return np.array([c, w], dtype=np.float64)
 
     return fn
@@ -331,6 +332,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)
+    p.add_argument("--alpha_0", type=float, default=1.0)
     p.add_argument("--tau_fb", type=float, default=0.2)
     p.add_argument("--onset_detector_amp", type=float, default=0.3)
     p.add_argument("--tau_fast", type=float, default=0.01)

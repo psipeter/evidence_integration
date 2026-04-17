@@ -5,7 +5,7 @@ model fitting jobs.
 Usage::
 
     # Submit a new run
-    python -m jobs.run all [--n_trials N] [--n_runs N] [--loss_type L]
+    python -m jobs.run all [--n_trials N] [--n_runs N] [--k K] [--loss_type L]
     python -m jobs.run {dataset} {model_type} [--n_trials N] ...
     python -m jobs.run {dataset} {model_type} {pid} [--n_trials N] ...
 
@@ -16,7 +16,7 @@ Usage::
     python -m jobs.run --collect {run_folder}
 
     # Run locally without SLURM
-    python -m jobs.run all --local [--n_trials N] ...
+    python -m jobs.run all --local [--n_trials N] [--k K] ...
 
     # Dry run (print without executing)
     python -m jobs.run all --dry_run
@@ -115,11 +115,12 @@ def _resolve_jobs(
     pid: int | None,
     n_trials: int,
     n_runs: int,
+    k: int,
     loss_type: str | None,
 ) -> list[dict]:
     """
     Build the list of job dicts for a run.
-    Each dict has: dataset, model_type, pid, n_trials, n_runs, loss_type.
+    Each dict has: dataset, model_type, pid, n_trials, n_runs, k, loss_type.
     """
     jobs = []
     datasets = (
@@ -145,6 +146,7 @@ def _resolve_jobs(
                         "pid": p,
                         "n_trials": n_trials,
                         "n_runs": n_runs,
+                        "k": k,
                         "loss_type": lt,
                     }
                 )
@@ -158,13 +160,14 @@ def _submit_job(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     pid = job["pid"]
     n_trials = job["n_trials"]
     n_runs = job["n_runs"]
+    k = int(job.get("k", 5))
     lt = job["loss_type"]
     root = str(DATA_DIR.parent)
     time_limit = TIME_LIMITS.get(mt, "4:0:0")
 
     fit_cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
-        f"{lt} {n_runs} {run_folder}"
+        f"{lt} {n_runs} {k} {run_folder}"
     )
     rerun_cmd = f"python -m jobs.run --rerun {ds} {mt} {pid} {run_folder}"
 
@@ -207,6 +210,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     pid = job["pid"]
     n_trials = job["n_trials"]
     n_runs = job["n_runs"]
+    k = int(job.get("k", 5))
     lt = job["loss_type"]
 
     if dry_run:
@@ -219,6 +223,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         mt,
         pid,
         n_trials=n_trials,
+        k=k,
         loss_type=lt,
         n_runs=n_runs,
         run_folder=run_folder,
@@ -235,6 +240,10 @@ def _rerun_single(
         print(f"Warning: params not found for {model_type} {dataset} pid={pid}")
         return
     params = pd.read_pickle(params_path).loc[0].to_dict()
+    model_spec = MODEL_PARAMS.get(dataset, {}).get(model_type, {})
+    fixed = model_spec.get("fixed", {})
+    params = {**fixed, **params}
+    params["seed"] = abs(hash((int(params["pid"]), 0))) % (2**31)
     if model_type == "NEF_recurrent":
         df = recurrent.run(params)
     else:
@@ -339,6 +348,7 @@ def main() -> None:
     parser.add_argument("pid", nargs="?", type=int, default=None)
     parser.add_argument("--n_trials", type=int, default=200)
     parser.add_argument("--n_runs", type=int, default=1)
+    parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--loss_type", default=None)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
@@ -360,6 +370,7 @@ def main() -> None:
             args.pid,
             args.n_trials,
             args.n_runs,
+            args.k,
             args.loss_type,
         )
         run_folder = _make_run_folder()

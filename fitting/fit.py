@@ -32,11 +32,14 @@ Optional ``n_runs`` (default ``1``) is forwarded into model ``params`` when
 ``n_runs >= 20`` is a reasonable choice for cluster fits.
 
 Entry point:
-``python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs] [run_folder]``
+``python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs] [k] [run_folder]``
 
 Optional 4th token ``n_trials`` (default 100); optional 5th ``loss_type`` (omit
-for task-aware default); optional 6th ``n_runs`` (default 1); optional 7th
-``run_folder`` (omit for ``data/runs/default``).
+for task-aware default); optional 6th ``n_runs`` (default 1). With exactly eight
+tokens after the program name, the 8th is ``run_folder`` and ``k`` defaults to
+5. With nine or more, the 8th is ``k`` (CV folds) and the 9th is ``run_folder``.
+Omit trailing tokens for defaults (``run_folder`` defaults to
+``data/runs/default``).
 
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
@@ -105,8 +108,6 @@ def _suggest_params(
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
-    if model_type == "NEF_recurrent":
-        params["seed"] = int(pid)
     if n_runs > 1:
         params["n_runs"] = n_runs
     if dataset not in MODEL_PARAMS:
@@ -115,8 +116,20 @@ def _suggest_params(
         raise ValueError(
             f"Unsupported model_type {model_type!r} for dataset {dataset!r}"
         )
-    for param, (low, high, step) in MODEL_PARAMS[dataset][model_type].items():
-        params[param] = trial.suggest_float(param, low, high, step=step)
+    model_spec = MODEL_PARAMS[dataset][model_type]
+    fixed_params = model_spec.get("fixed", {})
+    if fixed_params:
+        params.update(fixed_params)
+
+    for param, spec in model_spec.items():
+        if param == "fixed":
+            continue
+        low, high, step = spec
+        # Keep integer-valued hyperparameters discrete in Optuna.
+        if float(step).is_integer() and float(low).is_integer() and float(high).is_integer():
+            params[param] = trial.suggest_int(param, int(low), int(high), step=int(step))
+        else:
+            params[param] = trial.suggest_float(param, low, high, step=step)
     return params
 
 
@@ -260,6 +273,7 @@ def fit(
         params = _suggest_params(
             trial, model_type, dataset, pid, loss_type, n_runs
         )
+        params["seed"] = abs(hash((int(params["pid"]), trial.number))) % (2**31)
         mean_loss, fold_losses = _cross_validate(params, human, k=k, loss_type=loss_type)
         trial.set_user_attr("cv_loss_folds", fold_losses)
         return mean_loss
@@ -276,8 +290,7 @@ def fit(
             "loss_type": loss_type,
         }
     )
-    if model_type == "NEF_recurrent":
-        best_params["seed"] = int(pid)
+    best_params["seed"] = abs(hash((int(pid), best_trial.number))) % (2**31)
     best_folds = list(best_trial.user_attrs.get("cv_loss_folds", []))
 
     runtime = (time.time() - start) / 60.0
@@ -426,7 +439,12 @@ if __name__ == "__main__":
     n_trials = int(sys.argv[4]) if len(sys.argv) > 4 else 100
     loss_type = sys.argv[5] if len(sys.argv) > 5 else None
     n_runs = int(sys.argv[6]) if len(sys.argv) > 6 else 1
-    run_folder = sys.argv[7] if len(sys.argv) > 7 else None
+    if len(sys.argv) >= 9:
+        k = int(sys.argv[7])
+        run_folder = sys.argv[8]
+    else:
+        k = 5
+        run_folder = sys.argv[7] if len(sys.argv) > 7 else None
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(
@@ -434,6 +452,7 @@ if __name__ == "__main__":
         model_type,
         pid,
         n_trials=n_trials,
+        k=k,
         loss_type=loss_type,
         n_runs=n_runs,
         run_folder=run_folder,

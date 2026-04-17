@@ -60,6 +60,7 @@ def _compute_lmu_matrices(params: dict) -> tuple[np.ndarray, np.ndarray]:
 
 def _ideal_stream(params: dict) -> callable:
     lambda_ = float(params["lambda_"])
+    alpha_0 = float(params["alpha_0"])
     state = {"last_in": 0.0, "count": 0.0}
 
     def fn(t: float, x: np.ndarray) -> np.ndarray:
@@ -68,7 +69,7 @@ def _ideal_stream(params: dict) -> callable:
             state["count"] += 1.0
         state["last_in"] = inp
         c = state["count"]
-        w = 1.0 / max(c, 1.0) ** lambda_
+        w = alpha_0 / max(c, 1.0) ** lambda_
         return np.array([c, w], dtype=np.float64)
 
     return fn
@@ -439,6 +440,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)
+    p.add_argument("--alpha_0", type=float, default=1.0)
     p.add_argument("--lmu_order", type=int, default=24)
     p.add_argument("--lmu_tau", type=float, default=0.2)
     p.add_argument("--lmu_n_obs_max", type=int, default=30)

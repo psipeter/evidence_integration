@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 
 import nengo
@@ -289,45 +288,38 @@ def run(
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
     first_trial = int(sorted(human_pid["trial"].unique())[0]) if len(human_pid) else 0
-
-    response_acc: dict[tuple[int, int], list[float]] = defaultdict(list)
+    decoders = _pretrain(pfull)
+    rows = []
     t0 = time.time()
 
-    for s in range(int(pfull["seed"]), int(pfull["seed"]) + int(pfull["n_seeds"])):
-        p = {**pfull, "seed": s}
-        decoders = _pretrain(p)
-        for trial, trial_data in human_pid.groupby("trial"):
-            trial_data = trial_data.sort_values("observation")
-            obs_values = trial_data["value"].to_numpy(dtype=float)
-            if save_probes and s == int(pfull["seed"]) and int(trial) == first_trial:
-                responses, probe_data = _simulate_trial(
-                    obs_values, p, decoders, return_probes=True
-                )
-                probe_data["params"] = {**dict(pfull), "seed": int(s)}
-                fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
-                pd.to_pickle(probe_data, data_path(fname))
-                print(f"  Saved probe data to data/{fname}")
-            else:
-                responses = _simulate_trial(obs_values, p, decoders)
-            for observation, response in zip(trial_data["observation"], responses):
-                response_acc[(int(trial), int(observation))].append(float(response))
-
-    rows = [
-        {
-            "model_type": pfull["model_type"],
-            "pid": pid,
-            "trial": key[0],
-            "observation": key[1],
-            "response": float(np.mean(vals)),
-        }
-        for key, vals in sorted(response_acc.items())
-    ]
+    for trial, trial_data in human_pid.groupby("trial"):
+        trial_data = trial_data.sort_values("observation")
+        obs_values = trial_data["value"].to_numpy(dtype=float)
+        if save_probes and int(trial) == first_trial:
+            responses, probe_data = _simulate_trial(
+                obs_values, pfull, decoders, return_probes=True
+            )
+            probe_data["params"] = dict(pfull)
+            fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
+            pd.to_pickle(probe_data, data_path(fname))
+            print(f"  Saved probe data to data/{fname}")
+        else:
+            responses = _simulate_trial(obs_values, pfull, decoders)
+        for observation, response in zip(trial_data["observation"], responses):
+            rows.append(
+                {
+                    "model_type": pfull["model_type"],
+                    "pid": pid,
+                    "trial": int(trial),
+                    "observation": int(observation),
+                    "response": float(response),
+                }
+            )
 
     elapsed = time.time() - t0
     n_trials = human_pid["trial"].nunique()
-    n_seeds_used = int(pfull["n_seeds"])
-    denom = max(n_trials * n_seeds_used, 1)
-    print(f"  {n_trials} trials × {n_seeds_used} seeds in {elapsed:.1f}s ({elapsed/denom:.2f}s/trial-seed)")
+    denom = max(n_trials, 1)
+    print(f"  {n_trials} trials in {elapsed:.1f}s ({elapsed/denom:.2f}s/trial)")
 
     out = pd.DataFrame(rows)
     if save:
