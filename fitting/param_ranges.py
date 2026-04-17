@@ -45,11 +45,16 @@ _NEF_RANGES_CARRABIN: dict[str, tuple] = {
     "n_neurons": (200.0, 200.0, 10.0),
 }
 
-# Jiang / yoo: wider lambda_, n_neurons range.
-_NEF_RANGES_JIANG_YOO: dict[str, tuple] = {
+# Jiang / yoo: wider lambda_, n_neurons range (no beta; jiang NEF overrides below).
+_NEF_RANGES: dict[str, tuple] = {
     "lambda_": (0.0, 2.0, 0.001),
     "alpha_0": (0.01, 5.0, 0.001),
-    "n_neurons": (50.0, 500.0, 1.0),
+    "n_neurons": (200.0, 200.0, 10.0),
+}
+
+_NEF_RANGES_JIANG: dict[str, tuple] = {
+    **_NEF_RANGES,
+    "beta": (0.01, 15.0, 0.01),
 }
 
 
@@ -86,7 +91,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "beta": (0.01, 15.0, 0.01),
             "alpha": (0.01, 1.5, 0.01),
         },
-        **_nef_models(_NEF_RANGES_JIANG_YOO),
+        **_nef_models(_NEF_RANGES_JIANG),
     },
     "yoo": {
         "Mean": {},
@@ -97,6 +102,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "phi": (0.001, 1.0, 0.001),
             "rho": (0.001, 1.0, 0.001),
         },
-        **_nef_models(_NEF_RANGES_JIANG_YOO),
+        **_nef_models(_NEF_RANGES),
     },
 }
