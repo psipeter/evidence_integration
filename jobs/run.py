@@ -52,9 +52,8 @@ TIME_LIMITS = {
     "DeGroot":       "1:0:0",
     "Mean":          "0:30:0",
     "ADM":           "2:0:0",
-    "recurrent":     "48:0:0",
-    "synaptic":      "48:0:0",
-    "NEF_recurrent": "48:0:0",
+    "NEF_synaptic":  "72:0:0",
+    "NEF_recurrent": "72:0:0",
 }
 
 PROTECTED = frozenset(

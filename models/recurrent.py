@@ -128,7 +128,7 @@ def build_network(
     else:
         _build_c = build_counting_integrator
 
-    with nengo.Network(label="recurrent", seed=seed) as net:
+    with nengo.Network(label="NEF_recurrent", seed=seed) as net:
         net.node_input = nengo.Node(
             _make_input(obs_values, params), size_out=2, label="node_input"
         )
