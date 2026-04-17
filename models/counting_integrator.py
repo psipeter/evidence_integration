@@ -58,6 +58,7 @@ def _ideal_stream(params: dict) -> callable:
 def build_network(params: dict, train: bool, decoders: dict | None = None) -> nengo.Network:
     n_obs = int(params["n_obs"])
     n_neurons = int(params["n_neurons"])
+    n_neurons_counting = int(params["n_neurons_counting"])
     seed = int(params["seed"])
     tau_fb = float(params["tau_fb"])
     tau_probe = float(params["tau_probe"])
@@ -69,7 +70,11 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
         net.probe_ideal_raw = nengo.Probe(net.ideal, synapse=None)
 
         net.memory = nengo.Ensemble(
-            n_neurons=n_neurons, dimensions=1, radius=n_obs, label="memory", seed=seed
+            n_neurons=n_neurons_counting,
+            dimensions=1,
+            radius=n_obs,
+            label="memory",
+            seed=seed,
         )
         # onset_detector: fires only on 0→±1 transitions
         # positive-only encoders + intercepts ensure it only fires when
@@ -328,7 +333,8 @@ def run(params: dict) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Integrator counting and weight decoding")
     p.add_argument("--n_obs", type=int, default=30)
-    p.add_argument("--n_neurons", type=int, default=1000)
+    p.add_argument("--n_neurons", type=int, default=200)
+    p.add_argument("--n_neurons_counting", type=int, default=1000)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)

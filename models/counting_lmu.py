@@ -78,6 +78,7 @@ def _ideal_stream(params: dict) -> callable:
 def build_network(params: dict, train: bool, decoders: dict | None = None) -> nengo.Network:
     seed = int(params["seed"])
     n_neurons = int(params["n_neurons"])
+    n_neurons_counting = int(params["n_neurons_counting"])
     lmu_order = int(params["lmu_order"])
     lmu_tau = float(params["lmu_tau"])
     tau_probe = float(params["tau_probe"])
@@ -131,7 +132,7 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
 
         # Stream 3 — lmu_neural (coefficients decoded from spikes inside EnsembleArray)
         net.lmu_ea = nengo.networks.EnsembleArray(
-            n_neurons=n_neurons,
+            n_neurons=n_neurons_counting,
             n_ensembles=lmu_order,
             neuron_type=nengo.SpikingRectifiedLinear(),
             radius=radius,
@@ -437,6 +438,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LMU counting and weight decoding")
     p.add_argument("--n_obs", type=int, default=30)
     p.add_argument("--n_neurons", type=int, default=200)
+    p.add_argument("--n_neurons_counting", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)

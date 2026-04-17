@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import logging
 from pathlib import Path
 
 import nengo
@@ -28,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+logging.getLogger("nengo.simulator").setLevel(logging.WARNING)
 
 from models.counting_lmu import (
     build_network as build_counting_lmu,
@@ -42,10 +44,11 @@ from models.counting_integrator import (
 from utils.paths import data_path
 
 PARAM_DEFAULTS: dict = {
-    "counting": "lmu",
+    "counting": "integrator",
     "n_seeds": 1,
     "n_obs": 30,
-    "n_neurons": 300,
+    "n_neurons": 200,
+    "n_neurons_counting": 1000,
     "lambda_": 0.5,
     "lmu_order": 24,
     "lmu_tau": 0.2,
@@ -130,6 +133,8 @@ def build_network(
             _make_input(obs_values, params), size_out=2, label="node_input"
         )
 
+        # Counting uses n_neurons_counting for memory / lmu_ea and n_neurons for
+        # onset_detector (error and value use this n_neurons only).
         c_params = {**params, "n_obs": params["lmu_n_obs_max"]}
         net.counting = _build_c(c_params, train=False, decoders=decoders)
 
@@ -336,6 +341,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n_seeds", type=int, default=PARAM_DEFAULTS["n_seeds"])
     p.add_argument("--n_obs", type=int, default=PARAM_DEFAULTS["n_obs"])
     p.add_argument("--n_neurons", type=int, default=PARAM_DEFAULTS["n_neurons"])
+    p.add_argument(
+        "--n_neurons_counting",
+        type=int,
+        default=PARAM_DEFAULTS["n_neurons_counting"],
+    )
     p.add_argument("--lambda_", type=float, default=PARAM_DEFAULTS["lambda_"])
     p.add_argument("--lmu_order", type=int, default=PARAM_DEFAULTS["lmu_order"])
     p.add_argument("--lmu_tau", type=float, default=PARAM_DEFAULTS["lmu_tau"])
