@@ -27,8 +27,10 @@ def make_pulse_input(params: dict) -> callable:
     signs = rng.choice([-1.0, 1.0], size=n_obs)
 
     def pulse(t: float) -> float:
-        step = int(t / t_step)
-        phase = t - step * t_step
+        if t < t_iti:
+            return 0.0
+        step = int((t - t_iti) / t_step)
+        phase = (t - t_iti) - step * t_step
         if step < n_obs and phase < t_obs:
             return float(signs[step])
         return 0.0
@@ -154,7 +156,7 @@ def simulate_network(net: nengo.Network, params: dict, train: bool) -> dict:
     dt = float(params["dt"])
     n_obs = int(params["n_obs"])
     t_step = float(params["t_obs"]) + float(params["t_iti"])
-    t_total = n_obs * t_step + float(params["t_iti"])
+    t_total = n_obs * t_step
     with nengo.Simulator(net, dt=dt, seed=int(params["seed"]), progress_bar=False) as sim:
         sim.run(t_total)
 
@@ -196,7 +198,11 @@ def _eval_idx(params: dict, t_len: int) -> np.ndarray:
     dt = float(params["dt"])
     n_obs = int(params["n_obs"])
     t_step = float(params["t_obs"]) + float(params["t_iti"])
-    t_mid = float(params["t_obs"]) + float(params["t_iti"]) / 2.0
+    t_mid = (
+        float(params["t_iti"])
+        + float(params["t_obs"])
+        + float(params["t_iti"]) / 2.0
+    )
     times = np.array([i * t_step + t_mid for i in range(n_obs)])
     idx = np.clip(np.rint(times / dt).astype(int), 0, t_len - 1)
     return idx

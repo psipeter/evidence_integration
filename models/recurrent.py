@@ -72,8 +72,10 @@ def _make_input(obs_values: np.ndarray, params: dict) -> callable:
     n_obs = len(obs_values)
 
     def fn(t: float) -> list[float]:
-        step = int(t / t_step)
-        phase = t - step * t_step
+        if t < t_iti:
+            return [0.0, 1.0]
+        step = int((t - t_iti) / t_step)
+        phase = (t - t_iti) - step * t_step
         if step < n_obs and phase < t_obs:
             return [float(obs_values[step]), 0.0]
         return [0.0, 1.0]
@@ -91,7 +93,7 @@ def _extract_responses(
     t_obs = params["t_obs"]
     t_iti = params["t_iti"]
     t_step = t_obs + t_iti
-    readout_times = np.array([i * t_step + t_obs for i in range(n_obs)])
+    readout_times = np.array([t_iti + i * t_step + t_obs for i in range(n_obs)])
     return np.array(
         [
             float(np.mean(value_decoded[np.abs(t_arr - rt) < params["probe_dt"] * 3]))
@@ -230,7 +232,7 @@ def _simulate_trial(
     If ``return_probes`` is True, return ``(responses, probe_data)`` instead.
     """
     n_obs = len(obs_values)
-    t_total = n_obs * (float(params["t_obs"]) + float(params["t_iti"])) + float(params["t_iti"])
+    t_total = n_obs * (float(params["t_obs"]) + float(params["t_iti"]))
 
     net = build_network(obs_values, params, decoders)
     with nengo.Simulator(
