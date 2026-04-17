@@ -190,8 +190,7 @@ Each folder contains `run_config.json` with full hyperparameter record.
 
 **NEF models — in development:**
 - `models/counting.py` — standalone counting circuit testbed (complete)
-- `models/synaptic.py` — full synaptic NEF model (stub)
-- `models/recurrent.py` — recurrent NEF model (stub)
+- `models/NEF.py` — NEF recurrent / synaptic evidence integration
 
 **Known model details:**
 - NoisyCounting: sigma_c and nu upper bounds widened to 2.0

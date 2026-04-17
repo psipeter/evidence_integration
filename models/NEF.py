@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NEF recurrent model of evidence integration.
+NEF model of evidence integration (recurrent or synaptic value dynamics).
 
 Architecture (per trial):
     counting subnetwork (LMU or integrator, pretrained decoders)
@@ -8,38 +8,43 @@ Architecture (per trial):
     node_input[0] → error[dim 1]   (observation o(t))
     node_input[1] → error.neurons  (ITI inhibition)
     value → error[dim 1]      (transform=-1, subtracts v)
-    error → value               (x[0] * x[1], synapse tau_fb)
-    value → value               (line attractor recurrent)
+
+``nef_type`` (from ``model_type``): ``recurrent`` uses multiplicative
+error→value and recurrent self-connection on ``value``; ``synaptic`` uses a
+``spikes`` population and PES learning onto ``value``.
 
 Usage:
-    from models.recurrent import run
+    from models.NEF import run
     responses = run(params)
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import time
-import logging
 from pathlib import Path
 
 import nengo
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+nengo.rc.set("decoder_cache", "enabled", "False")
+
 logging.getLogger("nengo.simulator").setLevel(logging.WARNING)
 
-from models.counting_lmu import (
-    build_network as build_counting_lmu,
-    decode_outputs as decode_counting_lmu,
-    simulate_network as simulate_counting_lmu,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from models.counting_integrator import (
     build_network as build_counting_integrator,
     decode_outputs as decode_counting_integrator,
     simulate_network as simulate_counting_integrator,
+)
+from models.counting_lmu import (
+    build_network as build_counting_lmu,
+    decode_outputs as decode_counting_lmu,
+    simulate_network as simulate_counting_lmu,
 )
 from utils.paths import data_path
 
@@ -63,6 +68,7 @@ PARAM_DEFAULTS: dict = {
     "radius_e": 1.0,
     "radius_v": 1.0,
     "alpha_0": 1,
+    "pes_learning_rate": 1e-4,
 }
 
 
@@ -122,13 +128,14 @@ def build_network(
     decoders: dict,
 ) -> nengo.Network:
     seed = int(params["seed"])
+    tau_fb = float(params["tau_fb"])
 
     if params["counting"] == "lmu":
         _build_c = build_counting_lmu
     else:
         _build_c = build_counting_integrator
 
-    with nengo.Network(label="NEF_recurrent", seed=seed) as net:
+    with nengo.Network(label=str(params["model_type"]), seed=seed) as net:
         net.node_input = nengo.Node(
             _make_input(obs_values, params), size_out=2, label="node_input"
         )
@@ -189,21 +196,51 @@ def build_network(
             seed=seed,
         )
 
-        nengo.Connection(
-            net.error,
-            net.value,
-            function=lambda x: x[0] * x[1],
-            transform=float(params["tau_fb"]),
-            synapse=float(params["tau_fb"]),
-            seed=seed,
-        )
+        if params["nef_type"] == "recurrent":
+            nengo.Connection(
+                net.error,
+                net.value,
+                function=lambda x: x[0] * x[1],
+                transform=tau_fb,
+                synapse=tau_fb,
+                seed=seed,
+            )
+            nengo.Connection(
+                net.value,
+                net.value,
+                synapse=tau_fb,
+                seed=seed,
+            )
 
-        nengo.Connection(
-            net.value,
-            net.value,
-            synapse=float(params["tau_fb"]),
-            seed=seed,
-        )
+        elif params["nef_type"] == "synaptic":
+            net.spikes = nengo.Ensemble(
+                n_neurons=int(params["n_neurons"]),
+                dimensions=1,
+                seed=seed,
+                label="spikes",
+            )
+            conn_value = nengo.Connection(
+                net.spikes,
+                net.value,
+                synapse=tau_fb,
+                learning_rule_type=nengo.PES(
+                    learning_rate=float(params["pes_learning_rate"])
+                ),
+                function=lambda x: 0.0,
+                seed=seed,
+            )
+            nengo.Connection(
+                net.error,
+                conn_value.learning_rule,
+                function=lambda x: x[0] * x[1],
+                transform=-1,
+                synapse=tau_fb,
+                seed=seed,
+            )
+        else:
+            raise ValueError(
+                f"nef_type must be 'recurrent' or 'synaptic', got {params['nef_type']!r}"
+            )
 
         net.probe_value = nengo.Probe(
             net.value,
@@ -267,8 +304,11 @@ def run(
     trials: list | None = None,
     save_probes: bool = False,
 ) -> pd.DataFrame:
-    """Run the recurrent NEF model for a single participant."""
+    """Run the NEF model for a single participant."""
     pfull = {**PARAM_DEFAULTS, **params}
+    pfull["nef_type"] = (
+        "synaptic" if "synaptic" in pfull["model_type"] else "recurrent"
+    )
 
     required = (
         "model_type",
@@ -333,7 +373,7 @@ def run(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="NEF recurrent evidence integration")
+    p = argparse.ArgumentParser(description="NEF evidence integration (recurrent / synaptic)")
     p.add_argument("--dataset", type=str, default="carrabin")
     p.add_argument("--pid", type=int, default=1)
     p.add_argument("--model_type", type=str, default="NEF_recurrent")
@@ -359,10 +399,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tau_probe", type=float, default=PARAM_DEFAULTS["tau_probe"])
     p.add_argument("--radius_e", type=float, default=PARAM_DEFAULTS["radius_e"])
     p.add_argument("--radius_v", type=float, default=PARAM_DEFAULTS["radius_v"])
+    p.add_argument("--pes_learning_rate", type=float, default=PARAM_DEFAULTS["pes_learning_rate"])
     p.add_argument("--probe_dt", type=float, default=0.01)
     p.add_argument("--dt", type=float, default=0.001)
-    p.add_argument("--t_obs", type=float, default=1.0)
-    p.add_argument("--t_iti", type=float, default=1.0)
+    p.add_argument("--t_obs", type=float, default=0.5)
+    p.add_argument("--t_iti", type=float, default=0.5)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--alpha_0", type=float, default=PARAM_DEFAULTS["alpha_0"])
     p.add_argument("--save_probes", action="store_true", default=False)

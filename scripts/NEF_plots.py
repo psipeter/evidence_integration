@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Plot population dynamics from a single recurrent.py probe run.
+Plot population dynamics from a single NEF.py probe run.
 
 Usage:
-    python scripts/recurrent_plots.py --dataset carrabin --pid 1 --model_type NEF_recurrent
+    python scripts/NEF_plots.py --dataset carrabin --pid 1 --model_type NEF_recurrent
 """
 
 from __future__ import annotations
@@ -77,18 +77,27 @@ def plot_dynamics(probe_data: dict) -> None:
     )
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    stem = f"recurrent_dynamics_{params['dataset']}_{params['pid']}"
+    stem = (
+        f"NEF_dynamics_{params['model_type']}_{params['dataset']}_{params['pid']}"
+    )
     plt.savefig(FIGURES_DIR / f"{stem}.png", dpi=300)
     plt.savefig(FIGURES_DIR / f"{stem}.pdf")
     print(f"Saved figures/{stem}.{{png,pdf}}")
 
 
 def main() -> None:
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description="Plot NEF probe dynamics")
     p.add_argument("--dataset", type=str, default="carrabin")
     p.add_argument("--pid", type=int, default=1)
-    p.add_argument("--model_type", type=str, default="NEF_recurrent")
+    p.add_argument(
+        "--model_type",
+        type=str,
+        default=None,
+        help="Required, e.g. NEF_recurrent or NEF_synaptic",
+    )
     args = p.parse_args()
+    if not args.model_type:
+        p.error("--model_type is required (e.g. NEF_recurrent, NEF_synaptic)")
 
     fname = f"probe_{args.model_type}_{args.dataset}_{args.pid}.pkl"
     probe_data = pd.read_pickle(data_path(fname))

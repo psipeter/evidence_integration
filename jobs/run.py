@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.fit import DEFAULT_LOSS, fit
 from fitting.param_ranges import MODEL_PARAMS
-from models import recurrent
+from models import NEF
 from models.math_models import run as model_run
 from utils.paths import DATA_DIR, RUNS_DIR, data_path
 
@@ -243,8 +243,8 @@ def _rerun_single(
     fixed = model_spec.get("fixed", {})
     params = {**fixed, **params}
     params["seed"] = abs(hash((int(params["pid"]), 0))) % (2**31)
-    if model_type == "NEF_recurrent":
-        df = recurrent.run(params)
+    if model_type in ("NEF_recurrent", "NEF_synaptic"):
+        df = NEF.run(params)
     else:
         df = model_run(params)
     out_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"

@@ -7,7 +7,7 @@ Ported from observational-learning-social-networks/uniform_encoders.py.
 Original code by Corrado Chisari and John Burkardt (GNU LGPL license);
 Nengo distribution classes added for use with NEF models.
 
-Used by: models/synaptic.py, models/recurrent.py
+Used by: models/NEF.py
 """
 
 import numpy as np
