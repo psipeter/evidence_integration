@@ -11,6 +11,7 @@ Default run_folder: MSE
 Edit configuration variables at the top of this file.
 """
 
+import argparse
 import sys
 import numpy as np
 import pandas as pd
@@ -25,12 +26,22 @@ from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import annotate_violins, apply_style, get_palette, FIGURE_SIZE
 
 # -- configuration (edit here) -------------------------------------------------
-RUN_FOLDER = sys.argv[1] if len(sys.argv) > 1 else "MSE"
+parser = argparse.ArgumentParser(description="Plot model performance across tasks.")
+parser.add_argument("run_folder", nargs="?", default="MSE")
+parser.add_argument(
+    "--nef_type",
+    default="NEF_recurrent",
+    choices=("NEF_recurrent", "NEF_synaptic"),
+)
+args = parser.parse_args()
+
+RUN_FOLDER = args.run_folder
+nef_type = args.nef_type
 
 MODEL_ORDER = {
-    "carrabin": ["Bayes", "RL", "NoisyCounting"],
+    "carrabin": ["Bayes", "RL", "NoisyCounting", "NEF"],
     "jiang": ["Bayes", "RL", "DeGroot"],
-    "yoo": ["Mean", "RL", "ADM"],
+    "yoo": ["Mean", "RL", "ADM", "NEF"],
 }
 YLABELS = {
     "carrabin": "Mean Squared Error",
@@ -53,7 +64,8 @@ run_dir = data_path("runs") / RUN_FOLDER
 dfs = []
 for dataset, models in MODEL_ORDER.items():
     for model_type in models:
-        f = run_dir / f"{model_type}_{dataset}_performance.pkl"
+        load_model_type = nef_type if model_type == "NEF" else model_type
+        f = run_dir / f"{load_model_type}_{dataset}_performance.pkl"
         if f.exists():
             dfs.append(pd.read_pickle(f))
         else:
@@ -61,6 +73,12 @@ for dataset, models in MODEL_ORDER.items():
 
 assert dfs, f"No performance files found in {run_dir}"
 perf = pd.concat(dfs, ignore_index=True)
+perf["model_type"] = perf["model_type"].replace(
+    {
+        "NEF_recurrent": "NEF",
+        "NEF_synaptic": "NEF",
+    }
+)
 
 # -- plot ----------------------------------------------------------------------
 fig, axes = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
@@ -94,18 +112,6 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
         cut=0,
         ax=ax,
     )
-    # np.random.seed(42)
-    # sns.stripplot(
-    #     data=subset,
-    #     x="model_type",
-    #     y="cv_loss_mean",
-    #     order=order,
-    #     color="0.2",
-    #     alpha=0.5,
-    #     jitter=0.2,
-    #     size=4,
-    #     ax=ax,
-    # )
     ax.set_ylabel(YLABELS[dataset])
     ax.set_xlabel("")
     sns.despine(ax=ax, top=True, right=True)

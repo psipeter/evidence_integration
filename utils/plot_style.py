@@ -68,6 +68,8 @@ def get_palette() -> dict:
         "DeGroot":       palette[2],
         "ADM":           palette[2],
         "NEF":           palette[3],
+        "NEF_recurrent": palette[3],
+        "NEF_synaptic":  palette[3],
     }
 
 
