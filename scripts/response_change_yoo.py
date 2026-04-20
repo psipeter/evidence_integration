@@ -2,7 +2,7 @@
 """
 Yoo task: mean absolute response change across observations and power-law decay.
 
-Row 1: Human and three models — mean |Δresponse| ± SE vs observation with
+Row 1: Human and four models — mean |Δresponse| ± SE vs observation with
 per-participant power-law fits for three sample participants (fast / medium /
 slow decay). Row 2: human (tau, y_int) KDE with sample markers; violin plot of
 Wasserstein distance between human and model mean curves per participant.
@@ -11,14 +11,16 @@ On first run (SAMPLE_PIDS = None), prints pid / tau / y_int for humans (sorted
 by tau), then exits. Set SAMPLE_PIDS and rerun.
 
 Usage:
-    python scripts/response_change_yoo.py
+    python scripts/response_change_yoo.py [run_folder] [--nef_type ...] [--nef_folder ...]
 
-Data: data/yoo.pkl and data/runs/MSE/{Mean,RL,ADM}_yoo_responses.pkl
+Data: data/yoo.pkl and data/runs/{run_folder}/{Mean,RL,ADM}_yoo_responses.pkl;
+NEF: data/runs/{nef_folder}/{NEF_*}_yoo_responses.pkl
 No CSV/pickle outputs (figures only).
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -28,6 +30,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy.stats import wasserstein_distance
+
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -41,23 +44,65 @@ from utils.plot_style import (
 )
 
 # -- configuration (edit here) -------------------------------------------------
-RUN_FOLDER = "MSE"
-
 # None: print human pid / tau / y_int table (sorted by tau) and exit.
 # Else: e.g. {"fast": 1, "medium": 2, "slow": 3}
-# SAMPLE_PIDS: dict[str, int] | None = None
 SAMPLE_PIDS: dict[str, int] | None = {"fast": 1, "medium": 25, "slow": 17}
 
-MODEL_ORDER = ["Mean", "RL", "ADM"]
 LINESTYLES = ["solid", "dashed", "dotted"]  # fast / medium / slow
 SAMPLE_LABELS = ["fast", "medium", "slow"]
 
 OBS_MIN = 2
 OBS_MAX = 30
 
+ROLLING_WINDOW = 3
+
+# -- CLI ----------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Yoo response change / decay figure")
+parser.add_argument(
+    "run_folder",
+    nargs="?",
+    default="MSE",
+    help="Run folder under data/runs/ for math model pickles",
+)
+parser.add_argument(
+    "--nef_type",
+    default="NEF_recurrent",
+    choices=("NEF_recurrent", "NEF_synaptic"),
+)
+parser.add_argument(
+    "--nef_folder",
+    default="MSE",
+    help="Run folder under data/runs/ for NEF yoo pickles",
+)
+args = parser.parse_args()
+
+RUN_FOLDER = args.run_folder
+nef_type = args.nef_type
+nef_dir = data_path("runs") / args.nef_folder
+
+MODEL_ORDER = ["Mean", "RL", "ADM", nef_type]
+
+display_labels = {mt: mt for mt in MODEL_ORDER}
+display_labels[nef_type] = "NEF"
+
+DISPLAY_ORDER = [display_labels[mt] for mt in MODEL_ORDER]
+
 # -- style ---------------------------------------------------------------------
 apply_style()
 PALETTE = get_palette()
+
+
+def _row1_title(label: str) -> str:
+    if label == "Human":
+        return "Human"
+    return display_labels.get(label, label)
+
+
+def _row1_color(label: str) -> str:
+    if label == "Human":
+        return PALETTE["Human"]
+    disp = display_labels.get(label, label)
+    return PALETTE[disp]
 
 
 def abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
@@ -82,6 +127,28 @@ def mean_curve_by_pid(delta_df: pd.DataFrame) -> dict[int, pd.Series]:
         s = g.loc[int(pid)].sort_index()
         out[int(pid)] = s
     return out
+
+
+def smooth_mean_curve(
+    means: dict[int, pd.Series], window: int
+) -> dict[int, pd.Series]:
+    """Apply centered rolling average of given window size to each pid's curve."""
+    return {
+        pid: ser.rolling(window, center=True, min_periods=1).mean()
+        for pid, ser in means.items()
+    }
+
+
+def smooth_delta_df(delta_df: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Apply rolling average per (pid, trial) to smooth delta values."""
+    if delta_df.empty:
+        return delta_df
+    pieces = []
+    for (pid, trial), grp in delta_df.groupby(["pid", "trial"], sort=False):
+        g = grp.sort_values("observation").copy()
+        g["delta"] = g["delta"].rolling(window, center=True, min_periods=1).mean()
+        pieces.append(g)
+    return pd.concat(pieces, ignore_index=True)
 
 
 def fit_power_law(mean_ser: pd.Series) -> tuple[float, float]:
@@ -117,14 +184,16 @@ def curve_vector(mean_ser: pd.Series) -> np.ndarray | None:
 def build_wasserstein_loss_long(
     human_means: dict[int, pd.Series],
     model_means: dict[str, dict[int, pd.Series]],
+    model_order: list[str],
 ) -> pd.DataFrame:
+    """Curves in ``human_means`` / ``model_means`` are already smoothed (``ROLLING_WINDOW``)."""
     rows: list[dict] = []
     pids = sorted(human_means.keys())
     for pid in pids:
         h_vec = curve_vector(human_means[pid])
         if h_vec is None:
             continue
-        for mt in MODEL_ORDER:
+        for mt in model_order:
             mser = model_means[mt].get(pid)
             if mser is None:
                 continue
@@ -139,16 +208,17 @@ def build_wasserstein_loss_long(
 # -- load human ----------------------------------------------------------------
 human = pd.read_pickle(data_path("yoo.pkl"))
 delta_human = abs_delta_long(human)
-human_means = mean_curve_by_pid(delta_human)
-
-params_human: dict[int, tuple[float, float]] = {}
-for pid, ser in human_means.items():
-    params_human[pid] = fit_power_law(ser)
 
 if SAMPLE_PIDS is None:
+    human_means_tbl = mean_curve_by_pid(delta_human)
+    if ROLLING_WINDOW > 1:
+        human_means_tbl = smooth_mean_curve(human_means_tbl, ROLLING_WINDOW)
+    params_human_tbl = {
+        pid: fit_power_law(ser) for pid, ser in human_means_tbl.items()
+    }
     rows = [
-        {"pid": pid, "tau": params_human[pid][0], "y_int": params_human[pid][1]}
-        for pid in sorted(params_human.keys())
+        {"pid": pid, "tau": params_human_tbl[pid][0], "y_int": params_human_tbl[pid][1]}
+        for pid in sorted(params_human_tbl.keys())
     ]
     tbl = pd.DataFrame(rows).sort_values("tau", na_position="last")
     print("pid / tau / y_int (human, sorted by tau):")
@@ -160,18 +230,35 @@ if SAMPLE_PIDS is None:
 run_dir = data_path("runs") / RUN_FOLDER
 models: dict[str, pd.DataFrame] = {}
 for mt in MODEL_ORDER:
-    f = run_dir / f"{mt}_yoo_responses.pkl"
+    if mt == nef_type:
+        f = nef_dir / f"{nef_type}_yoo_responses.pkl"
+    else:
+        f = run_dir / f"{mt}_yoo_responses.pkl"
     if not f.exists():
         raise FileNotFoundError(f"Missing model responses: {f}")
     models[mt] = pd.read_pickle(f)
 
 delta_by_source: dict[str, pd.DataFrame] = {"Human": delta_human}
+for mt in MODEL_ORDER:
+    delta_by_source[mt] = abs_delta_long(models[mt])
+
+if ROLLING_WINDOW > 1:
+    for key in delta_by_source:
+        delta_by_source[key] = smooth_delta_df(delta_by_source[key], ROLLING_WINDOW)
+
+human_means = mean_curve_by_pid(delta_by_source["Human"])
 model_means: dict[str, dict[int, pd.Series]] = {}
 for mt in MODEL_ORDER:
-    dmt = abs_delta_long(models[mt])
-    delta_by_source[mt] = dmt
-    model_means[mt] = mean_curve_by_pid(dmt)
+    model_means[mt] = mean_curve_by_pid(delta_by_source[mt])
 
+if ROLLING_WINDOW > 1:
+    human_means = smooth_mean_curve(human_means, ROLLING_WINDOW)
+    for mt in MODEL_ORDER:
+        model_means[mt] = smooth_mean_curve(model_means[mt], ROLLING_WINDOW)
+
+params_human: dict[int, tuple[float, float]] = {
+    pid: fit_power_law(ser) for pid, ser in human_means.items()
+}
 params_by_source: dict[str, dict[int, tuple[float, float]]] = {"Human": params_human}
 for mt in MODEL_ORDER:
     params_by_source[mt] = {
@@ -184,11 +271,12 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
     if pid not in params_human or not (np.isfinite(tau) and np.isfinite(y0)):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid power-law fit")
 
-loss_df = build_wasserstein_loss_long(human_means, model_means)
+loss_df = build_wasserstein_loss_long(human_means, model_means, MODEL_ORDER)
 _complete = loss_df.groupby("pid").filter(lambda g: len(g) == len(MODEL_ORDER))
 if _complete.empty:
     raise RuntimeError("No participants with valid Wasserstein loss for all models.")
 loss_plot = _complete.copy()
+loss_plot["model_type"] = loss_plot["model_type"].replace({nef_type: "NEF"})
 
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
@@ -196,10 +284,10 @@ sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
 
 # -- figure --------------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-gs = gridspec.GridSpec(2, 4, figure=fig, height_ratios=[1.0, 1.2])
+gs = gridspec.GridSpec(2, 5, figure=fig, height_ratios=[1.0, 1.2])
 
 ax_row1: list = []
-for i in range(4):
+for i in range(5):
     sharey = ax_row1[0] if i > 0 else None
     ax_row1.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
@@ -211,7 +299,7 @@ n_grid = np.arange(OBS_MIN, OBS_MAX + 1, dtype=float)
 
 # Row 1: mean |Δresponse| ± SE + power-law overlay
 for ax, (label, _) in zip(ax_row1, sources):
-    color = PALETTE[label]
+    color = _row1_color(label)
     delta_src = delta_by_source[label]
     param_src = params_by_source[label]
     for pid, ls, mkr in zip(sample_pids, LINESTYLES, _markers):
@@ -235,11 +323,10 @@ for ax, (label, _) in zip(ax_row1, sources):
         if np.isfinite(tau) and np.isfinite(y_int) and y_int > 0:
             y_fit = y_int * n_grid ** (-tau)
             ax.plot(n_grid, y_fit, color=color, linestyle=ls, linewidth=1.5, zorder=4)
-            ax.scatter(2.0, y_int * 2.0 ** (-tau), color=color, marker=mkr,
-                       s=60, zorder=5)
+            ax.scatter(2.0, y_int * 2.0 ** (-tau), color=color, marker=mkr, s=60, zorder=5)
 
     ax.set_xlim(0, float(OBS_MAX))
-    ax.set_title(label)
+    ax.set_title(_row1_title(label))
     ax.set_xlabel("Observation")
     ax.set_ylabel("Mean |Δresponse|" if label == "Human" else "")
     if label != "Human":
@@ -295,12 +382,12 @@ ax_param.set_title("Human power-law parameters")
 sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: Wasserstein violins
-plot_palette = {k: PALETTE[k] for k in MODEL_ORDER}
+plot_palette = {disp: PALETTE[disp] for disp in DISPLAY_ORDER}
 sns.violinplot(
     data=loss_plot,
     x="model_type",
     y="loss",
-    order=MODEL_ORDER,
+    order=DISPLAY_ORDER,
     hue="model_type",
     palette=plot_palette,
     inner=None,
@@ -308,24 +395,12 @@ sns.violinplot(
     cut=0,
     ax=ax_viol,
 )
-# np.random.seed(42)
-# sns.stripplot(
-#     data=loss_plot,
-#     x="model_type",
-#     y="loss",
-#     order=MODEL_ORDER,
-#     color="0.2",
-#     alpha=0.5,
-#     jitter=0.2,
-#     size=4,
-#     ax=ax_viol,
-# )
 ax_viol.set_title("Distance to human response change curve")
 ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-annotate_violins(ax_viol, loss_plot, "model_type", "loss", MODEL_ORDER)
+annotate_violins(ax_viol, loss_plot, "model_type", "loss", DISPLAY_ORDER)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)

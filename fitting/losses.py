@@ -8,8 +8,9 @@ Supports multiple objectives:
 - **Experiment 2:** ``nll`` — jiang only; negative log-likelihood with a sigmoid
   decision rule on model expectation (requires ``beta`` in ``params``). Task-specific
   losses: ``wasserstein`` (carrabin: Wasserstein distance between response
-  distributions), ``switch`` (jiang: switch probability vs. conflict), ``decay`` (yoo:
-  power-law decay of update magnitude).
+  distributions), ``mse_wasserstein`` (yoo: MSE on responses plus Wasserstein on
+  smoothed mean ``|Δresponse|`` curves), ``switch`` (jiang: switch probability vs.
+  conflict), ``decay`` (yoo: power-law decay of update magnitude).
 
 This module does not depend on the model implementation layer.
 """
@@ -18,6 +19,22 @@ import numpy as np
 import pandas as pd
 import scipy.special
 from scipy.stats import wasserstein_distance
+
+DELTA_SMOOTH_WINDOW = 3  # rolling window for smoothing delta curves in mse_wasserstein
+MSE_WASSERSTEIN_W = 0.5  # default weight on Wasserstein term
+
+
+def _smooth_curve(arr: np.ndarray, window: int) -> np.ndarray:
+    """Apply centered rolling average of given window size to 1D array."""
+    if window <= 1:
+        return arr
+    result = arr.astype(float).copy()
+    half = window // 2
+    for i in range(len(arr)):
+        lo = max(0, i - half)
+        hi = min(len(arr), i + half + 1)
+        result[i] = float(arr[lo:hi].mean())
+    return result
 
 
 def mse(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
@@ -166,6 +183,51 @@ def wasserstein_loss(
     return result
 
 
+def mse_wasserstein(
+    params: dict,
+    model: pd.DataFrame,
+    human: pd.DataFrame,
+) -> float:
+    """MSE on responses + Wasserstein on smoothed mean |delta response| curve (yoo)."""
+    dataset = params["dataset"]
+    if dataset != "yoo":
+        raise ValueError(
+            f"mse_wasserstein() is only implemented for yoo; got dataset={dataset!r}"
+        )
+
+    merged = model.merge(
+        human[["pid", "trial", "observation", "response"]],
+        on=["pid", "trial", "observation"],
+        suffixes=("_model", "_human"),
+    )
+    if merged.empty:
+        return float("inf")
+    mse_val = float(
+        np.mean((merged["response_model"] - merged["response_human"]) ** 2)
+    )
+
+    def mean_delta(df: pd.DataFrame) -> np.ndarray:
+        pieces = []
+        for (pid, trial), grp in df.groupby(["pid", "trial"], sort=False):
+            g = grp.sort_values("observation").copy()
+            g["delta"] = g["response"].diff().abs()
+            pieces.append(g)
+        delta = pd.concat(pieces, ignore_index=True)
+        curve = delta.groupby("observation")["delta"].mean()
+        curve = curve[curve.index >= 2].sort_index().to_numpy(dtype=float)
+        return _smooth_curve(curve, DELTA_SMOOTH_WINDOW)
+
+    h_curve = mean_delta(human)
+    m_curve = mean_delta(model)
+    if len(h_curve) == 0 or len(m_curve) == 0:
+        return mse_val
+    n = min(len(h_curve), len(m_curve))
+    wass_val = float(wasserstein_distance(h_curve[:n], m_curve[:n]))
+
+    w = float(params.get("wasserstein_w", MSE_WASSERSTEIN_W))
+    return (1.0 - w) * mse_val + w * wass_val
+
+
 def switch_loss(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
     # TODO: loss on switch probability as function of conflict (RD)
     # Used in Experiment 2 for jiang. Requires beta parameter.
@@ -187,6 +249,8 @@ def compute_loss(
         return nll(params, model, human)
     if loss_type == "wasserstein":
         return wasserstein_loss(params, model, human)
+    if loss_type == "mse_wasserstein":
+        return mse_wasserstein(params, model, human)
     if loss_type == "switch":
         return switch_loss(params, model, human)
     if loss_type == "decay":
