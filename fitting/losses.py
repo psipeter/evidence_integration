@@ -8,8 +8,9 @@ Supports multiple objectives:
 - **Experiment 2:** ``nll`` — jiang only; negative log-likelihood with a sigmoid
   decision rule on model expectation (requires ``beta`` in ``params``). Task-specific
   losses: ``wasserstein`` (carrabin: Wasserstein distance between response
-  distributions), ``mse_wasserstein`` (yoo: MSE on responses plus Wasserstein on
-  smoothed mean ``|Δresponse|`` curves), ``switch`` (jiang: switch probability vs.
+  distributions), ``mse_wasserstein`` (carrabin / yoo: MSE on responses plus
+  Wasserstein on response distribution or smoothed mean ``|Δresponse|`` curves),
+  ``switch`` (jiang: switch probability vs.
   conflict), ``decay`` (yoo: power-law decay of update magnitude).
 
 This module does not depend on the model implementation layer.
@@ -21,7 +22,10 @@ import scipy.special
 from scipy.stats import wasserstein_distance
 
 DELTA_SMOOTH_WINDOW = 3  # rolling window for smoothing delta curves in mse_wasserstein
-MSE_WASSERSTEIN_W = 0.5  # default weight on Wasserstein term
+MSE_WASSERSTEIN_W = {
+    "carrabin": 0.2,
+    "yoo":      0.5,
+}
 
 
 def _smooth_curve(arr: np.ndarray, window: int) -> np.ndarray:
@@ -188,13 +192,21 @@ def mse_wasserstein(
     model: pd.DataFrame,
     human: pd.DataFrame,
 ) -> float:
-    """MSE on responses + Wasserstein on smoothed mean |delta response| curve (yoo)."""
+    """
+    MSE on responses + Wasserstein term.
+    - carrabin: Wasserstein on full response distribution, w=0.2
+    - yoo: Wasserstein on smoothed mean |delta response| curve, w=0.5
+    """
     dataset = params["dataset"]
-    if dataset != "yoo":
+    if dataset not in ("carrabin", "yoo"):
         raise ValueError(
-            f"mse_wasserstein() is only implemented for yoo; got dataset={dataset!r}"
+            f"mse_wasserstein() is only implemented for carrabin and yoo; "
+            f"got dataset={dataset!r}"
         )
 
+    w = float(params.get("wasserstein_w", MSE_WASSERSTEIN_W[dataset]))
+
+    # MSE term (shared)
     merged = model.merge(
         human[["pid", "trial", "observation", "response"]],
         on=["pid", "trial", "observation"],
@@ -206,25 +218,30 @@ def mse_wasserstein(
         np.mean((merged["response_model"] - merged["response_human"]) ** 2)
     )
 
-    def mean_delta(df: pd.DataFrame) -> np.ndarray:
-        pieces = []
-        for (pid, trial), grp in df.groupby(["pid", "trial"], sort=False):
-            g = grp.sort_values("observation").copy()
-            g["delta"] = g["response"].diff().abs()
-            pieces.append(g)
-        delta = pd.concat(pieces, ignore_index=True)
-        curve = delta.groupby("observation")["delta"].mean()
-        curve = curve[curve.index >= 2].sort_index().to_numpy(dtype=float)
-        return _smooth_curve(curve, DELTA_SMOOTH_WINDOW)
+    if dataset == "carrabin":
+        human_responses = human["response"].to_numpy(dtype=float)
+        model_responses = model["response"].to_numpy(dtype=float)
+        wass_val = float(wasserstein_distance(human_responses, model_responses))
 
-    h_curve = mean_delta(human)
-    m_curve = mean_delta(model)
-    if len(h_curve) == 0 or len(m_curve) == 0:
-        return mse_val
-    n = min(len(h_curve), len(m_curve))
-    wass_val = float(wasserstein_distance(h_curve[:n], m_curve[:n]))
+    else:  # yoo
+        def mean_delta(df: pd.DataFrame) -> np.ndarray:
+            pieces = []
+            for (pid, trial), grp in df.groupby(["pid", "trial"], sort=False):
+                g = grp.sort_values("observation").copy()
+                g["delta"] = g["response"].diff().abs()
+                pieces.append(g)
+            delta = pd.concat(pieces, ignore_index=True)
+            curve = delta.groupby("observation")["delta"].mean()
+            curve = curve[curve.index >= 2].sort_index().to_numpy(dtype=float)
+            return _smooth_curve(curve, DELTA_SMOOTH_WINDOW)
 
-    w = float(params.get("wasserstein_w", MSE_WASSERSTEIN_W))
+        h_curve = mean_delta(human)
+        m_curve = mean_delta(model)
+        if len(h_curve) == 0 or len(m_curve) == 0:
+            return mse_val
+        n = min(len(h_curve), len(m_curve))
+        wass_val = float(wasserstein_distance(h_curve[:n], m_curve[:n]))
+
     return (1.0 - w) * mse_val + w * wass_val
 
 

@@ -61,7 +61,8 @@ parser = argparse.ArgumentParser(description="Yoo response change / decay figure
 parser.add_argument(
     "run_folder",
     nargs="?",
-    default="MSE",
+    # default="MSE",
+    default="mse_wass",
     help="Run folder under data/runs/ for math model pickles",
 )
 parser.add_argument(

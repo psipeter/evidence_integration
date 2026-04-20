@@ -31,7 +31,6 @@ _NEF_FIXED: dict[str, object] = {
     "n_seeds": 1,
     "seed": 0,
     "pes_learning_rate": 1e-4,
-    "wasserstein_w": 0.5,
 }
 
 _NEF_RANGES: dict[str, tuple] = {
@@ -55,6 +54,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
+        },
+        "RL_decay": {
+            "alpha_0": (0.01, 5.0, 0.001),
+            "lambda_": (0.0, 2.0, 0.001),
         },
         "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
         "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
