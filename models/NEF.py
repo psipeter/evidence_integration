@@ -91,6 +91,30 @@ def _make_input(obs_values: np.ndarray, params: dict) -> callable:
     return fn
 
 
+def _make_alpha_bias_input(obs_values: np.ndarray, params: dict) -> callable:
+    """
+    Outputs omega * alpha_bias_array[step] during each observation, 0 during ITI.
+    For non-jiang datasets, alpha_bias_array is all zeros so output is always 0.
+    """
+    t_obs = float(params["t_obs"])
+    t_iti = float(params["t_iti"])
+    t_step = t_obs + t_iti
+    n_obs = len(obs_values)
+    omega = float(params.get("omega", 0.0))
+    bias = np.array(params.get("alpha_bias_array", np.zeros(n_obs)), dtype=float)
+
+    def fn(t: float) -> float:
+        if t < t_iti:
+            return 0.0
+        step = int((t - t_iti) / t_step)
+        phase = (t - t_iti) - step * t_step
+        if step < n_obs and phase < t_obs:
+            return float(omega * bias[step])
+        return 0.0
+
+    return fn
+
+
 def _extract_responses(
     t_arr: np.ndarray,
     value_decoded: np.ndarray,
@@ -151,6 +175,16 @@ def build_network(
             radius=float(params["radius_e"]),
             seed=seed,
             label="error",
+        )
+        net.node_alpha_bias = nengo.Node(
+            _make_alpha_bias_input(obs_values, params),
+            label="node_alpha_bias",
+        )
+        nengo.Connection(
+            net.node_alpha_bias,
+            net.error[0],
+            synapse=None,
+            seed=seed,
         )
 
         if params["counting"] == "lmu":
@@ -340,26 +374,33 @@ def run(
     for trial, trial_data in human_pid.groupby("trial"):
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
+        alpha_bias = (
+            trial_data["rd"].to_numpy(dtype=float)
+            if pfull["dataset"] == "jiang"
+            else np.zeros(len(obs_values))
+        )
+        p = {**pfull, "alpha_bias_array": alpha_bias}
         if save_probes and int(trial) == first_trial:
             responses, probe_data = _simulate_trial(
-                obs_values, pfull, decoders, return_probes=True
+                obs_values, p, decoders, return_probes=True
             )
-            probe_data["params"] = dict(pfull)
+            probe_data["params"] = dict(p)
             fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
             pd.to_pickle(probe_data, data_path(fname))
             print(f"  Saved probe data to data/{fname}")
         else:
-            responses = _simulate_trial(obs_values, pfull, decoders)
-        for observation, response in zip(trial_data["observation"], responses):
-            rows.append(
-                {
-                    "model_type": pfull["model_type"],
-                    "pid": pid,
-                    "trial": int(trial),
-                    "observation": int(observation),
-                    "response": float(response),
-                }
-            )
+            responses = _simulate_trial(obs_values, p, decoders)
+        for i, (_, row) in enumerate(trial_data.iterrows()):
+            entry = {
+                "model_type": pfull["model_type"],
+                "pid": pid,
+                "trial": int(trial),
+                "observation": int(row["observation"]),
+                "response": float(responses[i]),
+            }
+            if pfull["dataset"] == "jiang":
+                entry["stage"] = int(row["stage"])
+            rows.append(entry)
 
     elapsed = time.time() - t0
     n_trials = human_pid["trial"].nunique()
