@@ -280,7 +280,10 @@ def shape_loss(
             h_model_agg = obs_model.groupby("conflict")["switch"].mean().reset_index()
             if h_human_agg.empty or h_model_agg.empty:
                 continue
-            if h_human_agg["switch"].sum() == 0 or h_model_agg["switch"].sum() == 0:
+            if h_human_agg["switch"].sum() == 0:
+                continue
+            if h_model_agg["switch"].sum() == 0:
+                pid_losses.append(1.0)  # maximum penalty: model never switches
                 continue
             loss = float(
                 wasserstein_distance(
