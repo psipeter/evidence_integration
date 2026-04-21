@@ -84,9 +84,11 @@ def make_storage(host: str, user: str, password: str, study_name: str) -> str:
 def _log_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
     """Log progress every 10 trials."""
     if trial.number % 10 == 0:
+        trial_loss = f"{trial.value:.4f}" if trial.value is not None else "failed"
+        best = f"{study.best_value:.4f}" if study.best_value is not None else "n/a"
         logging.info(
-            f"Trial {trial.number}: loss={trial.value:.4f} | "
-            f"best={study.best_value:.4f} | params={trial.params}"
+            f"Trial {trial.number}: loss={trial_loss} | "
+            f"best={best} | params={trial.params}"
         )
 
 
