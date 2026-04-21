@@ -3,7 +3,13 @@ Submit, resubmit, or locally run model fitting jobs.
 
 Usage::
 
-    # submit fitting jobs
+    # Submit all models/datasets in one command to a named folder
+    python -m fitting.submit all --n_trials 100 --loss_type joint --run_folder joint_fits
+
+    # Add more jobs to the same folder later
+    python -m fitting.submit carrabin NoisyCounting --n_trials 200 --run_folder joint_fits
+
+    # submit fitting jobs (new timestamped folder if --run_folder omitted)
     python -m fitting.submit carrabin NEF_recurrent --n_trials 300
     python -m fitting.submit carrabin NEF_recurrent --n_trials 300 --pid 1
     python -m fitting.submit carrabin NEF_recurrent --n_trials 300 --pid 1 --local
@@ -12,8 +18,11 @@ Usage::
     python -m fitting.submit carrabin NEF_recurrent --rerun Apr21_1200pm
     python -m fitting.submit carrabin NEF_recurrent --rerun Apr21_1200pm --pid 1
 
-    # resubmit missing jobs from a run folder
-    python -m fitting.submit --resubmit Apr21_1200pm
+    # resubmit missing jobs
+    python -m fitting.submit --resubmit joint_fits
+
+    # collect all results
+    python -m fitting.collect joint_fits
 
     # dry run
     python -m fitting.submit --dry_run
@@ -52,7 +61,7 @@ def _make_run_folder() -> Path:
 
 
 def _write_run_config(run_folder: Path, jobs: list[dict]) -> None:
-    """Write run_config.json to the run folder."""
+    """Write or merge run_config.json in the run folder."""
     import subprocess as sp
 
     try:
@@ -63,13 +72,30 @@ def _write_run_config(run_folder: Path, jobs: list[dict]) -> None:
         )
     except Exception:
         commit = "unknown"
-    config = {
-        "run_folder": run_folder.name,
-        "timestamp": run_folder.name,
-        "git_commit": commit,
-        "jobs": jobs,
-    }
-    (run_folder / "run_config.json").write_text(json.dumps(config, indent=2))
+
+    config_path = run_folder / "run_config.json"
+    if config_path.exists():
+        existing = json.loads(config_path.read_text())
+        prev_jobs = list(existing.get("jobs", []))
+        existing_keys = {
+            (j["dataset"], j["model_type"], j["pid"]) for j in prev_jobs
+        }
+        new_jobs = [
+            j
+            for j in jobs
+            if (j["dataset"], j["model_type"], j["pid"]) not in existing_keys
+        ]
+        prev_jobs.extend(new_jobs)
+        existing["jobs"] = prev_jobs
+        config_path.write_text(json.dumps(existing, indent=2))
+    else:
+        config = {
+            "run_folder": run_folder.name,
+            "timestamp": run_folder.name,
+            "git_commit": commit,
+            "jobs": jobs,
+        }
+        config_path.write_text(json.dumps(config, indent=2))
 
 
 def _resolve_jobs(
@@ -96,13 +122,16 @@ def _resolve_jobs(
             lt = loss_type if loss_type is not None else DEFAULT_LOSS.get(ds, "response")
             pids_all = pd.read_pickle(data_path(f"{ds}.pkl"))["pid"].unique()
             pids = [int(pid)] if pid is not None else [int(p) for p in pids_all]
+            model_spec = MODEL_PARAMS[ds].get(mt, {})
+            has_params = any(k != "fixed" for k in model_spec)
+            effective_n_trials = n_trials if has_params else 1
             for p in pids:
                 jobs.append(
                     {
                         "dataset": ds,
                         "model_type": mt,
                         "pid": p,
-                        "n_trials": n_trials,
+                        "n_trials": effective_n_trials,
                         "n_runs": n_runs,
                         "k": k,
                         "loss_type": lt,
@@ -235,6 +264,12 @@ def main() -> None:
     parser.add_argument("--n_runs", type=int, default=1)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--loss_type", default=None)
+    parser.add_argument(
+        "--run_folder",
+        type=str,
+        default=None,
+        help="Use existing run folder by name instead of creating a new timestamped one.",
+    )
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
 
@@ -269,7 +304,11 @@ def main() -> None:
         args.k,
         args.loss_type,
     )
-    run_folder = _make_run_folder()
+    if args.run_folder is not None:
+        run_folder = RUNS_DIR / args.run_folder
+        run_folder.mkdir(parents=True, exist_ok=True)
+    else:
+        run_folder = _make_run_folder()
     _write_run_config(run_folder, jobs)
     for job in jobs:
         if args.local:
