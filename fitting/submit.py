@@ -93,7 +93,7 @@ def _resolve_jobs(
             else [model_type]
         )
         for mt in models:
-            lt = loss_type if loss_type is not None else DEFAULT_LOSS.get(ds, "mse")
+            lt = loss_type if loss_type is not None else DEFAULT_LOSS.get(ds, "response")
             pids_all = pd.read_pickle(data_path(f"{ds}.pkl"))["pid"].unique()
             pids = [int(pid)] if pid is not None else [int(p) for p in pids_all]
             for p in pids:

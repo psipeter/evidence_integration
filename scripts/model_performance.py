@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Model performance under MSE/NLL loss.
+Model performance under default ``response`` loss (MSE or jiang NLL).
 Distribution of cross-validated loss across participants for each model and task.
 One panel per task, 1 row x 3 columns.
 

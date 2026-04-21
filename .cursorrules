@@ -84,7 +84,7 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 | Mean increment | `mu` | carrabin NoisyCounting |
 | Inverse temperature | `beta` | jiang (all models) |
 | PES learning rate | `pes_learning_rate` | NEF_synaptic |
-| Wasserstein weight | `wasserstein_w` | mse_wasserstein loss |
+| Wasserstein weight | `wasserstein_w` | joint loss (blend of response + shape) |
 
 ---
 
@@ -95,17 +95,15 @@ fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
     loss_type=None, n_runs=1, run_folder=None)
 ```
 
-- Default loss: `mse` for carrabin/yoo, `nll` for jiang
+- Default loss: `response` for all datasets (MSE on carrabin/yoo; NLL on jiang)
 - All outputs saved to `run_folder` (defaults to `data/runs/default`)
 - Loss type stored inside `params.pkl`, not in filename
 - Seed: `optuna.samplers.TPESampler(seed=42)` for reproducibility
 
 Loss functions in `fitting/losses.py`:
-- `mse`            — universal baseline
-- `nll`            — binary NLL for jiang (requires beta)
-- `wasserstein`    — response distribution distance, carrabin only
-- `mse_wasserstein` — MSE + Wasserstein; carrabin (w=0.2), yoo (w=0.5)
-- `switch`, `decay`  — stubs
+- `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang)
+- `shape` — Wasserstein shape distance; carrabin (full distribution), yoo (smoothed delta curve), jiang (switch vs conflict aggregates)
+- `joint` — combined response + shape; default `w` from `JOINT_LOSS_W`: carrabin 0.2, yoo 0.5, jiang 0.3
 
 ---
 
@@ -159,7 +157,7 @@ Save figures as both PNG (300 dpi) and PDF to `figures/`.
 ## Figure Scripts
 
 All finalized figures are standalone Python scripts in `scripts/`:
-- `scripts/model_performance.py` — model performance under MSE/NLL
+- `scripts/model_performance.py` — model performance under default `response` loss
 - `scripts/response_variability_carrabin.py` — intertrial variability, carrabin
 - `scripts/switch_probability_jiang.py` — switch probability vs conflict, jiang
 - `scripts/response_change_yoo.py` — power-law decay of update magnitude, yoo
@@ -178,8 +176,8 @@ PDF to `figures/`. Configuration variables live at the top of each script.
 
 Key run folders under `data/runs/` (not tracked by git):
 
-- `MSE` — all math models, default losses (mse/nll), 500 trials
-- `wasserstein` — carrabin Bayes/RL/NoisyCounting, wasserstein loss,
+- `MSE` — all math models, default `response` loss, 500 trials
+- `wasserstein` — carrabin Bayes/RL/NoisyCounting, shape loss,
   500 trials, NoisyCounting n_runs=50
 - `switch_probability` — jiang models with beta-sampled binary responses
 

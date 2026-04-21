@@ -34,15 +34,15 @@ evidence_integration/
 │   ├── yoo.pkl
 │   ├── jiang_networks.npy
 │   └── runs/                  # model fitting outputs (not tracked)
-│       ├── MSE/               # math models, mse/nll loss
-│       └── mse_wass/          # math + NEF models, mse_wasserstein loss
+│       ├── MSE/               # math models, response loss (MSE or jiang NLL)
+│       └── mse_wass/          # math + NEF models, joint loss
 ├── models/
 │   ├── math_models.py         # all mathematical models
 │   ├── counting_integrator.py # integrator counting circuit testbed
 │   ├── counting_lmu.py        # LMU counting circuit testbed
 │   └── NEF.py                 # NEF recurrent and synaptic models
 ├── fitting/
-│   ├── losses.py              # MSE, NLL, Wasserstein, mse_wasserstein
+│   ├── losses.py              # response, shape, joint losses
 │   ├── fit.py                 # Optuna fitting with k-fold CV
 │   ├── param_ranges.py        # parameter search spaces
 │   ├── submit.py              # job submission and rerun
@@ -125,7 +125,8 @@ the Optuna loop and fit only the noise parameter (sigma or beta).
 ## Fitting
 
 Fitting uses Optuna with k-fold cross-validation (k=5). The loss function
-is task-aware by default: MSE for carrabin and yoo, NLL for jiang.
+is task-aware by default: ``response`` loss for all datasets (MSE on carrabin/yoo,
+NLL on jiang).
 All outputs are saved to a timestamped run folder under `data/runs/`.
 
 ```python
@@ -134,14 +135,12 @@ python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_run
 ```
 
 Loss type is stored inside `params.pkl` — not in the filename. Rename run
-folders manually to track experiment type (e.g. `Apr12_carrabin_mse`).
+folders manually to track experiment type (e.g. `Apr12_carrabin_response`).
 
 Loss functions in `fitting/losses.py`:
-- `mse` — universal baseline
-- `nll` — binary NLL for jiang (requires beta)
-- `wasserstein` — response distribution distance for carrabin
-- `mse_wasserstein` — MSE + Wasserstein; carrabin (w=0.2), yoo (w=0.5 on smoothed delta curve)
-- `switch`, `decay` — stubs
+- `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang, requires `beta`)
+- `shape` — Wasserstein on response distribution (carrabin), smoothed mean |Δresponse| curve (yoo), or switch-vs-conflict aggregates (jiang; requires `beta`)
+- `joint` — combined response + shape; default blend `w` in `JOINT_LOSS_W`: carrabin 0.2, yoo 0.5, jiang 0.3 (override with `wasserstein_w` in params)
 
 ---
 
@@ -153,7 +152,7 @@ Job operations are split across submit and collect entry points:
 # Submit a new run (SLURM)
 python -m fitting.submit all --n_trials 500
 python -m fitting.submit carrabin RL --n_trials 500
-python -m fitting.submit carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type wasserstein
+python -m fitting.submit carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type shape
 
 # Run locally (no SLURM)
 python -m fitting.submit carrabin RL --n_trials 10 --local
@@ -251,8 +250,8 @@ Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
 
 | Folder | Contents |
 |---|---|
-| `MSE` | All math models + NEF, mse/nll loss, 300-500 trials |
-| `mse_wass` | All math models + NEF, mse_wasserstein loss, 300 trials |
+| `MSE` | All math models + NEF, default `response` loss, 300-500 trials |
+| `mse_wass` | All math models + NEF, joint loss, 300 trials |
 
 Rename run folders manually to reflect experiment type. Inspect
 `run_config.json` inside any folder to see exact hyperparameters used.
@@ -278,12 +277,12 @@ subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 - [x] Port core utility code (`uniform_encoders.py`, `paths.py`, `plot_style.py`)
 - [x] Standardize data schema across all three task dataframes
 - [x] Port and refactor mathematical models (`math_models.py`)
-- [x] Implement MSE, NLL, Wasserstein loss functions (`losses.py`)
+- [x] Implement response, shape, and joint loss functions (`losses.py`)
 - [x] Implement Optuna fitting loop with k-fold CV (`fit.py`)
 - [x] Implement counting circuit testbeds (`counting_integrator.py`, `counting_lmu.py`)
 - [x] Implement NEF recurrent and synaptic models (`models/NEF.py`)
-- [x] Fit NEF models to carrabin and yoo (MSE and mse_wasserstein)
-- [x] Implement mse_wasserstein loss for carrabin and yoo
+- [x] Fit NEF models to carrabin and yoo (response and joint loss)
+- [x] Implement joint loss for carrabin, yoo, and jiang
 - [x] Add RL_decay model for yoo and carrabin
 - [x] Restructure job management (`fitting/submit.py`, `fitting/collect.py`)
 - [x] Create experiments/ framework with template
@@ -293,6 +292,6 @@ subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 - [x] Create switch probability figure (`scripts/switch_probability_jiang.py`)
 - [x] Create response change figure (`scripts/response_change_yoo.py`)
 - [ ] Fit NEF models to jiang
-- [ ] Collect and analyze full mse_wasserstein fits
+- [ ] Collect and analyze full joint-loss fits
 - [ ] Design and implement experiment scripts
 - [ ] Final analysis and figure generation

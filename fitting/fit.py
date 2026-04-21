@@ -7,24 +7,16 @@ Coordinates Optuna search with k-fold cross-validation over a chosen loss
 ``{model_type}_{dataset}_{pid}_params.pkl``, ``_performance.pkl``, and
 ``_cv_folds.pkl`` (loss type is stored in the params row, not in the name).
 When ``loss_type`` is omitted (``None``), the default is task-aware:
-``mse`` for carrabin and yoo, ``nll`` for jiang; pass a string explicitly to
-override.
+``response`` for all datasets; pass a string explicitly to override.
 
-Two experiment regimes:
+Loss codes (see ``fitting.losses.compute_loss``):
 
-- **Experiment 1 (``loss_type="mse"``):** Mean squared error between model and
-  human responses. Carrabin/yoo compare continuous values directly; jiang maps
-  the model expectation through ``sigmoid(beta * x)`` and thresholds at 0.5 to
-  a binary ``±1`` prediction before squaring error vs. human ``response``. All
-  jiang fits suggest ``beta`` (inverse temperature for that map).
-- **Experiment 2:** Task-specific losses wired through ``losses.compute_loss``.
-  For jiang, ``loss_type="nll"`` uses standard binary NLL with a sigmoid decision
-  rule on model expectation (see ``fitting.losses.nll``). Other codes
-  (``wasserstein``, ``switch``, ``decay``); ``wasserstein`` is implemented for
-  carrabin; ``switch`` and ``decay`` remain stubs until implemented.
-
-``fit_noise_only()`` is reserved for NLL-style noise fitting when those losses
-are implemented; it is not used for ``mse``.
+- **``response``** — response-accuracy loss for every dataset: mean squared error
+  on carrabin/yoo; for jiang, total negative log-likelihood of human binary
+  responses under ``sigmoid(beta * model_expectation)`` (requires ``beta``).
+- **``shape``** — Wasserstein shape distance (carrabin full distribution; yoo
+  smoothed mean ``|Δresponse|`` curve).
+- **``joint``** — combined response + shape loss (carrabin, yoo, jiang).
 
 Optional ``n_runs`` (default ``1``) is forwarded into model ``params`` when
 ``> 1`` to control Monte Carlo averaging for stochastic models (e.g. carrabin
@@ -43,8 +35,8 @@ Omit trailing tokens for defaults (``run_folder`` defaults to
 
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
-**Jiang:** ``beta`` is always suggested (threshold sharpness for MSE binarization
-and for other losses as needed). ``DeGroot`` — ``omega`` (0.01–10.0); ``RL`` —
+**Jiang:** ``beta`` is always suggested (inverse temperature in the sigmoid used
+inside ``response_loss`` / NLL). ``DeGroot`` — ``omega`` (0.01–10.0); ``RL`` —
 ``alpha`` (naive update, ignores ``rd``). ``Bayes`` — no structural params beyond
 ``beta``.
 
@@ -72,9 +64,9 @@ from utils.paths import RUNS_DIR, data_path
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 DEFAULT_LOSS: dict[str, str] = {
-    "carrabin": "mse",
-    "jiang": "nll",
-    "yoo": "mse",
+    "carrabin": "response",
+    "jiang": "response",
+    "yoo": "response",
 }
 
 
@@ -133,34 +125,11 @@ def _suggest_params(
     return params
 
 
-def _suggest_noise_only(
-    trial: optuna.trial.Trial,
-    dataset: str,
-    model_type: str,
-    pid: int,
-    loss_type: str,
-) -> dict:
-    """Sample only noise parameters for precomputed responses (NLL-style fits)."""
-    if loss_type == "mse":
-        raise NotImplementedError(
-            "fit_noise_only() is only meaningful for NLL-based (or other) loss "
-            "functions that include a noise parameter; MSE fits use fit() instead."
-        )
-    params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
-    if dataset in ("carrabin", "yoo"):
-        params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, step=0.001)
-    elif dataset == "jiang":
-        params["beta"] = trial.suggest_float("beta", 0.01, 10.0, step=0.01)
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset!r}")
-    return params
-
-
 def _cross_validate(
     params: dict,
     human: pd.DataFrame,
     k: int = 5,
-    loss_type: str = "mse",
+    loss_type: str = "response",
 ) -> tuple[float, list[float]]:
     """Run k-fold CV over trials and return mean loss and per-fold losses."""
     trials = np.asarray(sorted(human["trial"].unique()))
@@ -194,40 +163,37 @@ def _cross_validate(
     return mean_loss, fold_losses
 
 
-def _cross_validate_precomputed(
+def _cross_validate_components(
     params: dict,
     human: pd.DataFrame,
-    model_responses: pd.DataFrame,
     k: int = 5,
-    loss_type: str = "mse",
-) -> tuple[float, list[float]]:
-    """K-fold CV using fixed model responses (no ``math_models.run`` per fold)."""
+) -> tuple[float, float]:
+    """Return (mean response_loss, mean shape_loss) for joint loss decomposition."""
     trials = np.asarray(sorted(human["trial"].unique()))
-    if trials.size == 0:
-        raise ValueError("Human dataframe has no trials for cross-validation")
-
     rng = np.random.RandomState(seed=int(params["pid"]))
     shuffled = trials.copy()
     rng.shuffle(shuffled)
     folds = np.array_split(shuffled, k)
 
-    fold_losses: list[float] = []
+    response_losses: list[float] = []
+    shape_losses: list[float] = []
     for fold_trials in folds:
         holdout_trials = [int(t) for t in fold_trials.tolist()]
         if not holdout_trials:
             continue
-
-        model_fold = model_responses[model_responses["trial"].isin(holdout_trials)]
+        if params["model_type"] in ("NEF_recurrent", "NEF_synaptic"):
+            model_fold = NEF.run(params, trials=holdout_trials)
+        else:
+            model_fold = math_models.run(params, trials=holdout_trials)
         human_fold = human[human["trial"].isin(holdout_trials)]
+        response_losses.append(
+            float(losses.response_loss(params, model_fold, human_fold))
+        )
+        shape_losses.append(float(losses.shape_loss(params, model_fold, human_fold)))
 
-        fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
-        fold_losses.append(float(fold_loss))
-
-    if not fold_losses:
+    if not response_losses:
         raise ValueError("No non-empty CV folds were generated")
-
-    mean_loss = float(np.mean(fold_losses))
-    return mean_loss, fold_losses
+    return float(np.mean(response_losses)), float(np.mean(shape_losses))
 
 
 def fit(
@@ -246,7 +212,7 @@ def fit(
         run_folder = RUNS_DIR / "default"
     run_folder = Path(run_folder)
     if loss_type is None:
-        loss_type = DEFAULT_LOSS.get(dataset, "mse")
+        loss_type = DEFAULT_LOSS.get(dataset, "response")
     if model_type in ("NEF_recurrent", "NEF_synaptic") and n_runs > 1:
         raise ValueError("NEF_recurrent and NEF_synaptic do not support n_runs > 1")
     start = time.time()
@@ -276,6 +242,10 @@ def fit(
         params["seed"] = abs(hash((int(params["pid"]), trial.number))) % (2**31)
         mean_loss, fold_losses = _cross_validate(params, human, k=k, loss_type=loss_type)
         trial.set_user_attr("cv_loss_folds", fold_losses)
+        if loss_type == "joint":
+            response_mean, shape_mean = _cross_validate_components(params, human, k=k)
+            trial.set_user_attr("response_component", response_mean)
+            trial.set_user_attr("shape_component", shape_mean)
         return mean_loss
 
     study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
@@ -302,108 +272,12 @@ def fit(
                 "dataset": dataset,
                 "pid": int(pid),
                 "cv_loss_mean": float(best_trial.value),
-                "runtime": float(runtime),
-            }
-        ]
-    )
-    cv_folds_df = pd.DataFrame(
-        [
-            {
-                "model_type": model_type,
-                "dataset": dataset,
-                "pid": int(pid),
-                "fold": int(i + 1),
-                "loss": float(loss_val),
-            }
-            for i, loss_val in enumerate(best_folds)
-        ]
-    )
-
-    params_df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_params.pkl")
-    performance_df.to_pickle(
-        run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
-    )
-    cv_folds_df.to_pickle(
-        run_folder / f"{model_type}_{dataset}_{pid}_cv_folds.pkl"
-    )
-
-    return params_df, performance_df
-
-
-def fit_noise_only(
-    dataset: str,
-    model_type: str,
-    pid: int,
-    n_trials: int = 100,
-    k: int = 5,
-    storage: str | None = None,
-    loss_type: str | None = None,
-    run_folder: Path | str | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Fit only observation/decision noise (sigma or beta) given pre-saved model
-    responses at ``{run_folder}/{model_type}_{dataset}_{pid}_responses.pkl``.
-    """
-    if run_folder is None:
-        run_folder = RUNS_DIR / "default"
-    run_folder = Path(run_folder)
-    run_folder.mkdir(parents=True, exist_ok=True)
-    if loss_type is None:
-        loss_type = DEFAULT_LOSS.get(dataset, "mse")
-    start = time.time()
-    responses_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
-    if not responses_path.exists():
-        raise FileNotFoundError(
-            f"Pre-saved responses not found: {responses_path}. "
-            "Generate responses in the run folder (e.g. python -m fitting.submit ... --rerun RUN_FOLDER) "
-            "after fitting structural parameters."
-        )
-    model_responses = pd.read_pickle(responses_path)
-
-    human = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    human = human.query("pid == @pid")
-    if human.empty:
-        raise ValueError(f"No rows for pid={pid} in dataset={dataset!r}")
-
-    study = optuna.create_study(
-        direction="minimize",
-        study_name=f"{model_type}_{dataset}_{pid}_{loss_type}",
-        storage=storage,
-        load_if_exists=True,
-        sampler=optuna.samplers.TPESampler(seed=42),
-    )
-
-    def objective(trial: optuna.trial.Trial) -> float:
-        params = _suggest_noise_only(trial, dataset, model_type, pid, loss_type)
-        mean_loss, fold_losses = _cross_validate_precomputed(
-            params, human, model_responses, k=k, loss_type=loss_type
-        )
-        trial.set_user_attr("cv_loss_folds", fold_losses)
-        return mean_loss
-
-    study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
-
-    best_trial = study.best_trial
-    best_params = dict(best_trial.params)
-    best_params.update(
-        {
-            "model_type": model_type,
-            "dataset": dataset,
-            "pid": int(pid),
-            "loss_type": loss_type,
-        }
-    )
-    best_folds = list(best_trial.user_attrs.get("cv_loss_folds", []))
-
-    runtime = (time.time() - start) / 60.0
-    params_df = pd.DataFrame([best_params])
-    performance_df = pd.DataFrame(
-        [
-            {
-                "model_type": model_type,
-                "dataset": dataset,
-                "pid": int(pid),
-                "cv_loss_mean": float(best_trial.value),
+                "response_component": float(
+                    best_trial.user_attrs.get("response_component", float("nan"))
+                ),
+                "shape_component": float(
+                    best_trial.user_attrs.get("shape_component", float("nan"))
+                ),
                 "runtime": float(runtime),
             }
         ]
