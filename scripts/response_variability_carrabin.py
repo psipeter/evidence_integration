@@ -40,8 +40,8 @@ parser = argparse.ArgumentParser(description="Carrabin response variability figu
 parser.add_argument(
     "run_folder",
     nargs="?",
-    # default="wasserstein",
-    default="MSE",
+    default="mse_wass",
+    # default="MSE",
     help="Run folder under data/runs/ for math model pickles",
 )
 parser.add_argument(

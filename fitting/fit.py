@@ -355,7 +355,7 @@ def fit_noise_only(
     if not responses_path.exists():
         raise FileNotFoundError(
             f"Pre-saved responses not found: {responses_path}. "
-            "Generate responses in the run folder (e.g. python -m jobs.run --rerun ...) "
+            "Generate responses in the run folder (e.g. python -m fitting.submit ... --rerun RUN_FOLDER) "
             "after fitting structural parameters."
         )
     model_responses = pd.read_pickle(responses_path)

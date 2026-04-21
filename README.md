@@ -29,34 +29,39 @@ To navigate uncertain environments, the brain must continuously integrate new in
 ```
 evidence_integration/
 ├── data/
-│   ├── carrabin.pkl          # human behavioral data (tracked)
-│   ├── jiang.pkl             # human behavioral data (tracked)
-│   ├── yoo.pkl               # human behavioral data (tracked)
-│   ├── jiang_networks.npy    # social network adjacency matrices (tracked)
-│   └── runs/                 # model fitting outputs (not tracked by git)
-│       ├── MSE/              # all math models, default losses, 500 trials
-│       ├── wasserstein/      # carrabin Bayes/RL/NoisyCounting, wasserstein loss
-│       └── switch_probability/ # jiang models with beta-sampled responses
+│   ├── carrabin.pkl
+│   ├── jiang.pkl
+│   ├── yoo.pkl
+│   ├── jiang_networks.npy
+│   └── runs/                  # model fitting outputs (not tracked)
+│       ├── MSE/               # math models, mse/nll loss
+│       └── mse_wass/          # math + NEF models, mse_wasserstein loss
 ├── models/
-│   ├── math_models.py        # all mathematical models
-│   ├── counting.py           # NEF counting circuit testbed (integrator, LMU)
-│   ├── synaptic.py           # NEF synaptic model (stub)
-│   └── recurrent.py          # NEF recurrent model (stub)
+│   ├── math_models.py         # all mathematical models
+│   ├── counting_integrator.py # integrator counting circuit testbed
+│   ├── counting_lmu.py        # LMU counting circuit testbed
+│   └── NEF.py                 # NEF recurrent and synaptic models
 ├── fitting/
-│   ├── losses.py             # MSE, NLL, Wasserstein loss functions
-│   ├── fit.py                # Optuna fitting with k-fold CV
-│   └── param_ranges.py       # parameter search spaces
-├── jobs/
-│   └── run.py                # single entry point for all job management
+│   ├── losses.py              # MSE, NLL, Wasserstein, mse_wasserstein
+│   ├── fit.py                 # Optuna fitting with k-fold CV
+│   ├── param_ranges.py        # parameter search spaces
+│   ├── submit.py              # job submission and rerun
+│   └── collect.py             # result aggregation
+├── experiments/
+│   └── template.py            # template for experiment scripts
 ├── scripts/
 │   ├── model_performance.py
 │   ├── response_variability_carrabin.py
 │   ├── switch_probability_jiang.py
-│   └── response_change_yoo.py
+│   ├── response_change_yoo.py
+│   ├── counting_accuracy.py   # counting circuit sweep
+│   └── NEF_plots.py           # NEF population dynamics
 ├── utils/
-│   ├── paths.py              # central path config
-│   ├── plot_style.py         # shared matplotlib/seaborn style
-│   └── uniform_encoders.py   # quasi-Monte Carlo encoders for Nengo
+│   ├── paths.py
+│   ├── plot_style.py
+│   ├── slurm.py               # SLURM job utilities
+│   └── uniform_encoders.py
+└── logs/                      # SLURM job logs (not tracked)
 ```
 
 ---
@@ -101,12 +106,16 @@ responses = run(params)  # params dict with model_type, dataset, pid, ...
 | carrabin | `Bayes` | optimal | sigma only |
 | carrabin | `NoisyCounting` | human-matching | mu, sigma_c, nu |
 | carrabin | `RL` | naive | alpha |
+| carrabin | `RL_decay` | naive (decay) | alpha_0, lambda_ |
 | jiang | `Bayes` | optimal | beta only |
 | jiang | `DeGroot` | human-matching | omega, beta |
 | jiang | `RL` | naive | alpha, beta |
 | yoo | `Mean` | optimal | sigma only |
 | yoo | `ADM` | human-matching | phi, rho, nu |
 | yoo | `RL` | naive | alpha |
+| yoo | `RL_decay` | naive (decay) | alpha_0, lambda_ |
+| all | `NEF_recurrent` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
+| all | `NEF_synaptic` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 
 Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) skip
 the Optuna loop and fit only the noise parameter (sigma or beta).
@@ -127,29 +136,36 @@ python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_run
 Loss type is stored inside `params.pkl` — not in the filename. Rename run
 folders manually to track experiment type (e.g. `Apr12_carrabin_mse`).
 
+Loss functions in `fitting/losses.py`:
+- `mse` — universal baseline
+- `nll` — binary NLL for jiang (requires beta)
+- `wasserstein` — response distribution distance for carrabin
+- `mse_wasserstein` — MSE + Wasserstein; carrabin (w=0.2), yoo (w=0.5 on smoothed delta curve)
+- `switch`, `decay` — stubs
+
 ---
 
 ## Job Management
 
-All job operations go through a single entry point:
+Job operations are split across submit and collect entry points:
 
 ```bash
 # Submit a new run (SLURM)
-python -m jobs.run all --n_trials 500
-python -m jobs.run carrabin RL --n_trials 500
-python -m jobs.run carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type wasserstein
+python -m fitting.submit all --n_trials 500
+python -m fitting.submit carrabin RL --n_trials 500
+python -m fitting.submit carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type wasserstein
 
 # Run locally (no SLURM)
-python -m jobs.run carrabin RL --n_trials 10 --local
+python -m fitting.submit carrabin RL --n_trials 10 --local
 
 # Resubmit missing jobs from an existing run
-python -m jobs.run --resubmit Apr12_632pm
+python -m fitting.submit --resubmit Apr12_632pm
 
 # Collect results into combined files
-python -m jobs.run --collect Apr12_632pm
+python -m fitting.collect Apr12_632pm
 
 # Dry run
-python -m jobs.run all --dry_run
+python -m fitting.submit all --dry_run
 ```
 
 Run folders are created automatically with timestamp names (`Apr12_632pm`).
@@ -235,9 +251,8 @@ Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
 
 | Folder | Contents |
 |---|---|
-| `MSE` | All math models, MSE/NLL loss, 500 trials |
-| `wasserstein` | Carrabin models (Bayes, RL, NoisyCounting), Wasserstein loss, 500 trials, n_runs=50 for NoisyCounting |
-| `switch_probability` | Jiang models with beta-sampled binary responses for switch probability analysis |
+| `MSE` | All math models + NEF, mse/nll loss, 300-500 trials |
+| `mse_wass` | All math models + NEF, mse_wasserstein loss, 300 trials |
 
 Rename run folders manually to reflect experiment type. Inspect
 `run_config.json` inside any folder to see exact hyperparameters used.
@@ -246,61 +261,15 @@ Rename run folders manually to reflect experiment type. Inspect
 
 ## NEF Model Development
 
-The NEF model implements the prediction-error update rule in spiking neurons
-using the Neural Engineering Framework (Nengo). Two architectures are planned:
+`models/NEF.py` implements both `NEF_recurrent` and `NEF_synaptic` with the
+same `run(params)` interface as the math models.
 
-- `models/synaptic.py` — synaptic weight accumulation (primary, in development)
-- `models/recurrent.py` — recurrent line-attractor (secondary, stub)
+Counting testbeds are maintained separately:
+- `models/counting_integrator.py` — integrator counting circuit
+- `models/counting_lmu.py` — LMU counting circuit
 
-Both will expose the same `run(params)` interface as the math models.
-
-### Counting Circuit (`models/counting.py`)
-
-A standalone testbed for neural counting mechanisms, used to develop and
-compare methods for tracking observation count n(t) before integrating into
-the full model. Run with:
-
-```bash
-python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200] [--seed 0] [--n_seeds 5]
-```
-
-**Mechanisms:**
-
-| Mechanism | Description | RMSE (n=30) | Notes |
-|---|---|---|---|
-| `integrator` | Recurrent line-attractor | ~0.67 | Requires radius=n_obs; drifts at high n |
-| `lmu_math` | LMU via Nengo Nodes (no neurons) | ~0.17 | Best current accuracy; no radius problem |
-| `lmu_neural` | LMU via spiking EnsembleArray | ~0.33 | Generalizes across scales: ~0.19 (n=5), ~0.19 (n=4) |
-
-**LMU parameters (tuned):**
-- `LMU_ORDER = 32` — number of Legendre polynomials
-- `LMU_THETA_MULT = 1.1` — theta = n_obs * T_STEP * 1.1
-- ZOH discretization via `nengo.utils.filter_design.cont2discrete`
-- Pretraining readout uses `LMU_N_OBS_MAX = 30` and generalizes across tasks (carrabin n=5, jiang n<=6, yoo n=30)
-
-**Key findings:**
-- Integrator drifts at high n due to boundary effects at `radius=n_obs`
-- LMU avoids radius problem entirely; state stays bounded regardless of n_obs
-- LMU requires theta ≥ total trial duration to retain all pulse history
-- theta=1.1x trial duration and order=32 give best accuracy
-- `lmu_neural` pretraining on `LMU_N_OBS_MAX=30` generalizes well across task scales
-
-### Planned Full Model Architecture
-
-The full synaptic NEF model will consist of:
-
-1. **Observation population** — represents current observation o(t)
-2. **Delta/differentiator circuit** — detects new observations, outputs pulse
-3. **Counting circuit** — tracks n(t) using best mechanism from testbed
-4. **Weight population** — computes α(n, λ) from n(t)
-5. **Error population** — computes weighted prediction error e(t) = α(n) * (o(t) - v(t))
-6. **Context population** — provides stable basis for learning (constant input)
-7. **Value population** — represents current estimate v(t)
-8. **Estimate synapses** — learnable connections from context to value (PES rule)
-
-The model will be fitted to behavioral data by optimizing λ (decay exponent)
-and any noise parameters per participant, using the same Optuna/CV pipeline
-as the math models.
+Pretraining is dispatched via `_pretrain()` and supports shared counting
+subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 
 ---
 
@@ -311,20 +280,19 @@ as the math models.
 - [x] Port and refactor mathematical models (`math_models.py`)
 - [x] Implement MSE, NLL, Wasserstein loss functions (`losses.py`)
 - [x] Implement Optuna fitting loop with k-fold CV (`fit.py`)
-- [x] Implement unified job management (`jobs/run.py`)
+- [x] Implement counting circuit testbeds (`counting_integrator.py`, `counting_lmu.py`)
+- [x] Implement NEF recurrent and synaptic models (`models/NEF.py`)
+- [x] Fit NEF models to carrabin and yoo (MSE and mse_wasserstein)
+- [x] Implement mse_wasserstein loss for carrabin and yoo
+- [x] Add RL_decay model for yoo and carrabin
+- [x] Restructure job management (`fitting/submit.py`, `fitting/collect.py`)
+- [x] Create experiments/ framework with template
 - [x] Run population-level math model fits on cluster (folder: MSE)
-- [x] Run Wasserstein fits for carrabin (folder: wasserstein)
 - [x] Create model performance figure (`scripts/model_performance.py`)
 - [x] Create response variability figure (`scripts/response_variability_carrabin.py`)
 - [x] Create switch probability figure (`scripts/switch_probability_jiang.py`)
 - [x] Create response change figure (`scripts/response_change_yoo.py`)
-- [x] Implement counting circuit testbed (`models/counting.py`)
-- [x] Implement and tune integrator counting mechanism
-- [x] Implement and tune LMU math counting mechanism (RMSE~0.17)
-- [ ] Implement LMU neural counting mechanism (`lmu_neural`)
-- [ ] Compare integrator vs LMU neural accuracy with multiple seeds
-- [ ] Implement full synaptic NEF model (`models/synaptic.py`)
-- [ ] Fit NEF model to behavioral data (carrabin, jiang, yoo)
-- [ ] Create NEF model performance figures
-- [ ] Design and implement new experiments
+- [ ] Fit NEF models to jiang
+- [ ] Collect and analyze full mse_wasserstein fits
+- [ ] Design and implement experiment scripts
 - [ ] Final analysis and figure generation

@@ -73,7 +73,9 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 | Parameter | Symbol | Used in |
 |---|---|---|
 | Learning rate | `alpha` | RL (all tasks) |
-| RD social weighting | `omega` | jiang DeGroot |
+| Decay exponent | `lambda_` | NEF, RL_decay |
+| Baseline learning rate | `alpha_0` | NEF, RL_decay |
+| RD social weighting | `omega` | jiang DeGroot, NEF jiang |
 | Primacy | `phi` | yoo ADM |
 | Recency | `rho` | yoo ADM |
 | Baseline | `nu` | yoo ADM |
@@ -81,7 +83,8 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 | Response noise | `nu` | carrabin NoisyCounting |
 | Mean increment | `mu` | carrabin NoisyCounting |
 | Inverse temperature | `beta` | jiang (all models) |
-| Decay exponent | `lambda` | NEF synaptic model |
+| PES learning rate | `pes_learning_rate` | NEF_synaptic |
+| Wasserstein weight | `wasserstein_w` | mse_wasserstein loss |
 
 ---
 
@@ -98,23 +101,26 @@ fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
 - Seed: `optuna.samplers.TPESampler(seed=42)` for reproducibility
 
 Loss functions in `fitting/losses.py`:
-- `mse` — universal baseline (Experiment 1)
-- `nll` — binary NLL for jiang (Experiment 2)
-- `wasserstein` — response distribution match for carrabin (Experiment 2)
-- `switch`, `decay` — stubs (not yet implemented)
+- `mse`            — universal baseline
+- `nll`            — binary NLL for jiang (requires beta)
+- `wasserstein`    — response distribution distance, carrabin only
+- `mse_wasserstein` — MSE + Wasserstein; carrabin (w=0.2), yoo (w=0.5)
+- `switch`, `decay`  — stubs
 
 ---
 
 ## Job Management
 
-Single entry point: `python -m jobs.run`
+Entry points:
+- `python -m fitting.submit` for submit/resubmit/local/rerun
+- `python -m fitting.collect` for aggregation
 
 ```bash
-python -m jobs.run all --n_trials 500          # submit all to SLURM
-python -m jobs.run carrabin RL --local         # run locally
-python -m jobs.run --resubmit Apr12_632pm      # resubmit missing
-python -m jobs.run --collect Apr12_632pm       # collect results
-python -m jobs.run all --dry_run               # preview
+python -m fitting.submit all --n_trials 500    # submit all to SLURM
+python -m fitting.submit carrabin RL --local   # run locally
+python -m fitting.submit --resubmit Apr12_632pm # resubmit missing
+python -m fitting.collect Apr12_632pm          # collect results
+python -m fitting.submit all --dry_run         # preview
 ```
 
 Run folders are timestamped (`Apr12_632pm`) and created under `data/runs/`.
@@ -184,13 +190,14 @@ Each folder contains `run_config.json` with full hyperparameter record.
 ## Current Model Status
 
 **Math models — complete:**
-- carrabin: Bayes (optimal), NoisyCounting (human-matching, n_runs=50), RL (naive)
+- carrabin: Bayes (optimal), NoisyCounting (human-matching, n_runs=50), RL and RL_decay (naive)
 - jiang: Bayes (optimal, soft probabilistic), DeGroot (human-matching), RL (naive)
-- yoo: Mean (optimal), ADM (human-matching, nu fixed=0.01), RL (naive)
+- yoo: Mean (optimal), ADM (human-matching, nu fixed=0.01), RL and RL_decay (naive)
 
-**NEF models — in development:**
-- `models/counting.py` — standalone counting circuit testbed (complete)
-- `models/NEF.py` — NEF recurrent / synaptic evidence integration
+**NEF models — current implementation:**
+- `models/counting_integrator.py` — standalone integrator counting testbed
+- `models/counting_lmu.py` — standalone LMU counting testbed
+- `models/NEF.py` — full NEF recurrent / synaptic evidence integration model
 
 **Known model details:**
 - NoisyCounting: sigma_c and nu upper bounds widened to 2.0
@@ -201,49 +208,29 @@ Each folder contains `run_config.json` with full hyperparameter record.
 
 ---
 
-## NEF Counting Circuit (`models/counting.py`)
+## NEF Counting Circuit
 
-Standalone testbed for counting mechanisms. CLI:
+Standalone counting testbeds:
+- `models/counting_integrator.py` — integrator testbed
+- `models/counting_lmu.py` — LMU testbed
 
-```bash
-python models/counting.py --mechanism {mechanism} [--n_obs 30] [--n_neurons 200] [--seed 0] [--n_seeds 5]
-```
-
-**Mechanisms:**
-- `integrator` — recurrent line-attractor; RMSE~0.67; drifts at high n due to radius boundary
-- `lmu_math` — LMU via nengo.Node (no neurons); RMSE~0.17; no radius problem
-- `lmu_neural` — LMU via spiking EnsembleArray; RMSE~0.33 (n=30), ~0.19 (n=5), ~0.19 (n=4)
-
-**LMU implementation details:**
-- ZOH discretization via `nengo.utils.filter_design.cont2discrete`
-- `LMU_ORDER = 32`, `LMU_THETA_MULT = 1.1` (theta = n_obs * T_STEP * 1.1)
-- Pretraining uses `LMU_N_OBS_MAX = 30`; readout generalizes across carrabin (n=5), jiang (n<=6), yoo (n=30)
-- `lmu_math`: lmu_node is nengo.Node (exact math); `lmu_neural`: spiking EnsembleArray with pretrained readout
-- Both mechanisms share `_compute_lmu_matrices()` helper
-- Probes use default sampling (every simulator ``dt``)
-
-**Timing constants:**
-- `T_OBS = 0.5s` — observation pulse duration
-- `T_ITI = 0.5s` — inter-stimulus interval
-- `TAU_FB = 0.2s` — feedback synapse time constant (integrator)
+Both use:
+- shared params dict interfaces
+- train/test pretraining pipeline
+- onset detector inputs for pulse-driven counting
 
 ---
 
-## NEF Full Model Plan (`models/synaptic.py`)
+## NEF Full Model (`models/NEF.py`)
 
-Planned architecture for the synaptic NEF model:
+`models/NEF.py` implements both `NEF_recurrent` and `NEF_synaptic`.
 
-1. **Observation population** — represents o(t)
-2. **Delta circuit** — detects new observations, outputs pulse to counting circuit
-3. **Counting circuit** — tracks n(t) (best mechanism from counting.py testbed)
-4. **Weight population** — computes α(n, λ) from n(t) via learned PES weights
-5. **Error population** — computes e(t) = α(n) * (o(t) - v(t))
-6. **Context population** — constant input providing stable basis for learning
-7. **Value population** — represents current estimate v(t)
-8. **Estimate synapses** — learnable context→value connections (PES rule)
-
-Free parameters: λ (decay exponent), plus task-specific noise parameters.
-Will expose same `run(params)` interface as math models.
+- `nef_type` is determined from the `model_type` string.
+- Key populations: onset detector, counting subnetwork, error (2D), value
+  (line-attractor recurrent state or PES-based synaptic state).
+- Pretraining via `_pretrain()` dispatches to counting integrator or LMU
+  testbeds.
+- Default counting config: `counting="integrator"`, `n_neurons_counting=1000`.
 
 ---
 
