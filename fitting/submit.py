@@ -234,10 +234,13 @@ def _resubmit(run_folder: Path, dry_run: bool = False) -> None:
     config = json.loads(config_path.read_text())
     missing = []
     for job in config["jobs"]:
-        params_path = run_folder / (
-            f"{job['model_type']}_{job['dataset']}_{job['pid']}_params.pkl"
-        )
-        if not params_path.exists():
+        mt = job["model_type"]
+        ds = job["dataset"]
+        pid = job["pid"]
+        params_path = run_folder / f"{mt}_{ds}_{pid}_params.pkl"
+        responses_path = run_folder / f"{mt}_{ds}_{pid}_responses.pkl"
+        perf_path = run_folder / f"{mt}_{ds}_{pid}_performance.pkl"
+        if not all(p.exists() for p in [params_path, responses_path, perf_path]):
             missing.append(job)
 
     if not missing:
