@@ -11,10 +11,10 @@ On first run (SAMPLE_PIDS = None), prints pid / tau / y_int for humans (sorted
 by tau), then exits. Set SAMPLE_PIDS and rerun.
 
 Usage:
-    python scripts/response_change_yoo.py [run_folder] [--nef_type ...] [--nef_folder ...]
+    python scripts/response_change_yoo.py [run_folder]
 
 Data: data/yoo.pkl and data/runs/{run_folder}/{Mean,RL,ADM}_yoo_responses.pkl;
-NEF: data/runs/{nef_folder}/{NEF_*}_yoo_responses.pkl
+NEF: data/runs/{run_folder}/{NEF_*}_yoo_responses.pkl
 No CSV/pickle outputs (figures only).
 """
 
@@ -43,6 +43,12 @@ from utils.plot_style import (
     SAMPLE_MARKERS,
 )
 
+# -- CLI ----------------------------------------------------------------------
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--run_folder", type=str, default="MSE")
+_args, _ = _parser.parse_known_args()
+RUN_FOLDER = _args.run_folder
+
 # -- configuration (edit here) -------------------------------------------------
 # None: print human pid / tau / y_int table (sorted by tau) and exit.
 # Else: e.g. {"fast": 1, "medium": 2, "slow": 3}
@@ -59,51 +65,38 @@ ROLLING_WINDOW = 3
 # -- CLI ----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Yoo response change / decay figure")
 parser.add_argument(
-    "run_folder",
-    nargs="?",
-    # default="MSE",
-    default="mse_wass",
+    "--run_folder",
+    type=str,
+    default=RUN_FOLDER,
     help="Run folder under data/runs/ for math model pickles",
-)
-parser.add_argument(
-    "--nef_type",
-    default="NEF_recurrent",
-    choices=("NEF_recurrent", "NEF_synaptic"),
-)
-parser.add_argument(
-    "--nef_folder",
-    default="MSE",
-    help="Run folder under data/runs/ for NEF yoo pickles",
 )
 args = parser.parse_args()
 
 RUN_FOLDER = args.run_folder
-nef_type = args.nef_type
-nef_dir = data_path("runs") / args.nef_folder
 
-MODEL_ORDER = ["Mean", "RL", "ADM", nef_type]
-
-display_labels = {mt: mt for mt in MODEL_ORDER}
-display_labels[nef_type] = "NEF"
-
-DISPLAY_ORDER = [display_labels[mt] for mt in MODEL_ORDER]
+MODEL_ORDER = ["Mean", "RL", "ADM", "NEF_recurrent"]
 
 # -- style ---------------------------------------------------------------------
 apply_style()
 PALETTE = get_palette()
 
 
+def _display(mt: str) -> str:
+    if mt.startswith("NEF"):
+        return "NEF"
+    return mt
+
+
 def _row1_title(label: str) -> str:
     if label == "Human":
         return "Human"
-    return display_labels.get(label, label)
+    return _display(label)
 
 
 def _row1_color(label: str) -> str:
     if label == "Human":
         return PALETTE["Human"]
-    disp = display_labels.get(label, label)
-    return PALETTE[disp]
+    return PALETTE[_display(label)]
 
 
 def abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
@@ -230,14 +223,17 @@ if SAMPLE_PIDS is None:
 # -- load models ---------------------------------------------------------------
 run_dir = data_path("runs") / RUN_FOLDER
 models: dict[str, pd.DataFrame] = {}
+loaded_models: list[str] = []
 for mt in MODEL_ORDER:
-    if mt == nef_type:
-        f = nef_dir / f"{nef_type}_yoo_responses.pkl"
-    else:
-        f = run_dir / f"{mt}_yoo_responses.pkl"
+    f = run_dir / f"{mt}_yoo_responses.pkl"
     if not f.exists():
-        raise FileNotFoundError(f"Missing model responses: {f}")
+        print(f"Warning: missing {f.name}, skipping {mt}")
+        continue
     models[mt] = pd.read_pickle(f)
+    loaded_models.append(mt)
+
+MODEL_ORDER = loaded_models
+DISPLAY_ORDER = [_display(mt) for mt in MODEL_ORDER]
 
 delta_by_source: dict[str, pd.DataFrame] = {"Human": delta_human}
 for mt in MODEL_ORDER:
@@ -273,11 +269,12 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid power-law fit")
 
 loss_df = build_wasserstein_loss_long(human_means, model_means, MODEL_ORDER)
-_complete = loss_df.groupby("pid").filter(lambda g: len(g) == len(MODEL_ORDER))
-if _complete.empty:
-    raise RuntimeError("No participants with valid Wasserstein loss for all models.")
-loss_plot = _complete.copy()
-loss_plot["model_type"] = loss_plot["model_type"].replace({nef_type: "NEF"})
+if MODEL_ORDER and not loss_df.empty:
+    _complete = loss_df.groupby("pid").filter(lambda g: len(g) == len(MODEL_ORDER))
+    loss_plot = _complete.copy()
+    loss_plot["model_type"] = loss_plot["model_type"].apply(_display)
+else:
+    loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])
 
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
@@ -333,6 +330,8 @@ for ax, (label, _) in zip(ax_row1, sources):
     if label != "Human":
         plt.setp(ax.get_yticklabels(), visible=False)
     sns.despine(ax=ax, top=True, right=True)
+for ax in ax_row1[len(sources):]:
+    ax.axis("off")
 
 ymax = max(ax.get_ylim()[1] for ax in ax_row1)
 for ax in ax_row1:
@@ -384,24 +383,28 @@ sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: Wasserstein violins
 plot_palette = {disp: PALETTE[disp] for disp in DISPLAY_ORDER}
-sns.violinplot(
-    data=loss_plot,
-    x="model_type",
-    y="loss",
-    order=DISPLAY_ORDER,
-    hue="model_type",
-    palette=plot_palette,
-    inner=None,
-    legend=False,
-    cut=0,
-    ax=ax_viol,
-)
+if DISPLAY_ORDER and not loss_plot.empty:
+    sns.violinplot(
+        data=loss_plot,
+        x="model_type",
+        y="loss",
+        order=DISPLAY_ORDER,
+        hue="model_type",
+        palette=plot_palette,
+        inner=None,
+        legend=False,
+        cut=0,
+        ax=ax_viol,
+    )
+else:
+    ax_viol.text(0.5, 0.5, "no model data", ha="center", va="center", transform=ax_viol.transAxes)
 ax_viol.set_title("Distance to human response change curve")
 ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-annotate_violins(ax_viol, loss_plot, "model_type", "loss", DISPLAY_ORDER)
+if len(DISPLAY_ORDER) >= 2 and not loss_plot.empty:
+    annotate_violins(ax_viol, loss_plot, "model_type", "loss", DISPLAY_ORDER)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)

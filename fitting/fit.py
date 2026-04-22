@@ -208,6 +208,7 @@ def fit(
     loss_type: str | None = None,
     n_runs: int = 1,
     run_folder: Path | str | None = None,
+    optuna_seed: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
     if run_folder is None:
@@ -234,7 +235,7 @@ def fit(
         study_name=f"{model_type}_{dataset}_{pid}_{loss_type}",
         storage=storage,
         load_if_exists=True,
-        sampler=optuna.samplers.TPESampler(seed=42),
+        sampler=optuna.samplers.TPESampler(seed=optuna_seed),
     )
 
     def objective(trial: optuna.trial.Trial) -> float:
@@ -321,6 +322,7 @@ if __name__ == "__main__":
     else:
         k = 5
         run_folder = sys.argv[7] if len(sys.argv) > 7 else None
+    optuna_seed = int(sys.argv[9]) if len(sys.argv) > 9 else 42
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(
@@ -332,6 +334,7 @@ if __name__ == "__main__":
         loss_type=loss_type,
         n_runs=n_runs,
         run_folder=run_folder,
+        optuna_seed=optuna_seed,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")

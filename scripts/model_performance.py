@@ -25,28 +25,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import annotate_violins, apply_style, get_palette, FIGURE_SIZE
 
+# -- CLI -----------------------------------------------------------------------
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--run_folder", type=str, default="MSE")
+_args, _ = _parser.parse_known_args()
+RUN_FOLDER = _args.run_folder
+
 # -- configuration (edit here) -------------------------------------------------
-parser = argparse.ArgumentParser(description="Plot model performance across tasks.")
-parser.add_argument("run_folder", nargs="?", default="MSE")
-parser.add_argument(
-    "--nef_type",
-    default="NEF_recurrent",
-    choices=("NEF_recurrent", "NEF_synaptic"),
-)
-args = parser.parse_args()
-
-RUN_FOLDER = args.run_folder
-nef_type = args.nef_type
-
 MODEL_ORDER = {
-    "carrabin": ["Bayes", "RL", "NoisyCounting", "NEF"],
-    "jiang": ["Bayes", "RL", "DeGroot"],
-    "yoo": ["Mean", "RL", "ADM", "NEF"],
-}
-YLABELS = {
-    "carrabin": "Mean Squared Error",
-    "jiang":    "Negative Log-Likelihood",
-    "yoo":      "Mean Squared Error",
+    "carrabin": ["Bayes", "RL", "NoisyCounting", "NEF_recurrent"],
+    "jiang": ["Bayes", "RL", "DeGroot", "NEF_recurrent"],
+    "yoo": ["Mean", "RL", "ADM", "NEF_recurrent"],
 }
 TITLES = {
     "carrabin": "Ratio Estimation",
@@ -61,18 +50,41 @@ PALETTE = get_palette()
 # -- load data -----------------------------------------------------------------
 run_dir = data_path("runs") / RUN_FOLDER
 
+
+def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
+    """Return response_component if available, else cv_loss_mean."""
+    if "response_component" in perf_df.columns:
+        rc = perf_df["response_component"]
+        if rc.notna().all():
+            return rc
+    return perf_df["cv_loss_mean"]
+
+
 dfs = []
+warned_missing: set[str] = set()
 for dataset, models in MODEL_ORDER.items():
     for model_type in models:
-        load_model_type = nef_type if model_type == "NEF" else model_type
-        f = run_dir / f"{load_model_type}_{dataset}_performance.pkl"
+        f = run_dir / f"{model_type}_{dataset}_performance.pkl"
         if f.exists():
-            dfs.append(pd.read_pickle(f))
+            perf_df = pd.read_pickle(f)
+            perf_df["plot_loss"] = _get_loss(perf_df)
+            perf_df["uses_response_component"] = (
+                "response_component" in perf_df.columns
+                and perf_df["response_component"].notna().all()
+            )
+            dfs.append(perf_df)
         else:
-            print(f"Missing: {f.name}")
+            key = f"{model_type}_{dataset}"
+            if key not in warned_missing:
+                print(f"Warning: missing {f.name}, skipping {model_type} ({dataset})")
+                warned_missing.add(key)
 
-assert dfs, f"No performance files found in {run_dir}"
-perf = pd.concat(dfs, ignore_index=True)
+if dfs:
+    perf = pd.concat(dfs, ignore_index=True)
+else:
+    perf = pd.DataFrame(
+        columns=["dataset", "model_type", "plot_loss", "uses_response_component"]
+    )
 perf["model_type"] = perf["model_type"].replace(
     {
         "NEF_recurrent": "NEF",
@@ -85,9 +97,14 @@ fig, axes = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
 
 for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
     subset = perf[perf["dataset"] == dataset]
-    order = MODEL_ORDER[dataset]
+    available_models = set(subset["model_type"].unique())
+    order = [
+        "NEF" if m.startswith("NEF") else m
+        for m in MODEL_ORDER[dataset]
+        if ("NEF" if m.startswith("NEF") else m) in available_models
+    ]
 
-    if subset.empty:
+    if subset.empty or not order:
         ax.set_title(TITLES[dataset])
         ax.text(
             0.5,
@@ -103,7 +120,7 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
     sns.violinplot(
         data=subset,
         x="model_type",
-        y="cv_loss_mean",
+        y="plot_loss",
         order=order,
         hue="model_type",
         palette=PALETTE,
@@ -112,11 +129,15 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
         cut=0,
         ax=ax,
     )
-    ax.set_ylabel(YLABELS[dataset])
+    if subset["uses_response_component"].all():
+        ax.set_ylabel("Response loss (MSE / NLL)")
+    else:
+        ax.set_ylabel("CV loss")
     ax.set_xlabel("")
     sns.despine(ax=ax, top=True, right=True)
 
-    annotate_violins(ax, subset, "model_type", "cv_loss_mean", order)
+    if len(order) >= 2:
+        annotate_violins(ax, subset, "model_type", "plot_loss", order)
     ax.set_title(TITLES[dataset])
 
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)

@@ -106,6 +106,7 @@ def _resolve_jobs(
     n_runs: int,
     k: int,
     loss_type: str | None,
+    optuna_seed: int,
 ) -> list[dict]:
     """Build the list of job dicts for a run."""
     jobs = []
@@ -135,6 +136,7 @@ def _resolve_jobs(
                         "n_runs": n_runs,
                         "k": k,
                         "loss_type": lt,
+                        "optuna_seed": optuna_seed,
                     }
                 )
     return jobs
@@ -154,7 +156,7 @@ def _submit_job(job: dict, run_folder: Path, dry_run: bool = False) -> None:
 
     fit_cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
-        f"{lt} {n_runs} {k} {run_folder}"
+        f"{lt} {n_runs} {k} {run_folder} {job.get('optuna_seed', 42)}"
     )
     # TODO: prompt text requested fitting.collect --rerun, but collect is
     # specified as aggregation-only. Keep rerun in fitting.submit.
@@ -200,6 +202,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         loss_type=lt,
         n_runs=n_runs,
         run_folder=run_folder,
+        optuna_seed=job.get("optuna_seed", 42),
     )
     _rerun_single(ds, mt, pid, run_folder)
 
@@ -264,6 +267,7 @@ def main() -> None:
     parser.add_argument("--n_runs", type=int, default=1)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--loss_type", default=None)
+    parser.add_argument("--optuna_seed", type=int, default=42)
     parser.add_argument(
         "--run_folder",
         type=str,
@@ -303,6 +307,7 @@ def main() -> None:
         args.n_runs,
         args.k,
         args.loss_type,
+        args.optuna_seed,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder

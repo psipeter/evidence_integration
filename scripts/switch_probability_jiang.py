@@ -19,6 +19,7 @@ No other run folders. Does not write pickle/CSV outputs (figures only).
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -41,9 +42,13 @@ from utils.plot_style import (
     SAMPLE_MARKERS,
 )
 
-# -- configuration (edit here) -------------------------------------------------
-RUN_FOLDER = "switch_probability"
+# -- CLI ----------------------------------------------------------------------
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--run_folder", type=str, default="joint_loss")
+_args, _ = _parser.parse_known_args()
+RUN_FOLDER = _args.run_folder
 
+# -- configuration (edit here) -------------------------------------------------
 # None: print human pid / threshold / steepness table and exit.
 # Else: e.g. {"low": 12, "medium": 88, "high": 156}
 # SAMPLE_PIDS: dict[str, int] | None = None
@@ -222,6 +227,7 @@ def params_to_tidy(params: dict[int, tuple[float, float]]) -> pd.DataFrame:
 def build_loss_long(
     obs_human: pd.DataFrame,
     obs_models: dict[str, pd.DataFrame],
+    model_order: list[str],
 ) -> pd.DataFrame:
     """
     Per-participant Wasserstein distance between human and model
@@ -245,7 +251,7 @@ def build_loss_long(
         )
         if h_agg.empty or h_agg["switch_prob"].sum() == 0:
             continue
-        for mt in MODEL_ORDER:
+        for mt in model_order:
             m = obs_models[mt][obs_models[mt]["pid"] == pid]
             m_agg = (
                 m.groupby("conflict")
@@ -293,14 +299,22 @@ if SAMPLE_PIDS is None:
 
 run_dir = data_path("runs") / RUN_FOLDER
 models: dict[str, pd.DataFrame] = {}
+loaded_models: list[str] = []
 for mt in MODEL_ORDER:
     path = run_dir / f"{mt}_jiang_responses.pkl"
     params_path = run_dir / f"{mt}_jiang_params.pkl"
-    assert path.exists(), f"Missing model responses: {path}"
-    assert params_path.exists(), f"Missing model params: {params_path}"
+    if not path.exists():
+        print(f"Warning: missing {path.name}, skipping {mt}")
+        continue
+    if not params_path.exists():
+        print(f"Warning: missing {params_path.name}, skipping {mt}")
+        continue
     responses = pd.read_pickle(path)
     params_mt = pd.read_pickle(params_path)
     models[mt] = apply_beta_sampling(responses, params_mt, seed=BETA_SAMPLE_SEED)
+    loaded_models.append(mt)
+
+MODEL_ORDER = loaded_models
 
 params_models: dict[str, dict[int, tuple[float, float]]] = {}
 obs_models: dict[str, pd.DataFrame] = {}
@@ -320,12 +334,13 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
     if pid not in params_human or not np.isfinite(params_human[pid][0]):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid fit")
 
-loss_df = build_loss_long(obs_human, obs_models)
-# Paired tests: keep pids with all three models
-_complete = loss_df.groupby("pid").filter(lambda g: len(g) == 3)
-if _complete.empty:
-    raise RuntimeError("No participants with valid loss for all three models.")
-loss_plot = _complete.copy()
+loss_df = build_loss_long(obs_human, obs_models, MODEL_ORDER)
+# Paired tests: keep pids with all available models
+if MODEL_ORDER and not loss_df.empty:
+    _complete = loss_df.groupby("pid").filter(lambda g: len(g) == len(MODEL_ORDER))
+    loss_plot = _complete.copy()
+else:
+    loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])
 
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
@@ -399,6 +414,8 @@ for ax, (label, _) in zip(ax_row1, sources):
     if label != "Human":
         plt.setp(ax.get_yticklabels(), visible=False)
     sns.despine(ax=ax, top=True, right=True)
+for ax in ax_row1[len(sources):]:
+    ax.axis("off")
 
 # Row 2 left: threshold vs steepness
 h_tbl = pd.DataFrame(
@@ -446,18 +463,21 @@ sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: loss violins
 plot_palette = {k: PALETTE[k] for k in MODEL_ORDER}
-sns.violinplot(
-    data=loss_plot,
-    x="model_type",
-    y="loss",
-    order=MODEL_ORDER,
-    hue="model_type",
-    palette=plot_palette,
-    inner=None,
-    legend=False,
-    cut=0,
-    ax=ax_viol,
-)
+if MODEL_ORDER and not loss_plot.empty:
+    sns.violinplot(
+        data=loss_plot,
+        x="model_type",
+        y="loss",
+        order=MODEL_ORDER,
+        hue="model_type",
+        palette=plot_palette,
+        inner=None,
+        legend=False,
+        cut=0,
+        ax=ax_viol,
+    )
+else:
+    ax_viol.text(0.5, 0.5, "no model data", ha="center", va="center", transform=ax_viol.transAxes)
 # np.random.seed(42)
 # sns.stripplot(
 #     data=loss_plot,
@@ -475,7 +495,8 @@ ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-annotate_violins(ax_viol, loss_plot, "model_type", "loss", MODEL_ORDER)
+if len(MODEL_ORDER) >= 2 and not loss_plot.empty:
+    annotate_violins(ax_viol, loss_plot, "model_type", "loss", MODEL_ORDER)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
