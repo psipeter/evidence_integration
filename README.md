@@ -34,8 +34,8 @@ evidence_integration/
 │   ├── yoo.pkl
 │   ├── jiang_networks.npy
 │   └── runs/                  # model fitting outputs (not tracked)
-│       ├── MSE/               # math models, response loss (MSE or jiang NLL)
-│       └── mse_wass/          # math + NEF models, joint loss
+│       ├── response_loss/     # math models + NEF, response loss, 500 trials
+│       └── joint_loss/        # math models + NEF, joint loss, 100-500 trials
 ├── models/
 │   ├── math_models.py         # all mathematical models
 │   ├── counting_integrator.py # integrator counting circuit testbed
@@ -115,6 +115,9 @@ responses = run(params)  # params dict with model_type, dataset, pid, ...
 | all | `NEF_recurrent` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 | all | `NEF_synaptic` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 
+**NoisyCounting:** `nu` (lapse rate) is currently fitted; whether to fix it per
+Prat-Carrabin & Woodford (2024) is under investigation.
+
 Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) skip
 the Optuna loop and fit only the noise parameter (sigma or beta).
 
@@ -136,9 +139,9 @@ Loss type is stored inside `params.pkl` — not in the filename. Rename run
 folders manually to track experiment type (e.g. `Apr12_carrabin_response`).
 
 Loss functions in `fitting/losses.py`:
-- `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang, requires `beta`)
-- `shape` — Wasserstein on response distribution (carrabin), smoothed mean |Δresponse| curve (yoo), or switch-vs-conflict aggregates (jiang; requires `beta`)
-- `joint` — combined response + shape; default blend `w` in `JOINT_LOSS_W`: carrabin 0.2, yoo 0.5, jiang 0.3 (override with `wasserstein_w` in params)
+- `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang)
+- `shape` — Wasserstein on response distribution (carrabin), smoothed mean |Δresponse| curve (yoo), switch-vs-conflict aggregates (jiang)
+- `joint` — combined response + shape; `JOINT_LOSS_W`: carrabin=0.2, yoo=0.5, jiang=0.95 (override with `wasserstein_w` in params)
 
 ---
 
@@ -151,6 +154,9 @@ Job operations are split across submit and collect entry points:
 python -m fitting.submit all --n_trials 500
 python -m fitting.submit carrabin RL --n_trials 500
 python -m fitting.submit carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type shape
+
+# Use named folder instead of timestamped
+python -m fitting.submit carrabin RL --n_trials 500 --run_folder response_loss
 
 # Run locally (no SLURM)
 python -m fitting.submit carrabin RL --n_trials 10 --local
@@ -220,10 +226,10 @@ When drafting Cursor prompts, Claude should always format them as follows:
 All finalized figures are standalone Python scripts in `scripts/`:
 
 ```bash
-python scripts/model_performance.py [run_folder]   # default: MSE
-python scripts/response_variability_carrabin.py
-python scripts/switch_probability_jiang.py
-python scripts/response_change_yoo.py
+python scripts/model_performance.py --run_folder response_loss
+python scripts/response_variability_carrabin.py --run_folder response_loss
+python scripts/switch_probability_jiang.py --run_folder joint_loss
+python scripts/response_change_yoo.py --run_folder response_loss
 ```
 
 Scripts save both PNG (300 dpi) and PDF to `figures/`.
@@ -248,8 +254,8 @@ Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
 
 | Folder | Contents |
 |---|---|
-| `MSE` | All math models + NEF, default `response` loss, 300-500 trials |
-| `mse_wass` | All math models + NEF, joint loss, 300 trials |
+| `response_loss` | All math models + NEF, response loss, 500 trials |
+| `joint_loss` | All math models + NEF, joint loss, 100-500 trials |
 
 Rename run folders manually to reflect experiment type. Inspect
 `run_config.json` inside any folder to see exact hyperparameters used.
@@ -272,24 +278,23 @@ subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 
 ## Status
 
-- [x] Port core utility code (`uniform_encoders.py`, `paths.py`, `plot_style.py`)
-- [x] Standardize data schema across all three task dataframes
-- [x] Port and refactor mathematical models (`math_models.py`)
-- [x] Implement response, shape, and joint loss functions (`losses.py`)
-- [x] Implement Optuna fitting loop with k-fold CV (`fit.py`)
-- [x] Implement counting circuit testbeds (`counting_integrator.py`, `counting_lmu.py`)
-- [x] Implement NEF recurrent and synaptic models (`models/NEF.py`)
-- [x] Fit NEF models to carrabin and yoo (response and joint loss)
-- [x] Implement joint loss for carrabin, yoo, and jiang
-
+- [x] Port core utility code
+- [x] Standardize data schema
+- [x] Port and refactor mathematical models
+- [x] Implement response, shape, joint loss functions
+- [x] Implement Optuna fitting with k-fold CV
+- [x] Implement counting circuit testbeds
+- [x] Implement NEF recurrent and synaptic models
 - [x] Restructure job management (`fitting/submit.py`, `fitting/collect.py`)
 - [x] Create experiments/ framework with template
-- [x] Run population-level math model fits on cluster (folder: MSE)
-- [x] Create model performance figure (`scripts/model_performance.py`)
-- [x] Create response variability figure (`scripts/response_variability_carrabin.py`)
-- [x] Create switch probability figure (`scripts/switch_probability_jiang.py`)
-- [x] Create response change figure (`scripts/response_change_yoo.py`)
-- [ ] Fit NEF models to jiang
-- [ ] Collect and analyze full joint-loss fits
-- [ ] Design and implement experiment scripts
+- [x] Run math model fits: response_loss (500 trials), joint_loss (100-500 trials)
+- [x] Fit NEF models to carrabin and yoo (response and joint loss)
+- [x] Create all four figure scripts
+- [x] Implement `experiments/experiment_01_error_activity.py`
+
+- [ ] Investigate fixing nu in NoisyCounting per original paper
+- [ ] Fit NEF models to jiang (response and joint loss)
+- [ ] Run full NEF fits with 300+ trials
+- [ ] Collect and analyze response_loss and joint_loss results
+- [ ] Design and implement remaining experiment scripts
 - [ ] Final analysis and figure generation

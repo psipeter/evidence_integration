@@ -103,7 +103,7 @@ fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
 Loss functions in `fitting/losses.py`:
 - `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang)
 - `shape` — Wasserstein shape distance; carrabin (full distribution), yoo (smoothed delta curve), jiang (switch vs conflict aggregates)
-- `joint` — combined response + shape; default `w` from `JOINT_LOSS_W`: carrabin 0.2, yoo 0.5, jiang 0.3
+- `joint` — combined response + shape; default `w` from `JOINT_LOSS_W`: carrabin 0.2, yoo 0.5, jiang 0.95
 
 ---
 

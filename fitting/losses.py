@@ -308,7 +308,7 @@ def joint_loss(
     Combined response and shape loss: (1-w) * response_loss + w * shape_loss.
     - carrabin: w=0.2
     - yoo: w=0.5
-    - jiang: w=0.3 (default; tune via ``wasserstein_w`` / ``JOINT_LOSS_W``)
+    - jiang: w=0.95 (default; tune via ``wasserstein_w`` / ``JOINT_LOSS_W``)
     """
     dataset = params["dataset"]
     if dataset not in ("carrabin", "yoo", "jiang"):
