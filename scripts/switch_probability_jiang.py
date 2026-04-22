@@ -54,7 +54,7 @@ RUN_FOLDER = _args.run_folder
 # SAMPLE_PIDS: dict[str, int] | None = None
 SAMPLE_PIDS: dict[str, int] | None = {"low": 154, "medium": 88, "high": 173}
 
-MODEL_ORDER = ["Bayes", "RL", "DeGroot"]
+MODEL_ORDER = ["Bayes", "RL", "DeGroot", "NEF_recurrent"]
 LINESTYLES = ["solid", "dashed", "dotted"]  # low / medium / high sensitivity
 SAMPLE_LABELS = ["low", "medium", "high"]
 LINE_ARC = 0.2
@@ -71,6 +71,69 @@ def _model_lookup_series(mdf: pd.DataFrame) -> pd.Series:
     if s.index.duplicated().any():
         s = s[~s.index.duplicated(keep="first")]
     return s
+
+
+def _display(mt: str) -> str:
+    if mt.startswith("NEF"):
+        return "NEF"
+    return mt
+
+
+def _load_loss_long(
+    run_dir: Path,
+    model_order: list[str],
+    dataset: str,
+) -> pd.DataFrame:
+    """
+    Load per-pid shape loss for each model.
+    Prefers shape_component from performance files when available and
+    non-NaN; falls back to recomputing via losses.shape_loss().
+    Returns DataFrame with columns: pid, model_type, loss.
+    """
+    import fitting.losses as losses_mod
+
+    rows = []
+    human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
+
+    for mt in model_order:
+        perf_path = run_dir / f"{mt}_{dataset}_performance.pkl"
+        resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
+        if not perf_path.exists():
+            continue
+        perf = pd.read_pickle(perf_path)
+
+        if "shape_component" in perf.columns and perf["shape_component"].notna().all():
+            for _, row in perf.iterrows():
+                rows.append(
+                    {
+                        "pid": int(row["pid"]),
+                        "model_type": mt,
+                        "loss": float(row["shape_component"]),
+                    }
+                )
+            continue
+
+        if not resp_path.exists():
+            print(f"Warning: missing {resp_path.name}, cannot compute loss for {mt}")
+            continue
+        responses = pd.read_pickle(resp_path)
+        for pid, model_pid in responses.groupby("pid"):
+            human_pid = human_full[human_full["pid"] == pid]
+            params = {"dataset": dataset, "pid": int(pid)}
+            if dataset == "jiang":
+                params_path = run_dir / f"{mt}_{dataset}_params.pkl"
+                if params_path.exists():
+                    params_df = pd.read_pickle(params_path)
+                    beta_row = params_df[params_df["pid"] == pid]
+                    if not beta_row.empty and "beta" in beta_row.columns:
+                        params["beta"] = float(beta_row["beta"].iloc[0])
+            try:
+                loss = losses_mod.shape_loss(params, model_pid, human_pid)
+                rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
+            except Exception as e:
+                print(f"Warning: shape_loss failed for {mt} pid={pid}: {e}")
+
+    return pd.DataFrame(rows)
 
 
 def apply_beta_sampling(
@@ -224,54 +287,6 @@ def params_to_tidy(params: dict[int, tuple[float, float]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_loss_long(
-    obs_human: pd.DataFrame,
-    obs_models: dict[str, pd.DataFrame],
-    model_order: list[str],
-) -> pd.DataFrame:
-    """
-    Per-participant Wasserstein distance between human and model
-    switch-probability-weighted conflict distributions.
-
-    For each pid, compute mean switch probability at each natural conflict
-    level for human and model. Use switch probabilities as weights and
-    conflict levels as values in wasserstein_distance — scipy normalizes
-    weights internally so incomplete CDFs are handled correctly.
-    """
-    from scipy.stats import wasserstein_distance
-
-    rows: list[dict] = []
-    pids = sorted(obs_human["pid"].unique())
-    for pid in pids:
-        h = obs_human[obs_human["pid"] == pid]
-        h_agg = (
-            h.groupby("conflict")
-            .agg(switch_prob=("switch", "mean"), n=("switch", "size"))
-            .reset_index()
-        )
-        if h_agg.empty or h_agg["switch_prob"].sum() == 0:
-            continue
-        for mt in model_order:
-            m = obs_models[mt][obs_models[mt]["pid"] == pid]
-            m_agg = (
-                m.groupby("conflict")
-                .agg(switch_prob=("switch", "mean"), n=("switch", "size"))
-                .reset_index()
-            )
-            if m_agg.empty or m_agg["switch_prob"].sum() == 0:
-                continue
-            loss = float(
-                wasserstein_distance(
-                    h_agg["conflict"].values,
-                    m_agg["conflict"].values,
-                    u_weights=h_agg["switch_prob"].values,
-                    v_weights=m_agg["switch_prob"].values,
-                )
-            )
-            rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
-    return pd.DataFrame(rows)
-
-
 # -- load data & human-only analysis ------------------------------------------
 human = pd.read_pickle(data_path("jiang.pkl"))
 
@@ -334,11 +349,12 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
     if pid not in params_human or not np.isfinite(params_human[pid][0]):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid fit")
 
-loss_df = build_loss_long(obs_human, obs_models, MODEL_ORDER)
-# Paired tests: keep pids with all available models
+loss_df = _load_loss_long(run_dir, MODEL_ORDER, "jiang")
+loss_df["model_type"] = loss_df["model_type"].apply(_display)
 if MODEL_ORDER and not loss_df.empty:
-    _complete = loss_df.groupby("pid").filter(lambda g: len(g) == len(MODEL_ORDER))
-    loss_plot = _complete.copy()
+    loss_plot = loss_df.groupby("pid").filter(
+        lambda g: len(g) == len(MODEL_ORDER)
+    ).copy()
 else:
     loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])
 
@@ -348,10 +364,10 @@ sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
 
 # -- figure --------------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-gs = gridspec.GridSpec(2, 4, figure=fig, height_ratios=[1.0, 1.2])
+gs = gridspec.GridSpec(2, 5, figure=fig, height_ratios=[1.0, 1.2])
 
 ax_row1: list = []
-for i in range(4):
+for i in range(5):
     sharey = ax_row1[0] if i > 0 else None
     ax_row1.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
@@ -366,7 +382,8 @@ obs_by_source.update(obs_models)
 conflict_bins = np.linspace(0, 1.0, 5)
 
 for ax, (label, _) in zip(ax_row1, sources):
-    color = PALETTE[label]
+    display_label = _display(label)
+    color = PALETTE[display_label]
     obs_src = obs_by_source[label]
     param_src = params_by_source[label]
     for pid, ls, mkr in zip(sample_pids, LINESTYLES, _markers):
@@ -408,10 +425,10 @@ for ax, (label, _) in zip(ax_row1, sources):
 
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(0.0, 1.0)
-    ax.set_title(label)
+    ax.set_title(display_label)
     ax.set_xlabel("Conflict")
-    ax.set_ylabel("P(switch)" if label == "Human" else "")
-    if label != "Human":
+    ax.set_ylabel("P(switch)" if display_label == "Human" else "")
+    if display_label != "Human":
         plt.setp(ax.get_yticklabels(), visible=False)
     sns.despine(ax=ax, top=True, right=True)
 for ax in ax_row1[len(sources):]:
@@ -462,13 +479,17 @@ ax_param.set_xlim(0.4, 1.0)
 sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: loss violins
-plot_palette = {k: PALETTE[k] for k in MODEL_ORDER}
+plot_palette = {_display(mt): PALETTE[_display(mt)] for mt in MODEL_ORDER}
+display_order = [_display(mt) for mt in MODEL_ORDER]
+loss_plot = loss_plot.copy()
+if not loss_plot.empty:
+    loss_plot["model_type"] = loss_plot["model_type"].apply(_display)
 if MODEL_ORDER and not loss_plot.empty:
     sns.violinplot(
         data=loss_plot,
         x="model_type",
         y="loss",
-        order=MODEL_ORDER,
+        order=display_order,
         hue="model_type",
         palette=plot_palette,
         inner=None,
@@ -495,8 +516,8 @@ ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-if len(MODEL_ORDER) >= 2 and not loss_plot.empty:
-    annotate_violins(ax_viol, loss_plot, "model_type", "loss", MODEL_ORDER)
+if len(display_order) >= 2 and not loss_plot.empty:
+    annotate_violins(ax_viol, loss_plot, "model_type", "loss", display_order)
 
 # -- save ----------------------------------------------------------------------
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)

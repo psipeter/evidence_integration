@@ -12,7 +12,6 @@ _NEF_FIXED: dict[str, object] = {
     "t_obs": 0.5,
     "t_iti": 0.5,
     "dt": 0.001,
-    "probe_dt": 0.01,
     "tau_probe": 0.1,
     "tau_ff": 0.02,
     "tau_fb": 0.1,

@@ -66,6 +66,63 @@ def _display(mt: str) -> str:
     return mt
 
 
+def _load_loss_long(
+    run_dir: Path,
+    model_order: list[str],
+    dataset: str,
+) -> pd.DataFrame:
+    """
+    Load per-pid shape loss for each model.
+    Prefers shape_component from performance files when available and
+    non-NaN; falls back to recomputing via losses.shape_loss().
+    Returns DataFrame with columns: pid, model_type, loss.
+    """
+    import fitting.losses as losses_mod
+
+    rows = []
+    human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
+
+    for mt in model_order:
+        perf_path = run_dir / f"{mt}_{dataset}_performance.pkl"
+        resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
+        if not perf_path.exists():
+            continue
+        perf = pd.read_pickle(perf_path)
+
+        if "shape_component" in perf.columns and perf["shape_component"].notna().all():
+            for _, row in perf.iterrows():
+                rows.append(
+                    {
+                        "pid": int(row["pid"]),
+                        "model_type": mt,
+                        "loss": float(row["shape_component"]),
+                    }
+                )
+            continue
+
+        if not resp_path.exists():
+            print(f"Warning: missing {resp_path.name}, cannot compute loss for {mt}")
+            continue
+        responses = pd.read_pickle(resp_path)
+        for pid, model_pid in responses.groupby("pid"):
+            human_pid = human_full[human_full["pid"] == pid]
+            params = {"dataset": dataset, "pid": int(pid)}
+            if dataset == "jiang":
+                params_path = run_dir / f"{mt}_{dataset}_params.pkl"
+                if params_path.exists():
+                    params_df = pd.read_pickle(params_path)
+                    beta_row = params_df[params_df["pid"] == pid]
+                    if not beta_row.empty and "beta" in beta_row.columns:
+                        params["beta"] = float(beta_row["beta"].iloc[0])
+            try:
+                loss = losses_mod.shape_loss(params, model_pid, human_pid)
+                rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
+            except Exception as e:
+                print(f"Warning: shape_loss failed for {mt} pid={pid}: {e}")
+
+    return pd.DataFrame(rows)
+
+
 def _kde_panel_title(label: str) -> str:
     if label == "Human":
         return "Human"
@@ -83,30 +140,23 @@ run_dir = data_path("runs") / RUN_FOLDER
 human = pd.read_pickle(data_path("carrabin.pkl"))
 
 models: dict[str, pd.DataFrame] = {}
-perf_dfs = []
 loaded_models: list[str] = []
 for mt in MODEL_ORDER:
     resp_f = run_dir / f"{mt}_carrabin_responses.pkl"
-    perf_f = run_dir / f"{mt}_carrabin_performance.pkl"
     if not resp_f.exists():
         print(f"Warning: missing {resp_f.name}, skipping {mt}")
         continue
-    if not perf_f.exists():
-        print(f"Warning: missing performance file for {mt}, skipping")
-        continue
     models[mt] = pd.read_pickle(resp_f)
-    perf_dfs.append(pd.read_pickle(perf_f))
     loaded_models.append(mt)
 
 MODEL_ORDER = loaded_models
 DISPLAY_ORDER = [_display(mt) for mt in MODEL_ORDER]
 
-if perf_dfs:
-    perf = pd.concat(perf_dfs, ignore_index=True)
-else:
-    perf = pd.DataFrame(columns=["model_type", "cv_loss_mean"])
-perf_display = perf.copy()
-perf_display["model_type"] = perf_display["model_type"].apply(_display)
+loss_df = _load_loss_long(run_dir, MODEL_ORDER, "carrabin")
+loss_df["model_type"] = loss_df["model_type"].apply(_display)
+loss_plot = loss_df.groupby("pid").filter(
+    lambda g: len(g) == len(MODEL_ORDER)
+).copy()
 
 # -- per-participant std -------------------------------------------------------
 pid_std = (
@@ -212,11 +262,11 @@ ax_std.set_title("Population variability")
 sns.despine(ax=ax_std, top=True, right=True)
 
 # -- row 2b: Wasserstein violin plots ------------------------------------------
-if DISPLAY_ORDER and not perf_display.empty:
+if DISPLAY_ORDER and not loss_plot.empty:
     sns.violinplot(
-        data=perf_display,
+        data=loss_plot,
         x="model_type",
-        y="cv_loss_mean",
+        y="loss",
         order=DISPLAY_ORDER,
         hue="model_type",
         palette=PALETTE,
@@ -232,9 +282,9 @@ ax_viol.set_ylabel("Wasserstein distance")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
-if len(DISPLAY_ORDER) >= 2 and not perf_display.empty:
+if len(DISPLAY_ORDER) >= 2 and not loss_plot.empty:
     annotate_violins(
-        ax_viol, perf_display, "model_type", "cv_loss_mean", DISPLAY_ORDER
+        ax_viol, loss_plot, "model_type", "loss", DISPLAY_ORDER
     )
 
 # -- save ----------------------------------------------------------------------

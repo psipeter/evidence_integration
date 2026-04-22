@@ -26,7 +26,7 @@ from utils.slurm import DEFAULT_TIME_LIMITS, make_job_script, submit_script
 EXPERIMENT_NAME = "experiment_01_error_activity"
 DATASET = "carrabin"  # can be overridden via CLI
 MODEL_TYPE = "NEF_recurrent"
-RUN_FOLDER = "MSE"  # folder containing best-fit params
+RUN_FOLDER = "joint_loss"  # folder containing best-fit params
 
 
 def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
@@ -60,7 +60,6 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
         with nengo.Simulator(net, dt=dt, seed=int(p["seed"]), progress_bar=False) as sim:
             sim.run(t_total)
 
-        t_arr = np.arange(len(sim.data[net.probe_value])) * float(p["probe_dt"])
         error_decoded = sim.data[net.probe_error]  # (T, 2)
         spike_data = sim.data[probe_error_neurons]  # (T, n_neurons), probe-filtered
 
@@ -70,13 +69,11 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
             obs = int(row["observation"])
             # Readout at start of obs period (before value update).
             t_readout = t_iti + n_idx * t_step
-            probe_idx = int(np.round(t_readout / float(p["probe_dt"])))
-            probe_idx = int(np.clip(probe_idx, 0, len(t_arr) - 1))
-            raw_idx = int(np.round(t_readout / float(p["probe_dt"])))
-            raw_idx = int(np.clip(raw_idx, 0, len(firing_rates) - 1))
+            idx = int(np.round(t_readout / float(p["dt"])))
+            idx = int(np.clip(idx, 0, min(len(error_decoded), len(firing_rates)) - 1))
 
-            mean_act = float(firing_rates[raw_idx].mean())
-            pred_err = float(error_decoded[probe_idx, 1])  # o - v
+            mean_act = float(firing_rates[idx].mean())
+            pred_err = float(error_decoded[idx, 1])  # o - v
 
             entry: dict[str, int | float | str] = {
                 "model_type": MODEL_TYPE,
@@ -96,10 +93,12 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
 def run_local(pid: int, dataset: str, run_folder: str) -> None:
     from fitting.param_ranges import MODEL_PARAMS
 
-    params_path = RUNS_DIR / run_folder / f"{MODEL_TYPE}_{dataset}_{pid}_params.pkl"
-    params = pd.read_pickle(params_path).loc[0].to_dict()
+    params_path = RUNS_DIR / run_folder / f"{MODEL_TYPE}_{dataset}_params.pkl"
+    all_params = pd.read_pickle(params_path)
+    params = all_params[all_params["pid"] == pid].iloc[0].to_dict()
     fixed = MODEL_PARAMS.get(dataset, {}).get(MODEL_TYPE, {}).get("fixed", {})
     params = {**PARAM_DEFAULTS, **fixed, **params}
+    params["nef_type"] = "recurrent" if "recurrent" in MODEL_TYPE else "synaptic"
     params["dataset"] = dataset
     params["model_type"] = MODEL_TYPE
 

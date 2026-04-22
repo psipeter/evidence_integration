@@ -128,7 +128,7 @@ def _extract_responses(
     readout_times = np.array([t_iti + i * t_step + t_obs for i in range(n_obs)])
     return np.array(
         [
-            float(np.mean(value_decoded[np.abs(t_arr - rt) < params["probe_dt"] * 3]))
+            float(np.mean(value_decoded[np.abs(t_arr - rt) < params["dt"] * 3]))
             for rt in readout_times
         ]
     )
@@ -279,17 +279,17 @@ def build_network(
         net.probe_value = nengo.Probe(
             net.value,
             synapse=float(params["tau_probe"]),
-            sample_every=float(params["probe_dt"]),
+            sample_every=float(params["dt"]),
         )
         net.probe_error = nengo.Probe(
             net.error,
             synapse=float(params["tau_probe"]),
-            sample_every=float(params["probe_dt"]),
+            sample_every=float(params["dt"]),
         )
         net.probe_obs = nengo.Probe(
             net.node_input[0],
             synapse=None,
-            sample_every=float(params["probe_dt"]),
+            sample_every=float(params["dt"]),
         )
 
     return net
@@ -318,7 +318,7 @@ def _simulate_trial(
     ) as sim:
         sim.run(t_total)
 
-    t_arr = np.arange(len(sim.data[net.probe_value])) * float(params["probe_dt"])
+    t_arr = np.arange(len(sim.data[net.probe_value])) * float(params["dt"])
     value_decoded = sim.data[net.probe_value].squeeze()
     responses = _extract_responses(t_arr, value_decoded, n_obs, params)
     if not return_probes:
@@ -327,7 +327,7 @@ def _simulate_trial(
         "obs": sim.data[net.probe_obs].squeeze(),
         "error": sim.data[net.probe_error],
         "value": sim.data[net.probe_value].squeeze(),
-        "t": np.arange(len(sim.data[net.probe_value])) * float(params["probe_dt"]),
+        "t": np.arange(len(sim.data[net.probe_value])) * float(params["dt"]),
     }
     return responses, probe_data
 
@@ -352,7 +352,6 @@ def run(
         "t_iti",
         "dt",
         "tau_probe",
-        "probe_dt",
         "seed",
     )
     for key in required:
@@ -441,7 +440,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--radius_e", type=float, default=PARAM_DEFAULTS["radius_e"])
     p.add_argument("--radius_v", type=float, default=PARAM_DEFAULTS["radius_v"])
     p.add_argument("--pes_learning_rate", type=float, default=PARAM_DEFAULTS["pes_learning_rate"])
-    p.add_argument("--probe_dt", type=float, default=0.01)
     p.add_argument("--dt", type=float, default=0.001)
     p.add_argument("--t_obs", type=float, default=0.5)
     p.add_argument("--t_iti", type=float, default=0.5)

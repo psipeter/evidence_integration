@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.stats import wasserstein_distance
 
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -85,6 +84,63 @@ def _display(mt: str) -> str:
     if mt.startswith("NEF"):
         return "NEF"
     return mt
+
+
+def _load_loss_long(
+    run_dir: Path,
+    model_order: list[str],
+    dataset: str,
+) -> pd.DataFrame:
+    """
+    Load per-pid shape loss for each model.
+    Prefers shape_component from performance files when available and
+    non-NaN; falls back to recomputing via losses.shape_loss().
+    Returns DataFrame with columns: pid, model_type, loss.
+    """
+    import fitting.losses as losses_mod
+
+    rows = []
+    human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
+
+    for mt in model_order:
+        perf_path = run_dir / f"{mt}_{dataset}_performance.pkl"
+        resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
+        if not perf_path.exists():
+            continue
+        perf = pd.read_pickle(perf_path)
+
+        if "shape_component" in perf.columns and perf["shape_component"].notna().all():
+            for _, row in perf.iterrows():
+                rows.append(
+                    {
+                        "pid": int(row["pid"]),
+                        "model_type": mt,
+                        "loss": float(row["shape_component"]),
+                    }
+                )
+            continue
+
+        if not resp_path.exists():
+            print(f"Warning: missing {resp_path.name}, cannot compute loss for {mt}")
+            continue
+        responses = pd.read_pickle(resp_path)
+        for pid, model_pid in responses.groupby("pid"):
+            human_pid = human_full[human_full["pid"] == pid]
+            params = {"dataset": dataset, "pid": int(pid)}
+            if dataset == "jiang":
+                params_path = run_dir / f"{mt}_{dataset}_params.pkl"
+                if params_path.exists():
+                    params_df = pd.read_pickle(params_path)
+                    beta_row = params_df[params_df["pid"] == pid]
+                    if not beta_row.empty and "beta" in beta_row.columns:
+                        params["beta"] = float(beta_row["beta"].iloc[0])
+            try:
+                loss = losses_mod.shape_loss(params, model_pid, human_pid)
+                rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
+            except Exception as e:
+                print(f"Warning: shape_loss failed for {mt} pid={pid}: {e}")
+
+    return pd.DataFrame(rows)
 
 
 def _row1_title(label: str) -> str:
@@ -175,30 +231,6 @@ def curve_vector(mean_ser: pd.Series) -> np.ndarray | None:
     return reindexed.to_numpy(dtype=float)
 
 
-def build_wasserstein_loss_long(
-    human_means: dict[int, pd.Series],
-    model_means: dict[str, dict[int, pd.Series]],
-    model_order: list[str],
-) -> pd.DataFrame:
-    """Curves in ``human_means`` / ``model_means`` are already smoothed (``ROLLING_WINDOW``)."""
-    rows: list[dict] = []
-    pids = sorted(human_means.keys())
-    for pid in pids:
-        h_vec = curve_vector(human_means[pid])
-        if h_vec is None:
-            continue
-        for mt in model_order:
-            mser = model_means[mt].get(pid)
-            if mser is None:
-                continue
-            m_vec = curve_vector(mser)
-            if m_vec is None:
-                continue
-            loss = float(wasserstein_distance(h_vec, m_vec))
-            rows.append({"pid": pid, "model_type": mt, "loss": loss})
-    return pd.DataFrame(rows)
-
-
 # -- load human ----------------------------------------------------------------
 human = pd.read_pickle(data_path("yoo.pkl"))
 delta_human = abs_delta_long(human)
@@ -268,11 +300,12 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
     if pid not in params_human or not (np.isfinite(tau) and np.isfinite(y0)):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid power-law fit")
 
-loss_df = build_wasserstein_loss_long(human_means, model_means, MODEL_ORDER)
+loss_df = _load_loss_long(run_dir, MODEL_ORDER, "yoo")
+loss_df["model_type"] = loss_df["model_type"].apply(_display)
 if MODEL_ORDER and not loss_df.empty:
-    _complete = loss_df.groupby("pid").filter(lambda g: len(g) == len(MODEL_ORDER))
-    loss_plot = _complete.copy()
-    loss_plot["model_type"] = loss_plot["model_type"].apply(_display)
+    loss_plot = loss_df.groupby("pid").filter(
+        lambda g: len(g) == len(MODEL_ORDER)
+    ).copy()
 else:
     loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])
 
