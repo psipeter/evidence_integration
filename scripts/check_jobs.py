@@ -17,7 +17,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import RUNS_DIR
+from utils.paths import DATA_DIR, RUNS_DIR
+
+PROJECT_ROOT = DATA_DIR.parent
 
 
 def get_running_jobs() -> list[dict]:
@@ -50,7 +52,7 @@ def find_run_folder_for_job(job_id: str) -> Path | None:
     Search logs/ for {job_id}.out and extract run_folder from the log.
     Returns the run folder Path if found, else None.
     """
-    log_file = RUNS_DIR.parent / "logs" / f"{job_id}.out"
+    log_file = PROJECT_ROOT / "logs" / f"{job_id}.out"
     if not log_file.exists():
         return None
     # look for run_folder path in log output
@@ -67,51 +69,61 @@ def find_run_folder_for_job(job_id: str) -> Path | None:
     return None
 
 
-def job_is_complete(job_id: str, run_folder_filter: str | None) -> tuple[bool, str]:
+def parse_job_name(name: str) -> tuple[str, str, str] | None:
+    """
+    Parse model_type, dataset, pid from job script name like
+    'NEF_recurrent_yoo_2.sh' or 'ADM_carrabin_15.sh'.
+    Returns (model_type, dataset, pid) or None if unparseable.
+    """
+    name = name.replace(".sh", "")
+    datasets = ("carrabin", "jiang", "yoo")
+    for ds in datasets:
+        marker = f"_{ds}_"
+        if marker in name:
+            idx = name.index(marker)
+            model_type = name[:idx]
+            pid = name[idx + len(marker) :]
+            if model_type and pid.isdigit():
+                return model_type, ds, pid
+    return None
+
+
+def job_is_complete(job: dict, run_folder_filter: str | None) -> tuple[bool, str]:
     """
     Check if a job has saved all required output files.
     Returns (is_complete, reason_string).
     """
-    log_file = RUNS_DIR.parent / "logs" / f"{job_id}.out"
+    log_file = PROJECT_ROOT / "logs" / f"{job['job_id']}.out"
     if not log_file.exists():
         return False, "no log file found"
 
-    text = log_file.read_text(errors="replace")
+    parsed = parse_job_name(job["name"])
+    if parsed is None:
+        return False, f"could not parse job name: {job['name']}"
+    model_type, dataset, pid = parsed
 
-    # look for model_type, dataset, pid in log
-    model_type, dataset, pid = None, None, None
-    run_folder = None
-    for line in text.splitlines():
-        if "data/runs/" in line:
-            parts = line.split("data/runs/")
-            if len(parts) > 1:
-                sub = parts[1]
-                folder_name = sub.split("/")[0]
-                run_folder = RUNS_DIR / folder_name
-                # try to parse filename like NEF_recurrent_carrabin_1_params.pkl
-                fname = sub.split("/")[-1] if "/" in sub else ""
-                if "_params.pkl" in fname:
-                    parts2 = fname.replace("_params.pkl", "").split("_")
-                    if len(parts2) >= 3:
-                        pid = parts2[-1]
-                        dataset = parts2[-2]
-                        model_type = "_".join(parts2[:-2])
+    candidates = []
+    for folder in RUNS_DIR.iterdir():
+        if not folder.is_dir():
+            continue
+        if run_folder_filter and folder.name != run_folder_filter:
+            continue
+        params_f = folder / f"{model_type}_{dataset}_{pid}_params.pkl"
+        if params_f.exists():
+            candidates.append(folder)
 
-    if run_folder_filter and run_folder and run_folder.name != run_folder_filter:
-        return False, f"different folder ({run_folder.name})"
+    if not candidates:
+        return False, f"{model_type} {dataset} pid={pid} — no params file found"
 
-    if not all([model_type, dataset, pid, run_folder]):
-        return False, "could not parse job info from log"
+    for folder in candidates:
+        params_f = folder / f"{model_type}_{dataset}_{pid}_params.pkl"
+        responses_f = folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
+        perf_f = folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
+        missing = [f.name for f in [params_f, responses_f, perf_f] if not f.exists()]
+        if not missing:
+            return True, f"{model_type} {dataset} pid={pid} in {folder.name}"
 
-    params_f = run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
-    responses_f = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
-    perf_f = run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
-
-    missing = [f.name for f in [params_f, responses_f, perf_f] if not f.exists()]
-    if missing:
-        return False, f"missing: {', '.join(missing)}"
-
-    return True, f"{model_type} {dataset} pid={pid} in {run_folder.name}"
+    return False, f"{model_type} {dataset} pid={pid} — missing output files"
 
 
 def main() -> None:
@@ -138,7 +150,7 @@ def main() -> None:
     to_cancel = []
 
     for job in jobs:
-        complete, reason = job_is_complete(job["job_id"], args.run_folder)
+        complete, reason = job_is_complete(job, args.run_folder)
         status = "DONE  " if complete else "RUNNING"
         print(f"  [{status}] job={job['job_id']:>10}  name={job['name']:<20}  {reason}")
         if complete:
