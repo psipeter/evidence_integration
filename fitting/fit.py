@@ -340,3 +340,4 @@ if __name__ == "__main__":
     logging.info(f"Completed in {elapsed:.2f} min")
     logging.info(performance_df.to_string())
     logging.info(params_df.to_string())
+    print("JOB_COMPLETE")

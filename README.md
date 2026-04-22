@@ -115,9 +115,6 @@ responses = run(params)  # params dict with model_type, dataset, pid, ...
 | all | `NEF_recurrent` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 | all | `NEF_synaptic` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 
-**NoisyCounting:** `nu` (lapse rate) is currently fitted; whether to fix it per
-Prat-Carrabin & Woodford (2024) is under investigation.
-
 Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) skip
 the Optuna loop and fit only the noise parameter (sigma or beta).
 
@@ -276,6 +273,37 @@ subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 
 ---
 
+## Current Session Notes
+
+Key design decisions from recent development (for continuity across sessions):
+
+**Two-loss strategy:** Model performance figures use `response_loss` fits
+(best trial-by-trial accuracy). Task-specific shape violin plots use
+`joint_loss` fits (best distributional match). These are kept separate
+because optimizing joint loss compresses response loss differences between
+models.
+
+**Joint loss weights:** `JOINT_LOSS_W = {carrabin: 0.2, yoo: 0.5, jiang: 0.95}`.
+The jiang weight is high (0.95) because NLL (~8-15) vastly outscales
+Wasserstein (~0.05-0.1); w=0.95 is needed for the shape term to contribute
+meaningfully.
+
+**Cluster utilities:** `scripts/check_jobs.py --cancel` identifies and
+cancels SLURM jobs that have finished but are still running. Jobs signal
+completion by printing `JOB_COMPLETE` at the end of `fitting/fit.py`.
+This script is still under development (prompt 206).
+
+**NEF probe sampling:** `probe_dt` was removed; all probes now sample at
+`dt=0.001`. This fixed a zero-activity bug in `experiment_01_error_activity.py`
+where firing rates were indexed using the wrong timestep.
+
+**experiment_01_error_activity.py:** Measures mean error population activity
+vs prediction error at the start of each observation. Run with
+`--local --pid N` for one participant, `--collect` to aggregate.
+Currently implemented for carrabin; jiang and yoo pending.
+
+---
+
 ## Status
 
 - [x] Port core utility code
@@ -291,7 +319,6 @@ subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 - [x] Fit NEF models to carrabin and yoo (response and joint loss)
 - [x] Create all four figure scripts
 - [x] Implement `experiments/experiment_01_error_activity.py`
-
 - [ ] Investigate fixing nu in NoisyCounting per original paper
 - [ ] Fit NEF models to jiang (response and joint loss)
 - [ ] Run full NEF fits with 300+ trials
