@@ -106,14 +106,12 @@ responses = run(params)  # params dict with model_type, dataset, pid, ...
 | carrabin | `Bayes` | optimal | sigma only |
 | carrabin | `NoisyCounting` | human-matching | mu, sigma_c, nu |
 | carrabin | `RL` | naive | alpha |
-| carrabin | `RL_decay` | naive (decay) | alpha_0, lambda_ |
 | jiang | `Bayes` | optimal | beta only |
 | jiang | `DeGroot` | human-matching | omega, beta |
 | jiang | `RL` | naive | alpha, beta |
 | yoo | `Mean` | optimal | sigma only |
 | yoo | `ADM` | human-matching | phi, rho, nu |
 | yoo | `RL` | naive | alpha |
-| yoo | `RL_decay` | naive (decay) | alpha_0, lambda_ |
 | all | `NEF_recurrent` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 | all | `NEF_synaptic` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 
@@ -283,7 +281,7 @@ subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
 - [x] Implement NEF recurrent and synaptic models (`models/NEF.py`)
 - [x] Fit NEF models to carrabin and yoo (response and joint loss)
 - [x] Implement joint loss for carrabin, yoo, and jiang
-- [x] Add RL_decay model for yoo and carrabin
+
 - [x] Restructure job management (`fitting/submit.py`, `fitting/collect.py`)
 - [x] Create experiments/ framework with template
 - [x] Run population-level math model fits on cluster (folder: MSE)

@@ -10,10 +10,8 @@ Ported and redesigned from
 **Datasets and model types**
 
 - **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive),
-  ``RL_decay`` (naive, decaying learning rate)
 - **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
-- **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive),
-  ``RL_decay`` (naive, decaying learning rate)
+- **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
 
 **Unified interface**
 
@@ -171,9 +169,9 @@ def _bayes_posterior(
     return float(num / den)
 
 
-_CARRABIN_MODELS = frozenset({"Bayes", "NoisyCounting", "RL", "RL_decay"})
+_CARRABIN_MODELS = frozenset({"Bayes", "NoisyCounting", "RL"})
 _JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL"})
-_YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_decay"})
+_YOO_MODELS = frozenset({"Mean", "ADM", "RL"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -316,16 +314,6 @@ def _run_carrabin(
             expectation += params["alpha"] * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
-    if model_type == "RL_decay":
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        expectation = 0.0
-        for n, value in enumerate(values, start=1):
-            alpha = alpha_0 / n**lambda_
-            error = value - expectation
-            expectation += alpha * error
-            expectation = float(np.clip(expectation, -1, 1))
-        return float(expectation)
     raise AssertionError("unreachable")
 
 
@@ -408,16 +396,6 @@ def _run_yoo(
             expectation += params["alpha"] * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
-    if model_type == "RL_decay":
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        expectation = 0.0
-        for n, value in enumerate(values, start=1):
-            alpha = alpha_0 / n**lambda_
-            error = value - expectation
-            expectation += alpha * error
-            expectation = float(np.clip(expectation, -1, 1))
-        return float(expectation)
     if model_type == "ADM":
         phi = params["phi"]
         rho = params["rho"]

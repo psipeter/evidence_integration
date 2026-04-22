@@ -54,10 +54,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
         },
-        "RL_decay": {
-            "alpha_0": (0.01, 5.0, 0.001),
-            "lambda_": (0.0, 2.0, 0.001),
-        },
         "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
         "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },
@@ -78,10 +74,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "Mean": {},
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
-        },
-        "RL_decay": {
-            "alpha_0": (0.01, 5.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
         },
         "ADM": {
             "phi": (0.001, 1.0, 0.001),

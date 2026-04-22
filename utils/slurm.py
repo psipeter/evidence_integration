@@ -10,14 +10,12 @@ DEFAULT_TIME_LIMITS = {
     "Bayes": "0:30:0",
     "NoisyCounting": "24:0:0",
     "RL": "2:0:0",
-    "RL_decay": "2:0:0",
     "DeGroot": "1:0:0",
     "Mean": "0:30:0",
     "ADM": "2:0:0",
     "NEF_recurrent": "72:0:0",
     "NEF_synaptic": "72:0:0",
 }
-
 
 def make_job_script(
     root: str,
@@ -42,7 +40,6 @@ def make_job_script(
     ]
     lines.extend(commands)
     return "\n".join(lines) + "\n"
-
 
 def submit_script(script_path: Path, dry_run: bool = False) -> None:
     if dry_run:

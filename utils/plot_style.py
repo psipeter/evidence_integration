@@ -64,7 +64,6 @@ def get_palette() -> dict:
         "Bayes":         palette[0],
         "Mean":          palette[0],
         "RL":            palette[1],
-        "RL_decay":      palette[5],
         "NoisyCounting": palette[2],
         "DeGroot":       palette[2],
         "ADM":           palette[2],
