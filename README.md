@@ -33,9 +33,11 @@ evidence_integration/
 │   ├── jiang.pkl
 │   ├── yoo.pkl
 │   ├── jiang_networks.npy
-│   └── runs/                  # model fitting outputs (not tracked)
-│       ├── response_loss/     # math models + NEF, response loss, 500 trials
-│       └── joint_loss/        # math models + NEF, joint loss, 100-500 trials
+│   ├── runs/                  # model fitting outputs (not tracked)
+│   │   ├── response_loss/     # math models + NEF, response loss, 500 trials
+│   │   └── joint_loss/        # math models + NEF, joint loss, 100-500 trials
+│   └── experiments/           # experiment outputs (not tracked)
+│       └── experiment_01/     # error population activity data
 ├── models/
 │   ├── math_models.py         # all mathematical models
 │   ├── counting_integrator.py # integrator counting circuit testbed
@@ -48,18 +50,19 @@ evidence_integration/
 │   ├── submit.py              # job submission and rerun
 │   └── collect.py             # result aggregation
 ├── experiments/
-│   └── template.py            # template for experiment scripts
+│   └── experiment_01_error_activity.py
 ├── scripts/
 │   ├── model_performance.py
 │   ├── response_variability_carrabin.py
 │   ├── switch_probability_jiang.py
 │   ├── response_change_yoo.py
-│   ├── counting_accuracy.py   # counting circuit sweep
-│   └── NEF_plots.py           # NEF population dynamics
+│   ├── plot_experiment_01.py
+│   ├── check_jobs.py          # monitor and cancel finished SLURM jobs
+│   └── NEF_plots.py
 ├── utils/
 │   ├── paths.py
 │   ├── plot_style.py
-│   ├── slurm.py               # SLURM job utilities
+│   ├── slurm.py
 │   └── uniform_encoders.py
 └── logs/                      # SLURM job logs (not tracked)
 ```
@@ -103,94 +106,108 @@ responses = run(params)  # params dict with model_type, dataset, pid, ...
 
 | Dataset | Model | Role | Parameters |
 |---|---|---|---|
-| carrabin | `Bayes` | optimal | sigma only |
+| carrabin | `Bayes` | optimal | — |
 | carrabin | `NoisyCounting` | human-matching | mu, sigma_c, nu |
 | carrabin | `RL` | naive | alpha |
-| jiang | `Bayes` | optimal | beta only |
+| jiang | `Bayes` | optimal | beta |
 | jiang | `DeGroot` | human-matching | omega, beta |
 | jiang | `RL` | naive | alpha, beta |
-| yoo | `Mean` | optimal | sigma only |
+| yoo | `Mean` | optimal | — |
 | yoo | `ADM` | human-matching | phi, rho, nu |
 | yoo | `RL` | naive | alpha |
 | all | `NEF_recurrent` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 | all | `NEF_synaptic` | neural | lambda_, alpha_0 (+ omega, beta for jiang) |
 
-Parameter-free models (`Bayes` for carrabin/jiang, `Mean` for yoo) skip
-the Optuna loop and fit only the noise parameter (sigma or beta).
-
 ---
 
 ## Fitting
 
-Fitting uses Optuna with k-fold cross-validation (k=5). The loss function
-is task-aware by default: ``response`` loss for all datasets (MSE on carrabin/yoo,
-NLL on jiang).
-All outputs are saved to a timestamped run folder under `data/runs/`.
+Fitting uses Optuna with k-fold cross-validation (k=5). Default loss is `response` for all datasets.
 
-```python
-# fit.py entry point
-python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs] [run_folder]
+```bash
+python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [loss_type] [n_runs] [k] [run_folder]
 ```
 
-Loss type is stored inside `params.pkl` — not in the filename. Rename run
-folders manually to track experiment type (e.g. `Apr12_carrabin_response`).
-
 Loss functions in `fitting/losses.py`:
-- `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang)
+- `response` — MSE on carrabin/yoo; total NLL on jiang (requires `beta`)
 - `shape` — Wasserstein on response distribution (carrabin), smoothed mean |Δresponse| curve (yoo), switch-vs-conflict aggregates (jiang)
-- `joint` — combined response + shape; `JOINT_LOSS_W`: carrabin=0.2, yoo=0.5, jiang=0.95 (override with `wasserstein_w` in params)
+- `joint` — combined response + shape; `JOINT_LOSS_W`: carrabin=0.2, yoo=0.5, jiang=0.95
+
+**Two-loss strategy:** `response_loss` fits are used for model performance figures (best trial-by-trial accuracy). `joint_loss` fits are used for task-specific shape violin plots (best distributional match). Optimizing joint loss compresses response loss differences between models, so the two are kept separate.
 
 ---
 
 ## Job Management
 
-Job operations are split across submit and collect entry points:
-
 ```bash
-# Submit a new run (SLURM)
-python -m fitting.submit all --n_trials 500
-python -m fitting.submit carrabin RL --n_trials 500
-python -m fitting.submit carrabin NoisyCounting --n_trials 500 --n_runs 50 --loss_type shape
+# Submit fitting jobs
+python -m fitting.submit carrabin RL --n_trials 500 --loss_type response --run_folder response_loss
+python -m fitting.submit all --n_trials 500 --loss_type response --run_folder response_loss
 
-# Use named folder instead of timestamped
-python -m fitting.submit carrabin RL --n_trials 500 --run_folder response_loss
-
-# Run locally (no SLURM)
+# Run locally
 python -m fitting.submit carrabin RL --n_trials 10 --local
 
-# Resubmit missing jobs from an existing run
-python -m fitting.submit --resubmit Apr12_632pm
+# Resubmit missing jobs
+python -m fitting.submit --resubmit response_loss
 
-# Collect results into combined files
-python -m fitting.collect Apr12_632pm
+# Collect results
+python -m fitting.collect response_loss
 
-# Dry run
-python -m fitting.submit all --dry_run
+# Monitor cluster jobs (cancel finished ones)
+python scripts/check_jobs.py --cancel
 ```
 
-Run folders are created automatically with timestamp names (`Apr12_632pm`).
-Rename them manually to reflect the experiment. To clear a run, delete the
-folder: `rm -rf data/runs/Apr12_632pm`.
+Jobs print `JOB_COMPLETE` when finished; `check_jobs.py` uses this to identify done-but-still-running jobs.
 
 ---
 
-## Plotting Conventions
+## Plotting
 
-Colors are assigned by model role using the `colorblind` palette via
-`get_palette()` in `utils/plot_style.py`:
-- Optimal (Bayes, Mean): `palette[0]`
-- Naive (RL): `palette[1]`
-- Human-matching (NoisyCounting, DeGroot, ADM): `palette[2]`
-- NEF models: `palette[3]`
+All figure scripts accept `--run_folder`:
 
-All figure scripts import from `utils/plot_style.py`:
-
-```python
-from utils.plot_style import apply_style, get_palette, FIGURE_SIZE, SAMPLE_MARKERS
-from utils.plot_style import annotate_violins
+```bash
+python scripts/model_performance.py --run_folder response_loss
+python scripts/response_variability_carrabin.py --run_folder response_loss
+python scripts/switch_probability_jiang.py --run_folder joint_loss
+python scripts/response_change_yoo.py --run_folder response_loss
 ```
 
-Figures are saved as both PNG (300 dpi) and PDF to `figures/`.
+Scripts skip missing models gracefully and save PNG (300 dpi) + PDF to `figures/`.
+
+### Conventions
+- No `plt.show()` — save to file
+- Use `annotate_violins()` for significance brackets
+- Run with `SAMPLE_PIDS = None` first to get pid table, then set sample pids
+
+---
+
+## Experiments
+
+Each experiment script handles submission, local running, and collection:
+
+```bash
+# Run locally for one pid
+python experiments/experiment_01_error_activity.py --pid 1 --dataset carrabin --local
+
+# Submit all pids to cluster
+python experiments/experiment_01_error_activity.py --dataset carrabin
+
+# Collect results
+python experiments/experiment_01_error_activity.py --collect --dataset carrabin
+
+# Plot
+python scripts/plot_experiment_01.py --dataset carrabin
+```
+
+### experiment_01_error_activity
+Measures mean error population activity (on/off neurons split by encoder threshold=0.5)
+and prediction error (raw: obs − prev_response; decoded: error probe) at 100ms into
+each observation. Output: `data/experiments/experiment_01/experiment_01_{dataset}.pkl`.
+
+`plot_experiment_01.py` produces a 3-panel figure:
+1. On/off neuron activity vs signed PE (obs 3–5)
+2. Per-group response std vs firing rate std
+3. Per-pid residual firing rate std (after regressing out PE and observation) vs response std
 
 ---
 
@@ -201,127 +218,36 @@ conda activate PY311
 source venv/bin/activate
 ```
 
-Both environments are kept in sync via `requirements.txt`.
-
 ---
 
 ## Cursor Prompt Format
 
-When drafting Cursor prompts, Claude should always format them as follows:
-
 - Title: `Cursor Prompt 00X — Brief description`
-- Body: single fenced code block with language `markdown`
-- Numbering: sequential across entire project, never reset
+- Numbering: sequential, never reset — **next prompt is 218**
 - One prompt per response; combine multi-file changes into labeled sections
 - File paths relative to project root
 - Self-contained — Cursor should execute without reading conversation history
 
 ---
 
-## Figures
-
-All finalized figures are standalone Python scripts in `scripts/`:
-
-```bash
-python scripts/model_performance.py --run_folder response_loss
-python scripts/response_variability_carrabin.py --run_folder response_loss
-python scripts/switch_probability_jiang.py --run_folder joint_loss
-python scripts/response_change_yoo.py --run_folder response_loss
-```
-
-Scripts save both PNG (300 dpi) and PDF to `figures/`.
-
-### Conventions for figure scripts
-- No `plt.show()` — save to file and inspect via file browser
-- Use `annotate_violins()` from `utils/plot_style` for violin plot significance brackets
-- Configuration variables (run folders, sample pids, etc.) live at the top
-  of each script — edit there, not in the plotting logic
-
-### Editing sample participants
-Run once with `SAMPLE_PIDS = None` to print the pid/parameter table, then
-set `SAMPLE_PIDS` at the top of the script and rerun. Example:
-
-    SAMPLE_PIDS = {'narrow': 15, 'medium': 7, 'broad': 4}
-
----
-
-## Run Folders
-
-Fitted model data lives in `data/runs/` (not tracked by git). Key folders:
-
-| Folder | Contents |
-|---|---|
-| `response_loss` | All math models + NEF, response loss, 500 trials |
-| `joint_loss` | All math models + NEF, joint loss, 100-500 trials |
-
-Rename run folders manually to reflect experiment type. Inspect
-`run_config.json` inside any folder to see exact hyperparameters used.
-
----
-
-## NEF Model Development
-
-`models/NEF.py` implements both `NEF_recurrent` and `NEF_synaptic` with the
-same `run(params)` interface as the math models.
-
-Counting testbeds are maintained separately:
-- `models/counting_integrator.py` — integrator counting circuit
-- `models/counting_lmu.py` — LMU counting circuit
-
-Pretraining is dispatched via `_pretrain()` and supports shared counting
-subnetwork defaults (`counting="integrator"`, `n_neurons_counting=1000`).
-
----
-
-## Current Session Notes
-
-Key design decisions from recent development (for continuity across sessions):
-
-**Two-loss strategy:** Model performance figures use `response_loss` fits
-(best trial-by-trial accuracy). Task-specific shape violin plots use
-`joint_loss` fits (best distributional match). These are kept separate
-because optimizing joint loss compresses response loss differences between
-models.
-
-**Joint loss weights:** `JOINT_LOSS_W = {carrabin: 0.2, yoo: 0.5, jiang: 0.95}`.
-The jiang weight is high (0.95) because NLL (~8-15) vastly outscales
-Wasserstein (~0.05-0.1); w=0.95 is needed for the shape term to contribute
-meaningfully.
-
-**Cluster utilities:** `scripts/check_jobs.py --cancel` identifies and
-cancels SLURM jobs that have finished but are still running. Jobs signal
-completion by printing `JOB_COMPLETE` at the end of `fitting/fit.py`.
-This script is still under development (prompt 206).
-
-**NEF probe sampling:** `probe_dt` was removed; all probes now sample at
-`dt=0.001`. This fixed a zero-activity bug in `experiment_01_error_activity.py`
-where firing rates were indexed using the wrong timestep.
-
-**experiment_01_error_activity.py:** Measures mean error population activity
-vs prediction error at the start of each observation. Run with
-`--local --pid N` for one participant, `--collect` to aggregate.
-Currently implemented for carrabin; jiang and yoo pending.
-
----
-
 ## Status
 
-- [x] Port core utility code
-- [x] Standardize data schema
-- [x] Port and refactor mathematical models
-- [x] Implement response, shape, joint loss functions
-- [x] Implement Optuna fitting with k-fold CV
-- [x] Implement counting circuit testbeds
-- [x] Implement NEF recurrent and synaptic models
-- [x] Restructure job management (`fitting/submit.py`, `fitting/collect.py`)
-- [x] Create experiments/ framework with template
-- [x] Run math model fits: response_loss (500 trials), joint_loss (100-500 trials)
-- [x] Fit NEF models to carrabin and yoo (response and joint loss)
-- [x] Create all four figure scripts
-- [x] Implement `experiments/experiment_01_error_activity.py`
-- [ ] Investigate fixing nu in NoisyCounting per original paper
-- [ ] Fit NEF models to jiang (response and joint loss)
-- [ ] Run full NEF fits with 300+ trials
-- [ ] Collect and analyze response_loss and joint_loss results
-- [ ] Design and implement remaining experiment scripts
-- [ ] Final analysis and figure generation
+**Complete:**
+- All math models (carrabin, jiang, yoo)
+- Response, shape, joint loss functions
+- Optuna fitting with k-fold CV
+- NEF recurrent and synaptic models
+- Job management (submit.py, collect.py, check_jobs.py)
+- All four main figure scripts
+- experiment_01_error_activity.py (carrabin)
+
+**In progress:**
+- response_loss fits: math models 500 trials (running), NEF n=1 placeholder
+- joint_loss fits: math models 500 trials (running), NEF carrabin 100 trials (overnight)
+- experiment_01 correlation analysis: weak with n=1 NEF fits, pending 100-trial rerun
+
+**Pending:**
+- NEF fits with 300+ trials for all datasets
+- experiment_01 for jiang and yoo
+- Additional experiment scripts
+- Final analysis and figure generation
