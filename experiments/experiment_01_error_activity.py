@@ -60,20 +60,22 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
         with nengo.Simulator(net, dt=dt, seed=int(p["seed"]), progress_bar=False) as sim:
             sim.run(t_total)
 
-        error_decoded = sim.data[net.probe_error]  # (T, 2)
         spike_data = sim.data[probe_error_neurons]  # (T, n_neurons), probe-filtered
 
         firing_rates = spike_data
+        prev_response = 0.0  # neutral prior before any observations
 
         for n_idx, (_, row) in enumerate(trial_data.iterrows()):
             obs = int(row["observation"])
-            # Readout at start of obs period (before value update).
-            t_readout = t_iti + n_idx * t_step
+            current_value = float(row["value"])
+            pred_err = current_value - prev_response  # o[n] - v[n-1]
+
+            # Readout mean activity at 100ms into obs period.
+            t_readout = t_iti + n_idx * t_step + 0.1
             idx = int(np.round(t_readout / float(p["dt"])))
-            idx = int(np.clip(idx, 0, min(len(error_decoded), len(firing_rates)) - 1))
+            idx = int(np.clip(idx, 0, len(firing_rates) - 1))
 
             mean_act = float(firing_rates[idx].mean())
-            pred_err = float(error_decoded[idx, 1])  # o - v
 
             entry: dict[str, int | float | str] = {
                 "model_type": MODEL_TYPE,
@@ -86,6 +88,10 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
             if params["dataset"] == "jiang":
                 entry["stage"] = int(row["stage"])
             rows.append(entry)
+
+            # Update previous response from decoded value probe at same timepoint.
+            value_idx = int(np.clip(idx, 0, len(sim.data[net.probe_value]) - 1))
+            prev_response = float(sim.data[net.probe_value][value_idx, 0])
 
     return pd.DataFrame(rows)
 
@@ -102,11 +108,11 @@ def run_local(pid: int, dataset: str, run_folder: str) -> None:
     params["dataset"] = dataset
     params["model_type"] = MODEL_TYPE
 
-    out_dir = data_path("experiments") / EXPERIMENT_NAME / dataset
+    out_dir = data_path("experiments") / "experiment_01"
     out_dir.mkdir(parents=True, exist_ok=True)
     df = simulate_experiment(pid, params)
-    df.to_pickle(out_dir / f"{EXPERIMENT_NAME}_{dataset}_{pid}.pkl")
-    print(f"Saved {out_dir}/{EXPERIMENT_NAME}_{dataset}_{pid}.pkl")
+    df.to_pickle(out_dir / f"experiment_01_{dataset}_{pid}.pkl")
+    print(f"Saved {out_dir}/experiment_01_{dataset}_{pid}.pkl")
 
 
 def submit(
@@ -138,13 +144,13 @@ def submit(
 
 
 def collect(dataset: str) -> None:
-    out_dir = data_path("experiments") / EXPERIMENT_NAME / dataset
-    files = sorted(out_dir.glob(f"{EXPERIMENT_NAME}_{dataset}_*.pkl"))
+    out_dir = data_path("experiments") / "experiment_01"
+    files = sorted(out_dir.glob(f"experiment_01_{dataset}_*.pkl"))
     if not files:
         print(f"No files found in {out_dir}")
         return
     df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
-    out = out_dir / f"{EXPERIMENT_NAME}_{dataset}.pkl"
+    out = out_dir / f"experiment_01_{dataset}.pkl"
     df.to_pickle(out)
     print(f"Collected {len(files)} files -> {out} ({df.shape})")
 
