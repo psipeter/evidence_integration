@@ -99,6 +99,7 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
             entry["rd"] = float(rd_values[n_idx])
             entry["response_before"] = prev_response
             entry["response_after"] = float(sim.data[net.probe_value][idx, 0])
+            entry["lambda_"] = float(params.get("lambda_", float("nan")))
             rows.append(entry)
 
             prev_response = float(sim.data[net.probe_value][idx, 0])
