@@ -96,6 +96,8 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
             }
             if params["dataset"] == "jiang":
                 entry["stage"] = int(row["stage"])
+            entry["response_before"] = prev_response
+            entry["response_after"] = float(sim.data[net.probe_value][idx, 0])
             rows.append(entry)
 
             prev_response = float(sim.data[net.probe_value][idx, 0])
