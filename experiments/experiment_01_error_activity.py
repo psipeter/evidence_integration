@@ -27,6 +27,7 @@ EXPERIMENT_NAME = "experiment_01_error_activity"
 DATASET = "carrabin"  # can be overridden via CLI
 MODEL_TYPE = "NEF_recurrent"
 RUN_FOLDER = "joint_loss"  # folder containing best-fit params
+ENCODER_THRESHOLD = 0.5  # neurons with encoder[:,1] > thresh are "on", < -thresh are "off"
 
 
 def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
@@ -60,38 +61,44 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
         with nengo.Simulator(net, dt=dt, seed=int(p["seed"]), progress_bar=False) as sim:
             sim.run(t_total)
 
+        error_decoded = sim.data[net.probe_error]  # (T, 2)
         spike_data = sim.data[probe_error_neurons]  # (T, n_neurons), probe-filtered
+        encoders = sim.data[net.error].encoders  # (n_neurons, 2)
+        enc_pe = encoders[:, 1]  # PE dimension
+        on_idx = np.where(enc_pe > ENCODER_THRESHOLD)[0]
+        off_idx = np.where(enc_pe < -ENCODER_THRESHOLD)[0]
 
         firing_rates = spike_data
-        prev_response = 0.0  # neutral prior before any observations
+        prev_response = 0.0
 
         for n_idx, (_, row) in enumerate(trial_data.iterrows()):
             obs = int(row["observation"])
             current_value = float(row["value"])
-            pred_err = current_value - prev_response  # o[n] - v[n-1]
+            pred_err_raw = current_value - prev_response
 
-            # Readout mean activity at 100ms into obs period.
             t_readout = t_iti + n_idx * t_step + 0.1
             idx = int(np.round(t_readout / float(p["dt"])))
-            idx = int(np.clip(idx, 0, len(firing_rates) - 1))
+            idx = int(np.clip(idx, 0, min(len(firing_rates), len(error_decoded)) - 1))
 
-            mean_act = float(firing_rates[idx].mean())
+            pred_err_decoded = float(error_decoded[idx, 1])
+            mean_act_on = float(firing_rates[idx][on_idx].mean())
+            mean_act_off = float(firing_rates[idx][off_idx].mean())
 
             entry: dict[str, int | float | str] = {
                 "model_type": MODEL_TYPE,
                 "pid": pid,
                 "trial": int(trial),
                 "observation": obs,
-                "mean_activity": mean_act,
-                "prediction_error": pred_err,
+                "mean_activity_on": mean_act_on,
+                "mean_activity_off": mean_act_off,
+                "prediction_error_raw": pred_err_raw,
+                "prediction_error_decoded": pred_err_decoded,
             }
             if params["dataset"] == "jiang":
                 entry["stage"] = int(row["stage"])
             rows.append(entry)
 
-            # Update previous response from decoded value probe at same timepoint.
-            value_idx = int(np.clip(idx, 0, len(sim.data[net.probe_value]) - 1))
-            prev_response = float(sim.data[net.probe_value][value_idx, 0])
+            prev_response = float(sim.data[net.probe_value][idx, 0])
 
     return pd.DataFrame(rows)
 
