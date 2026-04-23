@@ -38,12 +38,12 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
     for trial, trial_data in human_pid.groupby("trial"):
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        alpha_bias = (
+        rd_values = (
             trial_data["rd"].to_numpy(dtype=float)
             if params["dataset"] == "jiang"
             else np.zeros(len(obs_values))
         )
-        p = {**params, "alpha_bias_array": alpha_bias}
+        p = {**params, "alpha_bias_array": rd_values}
         n_obs = len(obs_values)
         t_obs = float(params["t_obs"])
         t_iti = float(params["t_iti"])
@@ -96,6 +96,7 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
             }
             if params["dataset"] == "jiang":
                 entry["stage"] = int(row["stage"])
+            entry["rd"] = float(rd_values[n_idx])
             entry["response_before"] = prev_response
             entry["response_after"] = float(sim.data[net.probe_value][idx, 0])
             rows.append(entry)
