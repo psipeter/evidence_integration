@@ -147,6 +147,7 @@ def run_local(
     out_dir = data_path("experiments") / "save_activities"
     out_dir.mkdir(parents=True, exist_ok=True)
     simulate_and_save(pid, params, ensembles, timing, out_dir)
+    print("JOB_COMPLETE")
 
 
 def submit(

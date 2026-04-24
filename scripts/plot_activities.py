@@ -20,8 +20,6 @@ from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style
 
 ENCODER_THRESHOLD = 0.5
-COUNTING_ENC_MIN = 0.0
-COUNTING_ENC_MAX = 1.0
 MODEL_TYPE = "NEF_recurrent"
 DATASETS = ("carrabin", "jiang", "yoo")
 pe_col = "prediction_error_raw"
@@ -218,10 +216,7 @@ def main() -> None:
 
         neuron_cols = [c for c in activities_df.columns if c.startswith("n")]
         for pid, pid_enc in encoders_df.groupby("pid"):
-            pos_idx = pid_enc[
-                (pid_enc["enc_dim_0"] > COUNTING_ENC_MIN)
-                & (pid_enc["enc_dim_0"] <= COUNTING_ENC_MAX)
-            ]["neuron_idx"].values
+            pos_idx = pid_enc[pid_enc["enc_dim_0"] > ENCODER_THRESHOLD]["neuron_idx"].values
             mask = activities_df["pid"] == pid
             pos_cols = [f"n{i}" for i in pos_idx if f"n{i}" in neuron_cols]
             activities_df.loc[mask, "mean_activity_pos"] = (
@@ -319,28 +314,42 @@ def main() -> None:
             (activities_df[count_x_col] >= obs_min)
             & (activities_df[count_x_col] <= obs_max)
         ].copy()
-        if plot_df.empty:
-            continue
 
         style = dataset_styles[dataset]
-        n_bins = int(plot_df[count_x_col].nunique())
+        if plot_df.empty or "mean_activity_pos" not in plot_df.columns:
+            continue
+
+        n_unique = int(plot_df[count_x_col].nunique())
         sns.regplot(
             data=plot_df,
             x=count_x_col,
             y="mean_activity_pos",
-            x_bins=n_bins,
+            x_bins=n_unique,
+            scatter=True,
             scatter_kws={
-                "alpha": 0.6,
-                "s": 20,
-                "color": cb_palette[2],
-                "marker": style["marker"],
+                "alpha": 0.0,
+                "s": 0,
             },
             line_kws={
-                "color": cb_palette[2],
+                "color": cb_palette[0],
                 "linewidth": 2,
                 "linestyle": style["linestyle"],
             },
             ax=ax_count,
+        )
+        binned_means = plot_df.groupby(count_x_col)["mean_activity_pos"].agg(
+            ["mean", "std"]
+        )
+        ax_count.errorbar(
+            binned_means.index,
+            binned_means["mean"],
+            yerr=binned_means["std"],
+            fmt=style["marker"],
+            color=cb_palette[0],
+            alpha=0.8,
+            markersize=5,
+            linewidth=1.2,
+            zorder=5,
         )
 
     ax_count.legend(handles=dataset_handles, frameon=False)

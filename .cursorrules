@@ -127,6 +127,22 @@ Rename folders manually to track experiments. Delete folders to clear data.
 
 ---
 
+## SLURM job scripts
+
+Any script that has a `run_local()` function intended to be called from a SLURM
+job (i.e. the function invoked when `--local` is passed) must print the sentinel
+string `JOB_COMPLETE` as the very last line of output in that function, after all
+work is complete. This allows `check_jobs.py` to identify finished jobs that have
+not yet been cleaned up by the SLURM scheduler.
+
+Example:
+
+    def run_local(...) -> None:
+        ...
+        print("JOB_COMPLETE")
+
+---
+
 ## Plotting Conventions
 
 All figure scripts import shared aesthetics from `utils/plot_style.py`:
