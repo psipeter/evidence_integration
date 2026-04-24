@@ -69,10 +69,11 @@ if plot_df_yoo is not None and not plot_df_yoo.empty:
     plot_df_yoo["lambda_bin"] = pd.cut(
         plot_df_yoo["lambda_"],
         bins=lambda_bin_edges,
-        labels=[f"Q{i+1}" for i in range(4)],
         include_lowest=True,
+        duplicates="drop",
     )
-    lambda_palette = sns.color_palette("colorblind", n_colors=4)
+    n_lambda_bins = plot_df_yoo["lambda_bin"].nunique()
+    lambda_palette = sns.color_palette("colorblind", n_colors=n_lambda_bins)
 
 if plot_df_jiang is not None and not plot_df_jiang.empty:
 
