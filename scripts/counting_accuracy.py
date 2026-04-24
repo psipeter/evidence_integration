@@ -32,6 +32,7 @@ from models.counting_lmu import (
     decode_outputs as decode_lmu,
     simulate_network as simulate_lmu,
 )
+from fitting.model_params import _NEF_FIXED
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -40,24 +41,13 @@ N_SEEDS = 5
 SEED_START = 0
 
 BASE_PARAMS = {
+    **_NEF_FIXED,
     "n_obs": 30,
-    "n_neurons": 300,
+    "n_neurons": 300,  # script-specific override for sweep
     "seed": 0,
     "n_seeds": 1,
     "lambda_": 0.5,
     "alpha_0": 1.0,
-    "lmu_order": 24,
-    "lmu_tau": 0.2,
-    "lmu_n_obs_max": 30,
-    "lmu_theta_mult": 1.1,
-    "onset_detector_amp": 0.3,
-    "tau_fast": 0.01,
-    "tau_slow": 0.2,
-    "tau_probe": 0.1,
-    "tau_fb": 0.2,
-    "dt": 0.001,
-    "t_obs": 1.0,
-    "t_iti": 1.0,
 }
 
 

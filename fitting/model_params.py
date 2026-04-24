@@ -1,20 +1,22 @@
 """
-Single source of truth for all model parameter search spaces used in Optuna.
+Single source of truth for all model parameters.
 
-Structure: ``dataset`` → ``model_type`` → ``param_name`` → ``(min, max, step)``
-tuples passed to ``trial.suggest_float(name, low, high, step=step)``.
-Parameter-free models map to an empty dict.
+``_NEF_FIXED``: fixed architectural and timing parameters for all NEF models.
+``MODEL_PARAMS``: per-dataset, per-model parameter search spaces (fitted ranges)
+and fixed parameter dicts. Structure:
+    dataset → model_type → param_name → (min, max, step)  [for fitted params]
+                         → "fixed"    → dict               [for fixed params]
 """
 
 from __future__ import annotations
 
 _NEF_FIXED: dict[str, object] = {
-    "t_obs": 0.5,
+    "t_obs": 1.5,
     "t_iti": 0.5,
     "dt": 0.001,
-    "tau_probe": 0.1,
-    "tau_ff": 0.02,
-    "tau_fb": 0.1,
+    "tau_probe": 0.01,
+    "tau_ff": 0.01,
+    "tau_fb": 0.2,
     "tau_fast": 0.01,
     "tau_slow": 0.2,
     "lmu_order": 24,

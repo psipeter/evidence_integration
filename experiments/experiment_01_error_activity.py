@@ -28,6 +28,7 @@ DATASET = "carrabin"  # can be overridden via CLI
 MODEL_TYPE = "NEF_recurrent"
 RUN_FOLDER = "joint_loss"  # folder containing best-fit params
 ENCODER_THRESHOLD = 0.5  # neurons with encoder[:,1] > thresh are "on", < -thresh are "off"
+READOUT_OFFSET = 0.1  # seconds into observation window for activity readout
 
 
 def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
@@ -76,7 +77,7 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
             current_value = float(row["value"])
             pred_err_raw = current_value - prev_response
 
-            t_readout = t_iti + n_idx * t_step + 0.1
+            t_readout = t_iti + n_idx * t_step + READOUT_OFFSET
             idx = int(np.round(t_readout / float(p["dt"])))
             idx = int(np.clip(idx, 0, min(len(firing_rates), len(error_decoded)) - 1))
 
@@ -108,7 +109,7 @@ def simulate_experiment(pid: int, params: dict) -> pd.DataFrame:
 
 
 def run_local(pid: int, dataset: str, run_folder: str) -> None:
-    from fitting.param_ranges import MODEL_PARAMS
+    from fitting.model_params import MODEL_PARAMS
 
     params_path = RUNS_DIR / run_folder / f"{MODEL_TYPE}_{dataset}_params.pkl"
     all_params = pd.read_pickle(params_path)

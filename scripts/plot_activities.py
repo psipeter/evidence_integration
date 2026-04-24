@@ -37,6 +37,8 @@ COUNTING_OBS_RANGE = {
 PE_BIN_TYPE = "equally_spaced"  # "equally_spaced" or "quantile"
 PE_BIN_N = 10
 PE_BIN_RANGE = (-1.5, 1.5)
+TIMECOURSE_OBS_MIN = 2
+TIMECOURSE_OBS_MAX = 5
 
 
 def main() -> None:
@@ -103,6 +105,15 @@ def main() -> None:
         responses_data[dataset] = pd.read_pickle(responses_path)
         raw_data[dataset] = pd.read_pickle(raw_path)
         available_datasets.append(dataset)
+
+    windowed_path = (
+        data_path("experiments")
+        / args.activity_folder
+        / "activities_windowed_error_carrabin.npz"
+    )
+    windowed_carrabin = np.load(windowed_path) if windowed_path.exists() else None
+    if windowed_carrabin is None:
+        print(f"Warning: missing windowed activities: {windowed_path}")
 
     yoo_params_path = (
         RUNS_DIR / args.responses_folder / "NEF_recurrent_yoo_params.pkl"
@@ -262,6 +273,41 @@ def main() -> None:
 
         activities_data[dataset] = activities_df
 
+    carrabin_on_idx_by_pid: dict[int, np.ndarray] = {}
+    if "carrabin" in available_datasets and encoders_data["carrabin"] is not None:
+        for pid, pid_enc in encoders_data["carrabin"].groupby("pid"):
+            on_idx = pid_enc[
+                pid_enc["enc_dim_1"] > ENCODER_THRESHOLD
+            ]["neuron_idx"].values
+            carrabin_on_idx_by_pid[int(pid)] = on_idx
+
+    timecourse_mean = None
+    timecourse_std = None
+    t_axis: np.ndarray | None = None
+
+    if windowed_carrabin is not None and carrabin_on_idx_by_pid:
+        acts = windowed_carrabin["activities"]
+        pid_ids = windowed_carrabin["pid_ids"]
+        # dt_sample = float(windowed_carrabin["dt_sample"])
+        dt_sample = 0.01  # matches --dt_sample used when saving
+        obs_slice = slice(TIMECOURSE_OBS_MIN - 1, TIMECOURSE_OBS_MAX)
+
+        pid_timecourses = []
+        for i, pid in enumerate(pid_ids):
+            on_idx = carrabin_on_idx_by_pid.get(int(pid))
+            if on_idx is None or len(on_idx) == 0:
+                continue
+            pid_acts = acts[i]
+            selected = pid_acts[:, obs_slice, :, :][:, :, :, on_idx]
+            pid_mean = np.nanmean(selected, axis=(0, 1, 3))
+            pid_timecourses.append(pid_mean)
+
+        if pid_timecourses:
+            pid_timecourses_arr = np.stack(pid_timecourses, axis=0)
+            timecourse_mean = np.nanmean(pid_timecourses_arr, axis=0)
+            timecourse_std = np.nanstd(pid_timecourses_arr, axis=0)
+            t_axis = np.arange(len(timecourse_mean)) * dt_sample
+
     for dataset in available_datasets:
         activities_df = counting_activities_data.get(dataset)
         encoders_df = counting_encoders_data.get(dataset)
@@ -300,12 +346,13 @@ def main() -> None:
 
     apply_style()
     fig, axes = plt.subplots(
-        1, 4, figsize=FIGURE_SIZE, constrained_layout=True, sharey=False
+        1, 5, figsize=FIGURE_SIZE, constrained_layout=True, sharey=False
     )
     ax_pe = axes[0]
     ax_count = axes[1]
     ax_weight = axes[2]
     ax_rd = axes[3]
+    ax_time = axes[4]
 
     cb_palette = sns.color_palette("colorblind")
     color_on = cb_palette[0]
@@ -573,6 +620,26 @@ def main() -> None:
         ax_rd.set_visible(False)
     ax_rd.set_xticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
 
+    if timecourse_mean is not None and t_axis is not None:
+        ax_time.fill_between(
+            t_axis,
+            timecourse_mean - timecourse_std,
+            timecourse_mean + timecourse_std,
+            color=cb_palette[0],
+            alpha=0.3,
+        )
+        ax_time.plot(
+            t_axis,
+            timecourse_mean,
+            color=cb_palette[0],
+            linewidth=2,
+        )
+        ax_time.set_xlabel("Time within observation (s)")
+        ax_time.set_title("Error neuron timecourse")
+        sns.despine(ax=ax_time, top=True, right=True)
+    else:
+        ax_time.set_visible(False)
+
     ax_pe.set_title("Error-sensitive neurons")
     ax_count.set_title("Observation count neurons")
     ax_weight.set_title("Dynamic learning rate neurons")
@@ -581,6 +648,7 @@ def main() -> None:
     ax_count.set_ylabel("")
     ax_weight.set_ylabel("")
     ax_rd.set_ylabel("")
+    ax_time.set_ylabel("")
     ax_pe.set_xticks([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0])
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

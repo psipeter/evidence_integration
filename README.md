@@ -46,7 +46,7 @@ evidence_integration/
 ├── fitting/
 │   ├── losses.py              # response, shape, joint losses
 │   ├── fit.py                 # Optuna fitting with k-fold CV
-│   ├── param_ranges.py        # parameter search spaces
+│   ├── model_params.py         # model parameter search spaces & NEF fixed params
 │   ├── submit.py              # job submission and rerun
 │   └── collect.py             # result aggregation
 ├── experiments/

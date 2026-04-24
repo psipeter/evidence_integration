@@ -48,27 +48,13 @@ from models.counting_lmu import (
 )
 from utils.paths import data_path
 
+from fitting.model_params import _NEF_FIXED
+
 PARAM_DEFAULTS: dict = {
-    "counting": "integrator",
-    "n_seeds": 1,
+    **_NEF_FIXED,
     "n_obs": 30,
-    "n_neurons": 200,
-    "n_neurons_counting": 1000,
     "lambda_": 0.5,
-    "lmu_order": 24,
-    "lmu_tau": 0.2,
-    "lmu_n_obs_max": 30,
-    "lmu_theta_mult": 1.1,
-    "tau_ff": 0.02,
-    "tau_fb": 0.1,
-    "onset_detector_amp": 0.3,
-    "tau_fast": 0.01,
-    "tau_slow": 0.2,
-    "tau_probe": 0.1,
-    "radius_e": 1.0,
-    "radius_v": 1.0,
     "alpha_0": 1,
-    "pes_learning_rate": 1e-4,
 }
 
 
@@ -440,10 +426,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--radius_e", type=float, default=PARAM_DEFAULTS["radius_e"])
     p.add_argument("--radius_v", type=float, default=PARAM_DEFAULTS["radius_v"])
     p.add_argument("--pes_learning_rate", type=float, default=PARAM_DEFAULTS["pes_learning_rate"])
-    p.add_argument("--dt", type=float, default=0.001)
-    p.add_argument("--t_obs", type=float, default=0.5)
-    p.add_argument("--t_iti", type=float, default=0.5)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--dt", type=float, default=PARAM_DEFAULTS["dt"])
+    p.add_argument("--t_obs", type=float, default=PARAM_DEFAULTS["t_obs"])
+    p.add_argument("--t_iti", type=float, default=PARAM_DEFAULTS["t_iti"])
+    p.add_argument("--seed", type=int, default=PARAM_DEFAULTS["seed"])
     p.add_argument("--alpha_0", type=float, default=PARAM_DEFAULTS["alpha_0"])
     p.add_argument("--save_probes", action="store_true", default=False)
     return p.parse_args()

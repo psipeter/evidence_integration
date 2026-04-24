@@ -38,7 +38,7 @@ from pathlib import Path
 import pandas as pd
 
 from fitting.fit import DEFAULT_LOSS, fit
-from fitting.param_ranges import MODEL_PARAMS
+from fitting.model_params import MODEL_PARAMS
 from models import NEF
 from models.math_models import run as model_run
 from utils.paths import DATA_DIR, RUNS_DIR, data_path

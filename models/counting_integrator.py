@@ -14,6 +14,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from fitting.model_params import _NEF_FIXED
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -333,20 +334,28 @@ def run(params: dict) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Integrator counting and weight decoding")
     p.add_argument("--n_obs", type=int, default=30)
-    p.add_argument("--n_neurons", type=int, default=200)
-    p.add_argument("--n_neurons_counting", type=int, default=1000)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--n_neurons", type=int, default=_NEF_FIXED["n_neurons"])
+    p.add_argument(
+        "--n_neurons_counting",
+        type=int,
+        default=_NEF_FIXED["n_neurons_counting"],
+    )
+    p.add_argument("--seed", type=int, default=_NEF_FIXED["seed"])
     p.add_argument("--n_seeds", type=int, default=3)
     p.add_argument("--lambda_", type=float, default=0.5)
     p.add_argument("--alpha_0", type=float, default=1.0)
-    p.add_argument("--tau_fb", type=float, default=0.2)
-    p.add_argument("--onset_detector_amp", type=float, default=0.3)
-    p.add_argument("--tau_fast", type=float, default=0.01)
-    p.add_argument("--tau_slow", type=float, default=0.2)
-    p.add_argument("--tau_probe", type=float, default=0.1)
-    p.add_argument("--dt", type=float, default=0.001)
-    p.add_argument("--t_obs", type=float, default=1.0)
-    p.add_argument("--t_iti", type=float, default=1.0)
+    p.add_argument("--tau_fb", type=float, default=_NEF_FIXED["tau_fb"])
+    p.add_argument(
+        "--onset_detector_amp",
+        type=float,
+        default=_NEF_FIXED["onset_detector_amp"],
+    )
+    p.add_argument("--tau_fast", type=float, default=_NEF_FIXED["tau_fast"])
+    p.add_argument("--tau_slow", type=float, default=_NEF_FIXED["tau_slow"])
+    p.add_argument("--tau_probe", type=float, default=_NEF_FIXED["tau_probe"])
+    p.add_argument("--dt", type=float, default=_NEF_FIXED["dt"])
+    p.add_argument("--t_obs", type=float, default=_NEF_FIXED["t_obs"])
+    p.add_argument("--t_iti", type=float, default=_NEF_FIXED["t_iti"])
     return p.parse_args()
 
 

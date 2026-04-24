@@ -58,7 +58,7 @@ import pandas as pd
 import fitting.losses as losses
 import models.math_models as math_models
 from models import NEF
-from fitting.param_ranges import MODEL_PARAMS
+from fitting.model_params import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)

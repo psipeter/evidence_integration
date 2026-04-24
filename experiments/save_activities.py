@@ -194,7 +194,7 @@ def run_local(
     timing: str,
     dt_sample: float = 0.01,
 ) -> None:
-    from fitting.param_ranges import MODEL_PARAMS
+    from fitting.model_params import MODEL_PARAMS
 
     params_path = RUNS_DIR / run_folder / f"{MODEL_TYPE}_{dataset}_params.pkl"
     all_params = pd.read_pickle(params_path)
