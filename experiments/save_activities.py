@@ -89,6 +89,7 @@ def simulate_and_save(
                         }
                         if params["dataset"] == "jiang":
                             out_row["stage"] = int(row["stage"])
+                            out_row["trial_obs_idx"] = n_idx
                         for j, val in enumerate(activity):
                             out_row[f"n{j}"] = float(val)
                         activities_rows[ens_name].append(out_row)

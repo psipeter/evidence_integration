@@ -20,6 +20,8 @@ from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style
 
 ENCODER_THRESHOLD = 0.5
+COUNTING_ENC_MIN = 0.0
+COUNTING_ENC_MAX = 1.0
 MODEL_TYPE = "NEF_recurrent"
 DATASETS = ("carrabin", "jiang", "yoo")
 pe_col = "prediction_error_raw"
@@ -27,6 +29,11 @@ OBS_RANGE = {
     "carrabin": (2, 5),
     "jiang": (1, 3),  # stages 1-3, skip stage 0
     "yoo": (2, 30),  # adjust as needed
+}
+COUNTING_OBS_RANGE = {
+    "carrabin": (2, 5),
+    "jiang": (0, 30),
+    "yoo": (2, 30),
 }
 
 
@@ -38,6 +45,8 @@ def main() -> None:
 
     activities_data: dict[str, pd.DataFrame | None] = {}
     encoders_data: dict[str, pd.DataFrame | None] = {}
+    counting_activities_data: dict[str, pd.DataFrame | None] = {}
+    counting_encoders_data: dict[str, pd.DataFrame | None] = {}
     responses_data: dict[str, pd.DataFrame | None] = {}
     raw_data: dict[str, pd.DataFrame | None] = {}
 
@@ -53,10 +62,27 @@ def main() -> None:
             / args.activity_folder
             / f"encoders_error_{dataset}.pkl"
         )
+        counting_activities_path = (
+            data_path("experiments")
+            / args.activity_folder
+            / f"activities_counting_{dataset}.pkl"
+        )
+        counting_encoders_path = (
+            data_path("experiments")
+            / args.activity_folder
+            / f"encoders_counting_{dataset}.pkl"
+        )
         responses_path = (
             RUNS_DIR / args.responses_folder / f"{MODEL_TYPE}_{dataset}_responses.pkl"
         )
         raw_path = data_path(f"{dataset}.pkl")
+
+        if counting_activities_path.exists() and counting_encoders_path.exists():
+            counting_activities_data[dataset] = pd.read_pickle(counting_activities_path)
+            counting_encoders_data[dataset] = pd.read_pickle(counting_encoders_path)
+        else:
+            counting_activities_data[dataset] = None
+            counting_encoders_data[dataset] = None
 
         required = [activities_path, encoders_path, responses_path, raw_path]
         missing = [str(p) for p in required if not p.exists()]
@@ -184,8 +210,30 @@ def main() -> None:
 
         activities_data[dataset] = activities_df
 
+    for dataset in available_datasets:
+        activities_df = counting_activities_data.get(dataset)
+        encoders_df = counting_encoders_data.get(dataset)
+        if activities_df is None or encoders_df is None:
+            continue
+
+        neuron_cols = [c for c in activities_df.columns if c.startswith("n")]
+        for pid, pid_enc in encoders_df.groupby("pid"):
+            pos_idx = pid_enc[
+                (pid_enc["enc_dim_0"] > COUNTING_ENC_MIN)
+                & (pid_enc["enc_dim_0"] <= COUNTING_ENC_MAX)
+            ]["neuron_idx"].values
+            mask = activities_df["pid"] == pid
+            pos_cols = [f"n{i}" for i in pos_idx if f"n{i}" in neuron_cols]
+            activities_df.loc[mask, "mean_activity_pos"] = (
+                activities_df.loc[mask, pos_cols].mean(axis=1)
+            )
+
+        counting_activities_data[dataset] = activities_df
+
     apply_style()
-    fig, ax = plt.subplots(1, 1, figsize=FIGURE_SIZE, constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=FIGURE_SIZE, constrained_layout=True)
+    ax_pe = axes[0]
+    ax_count = axes[1]
 
     cb_palette = sns.color_palette("colorblind")
     color_on = cb_palette[0]
@@ -211,7 +259,7 @@ def main() -> None:
             ("mean_activity_on", color_on, "on neurons"),
             ("mean_activity_off", color_off, "off neurons"),
         ]:
-            ax.scatter(
+            ax_pe.scatter(
                 plot_df[pe_col],
                 plot_df[y_col],
                 alpha=0.15,
@@ -229,7 +277,7 @@ def main() -> None:
                     "linewidth": 2,
                     "linestyle": style["linestyle"],
                 },
-                ax=ax,
+                ax=ax_pe,
             )
 
     dataset_handles = []
@@ -252,14 +300,54 @@ def main() -> None:
         mlines.Line2D([], [], color=color_off, linewidth=2, label="off neurons"),
     ]
 
-    ax.legend(
+    ax_pe.legend(
         handles=dataset_handles + neuron_handles,
         frameon=False,
     )
-    ax.set_xlabel("Prediction error")
-    ax.set_ylabel("Mean neuron activity (Hz)")
-    ax.set_title("Error population activity vs prediction error")
-    sns.despine(ax=ax, top=True, right=True)
+    ax_pe.set_xlabel("Prediction error")
+    ax_pe.set_ylabel("Mean neuron activity (Hz)")
+    ax_pe.set_title("Error population activity vs prediction error")
+    sns.despine(ax=ax_pe, top=True, right=True)
+
+    for dataset in available_datasets:
+        activities_df = counting_activities_data.get(dataset)
+        if activities_df is None or "mean_activity_pos" not in activities_df.columns:
+            continue
+        count_x_col = "trial_obs_idx" if dataset == "jiang" else "observation"
+        obs_min, obs_max = COUNTING_OBS_RANGE[dataset]
+        plot_df = activities_df[
+            (activities_df[count_x_col] >= obs_min)
+            & (activities_df[count_x_col] <= obs_max)
+        ].copy()
+        if plot_df.empty:
+            continue
+
+        style = dataset_styles[dataset]
+        n_bins = int(plot_df[count_x_col].nunique())
+        sns.regplot(
+            data=plot_df,
+            x=count_x_col,
+            y="mean_activity_pos",
+            x_bins=n_bins,
+            scatter_kws={
+                "alpha": 0.6,
+                "s": 20,
+                "color": cb_palette[2],
+                "marker": style["marker"],
+            },
+            line_kws={
+                "color": cb_palette[2],
+                "linewidth": 2,
+                "linestyle": style["linestyle"],
+            },
+            ax=ax_count,
+        )
+
+    ax_count.legend(handles=dataset_handles, frameon=False)
+    ax_count.set_xlabel("Observation index (within trial)")
+    ax_count.set_ylabel("Mean neuron activity (Hz)")
+    ax_count.set_title("Counting population activity vs observation")
+    sns.despine(ax=ax_count, top=True, right=True)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     fname = "neural_activities"
