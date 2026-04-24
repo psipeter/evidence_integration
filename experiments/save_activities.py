@@ -39,15 +39,19 @@ def simulate_and_save(
     ensembles: list[str],
     timing: str,
     out_dir: Path,
+    dt_sample: float = 0.01,
 ) -> None:
     decoders = _pretrain(params)
     human_pid = pd.read_pickle(data_path(f"{params['dataset']}.pkl")).query("pid == @pid")
 
     activities_rows: dict[str, list[dict]] = {ens_name: [] for ens_name in ensembles}
     encoders_by_ens: dict[str, np.ndarray | None] = {ens_name: None for ens_name in ensembles}
+    windowed_data_by_ens: dict[str, list[np.ndarray]] = {
+        ens_name: [] for ens_name in ensembles
+    }
 
-    for trial, trial_data in human_pid.groupby("trial"):
-        trial_data = trial_data.sort_values("observation")
+    for trial in sorted(human_pid["trial"].unique()):
+        trial_data = human_pid[human_pid["trial"] == trial].sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
         rd_values = (
             trial_data["rd"].to_numpy(dtype=float)
@@ -65,11 +69,19 @@ def simulate_and_save(
         tau_probe = float(params["tau_probe"])
 
         net = build_network(obs_values, p, decoders)
-        probes = {}
+        probes: dict[str, nengo.Probe] = {}
+        probes_dt: dict[str, nengo.Probe] = {}
         with net:
             for ens_name in ensembles:
                 ens = _get_ensemble_obj(net, ens_name)
-                probes[ens_name] = nengo.Probe(ens.neurons, synapse=tau_probe)
+                if timing == "once_per_obs":
+                    probes[ens_name] = nengo.Probe(ens.neurons, synapse=tau_probe)
+                elif timing == "once_per_dt":
+                    probes_dt[ens_name] = nengo.Probe(
+                        ens.neurons,
+                        synapse=float(params["tau_probe"]),
+                        sample_every=dt_sample,
+                    )
 
         with nengo.Simulator(net, dt=dt, seed=int(p["seed"]), progress_bar=False) as sim:
             sim.run(t_total)
@@ -93,37 +105,85 @@ def simulate_and_save(
                         for j, val in enumerate(activity):
                             out_row[f"n{j}"] = float(val)
                         activities_rows[ens_name].append(out_row)
+            elif timing == "once_per_dt":
+                n_samples_obs = int(round(float(params["t_obs"]) / dt_sample))
+                n_samples_step = int(round(t_step / dt_sample))
+                for ens_name in ensembles:
+                    spike_data = sim.data[probes_dt[ens_name]]
+                    obs_windows = []
+                    for n_idx in range(n_obs):
+                        n_samples_iti = int(round(float(params["t_iti"]) / dt_sample))
+                        start = n_idx * n_samples_step + n_samples_iti
+                        end = start + n_samples_obs
+                        obs_windows.append(spike_data[start:end])
+                    windowed_arr = np.stack(obs_windows, axis=0)
+                    windowed_data_by_ens[ens_name].append(windowed_arr)
             else:
-                raise NotImplementedError("per_timestep timing not yet implemented")
+                raise ValueError(f"Unknown timing mode in simulate_and_save: {timing!r}")
 
             for ens_name in ensembles:
                 if encoders_by_ens[ens_name] is None:
                     ens = _get_ensemble_obj(net, ens_name)
                     encoders_by_ens[ens_name] = np.array(sim.data[ens].encoders, copy=True)
 
-    for ens_name in ensembles:
-        activities_df = pd.DataFrame(activities_rows[ens_name])
-        activities_path = out_dir / f"activities_{ens_name}_{params['dataset']}_{pid}.pkl"
-        activities_df.to_pickle(activities_path)
-        print(f"Saved {activities_path}")
+    if timing == "once_per_obs":
+        for ens_name in ensembles:
+            activities_df = pd.DataFrame(activities_rows[ens_name])
+            activities_path = out_dir / f"activities_{ens_name}_{params['dataset']}_{pid}.pkl"
+            activities_df.to_pickle(activities_path)
+            print(f"Saved {activities_path}")
 
-        enc = encoders_by_ens[ens_name]
-        if enc is None:
-            raise RuntimeError(f"No encoders captured for ensemble {ens_name!r}")
-        enc_rows = []
-        for neuron_idx in range(enc.shape[0]):
-            row = {
-                "pid": int(pid),
-                "ensemble": ens_name,
-                "neuron_idx": int(neuron_idx),
-            }
-            for d in range(enc.shape[1]):
-                row[f"enc_dim_{d}"] = float(enc[neuron_idx, d])
-            enc_rows.append(row)
-        enc_df = pd.DataFrame(enc_rows)
-        encoders_path = out_dir / f"encoders_{ens_name}_{params['dataset']}_{pid}.pkl"
-        enc_df.to_pickle(encoders_path)
-        print(f"Saved {encoders_path}")
+            enc = encoders_by_ens[ens_name]
+            if enc is None:
+                raise RuntimeError(f"No encoders captured for ensemble {ens_name!r}")
+            enc_rows = []
+            for neuron_idx in range(enc.shape[0]):
+                row = {
+                    "pid": int(pid),
+                    "ensemble": ens_name,
+                    "neuron_idx": int(neuron_idx),
+                }
+                for d in range(enc.shape[1]):
+                    row[f"enc_dim_{d}"] = float(enc[neuron_idx, d])
+                enc_rows.append(row)
+            enc_df = pd.DataFrame(enc_rows)
+            encoders_path = out_dir / f"encoders_{ens_name}_{params['dataset']}_{pid}.pkl"
+            enc_df.to_pickle(encoders_path)
+            print(f"Saved {encoders_path}")
+    elif timing == "once_per_dt":
+        trial_ids = np.array(sorted(human_pid["trial"].unique()), dtype=int)
+        for ens_name in ensembles:
+            activities_arr = np.stack(windowed_data_by_ens[ens_name], axis=0)
+            enc = encoders_by_ens[ens_name]
+            if enc is None:
+                raise RuntimeError(f"No encoders captured for ensemble {ens_name!r}")
+            out_path = (
+                out_dir / f"activities_windowed_{ens_name}_{params['dataset']}_{pid}.npz"
+            )
+            np.savez_compressed(
+                out_path,
+                activities=activities_arr,
+                encoders=enc,
+                trial_ids=trial_ids,
+                dt_sample=np.array(dt_sample),
+            )
+            print(f"Saved {out_path} — shape {activities_arr.shape}")
+            enc_rows = []
+            for neuron_idx in range(enc.shape[0]):
+                row = {
+                    "pid": int(pid),
+                    "ensemble": ens_name,
+                    "neuron_idx": int(neuron_idx),
+                }
+                for d in range(enc.shape[1]):
+                    row[f"enc_dim_{d}"] = float(enc[neuron_idx, d])
+                enc_rows.append(row)
+            enc_df = pd.DataFrame(enc_rows)
+            encoders_path = out_dir / f"encoders_{ens_name}_{params['dataset']}_{pid}.pkl"
+            enc_df.to_pickle(encoders_path)
+            print(f"Saved {encoders_path}")
+    else:
+        raise ValueError(f"Unknown timing mode in simulate_and_save: {timing!r}")
 
 
 def run_local(
@@ -132,6 +192,7 @@ def run_local(
     ensembles: list[str],
     run_folder: str,
     timing: str,
+    dt_sample: float = 0.01,
 ) -> None:
     from fitting.param_ranges import MODEL_PARAMS
 
@@ -146,7 +207,7 @@ def run_local(
 
     out_dir = data_path("experiments") / "save_activities"
     out_dir.mkdir(parents=True, exist_ok=True)
-    simulate_and_save(pid, params, ensembles, timing, out_dir)
+    simulate_and_save(pid, params, ensembles, timing, out_dir, dt_sample=dt_sample)
     print("JOB_COMPLETE")
 
 
@@ -157,6 +218,7 @@ def submit(
     run_folder: str,
     timing: str,
     dry_run: bool = False,
+    dt_sample: float = 0.01,
 ) -> None:
     from utils.paths import DATA_DIR
 
@@ -169,7 +231,8 @@ def submit(
             f"python experiments/{EXPERIMENT_NAME}.py "
             f"--pid {pid} --dataset {dataset} "
             f"--ensembles {ensembles_str} "
-            f"--run_folder {run_folder} --timing {timing} --local"
+            f"--run_folder {run_folder} --timing {timing} "
+            f"--dt_sample {dt_sample} --local"
         )
         script = make_job_script(
             root=root,
@@ -201,6 +264,30 @@ def collect(dataset: str, ensembles: list[str]) -> None:
         else:
             print(f"No activity files found for {ens_name} in {out_dir}")
 
+        npz_files = sorted(
+            out_dir.glob(f"activities_windowed_{ens_name}_{dataset}_*.npz")
+        )
+        if npz_files:
+            arrays = [np.load(f)["activities"] for f in npz_files]
+            pid_ids = np.array([int(f.stem.split("_")[-1]) for f in npz_files])
+
+            max_trials = max(a.shape[0] for a in arrays)
+            padded = []
+            for a in arrays:
+                n_trials = a.shape[0]
+                if n_trials < max_trials:
+                    pad_shape = (max_trials - n_trials,) + a.shape[1:]
+                    padding = np.full(pad_shape, np.nan, dtype=np.float32)
+                    a = np.concatenate([a, padding], axis=0)
+                padded.append(a.astype(np.float32))
+
+            combined = np.stack(padded, axis=0)
+            out_path = out_dir / f"activities_windowed_{ens_name}_{dataset}.npz"
+            np.savez_compressed(out_path, activities=combined, pid_ids=pid_ids)
+            print(
+                f"Collected {len(npz_files)} files -> {out_path} shape {combined.shape}"
+            )
+
         encoder_files = sorted(out_dir.glob(f"encoders_{ens_name}_{dataset}_*.pkl"))
         if encoder_files:
             encoders_df = pd.concat(
@@ -222,15 +309,14 @@ def main() -> None:
     parser.add_argument("--ensembles", nargs="+", default=["error"])
     parser.add_argument("--run_folder", type=str, default=RUN_FOLDER)
     parser.add_argument("--timing", type=str, default="once_per_obs")
+    parser.add_argument("--dt_sample", type=float, default=0.01)
     parser.add_argument("--pid", type=int, default=None)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--collect", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()
 
-    if args.timing == "per_timestep":
-        raise NotImplementedError("per_timestep timing not yet implemented")
-    if args.timing != "once_per_obs":
+    if args.timing not in ("once_per_obs", "once_per_dt"):
         raise ValueError(f"Unknown timing mode: {args.timing!r}")
 
     invalid = [ens for ens in args.ensembles if ens not in VALID_ENSEMBLES]
@@ -243,7 +329,14 @@ def main() -> None:
     if args.collect:
         collect(args.dataset, args.ensembles)
     elif args.local and args.pid is not None:
-        run_local(args.pid, args.dataset, args.ensembles, args.run_folder, args.timing)
+        run_local(
+            args.pid,
+            args.dataset,
+            args.ensembles,
+            args.run_folder,
+            args.timing,
+            dt_sample=args.dt_sample,
+        )
     else:
         human = pd.read_pickle(data_path(f"{args.dataset}.pkl"))
         pids = [int(pid) for pid in human["pid"].unique()]
@@ -256,6 +349,7 @@ def main() -> None:
             args.run_folder,
             args.timing,
             dry_run=args.dry_run,
+            dt_sample=args.dt_sample,
         )
 
 
