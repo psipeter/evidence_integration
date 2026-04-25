@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Check SLURM job logs for JOB_COMPLETE and identify jobs still in the queue
-that have finished (cancelable) vs jobs already removed from the queue.
+Check SLURM job logs for JOB_COMPLETE and identify queued jobs
+that are finished (cancelable) vs still running.
 
 Usage:
     python scripts/check_jobs.py              # report only
@@ -51,31 +51,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    queued_ids = get_all_slurm_jobs()
+    queued_ids = sorted(get_all_slurm_jobs())
     complete_ids = scan_complete_logs()
     complete_set = set(complete_ids)
 
-    cancelable = sorted(complete_set & queued_ids)
-    already_done = sorted(complete_set - queued_ids)
+    cancelable = sorted(set(queued_ids) & complete_set)
+    running = [job_id for job_id in queued_ids if job_id not in complete_set]
 
     print("SLURM / log summary\n")
-    print(f"  Jobs currently in queue (squeue --me):     {len(queued_ids)}")
-    print(f"  Logs with JOB_COMPLETE:                    {len(complete_set)}")
-    print(
-        f"  JOB_COMPLETE and still in queue (cancel): {len(cancelable)}"
-    )
-    print(
-        f"  JOB_COMPLETE but gone from queue (done):  {len(already_done)}"
-    )
+    print(f"  Jobs currently in queue (squeue --me): {len(queued_ids)}")
 
-    if cancelable:
-        print("\nCancelable job IDs (log complete, still in queue):")
+    if queued_ids:
+        print("\nQueued job status:")
         for job_id in cancelable:
-            print(f"    {job_id}")
-    if already_done:
-        print("\nAlready finished (JOB_COMPLETE, not in queue):")
-        for job_id in already_done:
-            print(f"    {job_id}")
+            print(f"  [DONE]    {job_id}")
+        for job_id in running:
+            print(f"  [RUNNING] {job_id}")
 
     if not cancelable:
         print("\nNo cancelable jobs (none still in queue with JOB_COMPLETE).")
