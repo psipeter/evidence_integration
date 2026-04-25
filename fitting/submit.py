@@ -1,31 +1,5 @@
 """
 Submit, resubmit, or locally run model fitting jobs.
-
-Usage::
-
-    # Submit all models/datasets in one command to a named folder
-    python -m fitting.submit all --n_trials 100 --loss_type joint --run_folder joint_fits
-
-    # Add more jobs to the same folder later
-    python -m fitting.submit carrabin NoisyCounting --n_trials 200 --run_folder joint_fits
-
-    # submit fitting jobs (new timestamped folder if --run_folder omitted)
-    python -m fitting.submit carrabin NEF_recurrent --n_trials 300
-    python -m fitting.submit carrabin NEF_recurrent --n_trials 300 --pid 1
-    python -m fitting.submit carrabin NEF_recurrent --n_trials 300 --pid 1 --local
-
-    # rerun best-fit params to generate responses
-    python -m fitting.submit carrabin NEF_recurrent --rerun Apr21_1200pm
-    python -m fitting.submit carrabin NEF_recurrent --rerun Apr21_1200pm --pid 1
-
-    # resubmit missing jobs
-    python -m fitting.submit --resubmit joint_fits
-
-    # collect all results
-    python -m fitting.collect joint_fits
-
-    # dry run
-    python -m fitting.submit --dry_run
 """
 
 from __future__ import annotations
@@ -39,14 +13,18 @@ import pandas as pd
 
 from fitting.fit import DEFAULT_LOSS, fit
 from fitting.model_params import MODEL_PARAMS
-from models import NEF
 from models.math_models import run as model_run
 from utils.paths import DATA_DIR, RUNS_DIR, data_path
-from utils.slurm import DEFAULT_TIME_LIMITS, make_job_script, submit_script
+from utils.save_responses import save as save_responses
+from utils.slurm import (
+    DEFAULT_MEM_LIMITS,
+    DEFAULT_TIME_LIMITS,
+    make_job_script,
+    submit_script,
+)
 
 
 def _make_run_folder() -> Path:
-    """Create a new timestamped run folder under data/runs/."""
     now = datetime.now()
     month = now.strftime("%b")
     day = now.strftime("%d").lstrip("0")
@@ -61,7 +39,6 @@ def _make_run_folder() -> Path:
 
 
 def _write_run_config(run_folder: Path, jobs: list[dict]) -> None:
-    """Write or merge run_config.json in the run folder."""
     import subprocess as sp
 
     try:
@@ -108,7 +85,6 @@ def _resolve_jobs(
     loss_type: str | None,
     optuna_seed: int,
 ) -> list[dict]:
-    """Build the list of job dicts for a run."""
     jobs = []
     datasets = (
         list(MODEL_PARAMS.keys()) if dataset == "all" or dataset is None else [dataset]
@@ -124,7 +100,7 @@ def _resolve_jobs(
             pids_all = pd.read_pickle(data_path(f"{ds}.pkl"))["pid"].unique()
             pids = [int(pid)] if pid is not None else [int(p) for p in pids_all]
             model_spec = MODEL_PARAMS[ds].get(mt, {})
-            has_params = any(k != "fixed" for k in model_spec)
+            has_params = any(k_ != "fixed" for k_ in model_spec)
             effective_n_trials = n_trials if has_params else 1
             for p in pids:
                 jobs.append(
@@ -142,8 +118,35 @@ def _resolve_jobs(
     return jobs
 
 
-def _submit_job(job: dict, run_folder: Path, dry_run: bool = False) -> None:
-    """Generate and submit one SLURM job script."""
+def _submit_command(
+    *,
+    script_name: str,
+    command: str,
+    time_limit: str,
+    mem: str,
+    dry_run: bool,
+) -> None:
+    root = str(DATA_DIR.parent)
+    jobs_dir = Path(root) / "jobs"
+    jobs_dir.mkdir(exist_ok=True)
+    script = make_job_script(
+        root=root,
+        commands=[command],
+        time_limit=time_limit,
+        mem=mem,
+        log_dir=f"{root}/logs",
+    )
+    script_path = jobs_dir / script_name
+    script_path.write_text(script)
+    script_path.chmod(0o755)
+    submit_script(script_path, dry_run=dry_run)
+
+
+def _submit_job(
+    job: dict,
+    run_folder: Path,
+    dry_run: bool = False,
+) -> None:
     ds = job["dataset"]
     mt = job["model_type"]
     pid = job["pid"]
@@ -151,35 +154,23 @@ def _submit_job(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     n_runs = job["n_runs"]
     k = int(job.get("k", 5))
     lt = job["loss_type"]
-    root = str(DATA_DIR.parent)
-    time_limit = DEFAULT_TIME_LIMITS.get(mt, "4:0:0")
-
-    fit_cmd = (
+    cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
         f"{lt} {n_runs} {k} {run_folder} {job.get('optuna_seed', 42)}"
     )
-    # TODO: prompt text requested fitting.collect --rerun, but collect is
-    # specified as aggregation-only. Keep rerun in fitting.submit.
-    rerun_cmd = f"python -m fitting.submit {ds} {mt} --rerun {run_folder} --pid {pid}"
-    logs_dir = Path(root) / "logs"
-    logs_dir.mkdir(exist_ok=True)
-    jobs_dir = Path(root) / "jobs"
-    jobs_dir.mkdir(exist_ok=True)
-
-    script = make_job_script(
-        root=root,
-        commands=[fit_cmd, rerun_cmd],
-        time_limit=time_limit,
-        log_dir=f"{root}/logs",
+    _submit_command(
+        script_name=f"{mt}_{ds}_{pid}.sh",
+        command=cmd,
+        time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
+        mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
+        dry_run=dry_run,
     )
-    script_path = jobs_dir / f"{mt}_{ds}_{pid}.sh"
-    script_path.write_text(script)
-    script_path.chmod(0o755)
-    submit_script(script_path, dry_run=dry_run)
 
 
 def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
-    """Run one job locally without SLURM."""
+    import logging
+
+    logging.basicConfig(level=logging.INFO)
     ds = job["dataset"]
     mt = job["model_type"]
     pid = job["pid"]
@@ -204,63 +195,134 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         run_folder=run_folder,
         optuna_seed=job.get("optuna_seed", 42),
     )
-    _rerun_single(ds, mt, pid, run_folder)
 
 
 def _rerun_single(dataset: str, model_type: str, pid: int, run_folder: Path) -> None:
-    """Load best params from run_folder and generate full model responses."""
     params_path = run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
     if not params_path.exists():
         print(f"Warning: params not found for {model_type} {dataset} pid={pid}")
         return
-    params = pd.read_pickle(params_path).loc[0].to_dict()
-    model_spec = MODEL_PARAMS.get(dataset, {}).get(model_type, {})
-    fixed = model_spec.get("fixed", {})
-    params = {**fixed, **params}
     if model_type in ("NEF_recurrent", "NEF_synaptic"):
-        df = NEF.run(params)
+        save_responses(pid, dataset, run_folder, model_type)
     else:
+        params = pd.read_pickle(params_path).iloc[0].to_dict()
         df = model_run(params)
-    out_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
-    df.to_pickle(out_path)
+        out_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
+        df.to_pickle(out_path)
 
 
-def _resubmit(run_folder: Path, dry_run: bool = False) -> None:
-    """Read run_config.json, find missing participants, and resubmit their jobs."""
+def _jobs_from_config(run_folder: Path) -> list[dict]:
     config_path = run_folder / "run_config.json"
     if not config_path.exists():
-        print(f"No run_config.json in {run_folder}")
-        return
-    config = json.loads(config_path.read_text())
-    missing = []
-    for job in config["jobs"]:
-        mt = job["model_type"]
+        raise FileNotFoundError(f"No run_config.json in {run_folder}")
+    return list(json.loads(config_path.read_text()).get("jobs", []))
+
+
+def _resubmit(
+    *,
+    resubmit_type: str,
+    run_folder: Path,
+    dry_run: bool,
+    local: bool = False,
+    ensembles: list[str],
+    timing: str,
+    dt_sample: float,
+) -> None:
+    jobs = _jobs_from_config(run_folder)
+    missing: list[dict] = []
+    for job in jobs:
         ds = job["dataset"]
-        pid = job["pid"]
+        mt = job["model_type"]
+        pid = int(job["pid"])
         params_path = run_folder / f"{mt}_{ds}_{pid}_params.pkl"
-        responses_path = run_folder / f"{mt}_{ds}_{pid}_responses.pkl"
-        perf_path = run_folder / f"{mt}_{ds}_{pid}_performance.pkl"
-        if not all(p.exists() for p in [params_path, responses_path, perf_path]):
-            missing.append(job)
+
+        if resubmit_type == "params":
+            if not params_path.exists():
+                missing.append(job)
+        elif resubmit_type == "responses":
+            responses_path = run_folder / f"{mt}_{ds}_{pid}_responses.pkl"
+            if params_path.exists() and not responses_path.exists():
+                missing.append(job)
+        elif resubmit_type == "activities":
+            if not params_path.exists():
+                continue
+            out_dir = run_folder
+            ens_missing = False
+            for ens in ensembles:
+                if timing == "once_per_dt":
+                    p = out_dir / f"activities_windowed_{ens}_{ds}_{pid}.npz"
+                else:
+                    p = out_dir / f"activities_{ens}_{ds}_{pid}.pkl"
+                if not p.exists():
+                    ens_missing = True
+                    break
+            if ens_missing:
+                missing.append(job)
 
     if not missing:
-        print("No missing jobs found.")
+        print(f"No missing jobs found for type={resubmit_type}.")
         return
-    print(f"Found {len(missing)} missing jobs:")
+
+    print(f"Found {len(missing)} missing jobs for type={resubmit_type}:")
     for job in missing:
         print(f"  {job['model_type']} {job['dataset']} pid={job['pid']}")
 
-    if not dry_run:
-        for job in missing:
-            _submit_job(job, run_folder, dry_run=False)
-        print(f"Resubmitted {len(missing)} jobs.")
+    for job in missing:
+        ds = job["dataset"]
+        mt = job["model_type"]
+        pid = int(job["pid"])
+        if resubmit_type == "params":
+            if local:
+                _run_local(job, run_folder, dry_run=dry_run)
+            else:
+                _submit_job(job, run_folder, dry_run=dry_run)
+        elif resubmit_type == "responses":
+            if local:
+                if not dry_run:
+                    from utils.save_responses import save as save_responses
+
+                    save_responses(int(pid), ds, run_folder, mt)
+            else:
+                cmd = f"python -m utils.save_responses {ds} {mt} {pid} {run_folder}"
+                _submit_command(
+                    script_name=f"responses_{mt}_{ds}_{pid}.sh",
+                    command=cmd,
+                    time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
+                    mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
+                    dry_run=dry_run,
+                )
+        elif resubmit_type == "activities":
+            if local:
+                if not dry_run:
+                    from utils.save_activities import run as run_activities
+
+                    run_activities(
+                        int(pid), ds, ensembles, str(run_folder), timing, dt_sample, mt
+                    )
+            else:
+                ensembles_str = ",".join(ensembles)
+                cmd = (
+                    f"python -m utils.save_activities {ds} {mt} {pid} {run_folder} "
+                    f"{ensembles_str} {timing} {dt_sample}"
+                )
+                _submit_command(
+                    script_name=f"activities_{mt}_{ds}_{pid}.sh",
+                    command=cmd,
+                    time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
+                    mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
+                    dry_run=dry_run,
+                )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fitting.submit")
-
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--resubmit", metavar="RUN_FOLDER")
+    mode.add_argument(
+        "--resubmit",
+        type=str,
+        choices=["params", "responses", "activities"],
+        default=None,
+    )
     mode.add_argument("--rerun", metavar="RUN_FOLDER")
 
     parser.add_argument("target", nargs="?", default="all")
@@ -271,19 +333,26 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--loss_type", default=None)
     parser.add_argument("--optuna_seed", type=int, default=42)
-    parser.add_argument(
-        "--run_folder",
-        type=str,
-        default=None,
-        help="Use existing run folder by name instead of creating a new timestamped one.",
-    )
+    parser.add_argument("--run_folder", type=str, default=None)
+    parser.add_argument("--ensembles", nargs="+", default=["error"])
+    parser.add_argument("--timing", type=str, default="once_per_obs")
+    parser.add_argument("--dt_sample", type=float, default=0.01)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
-
     args = parser.parse_args()
 
     if args.resubmit is not None:
-        _resubmit(RUNS_DIR / args.resubmit, dry_run=args.dry_run)
+        if args.run_folder is None:
+            raise ValueError("--resubmit requires --run_folder")
+        _resubmit(
+            resubmit_type=args.resubmit,
+            run_folder=RUNS_DIR / args.run_folder,
+            dry_run=args.dry_run,
+            local=args.local,
+            ensembles=args.ensembles,
+            timing=args.timing,
+            dt_sample=args.dt_sample,
+        )
         return
 
     if args.rerun is not None:
@@ -301,9 +370,8 @@ def main() -> None:
             _rerun_single(args.target, args.model_type, int(pid), run_folder)
         return
 
-    dataset = args.target
     jobs = _resolve_jobs(
-        dataset,
+        args.target,
         args.model_type,
         args.pid,
         args.n_trials,
@@ -322,7 +390,11 @@ def main() -> None:
         if args.local:
             _run_local(job, run_folder, dry_run=args.dry_run)
         else:
-            _submit_job(job, run_folder, dry_run=args.dry_run)
+            _submit_job(
+                job,
+                run_folder,
+                dry_run=args.dry_run,
+            )
 
 
 if __name__ == "__main__":

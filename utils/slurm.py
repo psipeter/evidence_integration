@@ -17,6 +17,17 @@ DEFAULT_TIME_LIMITS = {
     "NEF_synaptic": "72:0:0",
 }
 
+DEFAULT_MEM_LIMITS = {
+    "Bayes": "8G",
+    "NoisyCounting": "16G",
+    "RL": "8G",
+    "DeGroot": "8G",
+    "Mean": "8G",
+    "ADM": "8G",
+    "NEF_recurrent": "32G",
+    "NEF_synaptic": "32G",
+}
+
 def make_job_script(
     root: str,
     commands: list[str],

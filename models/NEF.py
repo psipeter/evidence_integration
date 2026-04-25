@@ -32,7 +32,15 @@ import pandas as pd
 
 nengo.rc.set("decoder_cache", "enabled", "False")
 
-logging.getLogger("nengo.simulator").setLevel(logging.WARNING)
+for _logger_name in (
+    "nengo",
+    "nengo.simulator",
+    "nengo.builder",
+    "nengo.builder.network",
+    "nengo.builder.optimizer",
+    "nengo.builder.connection",
+):
+    logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -354,9 +362,9 @@ def run(
     first_trial = int(sorted(human_pid["trial"].unique())[0]) if len(human_pid) else 0
     decoders = _pretrain(pfull)
     rows = []
-    t0 = time.time()
 
     for trial, trial_data in human_pid.groupby("trial"):
+        t_trial = time.time()
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
         alpha_bias = (
@@ -375,6 +383,8 @@ def run(
             print(f"  Saved probe data to data/{fname}")
         else:
             responses = _simulate_trial(obs_values, p, decoders)
+        elapsed_trial = time.time() - t_trial
+        print(f"  pid={pid} trial {int(trial)}: {elapsed_trial:.1f}s", flush=True)
         for i, (_, row) in enumerate(trial_data.iterrows()):
             entry = {
                 "model_type": pfull["model_type"],
@@ -386,11 +396,6 @@ def run(
             if pfull["dataset"] == "jiang":
                 entry["stage"] = int(row["stage"])
             rows.append(entry)
-
-    elapsed = time.time() - t0
-    n_trials = human_pid["trial"].nunique()
-    denom = max(n_trials, 1)
-    print(f"  {n_trials} trials in {elapsed:.1f}s ({elapsed/denom:.2f}s/trial)")
 
     out = pd.DataFrame(rows)
     if save:

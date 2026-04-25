@@ -60,6 +60,7 @@ import models.math_models as math_models
 from models import NEF
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path
+from utils.save_responses import save as save_responses
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -149,10 +150,7 @@ def _cross_validate(
         if not holdout_trials:
             continue
 
-        if params["model_type"] in ("NEF_recurrent", "NEF_synaptic"):
-            model_fold = NEF.run(params, trials=holdout_trials)
-        else:
-            model_fold = math_models.run(params, trials=holdout_trials)
+        model_fold = math_models.run(params, trials=holdout_trials)
         human_fold = human[human["trial"].isin(holdout_trials)]
 
         fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
@@ -163,6 +161,68 @@ def _cross_validate(
 
     mean_loss = float(np.mean(fold_losses))
     return mean_loss, fold_losses
+
+
+def _run_nef_all_trials(params: dict, human: pd.DataFrame) -> pd.DataFrame:
+    """Run NEF simulation once for all trials, return responses dataframe."""
+    return NEF.run(params)
+
+
+def _cross_validate_nef(
+    params: dict,
+    model_responses: pd.DataFrame,
+    human: pd.DataFrame,
+    k: int = 5,
+    loss_type: str = "response",
+) -> tuple[float, list[float]]:
+    """K-fold CV using pre-computed NEF responses. No simulation calls."""
+    trials = np.asarray(sorted(human["trial"].unique()))
+    rng = np.random.RandomState(seed=int(params["pid"]))
+    shuffled = trials.copy()
+    rng.shuffle(shuffled)
+    folds = np.array_split(shuffled, k)
+
+    fold_losses: list[float] = []
+    for fold_trials in folds:
+        holdout_trials = [int(t) for t in fold_trials.tolist()]
+        if not holdout_trials:
+            continue
+        model_fold = model_responses[model_responses["trial"].isin(holdout_trials)]
+        human_fold = human[human["trial"].isin(holdout_trials)]
+        fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
+        fold_losses.append(float(fold_loss))
+
+    if not fold_losses:
+        raise ValueError("No non-empty CV folds were generated")
+    return float(np.mean(fold_losses)), fold_losses
+
+
+def _cross_validate_nef_components(
+    params: dict,
+    model_responses: pd.DataFrame,
+    human: pd.DataFrame,
+    k: int = 5,
+) -> tuple[float, float]:
+    """Return (mean response_loss, mean shape_loss) using pre-computed responses."""
+    trials = np.asarray(sorted(human["trial"].unique()))
+    rng = np.random.RandomState(seed=int(params["pid"]))
+    shuffled = trials.copy()
+    rng.shuffle(shuffled)
+    folds = np.array_split(shuffled, k)
+
+    response_losses: list[float] = []
+    shape_losses: list[float] = []
+    for fold_trials in folds:
+        holdout_trials = [int(t) for t in fold_trials.tolist()]
+        if not holdout_trials:
+            continue
+        model_fold = model_responses[model_responses["trial"].isin(holdout_trials)]
+        human_fold = human[human["trial"].isin(holdout_trials)]
+        response_losses.append(float(losses.response_loss(params, model_fold, human_fold)))
+        shape_losses.append(float(losses.shape_loss(params, model_fold, human_fold)))
+    if not response_losses:
+        raise ValueError("No non-empty CV folds were generated")
+    return float(np.mean(response_losses)), float(np.mean(shape_losses))
 
 
 def _cross_validate_components(
@@ -183,10 +243,7 @@ def _cross_validate_components(
         holdout_trials = [int(t) for t in fold_trials.tolist()]
         if not holdout_trials:
             continue
-        if params["model_type"] in ("NEF_recurrent", "NEF_synaptic"):
-            model_fold = NEF.run(params, trials=holdout_trials)
-        else:
-            model_fold = math_models.run(params, trials=holdout_trials)
+        model_fold = math_models.run(params, trials=holdout_trials)
         human_fold = human[human["trial"].isin(holdout_trials)]
         response_losses.append(
             float(losses.response_loss(params, model_fold, human_fold))
@@ -243,16 +300,31 @@ def fit(
             trial, model_type, dataset, pid, loss_type, n_runs
         )
         params["seed"] = abs(hash((int(params["pid"]), trial.number))) % (2**31)
-        mean_loss, fold_losses = _cross_validate(params, human, k=k, loss_type=loss_type)
+
+        if model_type in ("NEF_recurrent", "NEF_synaptic"):
+            model_responses = _run_nef_all_trials(params, human)
+            mean_loss, fold_losses = _cross_validate_nef(
+                params, model_responses, human, k=k, loss_type=loss_type
+            )
+            if loss_type == "joint":
+                response_mean, shape_mean = _cross_validate_nef_components(
+                    params, model_responses, human, k=k
+                )
+                trial.set_user_attr("response_component", response_mean)
+                trial.set_user_attr("shape_component", shape_mean)
+        else:
+            mean_loss, fold_losses = _cross_validate(
+                params, human, k=k, loss_type=loss_type
+            )
+            if loss_type == "joint":
+                response_mean, shape_mean = _cross_validate_components(params, human, k=k)
+                trial.set_user_attr("response_component", response_mean)
+                trial.set_user_attr("shape_component", shape_mean)
+
         trial.set_user_attr("cv_loss_folds", fold_losses)
-        if loss_type == "joint":
-            response_mean, shape_mean = _cross_validate_components(params, human, k=k)
-            trial.set_user_attr("response_component", response_mean)
-            trial.set_user_attr("shape_component", shape_mean)
         return mean_loss
 
     study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
-
     best_trial = study.best_trial
     best_params = dict(best_trial.params)
     best_params.update(
@@ -305,6 +377,9 @@ def fit(
     cv_folds_df.to_pickle(
         run_folder / f"{model_type}_{dataset}_{pid}_cv_folds.pkl"
     )
+
+    if model_type in ("NEF_recurrent", "NEF_synaptic"):
+        save_responses(pid, dataset, run_folder, model_type)
 
     return params_df, performance_df
 
