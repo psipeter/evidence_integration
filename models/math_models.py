@@ -358,8 +358,7 @@ def _run_jiang(
     rds = subdata["rd"].to_numpy(dtype=float)
 
     if model_type == "DeGroot":
-        omega = params["omega"]
-        weights = 1.0 + omega * rds
+        weights = 1.0 + rds
         wsum = np.sum(weights)
         if wsum == 0:
             return 0.0

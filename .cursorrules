@@ -2,9 +2,7 @@
 
 ## Project Context
 
-This repository is a clean refactor of a research codebase for modeling individual variability in evidence integration across three cognitive tasks (carrabin, jiang, yoo). The project involves mathematical models, behavioral data fitting with Optuna, and biophysical neural network simulations in Nengo.
-
-The original codebase is preserved in `~/observational-learning-social-networks/` and must not be modified. Code is ported here selectively and rewritten for clarity and reproducibility.
+Research codebase for modeling individual variability in evidence integration across three cognitive tasks (carrabin, jiang, yoo). Combines mathematical models, behavioral data fitting with Optuna, and biophysical neural network simulations in Nengo (NEF).
 
 ---
 
@@ -12,7 +10,7 @@ The original codebase is preserved in `~/observational-learning-social-networks/
 
 **Cursor is the code execution layer in a three-stage workflow:**
 
-1. The researcher and Claude (claude.ai) discuss goals and design decisions
+1. Researcher and Claude discuss goals and design decisions
 2. Claude drafts an explicit Cursor prompt describing exactly what to implement
 3. Cursor executes that prompt
 
@@ -24,7 +22,7 @@ Follow prompts as written. Add `# TODO: [decision needed]` for ambiguous decisio
 
 - Title: `Cursor Prompt 00X — Brief description`
 - Body: single fenced code block with language `markdown`
-- Numbering: sequential across entire project, never reset
+- Numbering: sequential across entire project, never reset — **next prompt is 284**
 - One prompt per response; combine multi-file changes into labeled sections
 - File paths always relative to project root
 - Self-contained — Cursor should execute without reading conversation history
@@ -64,27 +62,28 @@ run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFram
 - `params` must contain `"model_type"`, `"dataset"`, `"pid"` plus model-specific keys
 - Returns DataFrame with columns: `"model_type"`, `"pid"`, `"trial"`, `"observation"` or `"stage"`, `"response"`
 - `trials` restricts execution to a subset of trial ids
-- `n_runs` in params controls Monte Carlo averaging for stochastic models
 
 ---
 
-## Parameter Naming Convention
+## Parameter Reference
 
 | Parameter | Symbol | Used in |
 |---|---|---|
 | Learning rate | `alpha` | RL (all tasks) |
-| Decay exponent | `lambda_` | NEF |
-| Baseline learning rate | `alpha_0` | NEF |
-| RD social weighting | `omega` | jiang DeGroot, NEF jiang |
+| Decay exponent | `lambda_` | NEF (fitted, 0.01–1.0) |
+| Baseline learning rate | `alpha_0` | NEF (fitted, 0.01–1.0) |
+| Inverse temperature | `beta` | jiang all models (fitted) |
 | Primacy | `phi` | yoo ADM |
 | Recency | `rho` | yoo ADM |
-| Baseline | `nu` | yoo ADM |
+| Baseline | `nu` | yoo ADM (fixed=0.01), carrabin NoisyCounting |
 | Cognitive noise | `sigma_c` | carrabin NoisyCounting |
-| Response noise | `nu` | carrabin NoisyCounting |
 | Mean increment | `mu` | carrabin NoisyCounting |
-| Inverse temperature | `beta` | jiang (all models) |
-| PES learning rate | `pes_learning_rate` | NEF_synaptic |
-| Wasserstein weight | `wasserstein_w` | joint loss (blend of response + shape) |
+| PES learning rate | `pes_learning_rate` | NEF_synaptic (fixed) |
+| Error→value transform | `T_error` | NEF (fixed=0.4) |
+| Inhibition release synapse | `tau_error` | NEF (fixed=0.1) |
+| Feedback time constant | `tau_fb` | NEF (fixed=0.2) |
+| Feedforward time constant | `tau_ff` | NEF (fixed=0.01) |
+| Error ensemble radius | `radius_e` | NEF (fixed=2.0) |
 
 ---
 
@@ -95,197 +94,70 @@ fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
     loss_type=None, n_runs=1, run_folder=None)
 ```
 
-- Default loss: `response` for all datasets (MSE on carrabin/yoo; NLL on jiang)
-- All outputs saved to `run_folder` (defaults to `data/runs/default`)
+- NEF models run one simulation per Optuna trial (all trials), then evaluate k-fold CV on cached responses
+- Default loss: `response` for all datasets
 - Loss type stored inside `params.pkl`, not in filename
-- Seed: `optuna.samplers.TPESampler(seed=42)` for reproducibility
 
 Loss functions in `fitting/losses.py`:
-- `response` — response accuracy for all datasets (MSE on carrabin/yoo; total NLL on jiang)
-- `shape` — Wasserstein shape distance; carrabin (full distribution), yoo (smoothed delta curve), jiang (switch vs conflict aggregates)
-- `joint` — combined response + shape; default `w` from `JOINT_LOSS_W`: carrabin 0.2, yoo 0.5, jiang 0.95
+- `response` — MSE on carrabin/yoo; total NLL on jiang
+- `shape` — Wasserstein shape distance
+- `joint` — combined; `JOINT_LOSS_W`: carrabin=0.2, yoo=0.5, jiang=0.95
 
 ---
 
 ## Job Management
 
-Entry points:
-- `python -m fitting.submit` for submit/resubmit/local/rerun
-- `python -m fitting.collect` for aggregation
-
 ```bash
-python -m fitting.submit all --n_trials 500    # submit all to SLURM
-python -m fitting.submit carrabin RL --local   # run locally
-python -m fitting.submit --resubmit Apr12_632pm # resubmit missing
-python -m fitting.collect Apr12_632pm          # collect results
-python -m fitting.submit all --dry_run         # preview
+python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --loss_type joint --run_folder NEF200
+python -m fitting.submit --resubmit params --run_folder NEF200
+python -m fitting.submit --resubmit responses --run_folder NEF200
+python -m fitting.submit --resubmit activities --run_folder NEF200 --ensembles error value counting
+python -m fitting.collect NEF200 --type params
+python -m fitting.collect NEF200 --type responses
+python -m fitting.collect NEF200 --type activities --ensembles error value counting
+python -m fitting.collect NEF200 --type activities --ensembles error --timing once_per_dt
+python scripts/check_jobs.py --cancel
 ```
 
-Run folders are timestamped (`Apr12_632pm`) and created under `data/runs/`.
-Rename folders manually to track experiments. Delete folders to clear data.
-`run_config.json` in each folder records all job specs and git commit.
+Run folders live under `data/runs/`. `run_config.json` records all job specs and git commit.
 
 ---
 
-## SLURM job scripts
+## SLURM Job Scripts
 
-Any script that has a `run_local()` function intended to be called from a SLURM
-job (i.e. the function invoked when `--local` is passed) must print the sentinel
-string `JOB_COMPLETE` as the very last line of output in that function, after all
-work is complete. This allows `check_jobs.py` to identify finished jobs that have
-not yet been cleaned up by the SLURM scheduler.
-
-Example:
-
-    def run_local(...) -> None:
-        ...
-        print("JOB_COMPLETE")
+Any function invoked when `--local` is passed must print `JOB_COMPLETE` as the very last line of output. This allows `check_jobs.py` to identify finished jobs not yet cleaned up by SLURM.
 
 ---
 
-## Plotting Conventions
+## Activity Saving
 
-All figure scripts import shared aesthetics from `utils/plot_style.py`:
+Per-neuron activities and encoders are saved flat in the run folder alongside responses:
 
-```python
-from utils.plot_style import apply_style, get_palette, FIGURE_SIZE, SAMPLE_MARKERS
-from utils.plot_style import annotate_violins
-```
+- `once_per_obs`: `activities_{ens}_{dataset}.pkl`, `encoders_{ens}_{dataset}.pkl`
+- `once_per_dt`: `activities_windowed_{ens}_{dataset}.npz` (carrabin error ensemble only)
 
-`get_palette()` returns:
-```python
-{
-    "Human": "0.3",
-    "Bayes": palette[0], "Mean": palette[0],       # optimal
-    "RL": palette[1],                               # naive
-    "NoisyCounting": palette[2], "DeGroot": palette[2], "ADM": palette[2],  # human-matching
-    "NEF": palette[3],                              # NEF models
-}
-```
-
-`annotate_violins(ax, data, x_col, y_col, order)` runs paired Wilcoxon
-tests and draws manual significance brackets — use instead of statannotations.
-
-Save figures as both PNG (300 dpi) and PDF to `figures/`.
+Utility modules: `utils/save_responses.py`, `utils/save_activities.py`
 
 ---
 
-## Figure Scripts
+## Plotting
 
-All finalized figures are standalone Python scripts in `scripts/`:
-- `scripts/model_performance.py` — model performance under default `response` loss
-- `scripts/response_variability_carrabin.py` — intertrial variability, carrabin
-- `scripts/switch_probability_jiang.py` — switch probability vs conflict, jiang
-- `scripts/response_change_yoo.py` — power-law decay of update magnitude, yoo
+Figure scripts in `scripts/`. All accept `--run_folder`. Save PNG (300 dpi) + PDF to `figures/`. No `plt.show()`.
 
-Run with `python scripts/{script}.py`. Scripts save PNG (300 dpi) and
-PDF to `figures/`. Configuration variables live at the top of each script.
-
-### Conventions for all figure scripts
-- No `plt.show()` — save to file and inspect via file browser
-- Use `annotate_violins()` from `utils/plot_style` for significance brackets
-- No Jupyter notebooks — all figures are standalone scripts
+- `model_performance.py` — model performance
+- `response_variability_carrabin.py` — intertrial variability
+- `switch_probability_jiang.py` — switch probability vs conflict
+- `response_change_yoo.py` — power-law decay of update magnitude
+- `plot_activities.py` — neural population activity (5 panels)
 
 ---
 
-## Run Folders
+## Code Style
 
-Key run folders under `data/runs/` (not tracked by git):
-
-- `MSE` — all math models, default `response` loss, 500 trials
-- `wasserstein` — carrabin Bayes/RL/NoisyCounting, shape loss,
-  500 trials, NoisyCounting n_runs=50
-- `switch_probability` — jiang models with beta-sampled binary responses
-
-Each folder contains `run_config.json` with full hyperparameter record.
-
----
-
-## Current Model Status
-
-**Math models — complete:**
-- carrabin: Bayes (optimal), NoisyCounting (human-matching, n_runs=50), RL (naive)
-- jiang: Bayes (optimal, soft probabilistic), DeGroot (human-matching), RL (naive)
-- yoo: Mean (optimal), ADM (human-matching, nu fixed=0.01), RL (naive)
-
-**NEF models — current implementation:**
-- `models/counting_integrator.py` — standalone integrator counting testbed
-- `models/counting_lmu.py` — standalone LMU counting testbed
-- `models/NEF.py` — full NEF recurrent / synaptic evidence integration model
-
-**Known model details:**
-- NoisyCounting: sigma_c and nu upper bounds widened to 2.0
-- ADM: nu fixed at 0.01 per Yoo et al.; only phi and rho are fitted
-- Jiang Bayes: soft probabilistic; signal accuracy = 5/7
-- Jiang models: continuous expectations saved in response files; beta
-  sampling applied post-hoc via `apply_beta_sampling()` in switch_probability_jiang.py
-
----
-
-## NEF Counting Circuit
-
-Standalone counting testbeds:
-- `models/counting_integrator.py` — integrator testbed
-- `models/counting_lmu.py` — LMU testbed
-
-Both use:
-- shared params dict interfaces
-- train/test pretraining pipeline
-- onset detector inputs for pulse-driven counting
-
----
-
-## NEF Full Model (`models/NEF.py`)
-
-`models/NEF.py` implements both `NEF_recurrent` and `NEF_synaptic`.
-
-- `nef_type` is determined from the `model_type` string.
-- Key populations: onset detector, counting subnetwork, error (2D), value
-  (line-attractor recurrent state or PES-based synaptic state).
-- Pretraining via `_pretrain()` dispatches to counting integrator or LMU
-  testbeds.
-- Default counting config: `counting="integrator"`, `n_neurons_counting=1000`.
-
----
-
-## Code Style & Standards
-
-- **Language:** Python 3.11 (conda env: `PY311`; venv: `venv/`)
-- **Style:** PEP 8; use `black` formatting
-- **No hardcoded paths** — use `data_path()` or path constants from `utils/paths.py`
-- **No silent failures** — use assertions or explicit error messages
-- All file paths in prompts are relative to project root
-- Do not create nested project folders
+- Python 3.11 (conda: `PY311`; venv: `venv/`)
+- PEP 8, `black` formatting
+- No hardcoded paths — use `data_path()` from `utils/paths.py`
+- No silent failures
 - Do not push to git — commits are made manually
-
----
-
-## Reproducibility
-
-- All stochastic operations receive explicit random seeds
-- Optuna uses `TPESampler(seed=42)`
-- CV fold shuffling seeded with `pid`
-- NoisyCounting runs seeded with `100*pid + 1000*trial + run_idx`
-- `run_config.json` records git commit hash per run
-
----
-
-## Porting from Old Codebase
-
-When porting from `~/observational-learning-social-networks/`:
-
-1. Rewrite for clarity — do not copy-paste blindly
-2. Remove dead code and interactive-analysis fragments
-3. Add docstring noting original file
-4. Flag unclear logic with `# REVIEW: [reason]`
-
----
-
-## What Cursor Should NOT Do
-
-- Modify files outside the scope of the current prompt
-- Refactor code not mentioned in the prompt
-- Install dependencies without updating `requirements.txt`
-- Push to git
-- Create nested `evidence_integration/evidence_integration/` folders
-- Create Jupyter notebooks. All figures must be standalone Python scripts in `scripts/`
+- No Jupyter notebooks — all figures are standalone scripts in `scripts/`
+- Do not modify files outside the scope of the current prompt

@@ -36,7 +36,7 @@ Omit trailing tokens for defaults (``run_folder`` defaults to
 **Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
 
 **Jiang:** ``beta`` is always suggested (inverse temperature in the sigmoid used
-inside ``response_loss`` / NLL). ``DeGroot`` — ``omega`` (0.01–10.0); ``RL`` —
+inside ``response_loss`` / NLL). ``DeGroot`` — ``beta``; ``RL`` —
 ``alpha`` (naive update, ignores ``rd``). ``Bayes`` — no structural params beyond
 ``beta``.
 

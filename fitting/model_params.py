@@ -41,11 +41,6 @@ _NEF_RANGES: dict[str, tuple] = {
     "alpha_0": (0.01, 1.0, 0.001),
 }
 
-_NEF_FIXED_JIANG: dict[str, object] = {
-    **_NEF_FIXED,
-    "omega": 0.0,
-}
-
 _NEF_RANGES_JIANG: dict[str, tuple] = {
     **_NEF_RANGES,
     "beta": (0.01, 15.0, 0.01),
@@ -72,8 +67,8 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "beta": (0.01, 15.0, 0.01),
             "alpha": (0.01, 1.0, 0.01),
         },
-        "NEF_recurrent": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED_JIANG},
-        "NEF_synaptic": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED_JIANG},
+        "NEF_recurrent": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED},
+        "NEF_synaptic": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED},
     },
     "yoo": {
         "Mean": {},
