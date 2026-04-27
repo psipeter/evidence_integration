@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -30,22 +29,49 @@ OBS_RANGE = {
     "yoo": (2, 30),  # adjust as needed
 }
 COUNTING_OBS_RANGE = {
-    "carrabin": (2, 5),
-    "jiang": (0, 30),
-    "yoo": (2, 30),
+    "carrabin": (1, 5),
+    "jiang": (1, 30),
+    "yoo": (1, 30),
 }
 PE_BIN_TYPE = "equally_spaced"  # "equally_spaced" or "quantile"
 PE_BIN_N = 10
 PE_BIN_RANGE = (-1.5, 1.5)
-TIMECOURSE_OBS_MIN = 2
+LAMBDA_N = 5  # number of lowest/highest lambda pids to use in panel 3
+TIMECOURSE_EXAMPLES = [
+    {"pid": 4, "label": "#4"},
+    {"pid": 5, "label": "#5"},
+]
+ERROR_STYLE = "ci"  # "ci" for seaborn default 95% CI, or "sd" for standard deviation
+TIMECOURSE_OBS_MIN = 1
 TIMECOURSE_OBS_MAX = 5
+
+
+def make_binned_df(
+    df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    bin_edges: np.ndarray | int,
+    hue_col: str | None = None,
+    hue_val=None,
+) -> pd.DataFrame:
+    """Return long-form df with x replaced by bin centers, ready for sns.lineplot."""
+    df = df.copy()
+    if isinstance(bin_edges, int):
+        bins = pd.cut(df[x_col], bins=bin_edges, include_lowest=True)
+    else:
+        bins = pd.cut(df[x_col], bins=bin_edges, include_lowest=True)
+    df["bin_center"] = bins.apply(lambda b: b.mid if pd.notna(b) else np.nan)
+    df = df.dropna(subset=["bin_center", y_col])
+    if hue_col is not None and hue_val is not None:
+        df[hue_col] = hue_val
+    return df[["bin_center", y_col] + ([hue_col] if hue_col else [])]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--responses_folder", type=str, default="joint_loss")
-    parser.add_argument("--activity_folder", type=str, default="save_activities")
+    parser.add_argument("--run_folder", type=str, default="NEF200")
     args = parser.parse_args()
+    run_dir = RUNS_DIR / args.run_folder
 
     activities_data: dict[str, pd.DataFrame | None] = {}
     encoders_data: dict[str, pd.DataFrame | None] = {}
@@ -56,29 +82,11 @@ def main() -> None:
 
     available_datasets: list[str] = []
     for dataset in DATASETS:
-        activities_path = (
-            data_path("experiments")
-            / args.activity_folder
-            / f"activities_error_{dataset}.pkl"
-        )
-        encoders_path = (
-            data_path("experiments")
-            / args.activity_folder
-            / f"encoders_error_{dataset}.pkl"
-        )
-        counting_activities_path = (
-            data_path("experiments")
-            / args.activity_folder
-            / f"activities_counting_{dataset}.pkl"
-        )
-        counting_encoders_path = (
-            data_path("experiments")
-            / args.activity_folder
-            / f"encoders_counting_{dataset}.pkl"
-        )
-        responses_path = (
-            RUNS_DIR / args.responses_folder / f"{MODEL_TYPE}_{dataset}_responses.pkl"
-        )
+        activities_path = run_dir / f"activities_error_{dataset}.pkl"
+        encoders_path = run_dir / f"encoders_error_{dataset}.pkl"
+        counting_activities_path = run_dir / f"activities_counting_{dataset}.pkl"
+        counting_encoders_path = run_dir / f"encoders_counting_{dataset}.pkl"
+        responses_path = run_dir / f"{MODEL_TYPE}_{dataset}_responses.pkl"
         raw_path = data_path(f"{dataset}.pkl")
 
         if counting_activities_path.exists() and counting_encoders_path.exists():
@@ -106,18 +114,13 @@ def main() -> None:
         raw_data[dataset] = pd.read_pickle(raw_path)
         available_datasets.append(dataset)
 
-    windowed_path = (
-        data_path("experiments")
-        / args.activity_folder
-        / "activities_windowed_error_carrabin.npz"
-    )
+    windowed_path = run_dir / "activities_windowed_error_carrabin.npz"
     windowed_carrabin = np.load(windowed_path) if windowed_path.exists() else None
     if windowed_carrabin is None:
         print(f"Warning: missing windowed activities: {windowed_path}")
+    carrabin_encoders_path = run_dir / "encoders_error_carrabin.pkl"
 
-    yoo_params_path = (
-        RUNS_DIR / args.responses_folder / "NEF_recurrent_yoo_params.pkl"
-    )
+    yoo_params_path = run_dir / f"{MODEL_TYPE}_yoo_params.pkl"
     if yoo_params_path.exists():
         yoo_params = pd.read_pickle(yoo_params_path)[["pid", "lambda_"]].drop_duplicates()
     else:
@@ -274,39 +277,57 @@ def main() -> None:
         activities_data[dataset] = activities_df
 
     carrabin_on_idx_by_pid: dict[int, np.ndarray] = {}
-    if "carrabin" in available_datasets and encoders_data["carrabin"] is not None:
-        for pid, pid_enc in encoders_data["carrabin"].groupby("pid"):
+    carrabin_encoders_df = None
+    if carrabin_encoders_path.exists():
+        carrabin_encoders_df = pd.read_pickle(carrabin_encoders_path)
+    elif "carrabin" in available_datasets and encoders_data["carrabin"] is not None:
+        print(
+            f"Warning: missing run-folder carrabin encoders, falling back to old path: "
+            f"{carrabin_encoders_path}"
+        )
+        carrabin_encoders_df = encoders_data["carrabin"]
+
+    if carrabin_encoders_df is not None:
+        for pid, pid_enc in carrabin_encoders_df.groupby("pid"):
             on_idx = pid_enc[
                 pid_enc["enc_dim_1"] > ENCODER_THRESHOLD
             ]["neuron_idx"].values
             carrabin_on_idx_by_pid[int(pid)] = on_idx
 
-    timecourse_mean = None
-    timecourse_std = None
-    t_axis: np.ndarray | None = None
+    timecourse_df = None
 
     if windowed_carrabin is not None and carrabin_on_idx_by_pid:
         acts = windowed_carrabin["activities"]
         pid_ids = windowed_carrabin["pid_ids"]
         # dt_sample = float(windowed_carrabin["dt_sample"])
         dt_sample = 0.01  # matches --dt_sample used when saving
-        obs_slice = slice(TIMECOURSE_OBS_MIN - 1, TIMECOURSE_OBS_MAX)
-
-        pid_timecourses = []
-        for i, pid in enumerate(pid_ids):
-            on_idx = carrabin_on_idx_by_pid.get(int(pid))
+        timecourse_rows = []
+        for example in TIMECOURSE_EXAMPLES:
+            ex_pid = example["pid"]
+            ex_label = example["label"]
+            if ex_pid not in pid_ids:
+                continue
+            i = list(pid_ids).index(ex_pid)
+            on_idx = carrabin_on_idx_by_pid.get(ex_pid)
             if on_idx is None or len(on_idx) == 0:
                 continue
-            pid_acts = acts[i]
-            selected = pid_acts[:, obs_slice, :, :][:, :, :, on_idx]
-            pid_mean = np.nanmean(selected, axis=(0, 1, 3))
-            pid_timecourses.append(pid_mean)
-
-        if pid_timecourses:
-            pid_timecourses_arr = np.stack(pid_timecourses, axis=0)
-            timecourse_mean = np.nanmean(pid_timecourses_arr, axis=0)
-            timecourse_std = np.nanstd(pid_timecourses_arr, axis=0)
-            t_axis = np.arange(len(timecourse_mean)) * dt_sample
+            pid_acts = acts[i]  # (n_trials, n_obs, n_timesteps, n_neurons)
+            obs_slice = slice(TIMECOURSE_OBS_MIN - 1, TIMECOURSE_OBS_MAX)
+            selected = pid_acts[:, obs_slice, :, :]  # (n_trials, n_obs, n_timesteps, n_neurons)
+            selected_on = selected[:, :, :, on_idx]  # (n_trials, n_obs, n_timesteps, n_on)
+            mean_over_neurons = np.nanmean(selected_on, axis=3)  # (n_trials, n_obs, n_timesteps)
+            n_trials, n_obs_sel, n_timesteps = mean_over_neurons.shape
+            for trial_i in range(n_trials):
+                for obs_i in range(n_obs_sel):
+                    for t_idx in range(n_timesteps):
+                        timecourse_rows.append(
+                            {
+                                "t": t_idx * dt_sample,
+                                "activity": float(mean_over_neurons[trial_i, obs_i, t_idx]),
+                                "example": ex_label,
+                            }
+                        )
+        timecourse_df = pd.DataFrame(timecourse_rows)
 
     for dataset in available_datasets:
         activities_df = counting_activities_data.get(dataset)
@@ -329,20 +350,6 @@ def main() -> None:
         activities_data["yoo"] = activities_data["yoo"].merge(
             yoo_params, on="pid", how="left"
         )
-        lambda_bin_edges = np.unique(
-            np.quantile(activities_data["yoo"]["lambda_"].dropna(), [0, 1/3, 2/3, 1])
-        )
-        n_bins = len(lambda_bin_edges) - 1
-        bin_labels = [
-            f"λ = [{lambda_bin_edges[i]:.2f} - {lambda_bin_edges[i+1]:.2f}]"
-            for i in range(n_bins)
-        ]
-        activities_data["yoo"]["lambda_bin"] = pd.cut(
-            activities_data["yoo"]["lambda_"],
-            bins=lambda_bin_edges,
-            labels=bin_labels,
-            include_lowest=True,
-        )
 
     apply_style()
     fig, axes = plt.subplots(
@@ -355,210 +362,134 @@ def main() -> None:
     ax_time = axes[4]
 
     cb_palette = sns.color_palette("colorblind")
-    color_on = cb_palette[0]
-    color_off = cb_palette[1]
-    dataset_styles = {
-        "carrabin": {"marker": "o", "linestyle": "-"},
-        "jiang": {"marker": "s", "linestyle": "--"},
-        "yoo": {"marker": "^", "linestyle": ":"},
-    }
-
-    for dataset in available_datasets:
-        plot_df = activities_data[dataset]
-        if plot_df is None:
-            continue
-        obs_col = "stage" if dataset == "jiang" else "observation"
-        obs_min, obs_max = OBS_RANGE[dataset]
-        plot_df = plot_df[(plot_df[obs_col] >= obs_min) & (plot_df[obs_col] <= obs_max)].copy()
-        if dataset == "jiang":
-            plot_df = (
-                plot_df.sort_values(["pid", "trial", "stage"])
-                .groupby(["pid", "trial", "stage"], sort=False)
-                .first()
-                .reset_index()
-            )
-        if plot_df.empty:
-            continue
-
-        style = dataset_styles[dataset]
+    if "yoo" in available_datasets and activities_data["yoo"] is not None:
+        obs_min, obs_max = OBS_RANGE["yoo"]
+        plot_df = activities_data["yoo"]
+        plot_df = plot_df[
+            (plot_df["observation"] >= obs_min) & (plot_df["observation"] <= obs_max)
+        ].copy()
         if PE_BIN_TYPE == "equally_spaced":
             pe_bin_edges = np.linspace(PE_BIN_RANGE[0], PE_BIN_RANGE[1], PE_BIN_N + 1)
-        elif PE_BIN_TYPE == "quantile":
+        else:
             pe_bin_edges = np.quantile(
                 plot_df[pe_col].dropna(), np.linspace(0, 1, PE_BIN_N + 1)
             )
-        else:
-            raise ValueError(f"Unknown PE_BIN_TYPE: {PE_BIN_TYPE!r}")
-        for y_col, color, label in [
-            ("mean_activity_on", color_on, "on neurons"),
-            ("mean_activity_off", color_off, "off neurons"),
-        ]:
-            binned = (
-                plot_df.groupby(
-                    pd.cut(plot_df[pe_col], bins=pe_bin_edges, include_lowest=True)
-                )[y_col]
-                .agg(["mean", "std"])
-                .dropna()
-            )
-            bin_centers = [interval.mid for interval in binned.index]
-            ax_pe.errorbar(
-                bin_centers,
-                binned["mean"],
-                yerr=binned["std"],
-                fmt=style["marker"],
-                color=color,
-                alpha=0.8,
-                markersize=5,
-                linewidth=1.2,
-                zorder=5,
-            )
-            sns.regplot(
-                data=plot_df,
-                x=pe_col,
-                y=y_col,
-                scatter=False,
-                line_kws={
-                    "color": color,
-                    "linewidth": 2,
-                    "linestyle": style["linestyle"],
-                },
-                ax=ax_pe,
-            )
 
-    dataset_handles = []
-    for dataset in available_datasets:
-        style = dataset_styles[dataset]
-        handle = mlines.Line2D(
-            [],
-            [],
-            color="gray",
-            marker=style["marker"],
-            linestyle=style["linestyle"],
-            linewidth=2,
-            markersize=6,
-            label=dataset,
+        on_df = make_binned_df(
+            plot_df, pe_col, "mean_activity_on", pe_bin_edges, "neuron_type", "on"
         )
-        dataset_handles.append(handle)
+        off_df = make_binned_df(
+            plot_df, pe_col, "mean_activity_off", pe_bin_edges, "neuron_type", "off"
+        )
+        on_df = on_df.rename(columns={"mean_activity_on": "activity"})
+        off_df = off_df.rename(columns={"mean_activity_off": "activity"})
+        pe_long = pd.concat([on_df, off_df], ignore_index=True)
 
-    neuron_handles = [
-        mlines.Line2D([], [], color=color_on, linewidth=2, label="on neurons"),
-        mlines.Line2D([], [], color=color_off, linewidth=2, label="off neurons"),
-    ]
+        sns.lineplot(
+            data=pe_long,
+            x="bin_center",
+            y="activity",
+            hue="neuron_type",
+            palette={"on": cb_palette[0], "off": cb_palette[1]},
+            errorbar=ERROR_STYLE,
+            ax=ax_pe,
+        )
+        ax_pe.legend(frameon=False)
+        ax_pe.get_legend().set_title("Encoding")
+        ax_pe.set_xlabel("Prediction error")
+        sns.despine(ax=ax_pe, top=True, right=True)
+    else:
+        ax_pe.set_visible(False)
 
-    ax_pe.legend(
-        handles=dataset_handles + neuron_handles,
-        loc="upper center",
-        ncol=2,
-        frameon=False,
-    )
-    ax_pe.set_xlabel("Prediction error")
-    sns.despine(ax=ax_pe, top=True, right=True)
-
-    for dataset in available_datasets:
+    count_dfs = []
+    for dataset in reversed(list(available_datasets)):
         activities_df = counting_activities_data.get(dataset)
         if activities_df is None or "mean_activity_pos" not in activities_df.columns:
             continue
         count_x_col = "trial_obs_idx" if dataset == "jiang" else "observation"
         obs_min, obs_max = COUNTING_OBS_RANGE[dataset]
-        plot_df = activities_df[
-            (activities_df[count_x_col] >= obs_min)
-            & (activities_df[count_x_col] <= obs_max)
-        ].copy()
-
-        style = dataset_styles[dataset]
-        if plot_df.empty or "mean_activity_pos" not in plot_df.columns:
+        plot_df = activities_df.copy()
+        if dataset == "jiang":
+            plot_df["obs_plot"] = plot_df[count_x_col] + 1
+        else:
+            plot_df["obs_plot"] = plot_df[count_x_col]
+        plot_df = plot_df[
+            (plot_df["obs_plot"] >= obs_min) & (plot_df["obs_plot"] <= obs_max)
+        ]
+        if plot_df.empty:
             continue
+        tmp = plot_df[["obs_plot", "mean_activity_pos"]].copy()
+        tmp["dataset"] = dataset
+        count_dfs.append(tmp)
 
-        n_unique = int(plot_df[count_x_col].nunique())
-        sns.regplot(
-            data=plot_df,
-            x=count_x_col,
+    if count_dfs:
+        count_long = pd.concat(count_dfs, ignore_index=True)
+        dataset_palette = {
+            ds: cb_palette[i] for i, ds in enumerate(reversed(list(available_datasets)))
+        }
+        sns.lineplot(
+            data=count_long,
+            x="obs_plot",
             y="mean_activity_pos",
-            x_bins=n_unique,
-            scatter=True,
-            scatter_kws={
-                "alpha": 0.0,
-                "s": 0,
-            },
-            line_kws={
-                "color": cb_palette[0],
-                "linewidth": 2,
-                "linestyle": style["linestyle"],
-            },
+            hue="dataset",
+            palette=dataset_palette,
+            errorbar=ERROR_STYLE,
             ax=ax_count,
         )
-        binned_means = plot_df.groupby(count_x_col)["mean_activity_pos"].agg(
-            ["mean", "std"]
-        )
-        ax_count.errorbar(
-            binned_means.index,
-            binned_means["mean"],
-            yerr=binned_means["std"],
-            fmt=style["marker"],
-            color=cb_palette[0],
-            alpha=0.8,
-            markersize=5,
-            linewidth=1.2,
-            zorder=5,
-        )
-
-    ax_count.legend(handles=dataset_handles, frameon=False)
-    ax_count.set_xlabel("Observation index (within trial)")
-    sns.despine(ax=ax_count, top=True, right=True)
-    ax_count.set_xticks(range(0, 31, 5))
+        ax_count.legend(frameon=False)
+        ax_count.get_legend().set_title("Task")
+        ax_count.set_xlabel("Observation number")
+        ax_count.set_xticks(range(0, 31, 5))
+        sns.despine(ax=ax_count, top=True, right=True)
+    else:
+        ax_count.set_visible(False)
 
     if "yoo" in available_datasets:
         plot_df_w = activities_data["yoo"]
         if (
             plot_df_w is not None
             and "mean_activity_weight_on" in plot_df_w.columns
-            and "lambda_bin" in plot_df_w.columns
+            and "lambda_" in plot_df_w.columns
         ):
             obs_min, obs_max = OBS_RANGE["yoo"]
             plot_df_w = plot_df_w[
                 (plot_df_w["observation"] >= obs_min)
                 & (plot_df_w["observation"] <= obs_max)
             ].copy()
-            lambda_palette = sns.color_palette("colorblind", n_colors=3)
-            for i, (bin_label, bin_df) in enumerate(
-                plot_df_w.groupby("lambda_bin", observed=True)
-            ):
-                if bin_df.empty:
-                    continue
-                binned = bin_df.groupby("observation")["mean_activity_weight_on"].agg(
-                    ["mean", "std"]
-                )
-                ax_weight.errorbar(
-                    binned.index,
-                    binned["mean"],
-                    yerr=binned["std"],
-                    fmt=dataset_styles["yoo"]["marker"],
-                    color=lambda_palette[i],
-                    alpha=0.8,
-                    markersize=5,
-                    linewidth=1.2,
-                    label=str(bin_label),
-                )
-                sns.regplot(
-                    data=bin_df,
-                    x="observation",
-                    y="mean_activity_weight_on",
-                    scatter=False,
-                    line_kws={
-                        "color": lambda_palette[i],
-                        "linewidth": 2,
-                        "linestyle": dataset_styles["yoo"]["linestyle"],
-                    },
-                    ax=ax_weight,
-                )
+            lambdas_sorted = plot_df_w.groupby("pid")["lambda_"].first().sort_values()
+            low_pids = lambdas_sorted.index[:LAMBDA_N].tolist()
+            high_pids = lambdas_sorted.index[-LAMBDA_N:].tolist()
+            low_thresh_lambda = lambdas_sorted.iloc[LAMBDA_N - 1]
+            high_thresh_lambda = lambdas_sorted.iloc[-LAMBDA_N]
+
+            low_df = plot_df_w[plot_df_w["pid"].isin(low_pids)].copy()
+            high_df = plot_df_w[plot_df_w["pid"].isin(high_pids)].copy()
+
+            low_label = f"low (λ<{low_thresh_lambda:.2f}, n={LAMBDA_N})"
+            high_label = f"high (λ>{high_thresh_lambda:.2f}, n={LAMBDA_N})"
+            low_df["lambda_group"] = low_label
+            high_df["lambda_group"] = high_label
+
+            plot_df_w_filtered = pd.concat([low_df, high_df], ignore_index=True)
+            lambda_palette = {low_label: cb_palette[0], high_label: cb_palette[1]}
+            sns.lineplot(
+                data=plot_df_w_filtered,
+                x="observation",
+                y="mean_activity_weight_on",
+                hue="lambda_group",
+                palette=lambda_palette,
+                errorbar=ERROR_STYLE,
+                ax=ax_weight,
+            )
             ax_weight.legend(frameon=False)
+            ax_weight.get_legend().set_title("Temporal discounting")
             ax_weight.set_xlabel("Observation number")
+            ax_weight.set_xticks(range(0, 31, 5))
             sns.despine(ax=ax_weight, top=True, right=True)
         else:
             ax_weight.set_visible(False)
     else:
         ax_weight.set_visible(False)
-    ax_weight.set_xticks(range(0, 31, 5))
 
     if "jiang" in available_datasets:
         plot_df_rd = activities_data["jiang"]
@@ -568,72 +499,50 @@ def main() -> None:
             and "rd_true" in plot_df_rd.columns
         ):
             plot_df_rd = plot_df_rd[plot_df_rd["stage"].isin([1, 2, 3])].copy()
-            stage_palette = sns.color_palette("colorblind", n_colors=3)
             rd_bin_edges = np.quantile(
                 plot_df_rd["rd_true"].dropna(), np.linspace(0, 1, 11)
             )
-            for i, stage_val in enumerate(sorted(plot_df_rd["stage"].unique())):
-                stage_df = plot_df_rd[plot_df_rd["stage"] == stage_val]
-                binned = (
-                    stage_df.groupby(
-                        pd.cut(
-                            stage_df["rd_true"],
-                            bins=rd_bin_edges,
-                            include_lowest=True,
-                        )
-                    )["mean_activity_weight_on"]
-                    .agg(["mean", "std"])
-                    .dropna()
-                )
-                bin_centers = [interval.mid for interval in binned.index]
-                ax_rd.errorbar(
-                    bin_centers,
-                    binned["mean"],
-                    yerr=binned["std"],
-                    fmt=dataset_styles["jiang"]["marker"],
-                    color=stage_palette[i],
-                    alpha=0.8,
-                    markersize=5,
-                    linewidth=1.2,
-                    label=f"stage {stage_val}",
-                    zorder=5,
-                )
-                sns.regplot(
-                    data=stage_df,
-                    x="rd_true",
-                    y="mean_activity_weight_on",
-                    x_bins=rd_bin_edges,
-                    scatter=False,
-                    line_kws={
-                        "color": stage_palette[i],
-                        "linewidth": 2,
-                        "linestyle": dataset_styles["jiang"]["linestyle"],
-                    },
-                    ax=ax_rd,
-                )
+            plot_df_rd["rd_bin"] = pd.cut(
+                plot_df_rd["rd_true"], bins=rd_bin_edges, include_lowest=True
+            ).apply(lambda b: b.mid if pd.notna(b) else np.nan)
+            plot_df_rd = plot_df_rd.dropna(subset=["rd_bin", "mean_activity_weight_on"])
+            plot_df_rd["stage"] = plot_df_rd["stage"].astype(str)
+            stage_palette = {str(s): cb_palette[i] for i, s in enumerate([1, 2, 3])}
+            sns.lineplot(
+                data=plot_df_rd,
+                x="rd_bin",
+                y="mean_activity_weight_on",
+                hue="stage",
+                palette=stage_palette,
+                errorbar=ERROR_STYLE,
+                ax=ax_rd,
+            )
             ax_rd.legend(frameon=False)
-            ax_rd.set_xlabel("Neighbor degree (rd)")
+            ax_rd.get_legend().set_title("Jiang task stage")
+            ax_rd.set_xlabel("Neighbor network degree")
+            ax_rd.set_xticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             sns.despine(ax=ax_rd, top=True, right=True)
         else:
             ax_rd.set_visible(False)
     else:
         ax_rd.set_visible(False)
-    ax_rd.set_xticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
 
-    if timecourse_mean is not None and t_axis is not None:
-        ax_time.fill_between(
-            t_axis,
-            timecourse_mean - timecourse_std,
-            timecourse_mean + timecourse_std,
-            color=cb_palette[0],
-            alpha=0.3,
+    if timecourse_df is not None:
+        example_palette = {ex["label"]: cb_palette[i] for i, ex in enumerate(TIMECOURSE_EXAMPLES)}
+        sns.lineplot(
+            data=timecourse_df,
+            x="t",
+            y="activity",
+            hue="example",
+            palette=example_palette,
+            errorbar=ERROR_STYLE,
+            ax=ax_time,
         )
-        ax_time.plot(
-            t_axis,
-            timecourse_mean,
-            color=cb_palette[0],
-            linewidth=2,
-        )
+        leg = ax_time.get_legend()
+        if leg:
+            leg.set_title("Participant")
+            # leg.get_title().set_fontsize(plt.rcParams.get("legend.fontsize", 8))
+            leg.set_frame_on(False)
         ax_time.set_xlabel("Time within observation (s)")
         ax_time.set_title("Error neuron timecourse")
         sns.despine(ax=ax_time, top=True, right=True)
@@ -649,7 +558,7 @@ def main() -> None:
     ax_weight.set_ylabel("")
     ax_rd.set_ylabel("")
     ax_time.set_ylabel("")
-    ax_pe.set_xticks([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0])
+    ax_pe.set_xticks([-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5])
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     fname = "neural_activities"

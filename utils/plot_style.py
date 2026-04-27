@@ -35,7 +35,7 @@ def apply_style() -> None:
             "axes.linewidth": 0.8,
             "xtick.major.width": 0.8,
             "ytick.major.width": 0.8,
-            "lines.linewidth": 1.5,
+            "lines.linewidth": 2.5,
             # saving
             "savefig.bbox": "tight",
             "savefig.transparent": False,
