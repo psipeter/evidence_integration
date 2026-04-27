@@ -42,7 +42,7 @@ _NEF_RANGES: dict[str, tuple] = {
 _NEF_RANGES_JIANG: dict[str, tuple] = {
     **_NEF_RANGES,
     "beta": (0.01, 15.0, 0.01),
-    "omega": (0.01, 10.0, 0.01),
+    "omega": (1.0, 1.0, 0.01),
 }
 
 MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
@@ -63,7 +63,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "Bayes": {"beta": (0.01, 15.0, 0.01)},
         "DeGroot": {
             "beta": (0.01, 15.0, 0.01),
-            "omega": (0.01, 10.0, 0.01),
+            "omega": (1.0, 1.0, 0.01),
         },
         "RL": {
             "beta": (0.01, 15.0, 0.01),

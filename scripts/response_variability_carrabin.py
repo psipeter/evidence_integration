@@ -31,7 +31,7 @@ from utils.plot_style import annotate_violins, apply_style, FIGURE_SIZE, get_pal
 
 # -- CLI ----------------------------------------------------------------------
 _parser = argparse.ArgumentParser()
-_parser.add_argument("--run_folder", type=str, default="MSE")
+_parser.add_argument("--run_folder", type=str, default="joint_loss")
 _args, _ = _parser.parse_known_args()
 RUN_FOLDER = _args.run_folder
 

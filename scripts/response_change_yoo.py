@@ -44,7 +44,7 @@ from utils.plot_style import (
 
 # -- CLI ----------------------------------------------------------------------
 _parser = argparse.ArgumentParser()
-_parser.add_argument("--run_folder", type=str, default="MSE")
+_parser.add_argument("--run_folder", type=str, default="joint_loss")
 _args, _ = _parser.parse_known_args()
 RUN_FOLDER = _args.run_folder
 
