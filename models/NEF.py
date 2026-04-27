@@ -63,6 +63,8 @@ PARAM_DEFAULTS: dict = {
     "n_obs": 30,
     "lambda_": 0.5,
     "alpha_0": 1,
+    "T_error": 0.5,  # transform on error→value connection; defaults to tau_fb for backward compatibility
+    "tau_error": 0.1,
 }
 
 
@@ -87,14 +89,13 @@ def _make_input(obs_values: np.ndarray, params: dict) -> callable:
 
 def _make_alpha_bias_input(obs_values: np.ndarray, params: dict) -> callable:
     """
-    Outputs omega * alpha_bias_array[step] during each observation, 0 during ITI.
+    Outputs alpha_bias_array[step] during each observation, 0 during ITI.
     For non-jiang datasets, alpha_bias_array is all zeros so output is always 0.
     """
     t_obs = float(params["t_obs"])
     t_iti = float(params["t_iti"])
     t_step = t_obs + t_iti
     n_obs = len(obs_values)
-    omega = float(params.get("omega", 0.0))
     bias = np.array(params.get("alpha_bias_array", np.zeros(n_obs)), dtype=float)
 
     def fn(t: float) -> float:
@@ -103,7 +104,7 @@ def _make_alpha_bias_input(obs_values: np.ndarray, params: dict) -> callable:
         step = int((t - t_iti) / t_step)
         phase = (t - t_iti) - step * t_step
         if step < n_obs and phase < t_obs:
-            return float(omega * bias[step])
+            return float(bias[step])
         return 0.0
 
     return fn
@@ -147,6 +148,7 @@ def build_network(
 ) -> nengo.Network:
     seed = int(params["seed"])
     tau_fb = float(params["tau_fb"])
+    T_error = float(params["T_error"])
 
     if params["counting"] == "lmu":
         _build_c = build_counting_lmu
@@ -199,12 +201,12 @@ def build_network(
             )
 
         nengo.Connection(net.node_input[0], net.error[1], synapse=None, seed=seed)
-        w_inh = -1000.0 * np.ones((net.error.n_neurons, 1))
+        w_inh = -10.0 * np.ones((net.error.n_neurons, 1))
         nengo.Connection(
             net.node_input[1],
             net.error.neurons,
             transform=w_inh,
-            synapse=None,
+            synapse=float(params["tau_error"]),
             seed=seed,
         )
 
@@ -229,7 +231,7 @@ def build_network(
                 net.error,
                 net.value,
                 function=lambda x: x[0] * x[1],
-                transform=tau_fb,
+                transform=T_error,
                 synapse=tau_fb,
                 seed=seed,
             )
@@ -424,6 +426,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lmu_theta_mult", type=float, default=PARAM_DEFAULTS["lmu_theta_mult"])
     p.add_argument("--tau_ff", type=float, default=PARAM_DEFAULTS["tau_ff"])
     p.add_argument("--tau_fb", type=float, default=PARAM_DEFAULTS["tau_fb"])
+    p.add_argument("--T_error", type=float, default=PARAM_DEFAULTS["T_error"])
+    p.add_argument("--tau_error", type=float, default=PARAM_DEFAULTS["tau_error"])
     p.add_argument("--onset_detector_amp", type=float, default=PARAM_DEFAULTS["onset_detector_amp"])
     p.add_argument("--tau_fast", type=float, default=PARAM_DEFAULTS["tau_fast"])
     p.add_argument("--tau_slow", type=float, default=PARAM_DEFAULTS["tau_slow"])

@@ -17,6 +17,8 @@ _NEF_FIXED: dict[str, object] = {
     "tau_probe": 0.01,
     "tau_ff": 0.01,
     "tau_fb": 0.2,
+    "tau_error": 0.1,
+    "T_error": 0.3,
     "tau_fast": 0.01,
     "tau_slow": 0.2,
     "lmu_order": 24,
@@ -24,7 +26,7 @@ _NEF_FIXED: dict[str, object] = {
     "lmu_n_obs_max": 30,
     "lmu_theta_mult": 1.1,
     "onset_detector_amp": 0.3,
-    "radius_e": 1.0,
+    "radius_e": 1.5,
     "radius_v": 1.0,
     "counting": "integrator",
     "n_neurons": 200,
@@ -36,13 +38,17 @@ _NEF_FIXED: dict[str, object] = {
 
 _NEF_RANGES: dict[str, tuple] = {
     "lambda_": (0.01, 1.0, 0.001),
-    "alpha_0": (0.01, 5.0, 0.001),
+    "alpha_0": (0.01, 1.0, 0.001),
+}
+
+_NEF_FIXED_JIANG: dict[str, object] = {
+    **_NEF_FIXED,
+    "omega": 0.0,
 }
 
 _NEF_RANGES_JIANG: dict[str, tuple] = {
     **_NEF_RANGES,
     "beta": (0.01, 15.0, 0.01),
-    "omega": (1.0, 1.0, 0.01),
 }
 
 MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
@@ -61,16 +67,13 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
     "jiang": {
         "Bayes": {"beta": (0.01, 15.0, 0.01)},
-        "DeGroot": {
-            "beta": (0.01, 15.0, 0.01),
-            "omega": (1.0, 1.0, 0.01),
-        },
+        "DeGroot": {"beta": (0.01, 15.0, 0.01)},
         "RL": {
             "beta": (0.01, 15.0, 0.01),
-            "alpha": (0.01, 1.5, 0.01),
+            "alpha": (0.01, 1.0, 0.01),
         },
-        "NEF_recurrent": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED},
-        "NEF_synaptic": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED},
+        "NEF_recurrent": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED_JIANG},
+        "NEF_synaptic": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED_JIANG},
     },
     "yoo": {
         "Mean": {},
