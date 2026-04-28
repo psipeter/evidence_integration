@@ -169,9 +169,9 @@ def _bayes_posterior(
     return float(num / den)
 
 
-_CARRABIN_MODELS = frozenset({"Bayes", "NoisyCounting", "RL"})
-_JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL"})
-_YOO_MODELS = frozenset({"Mean", "ADM", "RL"})
+_CARRABIN_MODELS = frozenset({"Bayes", "NoisyCounting", "RL", "RL_lambda"})
+_JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL", "RL_lambda", "RL_lambda_rd"})
+_YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -314,6 +314,16 @@ def _run_carrabin(
             expectation += params["alpha"] * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
+    if model_type == "RL_lambda":
+        alpha_0 = float(params["alpha_0"])
+        lambda_ = float(params["lambda_"])
+        expectation = 0.0
+        for n, value in enumerate(values, start=1):
+            alpha = alpha_0 / (n ** lambda_)
+            error = value - expectation
+            expectation += alpha * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
     raise AssertionError("unreachable")
 
 
@@ -373,6 +383,27 @@ def _run_jiang(
             expectation += weight * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
+    if model_type == "RL_lambda":
+        alpha_0 = float(params["alpha_0"])
+        lambda_ = float(params["lambda_"])
+        expectation = 0.0
+        for n, value in enumerate(values, start=1):
+            alpha = alpha_0 / (n ** lambda_)
+            error = value - expectation
+            expectation += alpha * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
+    if model_type == "RL_lambda_rd":
+        alpha_0 = float(params["alpha_0"])
+        lambda_ = float(params["lambda_"])
+        expectation = 0.0
+        for n, (value, rd) in enumerate(zip(values, rds), start=1):
+            alpha = alpha_0 / (n ** lambda_) + float(rd)
+            alpha = float(np.clip(alpha, 0.0, 1.0))
+            error = value - expectation
+            expectation += alpha * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
     raise AssertionError("unreachable")
 
 
@@ -393,6 +424,16 @@ def _run_yoo(
         for value in values:
             error = value - expectation
             expectation += params["alpha"] * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
+    if model_type == "RL_lambda":
+        alpha_0 = float(params["alpha_0"])
+        lambda_ = float(params["lambda_"])
+        expectation = 0.0
+        for n, value in enumerate(values, start=1):
+            alpha = alpha_0 / (n ** lambda_)
+            error = value - expectation
+            expectation += alpha * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
     if model_type == "ADM":
