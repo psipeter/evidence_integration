@@ -380,6 +380,12 @@ def fit(
 
     if model_type in ("NEF_recurrent", "NEF_synaptic"):
         save_responses(pid, dataset, run_folder, model_type)
+    else:
+        # math models: run full simulation with best params and save responses
+        best_params_full = {**best_params}
+        best_params_full["seed"] = best_params["seed"]
+        df = math_models.run(best_params_full)
+        df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl")
 
     return params_df, performance_df
 
