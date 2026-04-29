@@ -45,6 +45,7 @@ from utils.plot_style import (
 # -- CLI ----------------------------------------------------------------------
 _parser = argparse.ArgumentParser()
 _parser.add_argument("--run_folder", type=str, default="joint_loss")
+_parser.add_argument("--include_rl_lambda", action="store_true", default=False)
 _args, _ = _parser.parse_known_args()
 RUN_FOLDER = _args.run_folder
 
@@ -69,11 +70,14 @@ parser.add_argument(
     default=RUN_FOLDER,
     help="Run folder under data/runs/ for math model pickles",
 )
+parser.add_argument("--include_rl_lambda", action="store_true", default=False)
 args = parser.parse_args()
 
 RUN_FOLDER = args.run_folder
 
 MODEL_ORDER = ["Mean", "RL", "ADM", "NEF_recurrent"]
+if args.include_rl_lambda:
+    MODEL_ORDER.append("RL_lambda")
 
 # -- style ---------------------------------------------------------------------
 apply_style()
@@ -312,13 +316,14 @@ else:
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
 ]
+n_model_cols = len(sources)
 
 # -- figure --------------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-gs = gridspec.GridSpec(2, 5, figure=fig, height_ratios=[1.0, 1.2])
+gs = gridspec.GridSpec(2, n_model_cols, figure=fig, height_ratios=[1.0, 1.2])
 
 ax_row1: list = []
-for i in range(5):
+for i in range(n_model_cols):
     sharey = ax_row1[0] if i > 0 else None
     ax_row1.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
@@ -415,7 +420,10 @@ ax_param.set_title("Human power-law parameters")
 sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: Wasserstein violins
-plot_palette = {disp: PALETTE[disp] for disp in DISPLAY_ORDER}
+plot_palette = {
+    _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray"))
+    for mt in MODEL_ORDER
+}
 if DISPLAY_ORDER and not loss_plot.empty:
     sns.violinplot(
         data=loss_plot,

@@ -70,6 +70,8 @@ def get_palette() -> dict:
         "NEF":           palette[3],
         "NEF_recurrent": palette[3],
         "NEF_synaptic":  palette[3],
+        "RL_lambda":    "#9B59B6",  # purple
+        "RL_lambda_rd": "#6C3483",  # dark purple
     }
 
 

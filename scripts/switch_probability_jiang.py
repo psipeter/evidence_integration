@@ -45,6 +45,7 @@ from utils.plot_style import (
 # -- CLI ----------------------------------------------------------------------
 _parser = argparse.ArgumentParser()
 _parser.add_argument("--run_folder", type=str, default="joint_loss")
+_parser.add_argument("--include_rl_lambda", action="store_true", default=False)
 _args, _ = _parser.parse_known_args()
 RUN_FOLDER = _args.run_folder
 
@@ -55,6 +56,8 @@ RUN_FOLDER = _args.run_folder
 SAMPLE_PIDS: dict[str, int] | None = {"low": 154, "medium": 88, "high": 173}
 
 MODEL_ORDER = ["Bayes", "RL", "DeGroot", "NEF_recurrent"]
+if _args.include_rl_lambda:
+    MODEL_ORDER.extend(["RL_lambda", "RL_lambda_rd"])
 LINESTYLES = ["solid", "dashed", "dotted"]  # low / medium / high sensitivity
 SAMPLE_LABELS = ["low", "medium", "high"]
 LINE_ARC = 0.2
@@ -76,6 +79,10 @@ def _model_lookup_series(mdf: pd.DataFrame) -> pd.Series:
 def _display(mt: str) -> str:
     if mt.startswith("NEF"):
         return "NEF"
+    if mt == "RL_lambda":
+        return "RL_λ"
+    if mt == "RL_lambda_rd":
+        return "RL_λ_rd"
     return mt
 
 
@@ -361,13 +368,14 @@ else:
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
 ]
+n_model_cols = len(sources)
 
 # -- figure --------------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-gs = gridspec.GridSpec(2, 5, figure=fig, height_ratios=[1.0, 1.2])
+gs = gridspec.GridSpec(2, n_model_cols, figure=fig, height_ratios=[1.0, 1.2])
 
 ax_row1: list = []
-for i in range(5):
+for i in range(n_model_cols):
     sharey = ax_row1[0] if i > 0 else None
     ax_row1.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
@@ -383,7 +391,7 @@ conflict_bins = np.linspace(0, 1.0, 5)
 
 for ax, (label, _) in zip(ax_row1, sources):
     display_label = _display(label)
-    color = PALETTE[display_label]
+    color = PALETTE.get(label, PALETTE.get(display_label, "gray"))
     obs_src = obs_by_source[label]
     param_src = params_by_source[label]
     for pid, ls, mkr in zip(sample_pids, LINESTYLES, _markers):
@@ -479,7 +487,10 @@ ax_param.set_xlim(0.4, 1.0)
 sns.despine(ax=ax_param, top=True, right=True)
 
 # Row 2 right: loss violins
-plot_palette = {_display(mt): PALETTE[_display(mt)] for mt in MODEL_ORDER}
+plot_palette = {
+    _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray"))
+    for mt in MODEL_ORDER
+}
 display_order = [_display(mt) for mt in MODEL_ORDER]
 loss_plot = loss_plot.copy()
 if not loss_plot.empty:

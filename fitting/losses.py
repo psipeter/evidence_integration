@@ -25,6 +25,7 @@ import scipy.special
 from scipy.stats import wasserstein_distance
 
 DELTA_SMOOTH_WINDOW = 3  # rolling window for smoothing delta curves in shape_loss
+POWER_LAW_SMOOTH_WINDOW = 5  # smoothing window for power law fitting in yoo shape loss
 JOINT_LOSS_W = {
     "carrabin": 0.2,
     "yoo":      0.5,
@@ -43,6 +44,34 @@ def _smooth_curve(arr: np.ndarray, window: int) -> np.ndarray:
         hi = min(len(arr), i + half + 1)
         result[i] = float(arr[lo:hi].mean())
     return result
+
+
+def _fit_power_law_params(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fit a power law A * n^(-lambda) to each pid's smoothed mean |delta response|
+    curve. Returns DataFrame with columns: pid, A, lambda_.
+    """
+    from scipy.stats import linregress
+
+    rows = []
+    for pid, grp in df.groupby("pid"):
+        pieces = []
+        for _, tgrp in grp.groupby("trial"):
+            g = tgrp.sort_values("observation").copy()
+            g["delta"] = g["response"].diff().abs()
+            pieces.append(g)
+        delta = pd.concat(pieces, ignore_index=True)
+        curve = delta.groupby("observation")["delta"].mean().dropna()
+        curve = curve[curve.index >= 2]
+        if len(curve) < 3:
+            continue
+        d = _smooth_curve(curve.values, POWER_LAW_SMOOTH_WINDOW)
+        if np.any(d <= 0):
+            continue
+        n = curve.index.values.astype(float)
+        slope, intercept, _, _, _ = linregress(np.log(n), np.log(d))
+        rows.append({"pid": pid, "A": float(np.exp(intercept)), "lambda_": float(-slope)})
+    return pd.DataFrame(rows)
 
 
 def _observations_switch_conflict(
@@ -241,24 +270,16 @@ def shape_loss(
             raise ValueError(f"shape_loss is not finite: {result}")
         return result
     if dataset == "yoo":
-
-        def mean_delta(df: pd.DataFrame) -> np.ndarray:
-            pieces = []
-            for (_, trial), grp in df.groupby(["pid", "trial"], sort=False):
-                g = grp.sort_values("observation").copy()
-                g["delta"] = g["response"].diff().abs()
-                pieces.append(g)
-            delta = pd.concat(pieces, ignore_index=True)
-            curve = delta.groupby("observation")["delta"].mean()
-            curve = curve[curve.index >= 2].sort_index().to_numpy(dtype=float)
-            return _smooth_curve(curve, DELTA_SMOOTH_WINDOW)
-
-        h_curve = mean_delta(human_full)
-        m_curve = mean_delta(model)
-        if len(h_curve) == 0 or len(m_curve) == 0:
+        h_params = _fit_power_law_params(human_full)
+        m_params = _fit_power_law_params(model)
+        if h_params.empty or m_params.empty:
             return float("nan")
-        n = min(len(h_curve), len(m_curve))
-        return float(wasserstein_distance(h_curve[:n], m_curve[:n]))
+        merged = h_params.merge(m_params, on="pid", suffixes=("_h", "_m"))
+        if merged.empty:
+            return float("nan")
+        loss_A = (merged["A_h"] - merged["A_m"]).abs().mean()
+        loss_lambda = (merged["lambda__h"] - merged["lambda__m"]).abs().mean()
+        return float(loss_A + loss_lambda)
     if dataset == "jiang":
         if "beta" not in params:
             raise ValueError("params must include 'beta' for jiang shape_loss")

@@ -32,6 +32,7 @@ from utils.plot_style import annotate_violins, apply_style, FIGURE_SIZE, get_pal
 # -- CLI ----------------------------------------------------------------------
 _parser = argparse.ArgumentParser()
 _parser.add_argument("--run_folder", type=str, default="joint_loss")
+_parser.add_argument("--include_rl_lambda", action="store_true", default=False)
 _args, _ = _parser.parse_known_args()
 RUN_FOLDER = _args.run_folder
 
@@ -49,11 +50,14 @@ parser.add_argument(
     default=RUN_FOLDER,
     help="Run folder under data/runs/ for math model pickles",
 )
+parser.add_argument("--include_rl_lambda", action="store_true", default=False)
 args = parser.parse_args()
 
 RUN_FOLDER = args.run_folder
 
 MODEL_ORDER = ["Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
+if args.include_rl_lambda:
+    MODEL_ORDER.append("RL_lambda")
 
 # -- style ---------------------------------------------------------------------
 apply_style()
@@ -132,7 +136,8 @@ def _kde_panel_title(label: str) -> str:
 def _kde_color(label: str) -> str:
     if label == "Human":
         return PALETTE["Human"]
-    return PALETTE[_display(label)]
+    disp = _display(label)
+    return PALETTE.get(label, PALETTE.get(disp, "gray"))
 
 # -- load data -----------------------------------------------------------------
 run_dir = data_path("runs") / RUN_FOLDER
@@ -177,18 +182,21 @@ if SAMPLE_PIDS is None:
 sample_labels = ["narrow", "medium", "broad"]
 sample_pids = [SAMPLE_PIDS[l] for l in sample_labels]
 
+sources = [("Human", human)] + [(mt, models[mt]) for mt in MODEL_ORDER]
+n_model_cols = len(sources)
+
 # -- figure layout -------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
 gs = gridspec.GridSpec(
     2,
-    5,
+    n_model_cols,
     figure=fig,
     height_ratios=[1, 1.2],
 )
 
 # Row 1: KDE panels (Human + available models)
 ax_kde = []
-for i in range(5):
+for i in range(n_model_cols):
     sharey = ax_kde[0] if i > 0 else None
     ax_kde.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
@@ -197,7 +205,6 @@ ax_std = fig.add_subplot(gs[1, :2])
 ax_viol = fig.add_subplot(gs[1, 2:])
 
 # -- row 1: KDE panels ---------------------------------------------------------
-sources = [("Human", human)] + [(mt, models[mt]) for mt in MODEL_ORDER]
 
 # Compute shared x/y limits across all panels and all pids
 all_responses = pd.concat(
@@ -262,6 +269,10 @@ ax_std.set_title("Population variability")
 sns.despine(ax=ax_std, top=True, right=True)
 
 # -- row 2b: Wasserstein violin plots ------------------------------------------
+plot_palette = {
+    _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray"))
+    for mt in MODEL_ORDER
+}
 if DISPLAY_ORDER and not loss_plot.empty:
     sns.violinplot(
         data=loss_plot,
@@ -269,7 +280,7 @@ if DISPLAY_ORDER and not loss_plot.empty:
         y="loss",
         order=DISPLAY_ORDER,
         hue="model_type",
-        palette=PALETTE,
+        palette=plot_palette,
         inner=None,
         legend=False,
         cut=0,
