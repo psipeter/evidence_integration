@@ -68,6 +68,11 @@ PARAM_DEFAULTS: dict = {
 }
 
 
+def _trial_seed(base_seed: int, trial_number: int) -> int:
+    """Derive a reproducible per-trial seed from base_seed and trial number."""
+    return abs(hash((int(base_seed), int(trial_number)))) % (2**31)
+
+
 def _make_input(obs_values: np.ndarray, params: dict) -> callable:
     """Returns [obs(t), inh(t)] where inh=1 during ITI, 0 during observation."""
     t_obs = float(params["t_obs"])
@@ -374,7 +379,8 @@ def run(
             if pfull["dataset"] == "jiang"
             else np.zeros(len(obs_values))
         )
-        p = {**pfull, "alpha_bias_array": alpha_bias}
+        trial_seed = _trial_seed(int(pfull["seed"]), int(trial))
+        p = {**pfull, "alpha_bias_array": alpha_bias, "seed": trial_seed}
         if save_probes and int(trial) == first_trial:
             responses, probe_data = _simulate_trial(
                 obs_values, p, decoders, return_probes=True

@@ -41,6 +41,11 @@ _ALL_SIGNALS: np.ndarray | None = None
 _SIGNAL_ACCURACY = 5.0 / 7.0
 
 
+def _trial_seed(base_seed: int, trial_number: int) -> int:
+    """Derive a reproducible per-trial seed from base_seed and trial number."""
+    return abs(hash((int(base_seed), int(trial_number)))) % (2**31)
+
+
 def _bayes_load_networks() -> np.ndarray:
     """Load jiang_networks.npy, shape (7, 7, 43). Cached at module level."""
     global _JIANG_NETWORKS
@@ -290,7 +295,7 @@ def _run_carrabin(
         nu = float(params["nu"])
         if len(values) == 0:
             return 0.0
-        seed = 100 * int(params["pid"]) + 1000 * trial
+        seed = _trial_seed(int(params.get("seed", 0)), int(trial))
         rng = np.random.RandomState(seed)
         r = 0.0
         p_hat = 0.0

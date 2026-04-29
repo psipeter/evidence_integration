@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Yoo task: mean absolute response change across observations and power-law decay.
+Yoo task: power-law decay of response change (same fitting as ``fitting.losses``).
 
-Row 1: Human and four models — mean |Δresponse| ± SE vs observation with
-per-participant power-law fits for three sample participants (fast / medium /
-slow decay). Row 2: human (tau, y_int) KDE with sample markers; violin plot of
-Wasserstein distance between human and model mean curves per participant.
+Row 1: Human and models — per-participant power-law curves (same fit as
+``fitting.losses`` for yoo). Row 2: human decay vs amplitude KDE with sample
+markers; violin plot of shape loss vs human.
 
-On first run (SAMPLE_PIDS = None), prints pid / tau / y_int for humans (sorted
-by tau), then exits. Set SAMPLE_PIDS and rerun.
+On first run (SAMPLE_PIDS = None), prints pid / lambda_ / A for humans (sorted
+by lambda_ descending), then exits. Set SAMPLE_PIDS and rerun.
 
 Usage:
     python scripts/response_change_yoo.py [run_folder]
@@ -33,6 +32,8 @@ import seaborn as sns
 # -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from fitting.losses import POWER_LAW_SMOOTH_WINDOW  # noqa: F401
+from fitting.losses import _fit_power_law_params
 from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import (
     annotate_violins,
@@ -59,8 +60,6 @@ SAMPLE_LABELS = ["fast", "medium", "slow"]
 
 OBS_MIN = 2
 OBS_MAX = 30
-
-ROLLING_WINDOW = 3
 
 # -- CLI ----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Yoo response change / decay figure")
@@ -156,102 +155,15 @@ def _row1_title(label: str) -> str:
 def _row1_color(label: str) -> str:
     if label == "Human":
         return PALETTE["Human"]
-    return PALETTE[_display(label)]
-
-
-def abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
-    """|response[n] - response[n-1]| per (pid, trial, observation); obs 2–30."""
-    pieces: list[pd.DataFrame] = []
-    for (pid, trial), grp in df.groupby(["pid", "trial"], sort=False):
-        g = grp.sort_values("observation").copy()
-        g["delta"] = g["response"].astype(float).diff().abs()
-        g = g[(g["observation"] >= OBS_MIN) & (g["observation"] <= OBS_MAX)]
-        g = g[["pid", "trial", "observation", "delta"]].dropna(subset=["delta"])
-        pieces.append(g)
-    if not pieces:
-        return pd.DataFrame(columns=["pid", "trial", "observation", "delta"])
-    return pd.concat(pieces, ignore_index=True)
-
-
-def mean_curve_by_pid(delta_df: pd.DataFrame) -> dict[int, pd.Series]:
-    """Mean |Δresponse| at each observation, averaged across trials; index = obs."""
-    g = delta_df.groupby(["pid", "observation"])["delta"].mean()
-    out: dict[int, pd.Series] = {}
-    for pid in g.index.get_level_values(0).unique():
-        s = g.loc[int(pid)].sort_index()
-        out[int(pid)] = s
-    return out
-
-
-def smooth_mean_curve(
-    means: dict[int, pd.Series], window: int
-) -> dict[int, pd.Series]:
-    """Apply centered rolling average of given window size to each pid's curve."""
-    return {
-        pid: ser.rolling(window, center=True, min_periods=1).mean()
-        for pid, ser in means.items()
-    }
-
-
-def smooth_delta_df(delta_df: pd.DataFrame, window: int) -> pd.DataFrame:
-    """Apply rolling average per (pid, trial) to smooth delta values."""
-    if delta_df.empty:
-        return delta_df
-    pieces = []
-    for (pid, trial), grp in delta_df.groupby(["pid", "trial"], sort=False):
-        g = grp.sort_values("observation").copy()
-        g["delta"] = g["delta"].rolling(window, center=True, min_periods=1).mean()
-        pieces.append(g)
-    return pd.concat(pieces, ignore_index=True)
-
-
-def fit_power_law(mean_ser: pd.Series) -> tuple[float, float]:
-    """
-    Fit mean_delta(n) = y_int * n^(-tau) via log-log linear regression.
-    Returns (tau, y_int); (nan, nan) if incomplete or any mean_delta <= 0.
-    """
-    mean_ser = mean_ser.sort_index()
-    idx = mean_ser.index.astype(float).to_numpy()
-    vals = mean_ser.to_numpy(dtype=float)
-    mask = (idx >= OBS_MIN) & (idx <= OBS_MAX)
-    idx = idx[mask]
-    vals = vals[mask]
-    if len(idx) != (OBS_MAX - OBS_MIN + 1) or np.any(~np.isfinite(vals)) or np.any(vals <= 0):
-        return float("nan"), float("nan")
-    log_n = np.log(idx)
-    log_y = np.log(vals)
-    slope, intercept = np.polyfit(log_n, log_y, 1)
-    tau = -float(slope)
-    y_int = float(np.exp(intercept))
-    return tau, y_int
-
-
-def curve_vector(mean_ser: pd.Series) -> np.ndarray | None:
-    """29-point array for observations OBS_MIN..OBS_MAX; None if incomplete."""
-    obs_range = list(range(OBS_MIN, OBS_MAX + 1))
-    reindexed = mean_ser.reindex(obs_range)
-    if reindexed.isna().any() or not np.all(np.isfinite(reindexed.to_numpy(dtype=float))):
-        return None
-    return reindexed.to_numpy(dtype=float)
+    return PALETTE.get(label, PALETTE.get(_display(label), "gray"))
 
 
 # -- load human ----------------------------------------------------------------
 human = pd.read_pickle(data_path("yoo.pkl"))
-delta_human = abs_delta_long(human)
 
 if SAMPLE_PIDS is None:
-    human_means_tbl = mean_curve_by_pid(delta_human)
-    if ROLLING_WINDOW > 1:
-        human_means_tbl = smooth_mean_curve(human_means_tbl, ROLLING_WINDOW)
-    params_human_tbl = {
-        pid: fit_power_law(ser) for pid, ser in human_means_tbl.items()
-    }
-    rows = [
-        {"pid": pid, "tau": params_human_tbl[pid][0], "y_int": params_human_tbl[pid][1]}
-        for pid in sorted(params_human_tbl.keys())
-    ]
-    tbl = pd.DataFrame(rows).sort_values("tau", na_position="last")
-    print("pid / tau / y_int (human, sorted by tau):")
+    tbl = _fit_power_law_params(human).sort_values("lambda_", ascending=False)
+    print("pid / lambda_ / A (human, sorted by lambda_):")
     print(tbl.to_string(index=False))
     print("\nSet SAMPLE_PIDS at the top of this script and rerun.")
     sys.exit(0)
@@ -271,37 +183,21 @@ for mt in MODEL_ORDER:
 MODEL_ORDER = loaded_models
 DISPLAY_ORDER = [_display(mt) for mt in MODEL_ORDER]
 
-delta_by_source: dict[str, pd.DataFrame] = {"Human": delta_human}
+# human power law params (using same function as losses.py)
+human_pl = _fit_power_law_params(human).set_index("pid")
+
+# model power law params
+model_pl: dict[str, pd.DataFrame] = {}
 for mt in MODEL_ORDER:
-    delta_by_source[mt] = abs_delta_long(models[mt])
-
-if ROLLING_WINDOW > 1:
-    for key in delta_by_source:
-        delta_by_source[key] = smooth_delta_df(delta_by_source[key], ROLLING_WINDOW)
-
-human_means = mean_curve_by_pid(delta_by_source["Human"])
-model_means: dict[str, dict[int, pd.Series]] = {}
-for mt in MODEL_ORDER:
-    model_means[mt] = mean_curve_by_pid(delta_by_source[mt])
-
-if ROLLING_WINDOW > 1:
-    human_means = smooth_mean_curve(human_means, ROLLING_WINDOW)
-    for mt in MODEL_ORDER:
-        model_means[mt] = smooth_mean_curve(model_means[mt], ROLLING_WINDOW)
-
-params_human: dict[int, tuple[float, float]] = {
-    pid: fit_power_law(ser) for pid, ser in human_means.items()
-}
-params_by_source: dict[str, dict[int, tuple[float, float]]] = {"Human": params_human}
-for mt in MODEL_ORDER:
-    params_by_source[mt] = {
-        pid: fit_power_law(ser) for pid, ser in model_means[mt].items()
-    }
+    model_pl[mt] = _fit_power_law_params(models[mt]).set_index("pid")
 
 sample_pids = [int(SAMPLE_PIDS[k]) for k in SAMPLE_LABELS]
 for lab, pid in zip(SAMPLE_LABELS, sample_pids):
-    tau, y0 = params_human.get(pid, (float("nan"), float("nan")))
-    if pid not in params_human or not (np.isfinite(tau) and np.isfinite(y0)):
+    if pid not in human_pl.index:
+        raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} not in human power-law fits")
+    lam = float(human_pl.loc[pid, "lambda_"])
+    a0 = float(human_pl.loc[pid, "A"])
+    if not (np.isfinite(lam) and np.isfinite(a0)):
         raise ValueError(f"SAMPLE_PIDS[{lab!r}]={pid} missing or invalid power-law fit")
 
 loss_df = _load_loss_long(run_dir, MODEL_ORDER, "yoo")
@@ -333,38 +229,23 @@ ax_viol = fig.add_subplot(gs[1, 2:])
 _markers = SAMPLE_MARKERS
 n_grid = np.arange(OBS_MIN, OBS_MAX + 1, dtype=float)
 
-# Row 1: mean |Δresponse| ± SE + power-law overlay
+# Row 1: power-law fit curves only (same fit as losses.shape_loss for yoo)
 for ax, (label, _) in zip(ax_row1, sources):
     color = _row1_color(label)
-    delta_src = delta_by_source[label]
-    param_src = params_by_source[label]
-    for pid, ls, mkr in zip(sample_pids, LINESTYLES, _markers):
-        obs_pid = delta_src[delta_src["pid"] == pid]
-        if obs_pid.empty:
+    pl_df = human_pl if label == "Human" else model_pl[label]
+    for pid, ls in zip(sample_pids, LINESTYLES):
+        if pid not in pl_df.index:
             continue
-        sns.lineplot(
-            data=obs_pid,
-            x="observation",
-            y="delta",
-            errorbar="se",
-            err_style="band",
-            estimator="mean",
-            color=color,
-            linestyle="none",
-            linewidth=0,
-            ax=ax,
-            legend=False,
-        )
-        tau, y_int = param_src.get(pid, (float("nan"), float("nan")))
+        tau = float(pl_df.loc[pid, "lambda_"])
+        y_int = float(pl_df.loc[pid, "A"])
         if np.isfinite(tau) and np.isfinite(y_int) and y_int > 0:
             y_fit = y_int * n_grid ** (-tau)
             ax.plot(n_grid, y_fit, color=color, linestyle=ls, linewidth=1.5, zorder=4)
-            ax.scatter(2.0, y_int * 2.0 ** (-tau), color=color, marker=mkr, s=60, zorder=5)
 
     ax.set_xlim(0, float(OBS_MAX))
     ax.set_title(_row1_title(label))
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Mean |Δresponse|" if label == "Human" else "")
+    ax.set_ylabel("Power-law fit (|Δ|)" if label == "Human" else "")
     if label != "Human":
         plt.setp(ax.get_yticklabels(), visible=False)
     sns.despine(ax=ax, top=True, right=True)
@@ -375,28 +256,26 @@ ymax = max(ax.get_ylim()[1] for ax in ax_row1)
 for ax in ax_row1:
     ax.set_ylim(0.0, ymax)
 
-# Row 2 left: tau vs y_int (human)
-h_tbl = pd.DataFrame(
-    [{"pid": p, "tau": params_human[p][0], "y_int": params_human[p][1]} for p in params_human]
-)
-h_tbl = h_tbl[np.isfinite(h_tbl["tau"]) & np.isfinite(h_tbl["y_int"])]
+# Row 2 left: lambda_ vs A (human)
+h_tbl = human_pl.reset_index()[["pid", "lambda_", "A"]]
+h_tbl = h_tbl[np.isfinite(h_tbl["lambda_"]) & np.isfinite(h_tbl["A"])]
 sns.kdeplot(
     data=h_tbl,
-    x="tau",
-    y="y_int",
+    x="lambda_",
+    y="A",
     fill=True,
     alpha=0.6,
     color=PALETTE["Human"],
     ax=ax_param,
 )
-y_text_pad = 0.02 * float(h_tbl["y_int"].max()) if len(h_tbl) else 0.0
+y_text_pad = 0.02 * float(h_tbl["A"].max()) if len(h_tbl) else 0.0
 for pid, mkr, lbl in zip(sample_pids, _markers, SAMPLE_LABELS):
     row = h_tbl[h_tbl["pid"] == pid]
     if row.empty:
         continue
     ax_param.scatter(
-        float(row["tau"].iloc[0]),
-        float(row["y_int"].iloc[0]),
+        float(row["lambda_"].iloc[0]),
+        float(row["A"].iloc[0]),
         s=80,
         facecolors="none",
         edgecolors=PALETTE["Human"],
@@ -405,8 +284,8 @@ for pid, mkr, lbl in zip(sample_pids, _markers, SAMPLE_LABELS):
         zorder=5,
     )
     ax_param.text(
-        float(row["tau"].iloc[0]),
-        float(row["y_int"].iloc[0]) + y_text_pad,
+        float(row["lambda_"].iloc[0]),
+        float(row["A"].iloc[0]) + y_text_pad,
         lbl,
         ha="center",
         va="bottom",
@@ -414,12 +293,12 @@ for pid, mkr, lbl in zip(sample_pids, _markers, SAMPLE_LABELS):
         color=PALETTE["Human"],
     )
 
-ax_param.set_xlabel("τ (decay exponent)")
-ax_param.set_ylabel("y_int (scale)")
+ax_param.set_xlabel("λ (decay exponent)")
+ax_param.set_ylabel("A (amplitude)")
 ax_param.set_title("Human power-law parameters")
 sns.despine(ax=ax_param, top=True, right=True)
 
-# Row 2 right: Wasserstein violins
+# Row 2 right: shape loss violins
 plot_palette = {
     _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray"))
     for mt in MODEL_ORDER
@@ -439,8 +318,8 @@ if DISPLAY_ORDER and not loss_plot.empty:
     )
 else:
     ax_viol.text(0.5, 0.5, "no model data", ha="center", va="center", transform=ax_viol.transAxes)
-ax_viol.set_title("Distance to human response change curve")
-ax_viol.set_ylabel("Wasserstein distance")
+ax_viol.set_title("Power-law parameter distance")
+ax_viol.set_ylabel("Shape loss (|ΔA| + |Δλ|)")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 
