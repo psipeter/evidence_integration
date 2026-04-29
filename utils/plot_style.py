@@ -9,6 +9,7 @@ JupyterLab and crispness when loaded into LaTeX/Overleaf as PDF.
 from itertools import combinations
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D  # noqa: F401 (re-exported for convenience)
@@ -147,6 +148,9 @@ def annotate_violins(
             continue
         d1 = merged[f"{y_col}_1"].to_numpy(dtype=float)
         d2 = merged[f"{y_col}_2"].to_numpy(dtype=float)
+        diff = np.array(d1) - np.array(d2)
+        if len(diff) == 0 or np.all(diff == 0) or np.nanstd(diff) == 0:
+            continue
         try:
             res = wilcoxon(d1, d2)
         except ValueError:
