@@ -80,7 +80,6 @@ def _resolve_jobs(
     model_type: str | None,
     pid: int | None,
     n_trials: int,
-    n_runs: int,
     k: int,
     loss_type: str | None,
     optuna_seed: int,
@@ -109,7 +108,6 @@ def _resolve_jobs(
                         "model_type": mt,
                         "pid": p,
                         "n_trials": effective_n_trials,
-                        "n_runs": n_runs,
                         "k": k,
                         "loss_type": lt,
                         "optuna_seed": optuna_seed,
@@ -151,12 +149,11 @@ def _submit_job(
     mt = job["model_type"]
     pid = job["pid"]
     n_trials = job["n_trials"]
-    n_runs = job["n_runs"]
     k = int(job.get("k", 5))
     lt = job["loss_type"]
     cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
-        f"{lt} {n_runs} {k} {run_folder} {job.get('optuna_seed', 42)}"
+        f"{lt} {k} {run_folder} {job.get('optuna_seed', 42)}"
     )
     _submit_command(
         script_name=f"{mt}_{ds}_{pid}.sh",
@@ -175,7 +172,6 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     mt = job["model_type"]
     pid = job["pid"]
     n_trials = job["n_trials"]
-    n_runs = job["n_runs"]
     k = int(job.get("k", 5))
     lt = job["loss_type"]
 
@@ -191,7 +187,6 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         n_trials=n_trials,
         k=k,
         loss_type=lt,
-        n_runs=n_runs,
         run_folder=run_folder,
         optuna_seed=job.get("optuna_seed", 42),
     )
@@ -333,7 +328,6 @@ def main() -> None:
     parser.add_argument("model_type", nargs="?", default=None)
     parser.add_argument("--pid", type=int, default=None)
     parser.add_argument("--n_trials", type=int, default=200)
-    parser.add_argument("--n_runs", type=int, default=1)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--loss_type", default=None)
     parser.add_argument("--optuna_seed", type=int, default=42)
@@ -379,7 +373,6 @@ def main() -> None:
         args.model_type,
         args.pid,
         args.n_trials,
-        args.n_runs,
         args.k,
         args.loss_type,
         args.optuna_seed,

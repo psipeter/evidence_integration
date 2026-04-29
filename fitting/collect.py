@@ -37,7 +37,7 @@ def _collect_params(run_folder: Path) -> None:
         for pid in pids:
             pp = run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
             fp = run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
-            cp = run_folder / f"{model_type}_{dataset}_{pid}_cv_folds.pkl"
+            cp = run_folder / f"{model_type}_{dataset}_{pid}_folds.pkl"
             if pp.exists():
                 params_dfs.append(pd.read_pickle(pp))
             if fp.exists():
@@ -56,7 +56,7 @@ def _collect_params(run_folder: Path) -> None:
             df.to_pickle(out)
             print(f"Collected {len(perf_dfs)} -> {out} ({df.shape})")
         if folds_dfs:
-            out = run_folder / f"{model_type}_{dataset}_cv_folds.pkl"
+            out = run_folder / f"{model_type}_{dataset}_folds.pkl"
             df = pd.concat(folds_dfs, ignore_index=True)
             df.to_pickle(out)
             print(f"Collected {len(folds_dfs)} -> {out} ({df.shape})")

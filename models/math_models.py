@@ -284,29 +284,23 @@ def _run_carrabin(
         return float(expectation)
     if model_type == "NoisyCounting":
         # Prat-Carrabin & Woodford (2024), Table 5 Line 12: Eq. 31 (cognitive
-        # state) and Eq. 34 (response), on [-1, 1]. Default n_runs=1 is fast for
-        # local testing; use n_runs>=20 when fitting on the cluster; set
-        # params["n_runs"].
+        # state) and Eq. 34 (response), on [-1, 1].
         mu = float(params["mu"])
         sigma_c = float(params["sigma_c"])
         nu = float(params["nu"])
-        n_runs = int(params.get("n_runs", 1))
         if len(values) == 0:
             return 0.0
-        run_responses: list[float] = []
-        for run_idx in range(n_runs):
-            seed = 100 * int(params["pid"]) + 1000 * trial + run_idx
-            rng = np.random.RandomState(seed)
-            r = 0.0
-            p_hat = 0.0
-            for x in values:
-                xi = rng.normal(0.0, sigma_c)
-                r = r + float(x) * mu + xi
-                epsilon = rng.normal(0.0, nu)
-                p_hat = p_hat + (r - p_hat) * float(np.exp(epsilon))
-                p_hat = float(np.clip(p_hat, -1.0, 1.0))
-            run_responses.append(p_hat)
-        return float(np.mean(run_responses))
+        seed = 100 * int(params["pid"]) + 1000 * trial
+        rng = np.random.RandomState(seed)
+        r = 0.0
+        p_hat = 0.0
+        for x in values:
+            xi = rng.normal(0.0, sigma_c)
+            r = r + float(x) * mu + xi
+            epsilon = rng.normal(0.0, nu)
+            p_hat = p_hat + (r - p_hat) * float(np.exp(epsilon))
+            p_hat = float(np.clip(p_hat, -1.0, 1.0))
+        return float(p_hat)
     if model_type == "RL":
         expectation = 0.0
         for value in values:

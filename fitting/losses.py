@@ -32,6 +32,21 @@ JOINT_LOSS_W = {
     "jiang":    0.95,
 }
 
+QID_MIN_TRIALS = 10  # minimum trials per qid to include in carrabin shape loss
+
+
+def _mean_qid_std(df: pd.DataFrame, qid_min_trials: int = QID_MIN_TRIALS) -> float:
+    """
+    Compute mean per-qid response std for carrabin, using only qids with
+    at least qid_min_trials trials. Returns nan if no valid qids.
+    """
+    counts = df.groupby("qid")["trial"].nunique()
+    valid_qids = counts[counts >= qid_min_trials].index
+    if len(valid_qids) == 0:
+        return float("nan")
+    stds = df[df["qid"].isin(valid_qids)].groupby("qid")["response"].std()
+    return float(stds.mean())
+
 
 def _smooth_curve(arr: np.ndarray, window: int) -> np.ndarray:
     """Apply centered rolling average of given window size to 1D array."""
@@ -240,7 +255,7 @@ def shape_loss(
 ) -> float:
     """
     Distance between human and model response shape:
-    - carrabin: Wasserstein on full response distribution
+    - carrabin: |mean_per_qid_std(human) - mean_per_qid_std(model)| (qids with >= QID_MIN_TRIALS trials)
     - yoo: Wasserstein on smoothed mean |delta response| curve
     - jiang: mean per-pid Wasserstein between human and model
       switch-probability-weighted conflict distributions.
@@ -261,14 +276,18 @@ def shape_loss(
     human_full = human_full[human_full["pid"].isin(pids)]
 
     if dataset == "carrabin":
-        human_responses = human_full["response"].to_numpy(dtype=float)
-        model_responses = model["response"].to_numpy(dtype=float)
-        if len(human_responses) == 0 or len(model_responses) == 0:
-            raise ValueError("Empty response arrays in shape_loss")
-        result = float(wasserstein_distance(human_responses, model_responses))
-        if not np.isfinite(result):
-            raise ValueError(f"shape_loss is not finite: {result}")
-        return result
+        # merge qid into model responses using human trial/observation index
+        qid_map = human_full[["pid", "trial", "observation", "qid"]].drop_duplicates()
+        model_with_qid = model.merge(
+            qid_map, on=["pid", "trial", "observation"], how="left"
+        )
+        h_std = _mean_qid_std(human_full)
+        m_std = _mean_qid_std(model_with_qid)
+        if not np.isfinite(h_std) or not np.isfinite(m_std):
+            raise ValueError(
+                f"shape_loss: non-finite qid std (human={h_std}, model={m_std})"
+            )
+        return float(abs(h_std - m_std))
     if dataset == "yoo":
         h_params = _fit_power_law_params(human_full)
         m_params = _fit_power_law_params(model)
