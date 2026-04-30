@@ -237,9 +237,10 @@ def response_loss(
     """
     Response-accuracy loss for all datasets.
 
-    Carrabin and yoo: mean squared error between model and human responses.
-    Jiang: total NLL (same summation as former ``nll()``), not averaged per
-    observation.
+    Carrabin and yoo: root mean squared error (RMSE) between model and human
+    responses.
+    Jiang: mean negative log-likelihood of human binary choices under
+    sigmoid(beta * model_expectation), averaged over all (trial, stage) pairs.
     """
     dataset = params["dataset"]
     sq_errors: list[float] = []
@@ -268,7 +269,7 @@ def response_loss(
             err = human_response - model_response
             sq_errors.append(err**2)
 
-        out = float(np.mean(sq_errors))
+        out = float(np.sqrt(np.mean(sq_errors)))
         if not np.isfinite(out):
             raise ValueError(f"response_loss is not finite: {out}")
         return out
@@ -304,9 +305,10 @@ def response_loss(
                 )
             )
             total_logp += np.log(p) if human_response == 1 else np.log(1.0 - p)
-        out = float(-total_logp)
+        n_obs = len(pairs)
+        out = float(-total_logp / n_obs)
         if not np.isfinite(out):
-            raise ValueError(f"response_loss (NLL) is not finite: {out}")
+            raise ValueError(f"response_loss (mean NLL) is not finite: {out}")
         return out
 
     raise ValueError("params['dataset'] must be one of 'carrabin', 'jiang', 'yoo'")
