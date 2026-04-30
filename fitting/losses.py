@@ -30,7 +30,7 @@ POWER_LAW_SMOOTH_WINDOW = 5  # smoothing window for power law fitting in yoo sha
 JOINT_LOSS_W = {
     "carrabin": 0.2,
     "yoo":      0.5,
-    "jiang":    0.95,
+    "jiang":    0.8,
 }
 
 QID_MIN_TRIALS = 10  # minimum trials per qid to include in carrabin shape loss

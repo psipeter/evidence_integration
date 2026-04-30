@@ -245,6 +245,19 @@ def fit(
             f"{model_type} has no free parameters; running single evaluation."
         )
 
+    if beta_outside_optuna:
+        free_params = [
+            p for p in MODEL_PARAMS[dataset][model_type]
+            if p not in ("fixed", "beta")
+        ]
+        if len(free_params) == 0:
+            if n_trials > 1:
+                print(
+                    f"Warning: {model_type} has no free params besides beta. "
+                    f"Setting n_trials=1."
+                )
+            n_trials = 1
+
     study = optuna.create_study(
         direction="minimize",
         study_name=f"{model_type}_{dataset}_{pid}_{loss_type}",

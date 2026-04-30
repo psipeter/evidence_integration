@@ -367,12 +367,35 @@ def _run_jiang(
     rds = subdata["rd"].to_numpy(dtype=float)
 
     if model_type == "DeGroot":
-        weights = 1.0 + rds
-        wsum = np.sum(weights)
-        if wsum == 0:
+        w_base = float(params["w_base"])
+        w1 = float(params["w1"])
+        w2 = float(params["w2"])
+        w3 = float(params["w3"])
+        stage_w = {1: w1, 2: w2, 3: w3}
+
+        private_stage = human_pid.query("trial == @trial & stage == 0")
+        if private_stage.empty:
             return 0.0
-        expectation = float(np.dot(weights, values) / wsum)
-        return float(np.clip(expectation, -1, 1))
+        private_signal = float(private_stage["value"].iloc[0])
+
+        # accumulate weighted observations across all stages
+        numerator = w_base * float(private_signal)  # stage 0
+        n_obs = 1
+        expectation = float(np.clip(numerator / n_obs, -1.0, 1.0))
+
+        for stage_i in sorted(subdata["stage"].unique()):
+            if stage_i == 0:
+                continue
+            stage_data = subdata[subdata["stage"] == stage_i]
+            w_rd = stage_w.get(int(stage_i), 0.0)
+            for _, row in stage_data.iterrows():
+                rd_k = float(row["true_rd"]) if not pd.isna(row["true_rd"]) else 0.0
+                obs_k = float(row["value"])
+                numerator += (w_base + w_rd * rd_k) * obs_k
+                n_obs += 1
+            expectation = float(np.clip(numerator / n_obs, -1.0, 1.0))
+
+        return expectation
     if model_type == "RL":
         alpha = params["alpha"]
         weight = alpha
