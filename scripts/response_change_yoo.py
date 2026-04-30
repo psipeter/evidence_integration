@@ -45,7 +45,7 @@ from utils.plot_style import (
 
 # -- CLI ----------------------------------------------------------------------
 _parser = argparse.ArgumentParser()
-_parser.add_argument("--run_folder", type=str, default="joint_loss")
+_parser.add_argument("--run_folder", type=str, default="joint")
 _parser.add_argument("--include_rl_lambda", action="store_true", default=False)
 _args, _ = _parser.parse_known_args()
 RUN_FOLDER = _args.run_folder
@@ -203,8 +203,9 @@ for lab, pid in zip(SAMPLE_LABELS, sample_pids):
 loss_df = _load_loss_long(run_dir, MODEL_ORDER, "yoo")
 loss_df["model_type"] = loss_df["model_type"].apply(_display)
 if MODEL_ORDER and not loss_df.empty:
+    _models_with_loss = loss_df["model_type"].unique().tolist()
     loss_plot = loss_df.groupby("pid").filter(
-        lambda g: len(g) == len(MODEL_ORDER)
+        lambda g: len(g) == len(_models_with_loss)
     ).copy()
 else:
     loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])
@@ -241,6 +242,21 @@ for ax, (label, _) in zip(ax_row1, sources):
         if np.isfinite(tau) and np.isfinite(y_int) and y_int > 0:
             y_fit = y_int * n_grid ** (-tau)
             ax.plot(n_grid, y_fit, color=color, linestyle=ls, linewidth=1.5, zorder=4)
+    if label == "Human":
+        from matplotlib.lines import Line2D
+
+        handles = [
+            Line2D(
+                [0],
+                [0],
+                color=PALETTE["Human"],
+                linestyle=ls,
+                linewidth=1.5,
+                label=f"#{pid}",
+            )
+            for pid, ls in zip(sample_pids, LINESTYLES)
+        ]
+        ax.legend(handles=handles, title="Participant", frameon=False, loc="upper right")
 
     ax.set_xlim(0, float(OBS_MAX))
     ax.set_title(_row1_title(label))
@@ -268,31 +284,32 @@ sns.kdeplot(
     color=PALETTE["Human"],
     ax=ax_param,
 )
-y_text_pad = 0.02 * float(h_tbl["A"].max()) if len(h_tbl) else 0.0
-for pid, mkr, lbl in zip(sample_pids, _markers, SAMPLE_LABELS):
+for pid, ls, mkr in zip(sample_pids, LINESTYLES, _markers):
     row = h_tbl[h_tbl["pid"] == pid]
     if row.empty:
         continue
-    ax_param.scatter(
-        float(row["lambda_"].iloc[0]),
-        float(row["A"].iloc[0]),
-        s=80,
-        facecolors="none",
-        edgecolors=PALETTE["Human"],
-        linewidths=1.5,
+    x = float(row["lambda_"].iloc[0])
+    y = float(row["A"].iloc[0])
+    # draw marker
+    ax_param.plot(
+        x,
+        y,
         marker=mkr,
+        color="none",
+        markeredgecolor=PALETTE["Human"],
+        markeredgewidth=1.5,
+        markersize=10,
         zorder=5,
     )
-    ax_param.text(
-        float(row["lambda_"].iloc[0]),
-        float(row["A"].iloc[0]) + y_text_pad,
-        lbl,
-        ha="center",
-        va="bottom",
-        fontsize=7,
-        color=PALETTE["Human"],
-    )
 
+from matplotlib.lines import Line2D
+handles = [
+    Line2D([0], [0], marker=mkr, color="none",
+           markeredgecolor=PALETTE["Human"], markeredgewidth=1.5,
+           markersize=8, label=f"#{pid}")
+    for pid, mkr in zip(sample_pids, _markers)
+]
+ax_param.legend(handles=handles, title="Participant", frameon=False)
 ax_param.set_xlabel("λ (decay exponent)")
 ax_param.set_ylabel("A (amplitude)")
 ax_param.set_title("Human power-law parameters")

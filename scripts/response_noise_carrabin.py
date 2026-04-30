@@ -185,8 +185,9 @@ def _with_qid(df: pd.DataFrame) -> pd.DataFrame:
 loss_df = _load_loss_long(run_dir, MODEL_ORDER, "carrabin")
 loss_df["model_type"] = loss_df["model_type"].apply(_display)
 if MODEL_ORDER and not loss_df.empty:
+    _models_with_loss = loss_df["model_type"].unique().tolist()
     loss_plot = loss_df.groupby("pid").filter(
-        lambda g: len(g) == len(MODEL_ORDER)
+        lambda g: len(g) == len(_models_with_loss)
     ).copy()
 else:
     loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])

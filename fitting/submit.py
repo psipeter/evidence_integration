@@ -83,6 +83,7 @@ def _resolve_jobs(
     k: int,
     loss_type: str | None,
     optuna_seed: int,
+    beta_outside_optuna: bool,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -111,6 +112,7 @@ def _resolve_jobs(
                         "k": k,
                         "loss_type": lt,
                         "optuna_seed": optuna_seed,
+                        "beta_outside_optuna": bool(beta_outside_optuna),
                     }
                 )
     return jobs
@@ -155,6 +157,8 @@ def _submit_job(
         f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
         f"{lt} {k} {run_folder} {job.get('optuna_seed', 42)}"
     )
+    if job.get("beta_outside_optuna", False):
+        cmd += " --beta_outside_optuna"
     _submit_command(
         script_name=f"{mt}_{ds}_{pid}.sh",
         command=cmd,
@@ -189,6 +193,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         loss_type=lt,
         run_folder=run_folder,
         optuna_seed=job.get("optuna_seed", 42),
+        beta_outside_optuna=bool(job.get("beta_outside_optuna", False)),
     )
 
 
@@ -331,6 +336,7 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--loss_type", default=None)
     parser.add_argument("--optuna_seed", type=int, default=42)
+    parser.add_argument("--beta_outside_optuna", action="store_true", default=False)
     parser.add_argument("--run_folder", type=str, default=None)
     parser.add_argument("--ensembles", nargs="+", default=["error"])
     parser.add_argument("--timing", type=str, default="once_per_obs")
@@ -376,6 +382,7 @@ def main() -> None:
         args.k,
         args.loss_type,
         args.optuna_seed,
+        args.beta_outside_optuna,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder

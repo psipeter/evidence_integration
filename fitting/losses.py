@@ -9,8 +9,9 @@ Supports multiple objectives:
   ``beta`` in ``params``).
 - **``shape``** — distribution / curve distance (Wasserstein): full response
   distribution for carrabin, smoothed mean ``|Δresponse|`` curve for yoo,
-  mean per-pid Wasserstein between human and model switch-vs-conflict
-  aggregates for jiang (requires ``beta`` for model sampling). The human-side
+  mean per-pid |human_logistic_slope - model_logistic_slope| for jiang, where
+  slopes come from logistic P(switch) vs neighbor ``true_rd`` among disagreeing
+  neighbors at stages 2--3 (requires ``beta`` for model sampling). The human-side
   target is built from the full task pickle for all ``pid`` in the fold slice;
   the model side uses only fold-filtered ``model`` rows.
 - **``joint``** — combined ``(1 - w) * response_loss + w * shape_loss`` with
@@ -165,6 +166,69 @@ def _apply_beta_sampling(
     return s
 
 
+def _logistic_switch_slope(
+    model: pd.DataFrame,
+    human: pd.DataFrame,
+) -> pd.Series:
+    """
+    For each pid, fit logistic regression slope of P(switch) vs true_rd,
+    using only disagreeing neighbors at stages 2 and 3.
+    """
+    from scipy.optimize import minimize
+    from scipy.special import expit
+
+    model_resp = (
+        model[model["stage"].isin([1, 2, 3])][["pid", "trial", "stage", "response"]]
+        .drop_duplicates(["pid", "trial", "stage"])
+        .rename(columns={"response": "model_response"})
+    )
+    rows = []
+    for (pid, trial), grp in human.groupby(["pid", "trial"]):
+        for stage in [2, 3]:
+            curr = grp[grp["stage"] == stage]
+            prev_stage = stage - 1
+            prev_resp = model_resp.query(
+                "pid == @pid & trial == @trial & stage == @prev_stage"
+            )
+            curr_resp = model_resp.query(
+                "pid == @pid & trial == @trial & stage == @stage"
+            )
+            if prev_resp.empty or curr.empty or curr_resp.empty:
+                continue
+            prev_sign = float(prev_resp["model_response"].iloc[0])
+            curr_sign = float(curr_resp["model_response"].iloc[0])
+            switch = int(prev_sign != curr_sign)
+            for _, neighbor in curr.iterrows():
+                if float(neighbor["value"]) != prev_sign:
+                    rows.append(
+                        {
+                            "pid": int(pid),
+                            "true_rd": float(neighbor["true_rd"]),
+                            "switch": switch,
+                        }
+                    )
+
+    if not rows:
+        return pd.Series(dtype=float)
+    df = pd.DataFrame(rows)
+
+    slopes = {}
+    for pid, grp in df.groupby("pid"):
+        if len(grp) < 10:
+            continue
+        x = grp["true_rd"].values
+        y = grp["switch"].values.astype(float)
+
+        def neg_log_lik(params):
+            a, b = params
+            p = np.clip(expit(a * x + b), 1e-7, 1 - 1e-7)
+            return -np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+        res = minimize(neg_log_lik, [1.0, 0.0], method="Nelder-Mead")
+        slopes[pid] = float(res.x[0])
+    return pd.Series(slopes)
+
+
 def response_loss(
     params: dict,
     model: pd.DataFrame,
@@ -257,8 +321,9 @@ def shape_loss(
     Distance between human and model response shape:
     - carrabin: |mean_per_qid_std(human) - mean_per_qid_std(model)| (qids with >= QID_MIN_TRIALS trials)
     - yoo: Wasserstein on smoothed mean |delta response| curve
-    - jiang: mean per-pid Wasserstein between human and model
-      switch-probability-weighted conflict distributions.
+    - jiang: mean per-pid |human_slope - model_slope| where slope = logistic
+      regression of P(switch) vs neighbor true_rd among disagreeing neighbors
+      at stages 2--3
 
     Human-side targets use the full task pickle for all ``pid`` values present
     in ``human``; the model side uses only the fold-filtered ``model`` frame.
@@ -302,41 +367,26 @@ def shape_loss(
     if dataset == "jiang":
         if "beta" not in params:
             raise ValueError("params must include 'beta' for jiang shape_loss")
-        model_series = _apply_beta_sampling(model, params)
-        pid_losses: list[float] = []
-        for _pid, h_pid_full in human_full.groupby("pid"):
-            human_s = (
-                h_pid_full.set_index(["pid", "trial", "stage"])["response"]
-                .astype(float)
-                .apply(lambda x: 1.0 if float(x) > 0 else -1.0)
-            )
-            if human_s.index.duplicated().any():
-                human_s = human_s[~human_s.index.duplicated(keep="first")]
-            obs_human = _observations_switch_conflict(h_pid_full, human_s)
-            obs_model = _observations_switch_conflict(h_pid_full, model_series)
-            if obs_human.empty or obs_model.empty:
-                continue
-            h_human_agg = obs_human.groupby("conflict")["switch"].mean().reset_index()
-            h_model_agg = obs_model.groupby("conflict")["switch"].mean().reset_index()
-            if h_human_agg.empty or h_model_agg.empty:
-                continue
-            if h_human_agg["switch"].sum() == 0:
-                continue
-            if h_model_agg["switch"].sum() == 0:
-                pid_losses.append(1.0)  # maximum penalty: model never switches
-                continue
-            loss = float(
-                wasserstein_distance(
-                    h_human_agg["conflict"].to_numpy(dtype=float),
-                    h_model_agg["conflict"].to_numpy(dtype=float),
-                    u_weights=h_human_agg["switch"].to_numpy(dtype=float),
-                    v_weights=h_model_agg["switch"].to_numpy(dtype=float),
-                )
-            )
-            pid_losses.append(loss)
-        if not pid_losses:
+        model_binary = model.copy()
+        beta = float(params["beta"])
+        seed = int(params.get("seed", 42))
+        rng = np.random.RandomState(seed)
+        p_pos = scipy.special.expit(
+            beta * model_binary["response"].to_numpy(dtype=float)
+        )
+        model_binary["response"] = np.where(rng.binomial(1, p_pos) == 1, 1.0, -1.0)
+
+        model_slopes = _logistic_switch_slope(model_binary, human_full)
+        human_slopes = _logistic_switch_slope(human_full, human_full)
+
+        common_pids = set(model_slopes.index) & set(human_slopes.index)
+        if not common_pids:
             return float("nan")
-        return float(np.mean(pid_losses))
+        return float(
+            (human_slopes.loc[list(common_pids)] - model_slopes.loc[list(common_pids)])
+            .abs()
+            .mean()
+        )
 
 
 def joint_loss(

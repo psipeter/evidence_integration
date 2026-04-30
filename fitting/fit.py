@@ -94,6 +94,7 @@ def _suggest_params(
     dataset: str,
     pid: int,
     loss_type: str,
+    beta_outside_optuna: bool = False,
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
     params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
@@ -111,6 +112,8 @@ def _suggest_params(
     for param, spec in model_spec.items():
         if param == "fixed":
             continue
+        if beta_outside_optuna and param == "beta":
+            continue  # beta will be fitted separately
         low, high, step = spec
         # Keep integer-valued hyperparameters discrete in Optuna.
         if float(step).is_integer() and float(low).is_integer() and float(high).is_integer():
@@ -120,54 +123,19 @@ def _suggest_params(
     return params
 
 
-def _cross_validate(
-    params: dict,
-    human: pd.DataFrame,
-    k: int = 5,
-    loss_type: str = "response",
-) -> tuple[float, list[float]]:
-    """Run k-fold CV over trials and return mean loss and per-fold losses."""
-    trials = np.asarray(sorted(human["trial"].unique()))
-    if trials.size == 0:
-        raise ValueError("Human dataframe has no trials for cross-validation")
-
-    rng = np.random.RandomState(seed=int(params["pid"]))
-    shuffled = trials.copy()
-    rng.shuffle(shuffled)
-    folds = np.array_split(shuffled, k)
-
-    fold_losses: list[float] = []
-    for fold_trials in folds:
-        holdout_trials = [int(t) for t in fold_trials.tolist()]
-        if not holdout_trials:
-            continue
-
-        model_fold = math_models.run(params, trials=holdout_trials)
-        human_fold = human[human["trial"].isin(holdout_trials)]
-
-        fold_loss = losses.compute_loss(loss_type, params, model_fold, human_fold)
-        fold_losses.append(float(fold_loss))
-
-    if not fold_losses:
-        raise ValueError("No non-empty CV folds were generated")
-
-    mean_loss = float(np.mean(fold_losses))
-    return mean_loss, fold_losses
-
-
 def _run_nef_all_trials(params: dict, human: pd.DataFrame) -> pd.DataFrame:
     """Run NEF simulation once for all trials, return responses dataframe."""
     return NEF.run(params)
 
 
-def _cross_validate_nef(
+def _cross_validate(
     params: dict,
     model_responses: pd.DataFrame,
     human: pd.DataFrame,
     k: int = 5,
     loss_type: str = "response",
 ) -> tuple[float, list[float]]:
-    """K-fold CV using pre-computed NEF responses. No simulation calls."""
+    """K-fold CV using pre-computed responses. Works for NEF and math models."""
     trials = np.asarray(sorted(human["trial"].unique()))
     rng = np.random.RandomState(seed=int(params["pid"]))
     shuffled = trials.copy()
@@ -227,6 +195,26 @@ def _joint_cv_response_and_full_shape(
     return total_loss, fold_losses, cv_response_loss, shape
 
 
+def _fit_beta(
+    params: dict,
+    model_responses: pd.DataFrame,
+    human: pd.DataFrame,
+    beta_bounds: tuple[float, float] = (0.01, 15.0),
+) -> float:
+    """Fit beta via 1D optimization on all trials to minimize response NLL."""
+    from scipy.optimize import minimize_scalar
+
+    def neg_nll(beta: float) -> float:
+        p = {**params, "beta": float(beta)}
+        try:
+            return losses.response_loss(p, model_responses, human)
+        except Exception:
+            return float("inf")
+
+    result = minimize_scalar(neg_nll, bounds=beta_bounds, method="bounded")
+    return float(result.x)
+
+
 def fit(
     dataset: str,
     model_type: str,
@@ -237,6 +225,7 @@ def fit(
     loss_type: str | None = None,
     run_folder: Path | str | None = None,
     optuna_seed: int = 42,
+    beta_outside_optuna: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
     if run_folder is None:
@@ -268,38 +257,31 @@ def fit(
 
     def objective(trial: optuna.trial.Trial) -> float:
         params = _suggest_params(
-            trial, model_type, dataset, pid, loss_type
+            trial, model_type, dataset, pid, loss_type, beta_outside_optuna
         )
         params["seed"] = abs(hash((int(params["pid"]), trial.number))) % (2**31)
 
+        # run full simulation once
         if model_type in ("NEF_recurrent", "NEF_synaptic"):
             model_responses_full = _run_nef_all_trials(params, human)
-            if loss_type == "joint":
-                mean_loss, fold_losses, resp_c, shape_c = (
-                    _joint_cv_response_and_full_shape(
-                        params, model_responses_full, human, k
-                    )
-                )
-                trial.set_user_attr("response_component", resp_c)
-                trial.set_user_attr("shape_component", shape_c)
-            else:
-                mean_loss, fold_losses = _cross_validate_nef(
-                    params, model_responses_full, human, k=k, loss_type=loss_type
-                )
         else:
-            if loss_type == "joint":
-                model_responses_full = math_models.run(params)
-                mean_loss, fold_losses, resp_c, shape_c = (
-                    _joint_cv_response_and_full_shape(
-                        params, model_responses_full, human, k
-                    )
-                )
-                trial.set_user_attr("response_component", resp_c)
-                trial.set_user_attr("shape_component", shape_c)
-            else:
-                mean_loss, fold_losses = _cross_validate(
-                    params, human, k=k, loss_type=loss_type
-                )
+            model_responses_full = math_models.run(params)
+
+        if beta_outside_optuna and "beta" in MODEL_PARAMS[dataset][model_type]:
+            params["beta"] = _fit_beta(params, model_responses_full, human)
+            trial.set_user_attr("beta", params["beta"])
+
+        # compute loss
+        if loss_type == "joint":
+            mean_loss, fold_losses, resp_c, shape_c = _joint_cv_response_and_full_shape(
+                params, model_responses_full, human, k
+            )
+            trial.set_user_attr("response_component", resp_c)
+            trial.set_user_attr("shape_component", shape_c)
+        else:
+            mean_loss, fold_losses = _cross_validate(
+                params, model_responses_full, human, k=k, loss_type=loss_type
+            )
 
         resp_c = trial.user_attrs.get("response_component", float("nan"))
         shape_c = trial.user_attrs.get("shape_component", float("nan"))
@@ -314,6 +296,7 @@ def fit(
                     "loss": float(fold_loss),
                     "response_component": float(fold_loss),
                     "shape_component": float(shape_c),
+                    "beta": float(trial.user_attrs.get("beta", float("nan"))),
                 }
             )
         return mean_loss
@@ -330,6 +313,10 @@ def fit(
         }
     )
     best_params["seed"] = abs(hash((int(pid), best_trial.number))) % (2**31)
+    if beta_outside_optuna:
+        best_params["beta"] = float(
+            best_trial.user_attrs.get("beta", float("nan"))
+        )
 
     runtime = (time.time() - start) / 60.0
     params_df = pd.DataFrame([best_params])
@@ -371,23 +358,25 @@ def fit(
 
 
 if __name__ == "__main__":
-    dataset = sys.argv[1]
-    model_type = sys.argv[2]
-    pid = int(sys.argv[3])
-    n_trials = int(sys.argv[4]) if len(sys.argv) > 4 else 100
-    loss_type = sys.argv[5] if len(sys.argv) > 5 else None
-    if len(sys.argv) >= 9:
-        k = int(sys.argv[6])
-        run_folder = sys.argv[7]
-        optuna_seed = int(sys.argv[8])
-    elif len(sys.argv) >= 8:
-        k = int(sys.argv[6])
-        run_folder = sys.argv[7]
+    beta_outside_optuna = "--beta_outside_optuna" in sys.argv
+    argv = [arg for arg in sys.argv if arg != "--beta_outside_optuna"]
+    dataset = argv[1]
+    model_type = argv[2]
+    pid = int(argv[3])
+    n_trials = int(argv[4]) if len(argv) > 4 else 100
+    loss_type = argv[5] if len(argv) > 5 else None
+    if len(argv) >= 9:
+        k = int(argv[6])
+        run_folder = argv[7]
+        optuna_seed = int(argv[8])
+    elif len(argv) >= 8:
+        k = int(argv[6])
+        run_folder = argv[7]
         optuna_seed = 42
     else:
         k = 5
-        run_folder = sys.argv[6] if len(sys.argv) > 6 else None
-        optuna_seed = int(sys.argv[7]) if len(sys.argv) > 7 else 42
+        run_folder = argv[6] if len(argv) > 6 else None
+        optuna_seed = int(argv[7]) if len(argv) > 7 else 42
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(
@@ -399,6 +388,7 @@ if __name__ == "__main__":
         loss_type=loss_type,
         run_folder=run_folder,
         optuna_seed=optuna_seed,
+        beta_outside_optuna=beta_outside_optuna,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")
