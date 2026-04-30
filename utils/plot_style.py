@@ -123,7 +123,7 @@ def annotate_violins(
 ) -> None:
     """
     Run paired Wilcoxon tests for all combinations of `order` and draw
-    significance brackets above the violin plot on `ax`.
+    significance brackets above the distribution plot on `ax`.
 
     Parameters
     ----------
@@ -163,6 +163,8 @@ def annotate_violins(
         draw_bracket(
             ax, x_positions[m1], x_positions[m2], y_current, dy_step, stars
         )
+        star_y = y_current + dy_step
+        mid_x = (x_positions[m1] + x_positions[m2]) / 2
         y_current += dy_step * 2
 
     ax.set_ylim(top=y_current + dy_step)

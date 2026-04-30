@@ -122,16 +122,14 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
         sns.despine(ax=ax, top=True, right=True)
         continue
 
-    sns.violinplot(
+    sns.boxplot(
         data=subset,
         x="model_type",
         y="plot_loss",
         order=order,
         hue="model_type",
         palette=PALETTE,
-        inner=None,
         legend=False,
-        cut=0,
         ax=ax,
     )
     if subset["uses_response_component"].all():

@@ -215,6 +215,39 @@ def _fit_beta(
     return float(result.x)
 
 
+def _enqueue_warm_start(
+    study: optuna.Study,
+    model_type: str,
+    dataset: str,
+    pid: int,
+    run_folder: Path,
+) -> bool:
+    """
+    If RL_lambda params exist for this pid/dataset, enqueue them as the first
+    Optuna trial. Returns True if warm start was enqueued, False otherwise.
+    Only applies to NEF models.
+    """
+    if not model_type.startswith("NEF"):
+        return False
+    warm_path = run_folder / f"RL_lambda_{dataset}_{pid}_params.pkl"
+    if not warm_path.exists():
+        return False
+    try:
+        warm_params = pd.read_pickle(warm_path).iloc[0].to_dict()
+        enqueue_params = {}
+        for param in ("alpha_0", "lambda_"):
+            if param in warm_params:
+                enqueue_params[param] = float(warm_params[param])
+        if not enqueue_params:
+            return False
+        study.enqueue_trial(enqueue_params)
+        logging.info(f"Warm-starting NEF from RL_lambda params: {enqueue_params}")
+        return True
+    except Exception as e:
+        logging.warning(f"Warm-start failed: {e}")
+        return False
+
+
 def fit(
     dataset: str,
     model_type: str,
@@ -265,6 +298,7 @@ def fit(
         load_if_exists=True,
         sampler=optuna.samplers.TPESampler(seed=optuna_seed),
     )
+    _enqueue_warm_start(study, model_type, dataset, pid, run_folder)
 
     trial_records: list[dict] = []
 

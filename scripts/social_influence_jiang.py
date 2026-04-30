@@ -333,16 +333,21 @@ plot_palette = {
     _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray")) for mt in MODEL_ORDER
 }
 if DISPLAY_ORDER and not loss_plot.empty:
-    sns.violinplot(
+    sns.boxplot(
         data=loss_plot,
         x="model_type",
         y="loss",
         order=DISPLAY_ORDER,
         hue="model_type",
         palette=plot_palette,
-        inner=None,
+        showmeans=True,
+        meanprops={
+            "marker": "o",
+            "markerfacecolor": "white",
+            "markeredgecolor": "black",
+            "markersize": 5,
+        },
         legend=False,
-        cut=0,
         ax=ax_viol,
     )
 else:

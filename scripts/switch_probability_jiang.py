@@ -497,16 +497,21 @@ loss_plot = loss_plot.copy()
 if not loss_plot.empty:
     loss_plot["model_type"] = loss_plot["model_type"].apply(_display)
 if MODEL_ORDER and not loss_plot.empty:
-    sns.violinplot(
+    sns.boxplot(
         data=loss_plot,
         x="model_type",
         y="loss",
         order=display_order,
         hue="model_type",
         palette=plot_palette,
-        inner=None,
+        showmeans=True,
+        meanprops={
+            "marker": "o",
+            "markerfacecolor": "white",
+            "markeredgecolor": "black",
+            "markersize": 5,
+        },
         legend=False,
-        cut=0,
         ax=ax_viol,
     )
 else:

@@ -43,7 +43,7 @@ _NEF_RANGES: dict[str, tuple] = {
 
 _NEF_RANGES_JIANG: dict[str, tuple] = {
     **_NEF_RANGES,
-    "beta": (0.01, 15.0, 0.01),
+    "beta": (0.01, 30.0, 0.01),
 }
 
 MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
@@ -65,27 +65,27 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },
     "jiang": {
-        "Bayes": {"beta": (0.01, 15.0, 0.01)},
+        "Bayes": {"beta": (0.01, 30.0, 0.01)},
         "DeGroot": {
             "w_base": (0.0, 1.0, 0.01),
             "w1":     (0.0, 1.0, 0.01),
             "w2":     (0.0, 1.0, 0.01),
             "w3":     (0.0, 1.0, 0.01),
-            "beta":   (0.01, 15.0, 0.01),
+            "beta":   (0.01, 30.0, 0.01),
         },
         "RL": {
-            "beta": (0.01, 15.0, 0.01),
+            "beta": (0.01, 30.0, 0.01),
             "alpha": (0.01, 1.0, 0.01),
         },
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            "beta": (0.01, 15.0, 0.01),
+            "beta": (0.01, 30.0, 0.01),
         },
         "RL_lambda_rd": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            "beta": (0.01, 15.0, 0.01),
+            "beta": (0.01, 30.0, 0.01),
         },
         "NEF_recurrent": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED},
         "NEF_synaptic": {**_NEF_RANGES_JIANG, "fixed": _NEF_FIXED},
