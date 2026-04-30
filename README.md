@@ -86,8 +86,17 @@ evidence_integration/
 ## Fitting
 
 ```bash
-python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --loss_type joint --run_folder NEF200
-python -m fitting.submit --resubmit params --run_folder NEF200
+# New fits
+python -m fitting.submit carrabin NEF_recurrent --run_folder joint --n_trials 200
+python -m fitting.submit carrabin NEF_recurrent --run_folder joint --pid 1 --local
+
+# Resubmit missing jobs
+python -m fitting.submit --resubmit params --run_folder joint
+python -m fitting.submit --resubmit responses --run_folder joint
+python -m fitting.submit --resubmit responses --run_folder joint --model_type NEF_recurrent
+python -m fitting.submit --resubmit activities --run_folder joint --ensembles error value
+python -m fitting.submit --resubmit activities --run_folder joint --timing once_per_dt
+
 python -m fitting.collect NEF200 --type params
 python -m fitting.collect NEF200 --type responses
 python -m fitting.collect NEF200 --type activities --ensembles error value counting

@@ -13,9 +13,7 @@ import pandas as pd
 
 from fitting.fit import DEFAULT_LOSS, fit
 from fitting.model_params import MODEL_PARAMS
-from models.math_models import run as model_run
 from utils.paths import DATA_DIR, RUNS_DIR, data_path
-from utils.save_responses import save as save_responses
 from utils.slurm import (
     DEFAULT_MEM_LIMITS,
     DEFAULT_TIME_LIMITS,
@@ -197,20 +195,6 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     )
 
 
-def _rerun_single(dataset: str, model_type: str, pid: int, run_folder: Path) -> None:
-    params_path = run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
-    if not params_path.exists():
-        print(f"Warning: params not found for {model_type} {dataset} pid={pid}")
-        return
-    if model_type in ("NEF_recurrent", "NEF_synaptic"):
-        save_responses(pid, dataset, run_folder, model_type)
-    else:
-        params = pd.read_pickle(params_path).iloc[0].to_dict()
-        df = model_run(params)
-        out_path = run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl"
-        df.to_pickle(out_path)
-
-
 def _jobs_from_config(run_folder: Path) -> list[dict]:
     config_path = run_folder / "run_config.json"
     if not config_path.exists():
@@ -227,8 +211,18 @@ def _resubmit(
     ensembles: list[str],
     timing: str,
     dt_sample: float,
+    dataset: str | None = None,
+    model_type: str | None = None,
+    pid: int | None = None,
 ) -> None:
     jobs = _jobs_from_config(run_folder)
+    # apply filters
+    if dataset is not None:
+        jobs = [j for j in jobs if j["dataset"] == dataset]
+    if model_type is not None:
+        jobs = [j for j in jobs if j["model_type"] == model_type]
+    if pid is not None:
+        jobs = [j for j in jobs if int(j["pid"]) == int(pid)]
     missing: list[dict] = []
     for job in jobs:
         ds = job["dataset"]
@@ -320,14 +314,12 @@ def _resubmit(
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fitting.submit")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
+    parser.add_argument(
         "--resubmit",
         type=str,
         choices=["params", "responses", "activities"],
         default=None,
     )
-    mode.add_argument("--rerun", metavar="RUN_FOLDER")
 
     parser.add_argument("target", nargs="?", default="all")
     parser.add_argument("model_type", nargs="?", default=None)
@@ -356,22 +348,10 @@ def main() -> None:
             ensembles=args.ensembles,
             timing=args.timing,
             dt_sample=args.dt_sample,
+            dataset=args.target if args.target != "all" else None,
+            model_type=args.model_type,
+            pid=args.pid,
         )
-        return
-
-    if args.rerun is not None:
-        if args.target in (None, "all") or args.model_type is None:
-            raise ValueError(
-                "--rerun requires dataset and model_type, e.g. "
-                "`python -m fitting.submit carrabin NEF_recurrent --rerun Apr21_1200pm`"
-            )
-        run_folder = RUNS_DIR / args.rerun
-        pids = [args.pid] if args.pid is not None else [
-            int(p)
-            for p in pd.read_pickle(data_path(f"{args.target}.pkl"))["pid"].unique()
-        ]
-        for pid in pids:
-            _rerun_single(args.target, args.model_type, int(pid), run_folder)
         return
 
     jobs = _resolve_jobs(

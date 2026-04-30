@@ -136,7 +136,8 @@ def _extract_responses(
 
 def _pretrain(params: dict) -> dict:
     """Run counting pretraining using lmu_n_obs_max observations."""
-    p = {**params, "n_obs": params["lmu_n_obs_max"]}
+    seed = int(params.get("base_seed", params["seed"]))
+    p = {**params, "n_obs": params["lmu_n_obs_max"], "seed": seed}
     if p["counting"] == "lmu":
         net = build_counting_lmu(p, train=True)
         raw = simulate_counting_lmu(net, p, train=True)
@@ -167,8 +168,23 @@ def build_network(
 
         # Counting uses n_neurons_counting for memory / lmu_ea and n_neurons for
         # onset_detector (error and value use this n_neurons only).
-        c_params = {**params, "n_obs": params["lmu_n_obs_max"]}
+        c_params = {
+            **params,
+            "n_obs": params["lmu_n_obs_max"],
+            "seed": int(params["base_seed"]),
+        }
         net.counting = _build_c(c_params, train=False, decoders=decoders)
+        # probe counting weight and count decoded outputs
+        net.probe_counting_weight = nengo.Probe(
+            net.counting.weight_out,
+            synapse=float(params["tau_probe"]),
+            sample_every=float(params["dt"]),
+        )
+        net.probe_counting_count = nengo.Probe(
+            net.counting.count_out,
+            synapse=float(params["tau_probe"]),
+            sample_every=float(params["dt"]),
+        )
 
         net.error = nengo.Ensemble(
             n_neurons=int(params["n_neurons"]),
@@ -328,6 +344,8 @@ def _simulate_trial(
         "obs": sim.data[net.probe_obs].squeeze(),
         "error": sim.data[net.probe_error],
         "value": sim.data[net.probe_value].squeeze(),
+        "counting_weight": sim.data[net.probe_counting_weight].squeeze(),
+        "counting_count": sim.data[net.probe_counting_count].squeeze(),
         "t": np.arange(len(sim.data[net.probe_value])) * float(params["dt"]),
     }
     return responses, probe_data
@@ -344,6 +362,7 @@ def run(
     pfull["nef_type"] = (
         "synaptic" if "synaptic" in pfull["model_type"] else "recurrent"
     )
+    pfull["base_seed"] = int(pfull["seed"])
 
     required = (
         "model_type",
