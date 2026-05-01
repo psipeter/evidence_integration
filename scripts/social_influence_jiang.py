@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Jiang task: P(switch | neighbor disagrees) vs neighbor rd.
+Jiang task: ND-weighted regression metric (OLS of current sign on unweighted /
+orthogonalized ND-weighted neighbor sums) per Jiang et al.
 
-Top row: Human and models — logistic curves for sample participants (linestyle
-per pid). Bottom left: KDE of per-participant logistic slopes (rd → switch).
-Bottom right: shape-loss violins (performance shape_component or fallback).
+Top row: ND coefficient bars with stages on the x-axis, color by Human/model,
+hatch pattern by sample participant (low/medium/high).
+Bottom left: KDE of human stage-2 ND coefficients across pids with sample lines.
+Bottom right: boxplots of shape loss per model (ND coefficient distance).
 """
 
 from __future__ import annotations
@@ -19,14 +21,14 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-# -- path setup ----------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, FIGURES_DIR
 from utils.plot_style import annotate_violins, apply_style, FIGURE_SIZE, get_palette
 
-SAMPLE_PIDS = {"low": 179, "medium": 81, "high": 202}
-LINESTYLES = ["solid", "dashed", "dotted"]  # high / medium / low
+SAMPLE_PIDS = {"low": 109, "medium": 132, "high": 94}
+HATCHES = ["", "///", "xxx"]  # low / medium / high pid
+LINESTYLES = ["solid", "dashed", "dotted"]  # aligned with SAMPLE_PIDS order
 MODEL_ORDER = ["Bayes", "RL", "DeGroot", "NEF_recurrent"]
 
 
@@ -53,68 +55,89 @@ def _apply_beta(
     return df
 
 
-def _build_switch_rd_df(
+def _compute_nd_coefs(
     resp_df: pd.DataFrame,
     human_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    For each (pid, trial, stage 2+3), find disagreeing neighbors and record
-    (pid, true_rd, switch). One row per disagreeing neighbor observation.
-    resp_df must have binary ±1 responses (after beta sampling).
+    For each pid and stage, compute OLS coefficient for ND-weighted sum
+    (orthogonalized against unweighted sum) predicting current response sign.
+
+    Returns DataFrame with columns: pid, stage, coef_nd, coef_uw, se_nd, pval_nd.
+    ``resp_df`` must have binary ±1 responses (after beta sampling if needed).
     """
-    model_resp = (
-        resp_df[resp_df["stage"].isin([1, 2, 3])][["pid", "trial", "stage", "response"]]
-        .drop_duplicates(["pid", "trial", "stage"])
-        .rename(columns={"response": "model_response"})
-    )
-    rows = []
-    for (pid, trial), grp in human_df.groupby(["pid", "trial"]):
-        for stage in [2, 3]:
+    from numpy.linalg import lstsq
+    from scipy.stats import t as t_dist
+
+    rows: list[dict] = []
+    for (pid, trial), grp in human_df.groupby(["pid", "trial"], sort=False):
+        for stage in [1, 2]:
             curr = grp[grp["stage"] == stage]
-            prev_stage = stage - 1
-            prev_resp = model_resp.query(
-                "pid == @pid & trial == @trial & stage == @prev_stage"
-            )
-            curr_resp = model_resp.query(
-                "pid == @pid & trial == @trial & stage == @stage"
-            )
-            if prev_resp.empty or curr.empty or curr_resp.empty:
+            curr_resp = resp_df[
+                (resp_df["pid"] == pid)
+                & (resp_df["trial"] == trial)
+                & (resp_df["stage"] == stage)
+            ]
+            if curr.empty or curr_resp.empty:
                 continue
-            prev_sign = float(prev_resp["model_response"].iloc[0])
-            curr_sign = float(curr_resp["model_response"].iloc[0])
-            switch = int(prev_sign != curr_sign)
-            for _, neighbor in curr.iterrows():
-                if float(neighbor["value"]) != prev_sign:
-                    rows.append(
-                        {
-                            "pid": int(pid),
-                            "true_rd": float(neighbor["true_rd"]),
-                            "switch": switch,
-                        }
-                    )
-    return pd.DataFrame(rows)
+            curr_sign = float(curr_resp["response"].iloc[0])
+            obs = curr["value"].astype(float).values
+            rd = curr["true_rd"].astype(float).values
+            unweighted = float(np.sum(obs))
+            nd_weighted = float(np.sum(rd * obs))
+            rows.append(
+                {
+                    "pid": int(pid),
+                    "trial": int(trial),
+                    "stage": int(stage),
+                    "curr_sign": curr_sign,
+                    "unweighted": unweighted,
+                    "nd_weighted": nd_weighted,
+                }
+            )
 
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
 
-def _compute_logistic_slope(switch_rd_df: pd.DataFrame) -> pd.Series:
-    """Fit logistic regression slope of switch vs true_rd per pid."""
-    from scipy.optimize import minimize
-    from scipy.special import expit
-
-    slopes = {}
-    for pid, grp in switch_rd_df.groupby("pid"):
-        if len(grp) < 10:
+    coefs: list[dict] = []
+    for stage in [1, 2]:
+        s_df = df[df["stage"] == stage].copy()
+        if len(s_df) < 10:
             continue
-        x = grp["true_rd"].values
-        y = grp["switch"].values.astype(float)
+        b = lstsq(
+            s_df["unweighted"].values.reshape(-1, 1),
+            s_df["nd_weighted"].values,
+            rcond=None,
+        )[0][0]
+        s_df["nd_orth"] = s_df["nd_weighted"] - b * s_df["unweighted"]
 
-        def neg_log_lik(params):
-            a, b = params
-            p = np.clip(expit(a * x + b), 1e-7, 1 - 1e-7)
-            return -np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
-
-        res = minimize(neg_log_lik, [1.0, 0.0], method="Nelder-Mead")
-        slopes[pid] = float(res.x[0])
-    return pd.Series(slopes)
+        for pid, grp in s_df.groupby("pid"):
+            if len(grp) < 5:
+                continue
+            x_uw = grp["unweighted"].values
+            x_nd = grp["nd_orth"].values
+            y = grp["curr_sign"].values.astype(float)
+            X = np.column_stack([np.ones(len(y)), x_uw, x_nd])
+            coeffs, _, _, _ = lstsq(X, y, rcond=None)
+            n, p = len(y), X.shape[1]
+            y_hat = X @ coeffs
+            sigma2 = np.sum((y - y_hat) ** 2) / max(n - p, 1)
+            cov = sigma2 * np.linalg.pinv(X.T @ X)
+            se_nd = float(np.sqrt(max(cov[2, 2], 0)))
+            t_stat = coeffs[2] / se_nd if se_nd > 0 else 0.0
+            pval = float(2 * t_dist.sf(abs(t_stat), df=max(n - p, 1)))
+            coefs.append(
+                {
+                    "pid": int(pid),
+                    "stage": int(stage),
+                    "coef_nd": float(coeffs[2]),
+                    "coef_uw": float(coeffs[1]),
+                    "se_nd": se_nd,
+                    "pval_nd": pval,
+                }
+            )
+    return pd.DataFrame(coefs)
 
 
 def _load_loss_long(
@@ -210,20 +233,24 @@ MODEL_ORDER = loaded_models
 DISPLAY_ORDER = [_display(mt) for mt in MODEL_ORDER]
 
 human_resp_dedup = (
-    human.groupby(["pid", "trial", "stage"])["response"]
-    .first()
-    .reset_index()
+    human.groupby(["pid", "trial", "stage"])["response"].first().reset_index()
 )
+human_coefs = _compute_nd_coefs(human_resp_dedup, human)
+
+model_coefs: dict[str, pd.DataFrame] = {}
+for mt in MODEL_ORDER:
+    if mt not in models:
+        continue
+    model_coefs[mt] = _compute_nd_coefs(models[mt], human)
+
 sources: list[tuple[str, pd.DataFrame]] = [("Human", human_resp_dedup)] + [
     (mt, models[mt]) for mt in MODEL_ORDER
 ]
-switch_rd_dfs: dict[str, pd.DataFrame] = {}
-for label, resp_df in sources:
-    switch_rd_dfs[label] = _build_switch_rd_df(resp_df, human)
 
-slope_series: dict[str, pd.Series] = {}
-for label in switch_rd_dfs:
-    slope_series[label] = _compute_logistic_slope(switch_rd_dfs[label])
+coefs_by_label: dict[str, pd.DataFrame] = {"Human": human_coefs}
+for mt in MODEL_ORDER:
+    if mt in model_coefs:
+        coefs_by_label[mt] = model_coefs[mt]
 
 n_top = len(loaded_models) + 1
 
@@ -237,87 +264,115 @@ for i in range(n_top):
 ax_kde = fig.add_subplot(gs[1, : n_gs_cols // 2])
 ax_viol = fig.add_subplot(gs[1, n_gs_cols // 2 :])
 
-# Top row: P(switch | disagree) vs neighbor rd
-for ax, (label, resp_df) in zip(ax_top, sources):
+# Top row: stages on x; bar color Human/model palette; hatch = participant
+x = np.arange(2)  # stages 1, 2
+bar_width = 0.8 / len(SAMPLE_PIDS)
+offsets = (
+    np.linspace(-(len(SAMPLE_PIDS) - 1) / 2, (len(SAMPLE_PIDS) - 1) / 2, len(SAMPLE_PIDS))
+    * bar_width
+)
+
+for ax, (label, _) in zip(ax_top, sources):
+    coefs_df = coefs_by_label.get(label, pd.DataFrame())
+    if coefs_df.empty:
+        ax.text(
+            0.5,
+            0.5,
+            "insufficient data",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.set_title(_display(label))
+        sns.despine(ax=ax, top=True, right=True)
+        continue
+
     color = (
         PALETTE["Human"]
         if label == "Human"
         else PALETTE.get(label, PALETTE.get(_display(label), "gray"))
     )
     for i, (pid_label, pid) in enumerate(SAMPLE_PIDS.items()):
-        pid_df = switch_rd_dfs[label][switch_rd_dfs[label]["pid"] == pid]
-        if pid_df.empty:
-            continue
-        sns.regplot(
-            data=pid_df,
-            x="true_rd",
-            y="switch",
-            logistic=True,
-            scatter=False,
-            line_kws={"color": color, "linewidth": 2, "linestyle": LINESTYLES[i]},
-            ci=95,
-            ax=ax,
+        coef_vals = []
+        se_vals = []
+        for stage in [1, 2]:
+            row = coefs_df[(coefs_df["pid"] == pid) & (coefs_df["stage"] == stage)]
+            coef_vals.append(
+                float(row["coef_nd"].iloc[0]) if not row.empty else 0.0
+            )
+            se_vals.append(float(row["se_nd"].iloc[0]) if not row.empty else 0.0)
+        ax.bar(
+            x + offsets[i],
+            coef_vals,
+            bar_width,
+            color=color,
+            hatch=HATCHES[i],
+            edgecolor="white",
+            yerr=se_vals,
+            capsize=3,
+            error_kw={"elinewidth": 1.0, "ecolor": "gray"},
         )
 
+    ax.set_xticks(x)
+    ax.set_xticklabels(["Stage 1", "Stage 2"])
+    ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
+    ax.set_xlabel(None)
+    ax.set_ylabel("ND coefficient" if label == "Human" else "")
+    ax.set_title(_display(label))
     if label == "Human":
-        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
 
         handles = [
-            Line2D(
-                [0],
-                [0],
-                color=PALETTE["Human"],
-                linestyle=LINESTYLES[i],
-                linewidth=2,
+            Patch(
+                facecolor=PALETTE["Human"],
+                hatch=HATCHES[i],
+                edgecolor="white",
                 label=f"#{pid}",
             )
             for i, (_, pid) in enumerate(SAMPLE_PIDS.items())
         ]
-        ax.legend(handles=handles, title="Participant", frameon=False, loc="upper left")
-
-    ax.axhline(0.5, color="gray", linewidth=0.8, linestyle="--")
-    ax.set_xlim(0, 0.6)
-    ax.set_ylim(0, 1)
-    ax.set_xlabel("Neighbor rd")
-    ax.set_ylabel("P(switch | neighbor disagrees)" if label == "Human" else "")
-    ax.set_title(_display(label))
-    if label != "Human":
+        ax.legend(handles=handles, title="Participant", frameon=False)
+    else:
         plt.setp(ax.get_yticklabels(), visible=False)
     sns.despine(ax=ax, top=True, right=True)
 
-# Bottom left: KDE of logistic slopes
-human_slopes = slope_series["Human"]
-if len(human_slopes.dropna()) >= 2:
-    sns.kdeplot(
-        human_slopes.values,
-        ax=ax_kde,
-        color=PALETTE["Human"],
-        fill=True,
-        alpha=0.3,
-    )
+# Bottom left: KDE of stage-2 human ND coef
+stage2_coefs = human_coefs[human_coefs["stage"] == 2] if not human_coefs.empty else pd.DataFrame()
+vals_s2 = stage2_coefs["coef_nd"].dropna().values if not stage2_coefs.empty else np.array([])
+if len(vals_s2) >= 2:
+    sns.kdeplot(vals_s2, ax=ax_kde, color=PALETTE["Human"], fill=True, alpha=0.3)
     from scipy.stats import gaussian_kde
 
-    kde_fn = gaussian_kde(human_slopes.dropna().values)
+    kde_fn = gaussian_kde(vals_s2)
     for i, (_, pid) in enumerate(SAMPLE_PIDS.items()):
-        slope_val = human_slopes.get(pid, np.nan)
-        if not np.isfinite(slope_val):
+        row = stage2_coefs[stage2_coefs["pid"] == pid]
+        if row.empty:
             continue
-        kde_h = float(kde_fn(np.array([slope_val]))[0])
+        val = float(row["coef_nd"].iloc[0])
+        kde_h = float(kde_fn(np.array([val]))[0])
         ax_kde.plot(
-            [slope_val, slope_val],
+            [val, val],
             [0, kde_h],
             color=PALETTE["Human"],
             linestyle=LINESTYLES[i],
             linewidth=1.5,
         )
+elif len(vals_s2) == 1:
+    ax_kde.axvline(float(vals_s2[0]), color=PALETTE["Human"], linewidth=1.5)
 else:
-    ax_kde.text(0.5, 0.5, "insufficient data", ha="center", va="center", transform=ax_kde.transAxes)
-ax_kde.set_xlabel("Logistic slope (rd → switch)")
+    ax_kde.text(
+        0.5,
+        0.5,
+        "insufficient data",
+        ha="center",
+        va="center",
+        transform=ax_kde.transAxes,
+    )
+ax_kde.set_xlabel("ND coefficient (stage 2)")
 ax_kde.set_ylabel("Density")
 ax_kde.set_title("Population rd sensitivity")
 sns.despine(ax=ax_kde, top=True, right=True)
 
-# Bottom right: shape loss violins (stub)
 loss_df = _load_loss_long(run_dir, MODEL_ORDER, "jiang")
 if not loss_df.empty:
     loss_df["model_type"] = loss_df["model_type"].apply(_display)
@@ -330,7 +385,8 @@ else:
     loss_plot = pd.DataFrame(columns=["pid", "model_type", "loss"])
 
 plot_palette = {
-    _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray")) for mt in MODEL_ORDER
+    _display(mt): PALETTE.get(mt, PALETTE.get(_display(mt), "gray"))
+    for mt in MODEL_ORDER
 }
 if DISPLAY_ORDER and not loss_plot.empty:
     sns.boxplot(
@@ -352,8 +408,9 @@ if DISPLAY_ORDER and not loss_plot.empty:
     )
 else:
     ax_viol.text(0.5, 0.5, "no model data", ha="center", va="center", transform=ax_viol.transAxes)
-ax_viol.set_title("rd-consistency slope distance")
-ax_viol.set_ylabel("Shape loss (|Δslope|)")
+
+ax_viol.set_title("ND coefficient distance (mean |Δcoef|)")
+ax_viol.set_ylabel("Shape loss (stage 2)")
 ax_viol.set_xlabel("")
 sns.despine(ax=ax_viol, top=True, right=True)
 

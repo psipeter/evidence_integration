@@ -205,18 +205,17 @@ if not _has_agg:
 
 # -- figure layout -------------------------------------------------------------
 n_top = len(loaded_models) + 1
-n_gs = max(n_top, 2)
+n_gs_cols = max(n_top, 4)
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-gs = gridspec.GridSpec(2, n_gs, figure=fig, height_ratios=[1, 1.2])
+gs = gridspec.GridSpec(2, n_gs_cols, figure=fig, height_ratios=[1, 1.2])
 
 axes_top: list = []
 for i in range(n_top):
     sharey = axes_top[0] if i > 0 else None
     axes_top.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
-left_cols = max(1, n_top // 2)
-ax_kde = fig.add_subplot(gs[1, :left_cols])
-ax_viol = fig.add_subplot(gs[1, left_cols:])
+ax_kde = fig.add_subplot(gs[1, : n_gs_cols // 2])
+ax_viol = fig.add_subplot(gs[1, n_gs_cols // 2 :])
 
 sources = [("Human", human)] + [
     (mt, _with_qid(models[mt])) for mt in MODEL_ORDER

@@ -9,11 +9,12 @@ Supports multiple objectives:
   ``beta`` in ``params``).
 - **``shape``** — distribution / curve distance (Wasserstein): full response
   distribution for carrabin, smoothed mean ``|Δresponse|`` curve for yoo,
-  mean per-pid |human_logistic_slope - model_logistic_slope| for jiang, where
-  slopes come from logistic P(switch) vs neighbor ``true_rd`` among disagreeing
-  neighbors at stages 2--3 (requires ``beta`` for model sampling). The human-side
-  target is built from the full task pickle for all ``pid`` in the fold slice;
-  the model side uses only fold-filtered ``model`` rows.
+  mean per-pid |human_coef - model_coef| for jiang, where coef is the stage-2 OLS
+  coefficient for ND-weighted sum of observations (orthogonalized against
+  unweighted sum) predicting current response sign (requires ``beta`` for model
+  sampling). The human-side target is built from
+  the full task pickle for all ``pid`` in the fold slice; the model side uses
+  only fold-filtered ``model`` rows.
 - **``joint``** — combined ``(1 - w) * response_loss + w * shape_loss`` with
   dataset-specific ``w`` (see ``JOINT_LOSS_W``).
 
@@ -183,7 +184,7 @@ def _logistic_switch_slope(
         .rename(columns={"response": "model_response"})
     )
     rows = []
-    for (pid, trial), grp in human.groupby(["pid", "trial"]):
+    for (pid, trial), grp in human.groupby(["pid", "trial"], sort=False):
         for stage in [2, 3]:
             curr = grp[grp["stage"] == stage]
             prev_stage = stage - 1
@@ -212,20 +213,85 @@ def _logistic_switch_slope(
         return pd.Series(dtype=float)
     df = pd.DataFrame(rows)
 
-    slopes = {}
+    slopes: dict[int, float] = {}
     for pid, grp in df.groupby("pid"):
         if len(grp) < 10:
             continue
-        x = grp["true_rd"].values
-        y = grp["switch"].values.astype(float)
+        x_arr = grp["true_rd"].values
+        y_arr = grp["switch"].values.astype(float)
 
-        def neg_log_lik(params):
-            a, b = params
-            p = np.clip(expit(a * x + b), 1e-7, 1 - 1e-7)
-            return -np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
+        def neg_log_lik(params_xy):
+            a, bpar = params_xy
+            p = np.clip(expit(a * x_arr + bpar), 1e-7, 1 - 1e-7)
+            return -np.sum(y_arr * np.log(p) + (1 - y_arr) * np.log(1 - p))
 
         res = minimize(neg_log_lik, [1.0, 0.0], method="Nelder-Mead")
-        slopes[pid] = float(res.x[0])
+        slopes[int(pid)] = float(res.x[0])
+    return pd.Series(slopes)
+
+
+def _compute_nd_coef_loss(
+    model: pd.DataFrame,
+    human: pd.DataFrame,
+) -> pd.Series:
+    """
+    For each pid, compute OLS coefficient for ND-weighted sum of observations
+    (orthogonalized against unweighted sum) predicting current response sign,
+    at stage 2 only. Returns Series indexed by pid.
+
+    model must have binary ±1 responses (after beta sampling).
+    """
+    rows: list[dict] = []
+    for (pid, trial), grp in human.groupby(["pid", "trial"], sort=False):
+        stage = 2
+        curr = grp[grp["stage"] == stage]
+        model_stage = model[
+            (model["pid"] == pid)
+            & (model["trial"] == trial)
+            & (model["stage"] == stage)
+        ]
+        if curr.empty or model_stage.empty:
+            continue
+        curr_sign = float(model_stage["response"].iloc[0])
+        obs = curr["value"].astype(float).values
+        rd = curr["true_rd"].astype(float).values
+        rows.append(
+            {
+                "pid": int(pid),
+                "trial": int(trial),
+                "curr_sign": curr_sign,
+                "unweighted": float(np.sum(obs)),
+                "nd_weighted": float(np.sum(rd * obs)),
+            }
+        )
+
+    if not rows:
+        return pd.Series(dtype=float)
+
+    df = pd.DataFrame(rows)
+
+    b = np.linalg.lstsq(
+        df["unweighted"].values.reshape(-1, 1),
+        df["nd_weighted"].values,
+        rcond=None,
+    )[0][0]
+    df["nd_orth"] = df["nd_weighted"] - b * df["unweighted"]
+
+    slopes: dict[int, float] = {}
+    for pid, grp in df.groupby("pid"):
+        if len(grp) < 5:
+            continue
+        X = np.column_stack(
+            [
+                np.ones(len(grp)),
+                grp["unweighted"].values,
+                grp["nd_orth"].values,
+            ]
+        )
+        coeffs, _, _, _ = np.linalg.lstsq(
+            X, grp["curr_sign"].values.astype(float), rcond=None
+        )
+        slopes[int(pid)] = float(coeffs[2])
     return pd.Series(slopes)
 
 
@@ -323,9 +389,9 @@ def shape_loss(
     Distance between human and model response shape:
     - carrabin: |mean_per_qid_std(human) - mean_per_qid_std(model)| (qids with >= QID_MIN_TRIALS trials)
     - yoo: Wasserstein on smoothed mean |delta response| curve
-    - jiang: mean per-pid |human_slope - model_slope| where slope = logistic
-      regression of P(switch) vs neighbor true_rd among disagreeing neighbors
-      at stages 2--3
+    - jiang: mean per-pid |human_coef - model_coef| where coef = OLS coefficient
+      for ND-weighted sum of observations (orthogonalized against unweighted sum)
+      predicting current response sign at stage 2
 
     Human-side targets use the full task pickle for all ``pid`` values present
     in ``human``; the model side uses only the fold-filtered ``model`` frame.
@@ -378,14 +444,17 @@ def shape_loss(
         )
         model_binary["response"] = np.where(rng.binomial(1, p_pos) == 1, 1.0, -1.0)
 
-        model_slopes = _logistic_switch_slope(model_binary, human_full)
-        human_slopes = _logistic_switch_slope(human_full, human_full)
+        model_slopes = _compute_nd_coef_loss(model_binary, human_full)
+        human_slopes = _compute_nd_coef_loss(human_full, human_full)
 
         common_pids = set(model_slopes.index) & set(human_slopes.index)
         if not common_pids:
             return float("nan")
         return float(
-            (human_slopes.loc[list(common_pids)] - model_slopes.loc[list(common_pids)])
+            (
+                human_slopes.loc[list(common_pids)]
+                - model_slopes.loc[list(common_pids)]
+            )
             .abs()
             .mean()
         )

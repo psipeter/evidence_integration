@@ -217,15 +217,16 @@ n_model_cols = len(sources)
 
 # -- figure --------------------------------------------------------------------
 fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-gs = gridspec.GridSpec(2, n_model_cols, figure=fig, height_ratios=[1.0, 1.2])
+n_gs_cols = max(n_model_cols, 3)
+gs = gridspec.GridSpec(2, n_gs_cols, figure=fig, height_ratios=[1.0, 1.2])
 
 ax_row1: list = []
 for i in range(n_model_cols):
     sharey = ax_row1[0] if i > 0 else None
     ax_row1.append(fig.add_subplot(gs[0, i], sharey=sharey))
 
-ax_param = fig.add_subplot(gs[1, :2])
-ax_viol = fig.add_subplot(gs[1, 2:])
+ax_param = fig.add_subplot(gs[1, : n_gs_cols // 2])
+ax_viol = fig.add_subplot(gs[1, n_gs_cols // 2 :])
 
 _markers = SAMPLE_MARKERS
 n_grid = np.arange(OBS_MIN, OBS_MAX + 1, dtype=float)
