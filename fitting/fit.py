@@ -81,7 +81,10 @@ def _log_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
     """Log progress every 10 trials."""
     # if trial.number % 10 == 0:
     trial_loss = f"{trial.value:.4f}" if trial.value is not None else "failed"
-    best = f"{study.best_value:.4f}" if study.best_value is not None else "n/a"
+    try:
+        best = f"{study.best_value:.4f}"
+    except ValueError:
+        best = "n/a"
     logging.info(
         f"Trial {trial.number}: loss={trial_loss} | "
         f"best={best} | params={trial.params}"
@@ -319,7 +322,13 @@ def fit(
             trial.set_user_attr("beta", params["beta"])
 
         # compute loss
-        if loss_type == "joint":
+        if loss_type == "shape":
+            shape = float(losses.shape_loss(params, model_responses_full, human))
+            trial.set_user_attr("shape_component", shape)
+            # no CV — use full-data shape loss directly
+            mean_loss = shape
+            fold_losses = [shape] * k  # repeat for folds logging consistency
+        elif loss_type == "joint":
             mean_loss, fold_losses, resp_c, shape_c = _joint_cv_response_and_full_shape(
                 params, model_responses_full, human, k
             )

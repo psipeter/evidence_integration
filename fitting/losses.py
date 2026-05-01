@@ -9,9 +9,8 @@ Supports multiple objectives:
   ``beta`` in ``params``).
 - **``shape``** — distribution / curve distance (Wasserstein): full response
   distribution for carrabin, smoothed mean ``|Δresponse|`` curve for yoo,
-  mean per-pid |human_coef - model_coef| for jiang, where coef is the stage-2 OLS
-  coefficient for ND-weighted sum of observations (orthogonalized against
-  unweighted sum) predicting current response sign (requires ``beta`` for model
+  mean |human_coef - model_coef| for jiang ND-weighted OLS coefficients predicting
+  current response sign, averaged over stages 1 and 2 (requires ``beta`` for model
   sampling). The human-side target is built from
   the full task pickle for all ``pid`` in the fold slice; the model side uses
   only fold-filtered ``model`` rows.
@@ -233,66 +232,80 @@ def _logistic_switch_slope(
 def _compute_nd_coef_loss(
     model: pd.DataFrame,
     human: pd.DataFrame,
-) -> pd.Series:
+) -> pd.DataFrame:
     """
-    For each pid, compute OLS coefficient for ND-weighted sum of observations
-    (orthogonalized against unweighted sum) predicting current response sign,
-    at stage 2 only. Returns Series indexed by pid.
+    For each pid and stage (1 and 2), compute OLS coefficient for ND-weighted
+    sum of observations (orthogonalized against unweighted sum) predicting
+    current response sign. Returns DataFrame with columns: pid, stage, coef_nd.
 
     model must have binary ±1 responses (after beta sampling).
     """
+    from numpy.linalg import lstsq
+
     rows: list[dict] = []
     for (pid, trial), grp in human.groupby(["pid", "trial"], sort=False):
-        stage = 2
-        curr = grp[grp["stage"] == stage]
-        model_stage = model[
-            (model["pid"] == pid)
-            & (model["trial"] == trial)
-            & (model["stage"] == stage)
-        ]
-        if curr.empty or model_stage.empty:
-            continue
-        curr_sign = float(model_stage["response"].iloc[0])
-        obs = curr["value"].astype(float).values
-        rd = curr["true_rd"].astype(float).values
-        rows.append(
-            {
-                "pid": int(pid),
-                "trial": int(trial),
-                "curr_sign": curr_sign,
-                "unweighted": float(np.sum(obs)),
-                "nd_weighted": float(np.sum(rd * obs)),
-            }
-        )
+        for stage in [1, 2]:
+            curr = grp[grp["stage"] == stage]
+            model_stage = model[
+                (model["pid"] == pid)
+                & (model["trial"] == trial)
+                & (model["stage"] == stage)
+            ]
+            if curr.empty or model_stage.empty:
+                continue
+            curr_sign = float(model_stage["response"].iloc[0])
+            obs = curr["value"].astype(float).values
+            rd = curr["true_rd"].values
+            rows.append(
+                {
+                    "pid": int(pid),
+                    "trial": int(trial),
+                    "stage": int(stage),
+                    "curr_sign": curr_sign,
+                    "unweighted": float(np.sum(obs)),
+                    "nd_weighted": float(np.sum(rd * obs)),
+                }
+            )
 
     if not rows:
-        return pd.Series(dtype=float)
+        return pd.DataFrame()
 
     df = pd.DataFrame(rows)
+    result_rows: list[dict] = []
 
-    b = np.linalg.lstsq(
-        df["unweighted"].values.reshape(-1, 1),
-        df["nd_weighted"].values,
-        rcond=None,
-    )[0][0]
-    df["nd_orth"] = df["nd_weighted"] - b * df["unweighted"]
-
-    slopes: dict[int, float] = {}
-    for pid, grp in df.groupby("pid"):
-        if len(grp) < 5:
+    for stage in [1, 2]:
+        s_df = df[df["stage"] == stage].copy()
+        if len(s_df) < 10:
             continue
-        X = np.column_stack(
-            [
-                np.ones(len(grp)),
-                grp["unweighted"].values,
-                grp["nd_orth"].values,
-            ]
-        )
-        coeffs, _, _, _ = np.linalg.lstsq(
-            X, grp["curr_sign"].values.astype(float), rcond=None
-        )
-        slopes[int(pid)] = float(coeffs[2])
-    return pd.Series(slopes)
+        b = lstsq(
+            s_df["unweighted"].values.reshape(-1, 1),
+            s_df["nd_weighted"].values,
+            rcond=None,
+        )[0][0]
+        s_df["nd_orth"] = s_df["nd_weighted"] - b * s_df["unweighted"]
+
+        for pid, grp in s_df.groupby("pid"):
+            if len(grp) < 5:
+                continue
+            X = np.column_stack(
+                [
+                    np.ones(len(grp)),
+                    grp["unweighted"].values,
+                    grp["nd_orth"].values,
+                ]
+            )
+            coeffs, _, _, _ = lstsq(
+                X, grp["curr_sign"].values.astype(float), rcond=None
+            )
+            result_rows.append(
+                {
+                    "pid": int(pid),
+                    "stage": int(stage),
+                    "coef_nd": float(coeffs[2]),
+                }
+            )
+
+    return pd.DataFrame(result_rows)
 
 
 def response_loss(
@@ -389,9 +402,8 @@ def shape_loss(
     Distance between human and model response shape:
     - carrabin: |mean_per_qid_std(human) - mean_per_qid_std(model)| (qids with >= QID_MIN_TRIALS trials)
     - yoo: Wasserstein on smoothed mean |delta response| curve
-    - jiang: mean per-pid |human_coef - model_coef| where coef = OLS coefficient
-      for ND-weighted sum of observations (orthogonalized against unweighted sum)
-      predicting current response sign at stage 2
+    - jiang: mean per-pid |human_coef - model_coef| for ND-weighted OLS coefficient
+      predicting current response sign, averaged over stages 1 and 2
 
     Human-side targets use the full task pickle for all ``pid`` values present
     in ``human``; the model side uses only the fold-filtered ``model`` frame.
@@ -444,20 +456,18 @@ def shape_loss(
         )
         model_binary["response"] = np.where(rng.binomial(1, p_pos) == 1, 1.0, -1.0)
 
-        model_slopes = _compute_nd_coef_loss(model_binary, human_full)
-        human_slopes = _compute_nd_coef_loss(human_full, human_full)
+        model_coefs = _compute_nd_coef_loss(model_binary, human_full)
+        human_coefs = _compute_nd_coef_loss(human_full, human_full)
 
-        common_pids = set(model_slopes.index) & set(human_slopes.index)
-        if not common_pids:
+        if model_coefs.empty or human_coefs.empty:
             return float("nan")
-        return float(
-            (
-                human_slopes.loc[list(common_pids)]
-                - model_slopes.loc[list(common_pids)]
-            )
-            .abs()
-            .mean()
+
+        merged = human_coefs.merge(
+            model_coefs, on=["pid", "stage"], suffixes=("_h", "_m")
         )
+        if merged.empty:
+            return float("nan")
+        return float((merged["coef_nd_h"] - merged["coef_nd_m"]).abs().mean())
 
 
 def joint_loss(
