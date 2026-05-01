@@ -38,7 +38,7 @@ PE_BIN_TYPE = "equally_spaced"  # "equally_spaced" or "quantile"
 PE_BIN_N = 10
 PE_BIN_RANGE = (-1.5, 1.5)
 LAMBDA_N = 5  # number of lowest/highest lambda pids to use in panel 3
-ALPHA_N = 3  # number of pids to show for top/bottom alpha_0
+ALPHA_N = 4  # number of pids to show for top/bottom alpha_0
 ERROR_STYLE = "ci"  # "ci" for seaborn default 95% CI, or "sd" for standard deviation
 TIMECOURSE_OBS_MIN = 1
 TIMECOURSE_OBS_MAX = 5
@@ -68,7 +68,15 @@ def make_binned_df(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder", type=str, default="NEF200")
+    parser.add_argument(
+        "--timecourse_dataset",
+        type=str,
+        default="carrabin",
+        choices=["carrabin", "yoo"],
+        help="Dataset to use for panel 5 error neuron timecourse (default: carrabin)",
+    )
     args = parser.parse_args()
+    TIMECOURSE_DATASET = args.timecourse_dataset
     run_dir = RUNS_DIR / args.run_folder
 
     activities_data: dict[str, pd.DataFrame | None] = {}
@@ -112,16 +120,16 @@ def main() -> None:
         raw_data[dataset] = pd.read_pickle(raw_path)
         available_datasets.append(dataset)
 
-    windowed_path = run_dir / "activities_windowed_error_carrabin.npz"
-    windowed_carrabin = np.load(windowed_path) if windowed_path.exists() else None
-    if windowed_carrabin is None:
+    windowed_path = run_dir / f"activities_windowed_error_{TIMECOURSE_DATASET}.npz"
+    windowed_tc = np.load(windowed_path) if windowed_path.exists() else None
+    if windowed_tc is None:
         print(f"Warning: missing windowed activities: {windowed_path}")
-    carrabin_encoders_path = run_dir / "encoders_error_carrabin.pkl"
-    carrabin_params_path = run_dir / "NEF_recurrent_carrabin_params.pkl"
+    tc_encoders_path = run_dir / f"encoders_error_{TIMECOURSE_DATASET}.pkl"
+    tc_params_path = run_dir / f"NEF_recurrent_{TIMECOURSE_DATASET}_params.pkl"
     sorted_alpha = None
-    if carrabin_params_path.exists():
-        carrabin_params = pd.read_pickle(carrabin_params_path)
-        sorted_alpha = carrabin_params.sort_values("alpha_0")
+    if tc_params_path.exists():
+        tc_params = pd.read_pickle(tc_params_path)
+        sorted_alpha = tc_params.sort_values("alpha_0")
         bottom_alpha_pids = sorted_alpha.head(ALPHA_N)["pid"].tolist()
         top_alpha_pids = sorted_alpha.tail(ALPHA_N)["pid"].tolist()
     else:
@@ -283,37 +291,40 @@ def main() -> None:
 
         activities_data[dataset] = activities_df
 
-    carrabin_on_idx_by_pid: dict[int, np.ndarray] = {}
-    carrabin_encoders_df = None
-    if carrabin_encoders_path.exists():
-        carrabin_encoders_df = pd.read_pickle(carrabin_encoders_path)
-    elif "carrabin" in available_datasets and encoders_data["carrabin"] is not None:
+    tc_on_idx_by_pid: dict[int, np.ndarray] = {}
+    tc_encoders_df = None
+    if tc_encoders_path.exists():
+        tc_encoders_df = pd.read_pickle(tc_encoders_path)
+    elif (
+        TIMECOURSE_DATASET in available_datasets
+        and encoders_data[TIMECOURSE_DATASET] is not None
+    ):
         print(
-            f"Warning: missing run-folder carrabin encoders, falling back to old path: "
-            f"{carrabin_encoders_path}"
+            f"Warning: missing run-folder {TIMECOURSE_DATASET} encoders, "
+            f"falling back to old path: {tc_encoders_path}"
         )
-        carrabin_encoders_df = encoders_data["carrabin"]
+        tc_encoders_df = encoders_data[TIMECOURSE_DATASET]
 
-    if carrabin_encoders_df is not None:
-        for pid, pid_enc in carrabin_encoders_df.groupby("pid"):
+    if tc_encoders_df is not None:
+        for pid, pid_enc in tc_encoders_df.groupby("pid"):
             on_idx = pid_enc[
                 pid_enc["enc_dim_1"] > ENCODER_THRESHOLD
             ]["neuron_idx"].values
-            carrabin_on_idx_by_pid[int(pid)] = on_idx
+            tc_on_idx_by_pid[int(pid)] = on_idx
 
     timecourse_df = None
 
-    if windowed_carrabin is not None and carrabin_on_idx_by_pid:
-        acts = windowed_carrabin["activities"]
-        pid_ids = windowed_carrabin["pid_ids"]
-        # dt_sample = float(windowed_carrabin["dt_sample"])
+    if windowed_tc is not None and tc_on_idx_by_pid:
+        acts = windowed_tc["activities"]
+        pid_ids = windowed_tc["pid_ids"]
+        # dt_sample = float(windowed_tc["dt_sample"])
         dt_sample = 0.01  # matches --dt_sample used when saving
         timecourse_rows = []
         for ex_pid in bottom_alpha_pids:
             if ex_pid not in pid_ids:
                 continue
             i = list(pid_ids).index(ex_pid)
-            on_idx = carrabin_on_idx_by_pid.get(ex_pid)
+            on_idx = tc_on_idx_by_pid.get(ex_pid)
             if on_idx is None or len(on_idx) == 0:
                 continue
             pid_acts = acts[i]  # (n_trials, n_obs, n_timesteps, n_neurons)
@@ -336,7 +347,7 @@ def main() -> None:
             if ex_pid not in pid_ids:
                 continue
             i = list(pid_ids).index(ex_pid)
-            on_idx = carrabin_on_idx_by_pid.get(ex_pid)
+            on_idx = tc_on_idx_by_pid.get(ex_pid)
             if on_idx is None or len(on_idx) == 0:
                 continue
             pid_acts = acts[i]  # (n_trials, n_obs, n_timesteps, n_neurons)

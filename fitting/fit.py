@@ -333,19 +333,34 @@ def fit(
         resp_c = trial.user_attrs.get("response_component", float("nan"))
         shape_c = trial.user_attrs.get("shape_component", float("nan"))
         for i, fold_loss in enumerate(fold_losses):
-            trial_records.append(
-                {
-                    "model_type": model_type,
-                    "dataset": dataset,
-                    "pid": int(pid),
-                    "trial_number": trial.number,
-                    "fold": int(i + 1),
-                    "loss": float(fold_loss),
-                    "response_component": float(fold_loss),
-                    "shape_component": float(shape_c),
-                    "beta": float(trial.user_attrs.get("beta", float("nan"))),
-                }
-            )
+            record = {
+                "model_type": model_type,
+                "dataset": dataset,
+                "pid": int(pid),
+                "trial_number": trial.number,
+                "fold": int(i + 1),
+                "loss": float(fold_loss),
+                "response_component": float(fold_loss),
+                "shape_component": float(shape_c),
+                "beta": float(trial.user_attrs.get("beta", float("nan"))),
+            }
+            # add all suggested params (excludes fixed params, model_type, dataset, pid, seed)
+            for param_name, param_val in params.items():
+                if param_name not in (
+                    "model_type",
+                    "dataset",
+                    "pid",
+                    "seed",
+                    "base_seed",
+                    "alpha_bias_array",
+                ):
+                    if param_name not in record:
+                        record[param_name] = (
+                            float(param_val)
+                            if isinstance(param_val, (int, float))
+                            else param_val
+                        )
+            trial_records.append(record)
         return mean_loss
 
     study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
