@@ -18,7 +18,7 @@ from utils.paths import RUNS_DIR, data_path
 
 EXPERIMENT_NAME = "save_activities"
 RUN_FOLDER = "joint_loss"
-READOUT_OFFSET = 0.1  # seconds into observation window for once-per-obs readout
+READOUT_OFFSET = 0.5  # seconds into observation window for once-per-obs readout
 
 VALID_ENSEMBLES = {"error", "value", "counting"}
 

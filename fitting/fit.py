@@ -360,6 +360,7 @@ def fit(
         }
     )
     best_params["seed"] = abs(hash((int(pid), best_trial.number))) % (2**31)
+    best_params["base_seed"] = best_params["seed"]
     if beta_outside_optuna:
         best_params["beta"] = float(
             best_trial.user_attrs.get("beta", float("nan"))
