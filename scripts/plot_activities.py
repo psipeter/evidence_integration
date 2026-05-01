@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.lines import Line2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -37,10 +38,7 @@ PE_BIN_TYPE = "equally_spaced"  # "equally_spaced" or "quantile"
 PE_BIN_N = 10
 PE_BIN_RANGE = (-1.5, 1.5)
 LAMBDA_N = 5  # number of lowest/highest lambda pids to use in panel 3
-TIMECOURSE_EXAMPLES = [
-    {"pid": 4, "label": "#4"},
-    {"pid": 5, "label": "#5"},
-]
+ALPHA_N = 3  # number of pids to show for top/bottom alpha_0
 ERROR_STYLE = "ci"  # "ci" for seaborn default 95% CI, or "sd" for standard deviation
 TIMECOURSE_OBS_MIN = 1
 TIMECOURSE_OBS_MAX = 5
@@ -119,6 +117,15 @@ def main() -> None:
     if windowed_carrabin is None:
         print(f"Warning: missing windowed activities: {windowed_path}")
     carrabin_encoders_path = run_dir / "encoders_error_carrabin.pkl"
+    carrabin_params_path = run_dir / "NEF_recurrent_carrabin_params.pkl"
+    sorted_alpha = None
+    if carrabin_params_path.exists():
+        carrabin_params = pd.read_pickle(carrabin_params_path)
+        sorted_alpha = carrabin_params.sort_values("alpha_0")
+        bottom_alpha_pids = sorted_alpha.head(ALPHA_N)["pid"].tolist()
+        top_alpha_pids = sorted_alpha.tail(ALPHA_N)["pid"].tolist()
+    else:
+        bottom_alpha_pids, top_alpha_pids = [], []
 
     yoo_params_path = run_dir / f"{MODEL_TYPE}_yoo_params.pkl"
     if yoo_params_path.exists():
@@ -302,9 +309,7 @@ def main() -> None:
         # dt_sample = float(windowed_carrabin["dt_sample"])
         dt_sample = 0.01  # matches --dt_sample used when saving
         timecourse_rows = []
-        for example in TIMECOURSE_EXAMPLES:
-            ex_pid = example["pid"]
-            ex_label = example["label"]
+        for ex_pid in bottom_alpha_pids:
             if ex_pid not in pid_ids:
                 continue
             i = list(pid_ids).index(ex_pid)
@@ -324,7 +329,30 @@ def main() -> None:
                             {
                                 "t": t_idx * dt_sample,
                                 "activity": float(mean_over_neurons[trial_i, obs_i, t_idx]),
-                                "example": ex_label,
+                                "alpha_group": "low",
+                            }
+                        )
+        for ex_pid in top_alpha_pids:
+            if ex_pid not in pid_ids:
+                continue
+            i = list(pid_ids).index(ex_pid)
+            on_idx = carrabin_on_idx_by_pid.get(ex_pid)
+            if on_idx is None or len(on_idx) == 0:
+                continue
+            pid_acts = acts[i]  # (n_trials, n_obs, n_timesteps, n_neurons)
+            obs_slice = slice(TIMECOURSE_OBS_MIN - 1, TIMECOURSE_OBS_MAX)
+            selected = pid_acts[:, obs_slice, :, :]  # (n_trials, n_obs, n_timesteps, n_neurons)
+            selected_on = selected[:, :, :, on_idx]  # (n_trials, n_obs, n_timesteps, n_on)
+            mean_over_neurons = np.nanmean(selected_on, axis=3)  # (n_trials, n_obs, n_timesteps)
+            n_trials, n_obs_sel, n_timesteps = mean_over_neurons.shape
+            for trial_i in range(n_trials):
+                for obs_i in range(n_obs_sel):
+                    for t_idx in range(n_timesteps):
+                        timecourse_rows.append(
+                            {
+                                "t": t_idx * dt_sample,
+                                "activity": float(mean_over_neurons[trial_i, obs_i, t_idx]),
+                                "alpha_group": "high",
                             }
                         )
         timecourse_df = pd.DataFrame(timecourse_rows)
@@ -528,21 +556,40 @@ def main() -> None:
         ax_rd.set_visible(False)
 
     if timecourse_df is not None:
-        example_palette = {ex["label"]: cb_palette[i] for i, ex in enumerate(TIMECOURSE_EXAMPLES)}
+        alpha_palette = {"low": cb_palette[0], "high": cb_palette[1]}
         sns.lineplot(
             data=timecourse_df,
             x="t",
             y="activity",
-            hue="example",
-            palette=example_palette,
+            hue="alpha_group",
+            palette=alpha_palette,
             errorbar=ERROR_STYLE,
             ax=ax_time,
         )
-        leg = ax_time.get_legend()
-        if leg:
-            leg.set_title("Participant")
-            # leg.get_title().set_fontsize(plt.rcParams.get("legend.fontsize", 8))
-            leg.set_frame_on(False)
+        if sorted_alpha is not None and len(sorted_alpha) >= ALPHA_N:
+            low_thresh = sorted_alpha.iloc[ALPHA_N - 1]["alpha_0"]
+            high_thresh = sorted_alpha.iloc[-ALPHA_N]["alpha_0"]
+            legend_handles = [
+                Line2D(
+                    [0],
+                    [0],
+                    color=cb_palette[0],
+                    linewidth=1.5,
+                    label=f"low (α₀<{low_thresh:.2f}, n={ALPHA_N})",
+                ),
+                Line2D(
+                    [0],
+                    [0],
+                    color=cb_palette[1],
+                    linewidth=1.5,
+                    label=f"high (α₀>{high_thresh:.2f}, n={ALPHA_N})",
+                ),
+            ]
+            ax_time.legend(
+                handles=legend_handles,
+                title="Base Learning Rate",
+                frameon=False,
+            )
         ax_time.set_xlabel("Time within observation (s)")
         ax_time.set_title("Error neuron timecourse")
         sns.despine(ax=ax_time, top=True, right=True)

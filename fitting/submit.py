@@ -242,7 +242,7 @@ def _resubmit(
                 continue
             if mt not in ("NEF_recurrent", "NEF_synaptic"):
                 continue
-            if timing == "once_per_dt" and ds != "carrabin":
+            if timing == "once_per_dt" and ds != "yoo":
                 continue  # NOTE: hardcoded skipping
             out_dir = run_folder
             ens_missing = False
