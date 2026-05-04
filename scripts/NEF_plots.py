@@ -170,6 +170,12 @@ def main() -> None:
     p.add_argument("--dataset", type=str, default="carrabin")
     p.add_argument("--pid", type=int, default=None)
     p.add_argument(
+        "--trial",
+        type=int,
+        default=None,
+        help="Trial index to plot (default: first trial)",
+    )
+    p.add_argument(
         "--model_type",
         type=str,
         default=None,
@@ -193,7 +199,12 @@ def main() -> None:
                 f"No probe file found matching {pattern} in {DATA_DIR}"
             )
         probe_path = candidates[0]
-    probe_data = pd.read_pickle(probe_path)
+    probe_data_all = pd.read_pickle(probe_path)
+    if isinstance(probe_data_all, list):
+        trial_idx = 0 if args.trial is None else args.trial
+        probe_data = probe_data_all[trial_idx]
+    else:
+        probe_data = probe_data_all
     plot_dynamics(probe_data)
 
 

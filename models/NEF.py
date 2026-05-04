@@ -385,9 +385,9 @@ def run(
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
-    first_trial = int(sorted(human_pid["trial"].unique())[0]) if len(human_pid) else 0
     decoders = _pretrain(pfull)
     rows = []
+    all_probe_data: list[dict] = []
 
     for trial, trial_data in human_pid.groupby("trial"):
         t_trial = time.time()
@@ -400,14 +400,13 @@ def run(
         )
         trial_seed = _trial_seed(int(pfull["seed"]), int(trial))
         p = {**pfull, "alpha_bias_array": alpha_bias, "seed": trial_seed}
-        if save_probes and int(trial) == first_trial:
+        if save_probes:
             responses, probe_data = _simulate_trial(
                 obs_values, p, decoders, return_probes=True
             )
+            probe_data["trial"] = int(trial)
             probe_data["params"] = dict(p)
-            fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
-            pd.to_pickle(probe_data, data_path(fname))
-            print(f"  Saved probe data to data/{fname}")
+            all_probe_data.append(probe_data)
         else:
             responses = _simulate_trial(obs_values, p, decoders)
         elapsed_trial = time.time() - t_trial
@@ -425,6 +424,10 @@ def run(
             rows.append(entry)
 
     out = pd.DataFrame(rows)
+    if save_probes and all_probe_data:
+        fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
+        pd.to_pickle(all_probe_data, data_path(fname))
+        print(f"  Saved probe data ({len(all_probe_data)} trials) to data/{fname}")
     if save:
         out.to_pickle(data_path(f"{pfull['model_type']}_{dataset}_{pid}.pkl"))
     return out
