@@ -37,7 +37,11 @@ def _add_iti_noise(net, params: dict, n_obs: int) -> None:
         noise_node = nengo.Node(noise_process, size_out=1)
 
         def _iti_gate(_t):
-            return 1.0 if (_t % t_step) < t_iti else 0.0
+            """0 during first ITI and all t_obs periods; 1 during ITIs after obs 1."""
+            if _t < t_iti:
+                return 0.0
+            t_in_step = (_t - t_iti) % t_step
+            return 1.0 if t_in_step >= t_obs else 0.0
 
         gate_node = nengo.Node(_iti_gate)
 
@@ -53,24 +57,16 @@ def _add_iti_noise(net, params: dict, n_obs: int) -> None:
             transform=np.ones((1, 1)),
             synapse=float(params.get("tau_ff", 0.01)),
         )
+        net.probe_iti_noise = nengo.Probe(gated_node, synapse=None)
 
 
-def _nef_run_with_iti_noise(params: dict) -> pd.DataFrame:
-    """Run NEF with optional ITI noise (no edits to ``models/NEF.py``)."""
-    import models.NEF as nef_module
+def _nef_run_with_iti_noise(
+    params: dict, *, save_probes: bool = False
+) -> pd.DataFrame:
+    """Run NEF; ITI noise is injected inside ``models.NEF._simulate_trial``."""
+    from models.NEF import run as nef_run
 
-    build_orig = nef_module.build_network
-
-    def build_wrapped(obs_values: np.ndarray, p: dict, decoders: dict):
-        net = build_orig(obs_values, p, decoders)
-        _add_iti_noise(net, p, len(obs_values))
-        return net
-
-    nef_module.build_network = build_wrapped
-    try:
-        return nef_module.run(params)
-    finally:
-        nef_module.build_network = build_orig
+    return nef_run(params, save_probes=save_probes)
 
 
 def _load_base_params(pid: int, run_folder: Path) -> dict:
@@ -152,9 +148,52 @@ def _run_iti_scan(
             print(f"  pid={pid} t_iti={t_iti}: saved")
 
 
+def _run_probe_conditions(
+    pid: int, args: argparse.Namespace, run_folder: Path, out_dir: Path
+) -> None:
+    """Save probe data for 3 example conditions for panel 1."""
+    base = _load_base_params(pid, run_folder)
+
+    conditions = [
+        {"label": "no_noise", "iti_noise_amplitude": 0.0, "t_iti": base["t_iti"]},
+        {
+            "label": "med_noise",
+            "iti_noise_amplitude": args.probe_amp_small * 3,
+            "iti_noise_freq": args.fixed_noise_freq,
+            "t_iti": base["t_iti"],
+        },
+        {
+            "label": "long_iti",
+            "iti_noise_amplitude": args.probe_amp_small,
+            "iti_noise_freq": args.fixed_noise_freq,
+            "t_iti": base["t_iti"] * 3,
+        },
+    ]
+
+    for cond in conditions:
+        out_path = out_dir / f"probe_panel1_{pid}_{cond['label']}.pkl"
+        if out_path.exists():
+            print(f"  Skipping probe {cond['label']} (exists)")
+            continue
+        p = {**base, **{k: v for k, v in cond.items() if k != "label"}}
+        print(f"  Running probe condition: {cond['label']}...")
+        _nef_run_with_iti_noise(p, save_probes=True)
+        src = data_path(f"probe_NEF_recurrent_carrabin_{pid}.pkl")
+        dst = out_path
+        if src.exists():
+            src.rename(dst)
+            print(f"  Saved {dst.name}")
+
+
 def _analyze(args: argparse.Namespace, out_dir: Path, human: pd.DataFrame, qid_map: pd.DataFrame) -> None:
+    if args.experiment == "probe_conditions":
+        for label in ["no_noise", "med_noise", "long_iti"]:
+            path = out_dir / f"probe_panel1_{args.pid}_{label}.pkl"
+            print(f"  {label}: {'exists' if path.exists() else 'missing'}")
+        return
+
     rows = []
-    pattern = "noise_scan" if args.sub_experiment == "noise_scan" else "iti_scan"
+    pattern = "noise_scan" if args.experiment == "noise_scan" else "iti_scan"
     for f in sorted(out_dir.glob(f"{pattern}_*.pkl")):
         resp = pd.read_pickle(f)
         metrics = _compute_metrics(resp, qid_map)
@@ -167,7 +206,7 @@ def _analyze(args: argparse.Namespace, out_dir: Path, human: pd.DataFrame, qid_m
         print("No data found.")
         return
     df = pd.DataFrame(rows)
-    if args.sub_experiment == "noise_scan":
+    if args.experiment == "noise_scan":
         print("\nnoise_scan results (mean over pids):")
         print(
             df.groupby(["iti_noise_amplitude", "iti_noise_freq"])[
@@ -186,10 +225,15 @@ def _analyze(args: argparse.Namespace, out_dir: Path, human: pd.DataFrame, qid_m
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--sub_experiment",
+        "--experiment",
         type=str,
-        default="noise_scan",
-        choices=["noise_scan", "iti_scan"],
+        default="probe_conditions",
+        choices=["probe_conditions", "noise_scan", "iti_scan"],
+        help=(
+            "probe_conditions: save probe data for 3 example conditions (panel 1); "
+            "noise_scan: scan over noise amplitude/frequency; "
+            "iti_scan: scan over ITI duration"
+        ),
     )
     parser.add_argument("--run_simulation", action="store_true", default=False)
     parser.add_argument(
@@ -227,6 +271,7 @@ def main() -> None:
     parser.add_argument(
         "--fixed_noise_amplitude", type=float, default=0.05
     )
+    parser.add_argument("--probe_amp_small", type=float, default=0.02)
     args = parser.parse_args()
 
     run_folder = RUNS_DIR / args.run_folder
@@ -238,12 +283,14 @@ def main() -> None:
         ["pid", "trial", "observation", "qid", "value"]
     ].drop_duplicates()
 
-    pids = list(range(1, 22)) if args.run_all_pids else [args.pid]
-
     if args.run_simulation:
-        if args.sub_experiment == "noise_scan":
+        if args.experiment == "probe_conditions":
+            _run_probe_conditions(args.pid, args, run_folder, out_dir)
+        elif args.experiment == "noise_scan":
+            pids = list(range(1, 22)) if args.run_all_pids else [args.pid]
             _run_noise_scan(pids, args, run_folder, out_dir)
-        else:
+        elif args.experiment == "iti_scan":
+            pids = list(range(1, 22)) if args.run_all_pids else [args.pid]
             _run_iti_scan(pids, args, run_folder, out_dir)
 
     _analyze(args, out_dir, human, qid_map)

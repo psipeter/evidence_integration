@@ -328,6 +328,14 @@ def _simulate_trial(
     t_total = n_obs * (float(params["t_obs"]) + float(params["t_iti"]))
 
     net = build_network(obs_values, params, decoders)
+    # optional ITI noise injection (used by iti_perturbation.py)
+    if float(params.get("iti_noise_amplitude", 0.0)) > 0:
+        try:
+            from scripts.iti_perturbation import _add_iti_noise
+
+            _add_iti_noise(net, params, len(obs_values))
+        except ImportError:
+            pass
     with nengo.Simulator(
         net,
         dt=float(params["dt"]),
@@ -362,6 +370,8 @@ def _simulate_trial(
         idx = int(np.clip(idx, 0, len(error_neuron_data) - 1))
         readout_indices.append(idx)
     probe_data["error_neurons"] = error_neuron_data[readout_indices]
+    if return_probes and hasattr(net, "probe_iti_noise"):
+        probe_data["iti_noise"] = sim.data[net.probe_iti_noise].squeeze()
     return responses, probe_data
 
 

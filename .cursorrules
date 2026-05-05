@@ -22,7 +22,7 @@ Follow prompts as written. Add `# TODO: [decision needed]` for ambiguous decisio
 
 - Title: `Cursor Prompt 00X — Brief description`
 - Body: single fenced code block with language `markdown`
-- Numbering: sequential across entire project, never reset — **next prompt is 284**
+- Numbering: sequential across entire project, never reset — **next prompt is 383**
 - One prompt per response; combine multi-file changes into labeled sections
 - File paths always relative to project root
 - Self-contained — Cursor should execute without reading conversation history
@@ -99,9 +99,9 @@ fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
 - Loss type stored inside `params.pkl`, not in filename
 
 Loss functions in `fitting/losses.py`:
-- `response` — MSE on carrabin/yoo; total NLL on jiang
-- `shape` — Wasserstein shape distance
-- `joint` — combined; `JOINT_LOSS_W`: carrabin=0.2, yoo=0.5, jiang=0.95
+- `response` — RMSE on carrabin/yoo; mean NLL on jiang (default objective for fits)
+- `shape` — diagnostic / alternate objective; **jiang**: ND-weighted OLS coefficient distance vs human (carrabin/yoo definitions in module docstring)
+- `joint` — optional weighted mix of response + shape (`JOINT_LOSS_W`); not the default fitting workflow
 
 ---
 
@@ -109,23 +109,54 @@ Loss functions in `fitting/losses.py`:
 
 ```bash
 # New fits
-python -m fitting.submit carrabin NEF_recurrent --run_folder joint --n_trials 200
-python -m fitting.submit carrabin NEF_recurrent --run_folder joint --pid 1 --local
+python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --loss_type response --run_folder response
+python -m fitting.submit carrabin NEF_recurrent --run_folder response --pid 1 --local
+python -m fitting.submit jiang DeGroot --n_trials 500 --loss_type response --run_folder response
 
-# Resubmit missing jobs
-python -m fitting.submit --resubmit params --run_folder NEF200
-python -m fitting.submit --resubmit responses --run_folder NEF200
-python -m fitting.submit --resubmit responses --run_folder NEF200 --model_type NEF_recurrent
-python -m fitting.submit --resubmit activities --run_folder NEF200 --ensembles error value counting
-python -m fitting.submit --resubmit activities --run_folder NEF200 --timing once_per_dt
-python -m fitting.collect NEF200 --type params
-python -m fitting.collect NEF200 --type responses
-python -m fitting.collect NEF200 --type activities --ensembles error value counting
-python -m fitting.collect NEF200 --type activities --ensembles error --timing once_per_dt
+# Resubmit
+python -m fitting.submit --resubmit params --run_folder response
+python -m fitting.submit --resubmit responses --run_folder response --model_type NEF_recurrent
+python -m fitting.submit --resubmit activities --run_folder response --ensembles error value counting
+python -m fitting.submit --resubmit activities --run_folder response --ensembles error --timing once_per_dt
+```
+
+Optional filters with `--resubmit`: first positional **`target`** = dataset (`all` scans every job in `run_config.json`), second positional **`model_type`**, and **`--pid`**.
+
+SLURM time limits: `utils/slurm.py` `DEFAULT_TIME_LIMITS` (includes `RL_lambda`, `RL_lambda_rd`, `RL_lambda_offset`, and NEF models).
+
+```bash
+python -m fitting.collect response --type params
+python -m fitting.collect response --type responses
+python -m fitting.collect response --type activities --ensembles error value counting
+python -m fitting.collect response --type activities --ensembles error --timing once_per_dt
 python scripts/check_jobs.py --cancel
 ```
 
-Run folders live under `data/runs/`. `run_config.json` records all job specs and git commit.
+Run folders live under `data/runs/` (e.g. `response`, `noisy_representations`, `iti_perturbation`). `run_config.json` records all job specs and git commit.
+
+### Experiment scripts
+
+```bash
+# Noisy representations
+python scripts/noisy_representations.py --experiment probe_pids --run_folder response --out_folder noisy_representations
+python scripts/noisy_representations.py --experiment n_neurons_scan --run_simulation --scan_pids 14 --out_folder noisy_representations
+
+# ITI perturbation
+python scripts/iti_perturbation.py --experiment probe_conditions --run_simulation --pid 14 --out_folder iti_perturbation
+python scripts/iti_perturbation.py --experiment noise_scan --run_simulation --run_all_pids --out_folder iti_perturbation
+python scripts/iti_perturbation.py --experiment iti_scan --run_simulation --run_all_pids --out_folder iti_perturbation
+python scripts/plot_iti_perturbation.py --out_folder iti_perturbation
+```
+
+### Architecture notes (May 2026)
+
+- NEF seeds: **`base_seed`** for the counting subnetwork; **per-trial `trial_seed`** for the remainder of the network
+- **`READOUT_OFFSET = 0.5`** (seconds into each observation window) in `utils/save_activities.py` for aligned activity readouts
+- Warm start: NEF Optuna enqueue reads **`RL_lambda_{dataset}_{pid}_params.pkl`** (when present) for `alpha_0` / `lambda_` as trial 0 (`fitting/fit.py`)
+- Default loss for production fits: **`response`**; shape losses are diagnostics unless explicitly selected
+- Recommend **`beta_outside_optuna=False`** (default on `fitting.submit`) for all models unless you intentionally override
+- Probe pickles from `save_probes=True` are **`list`s of dicts (all trials)**; not limited to trial 0
+- ITI noise injection: when `iti_noise_amplitude > 0`, `NEF._simulate_trial` imports and calls **`scripts.iti_perturbation._add_iti_noise`** after `build_network`
 
 ---
 
@@ -148,13 +179,17 @@ Utility modules: `utils/save_responses.py`, `utils/save_activities.py`
 
 ## Plotting
 
-Figure scripts in `scripts/`. All accept `--run_folder`. Save PNG (300 dpi) + PDF to `figures/`. No `plt.show()`.
+Figure scripts in `scripts/`. Save PNG (300 dpi) + PDF to `figures/`. No `plt.show()`. Most take `--run_folder` when reading fits from `data/runs/` (exceptions noted in script CLIs).
 
 - `model_performance.py` — model performance
 - `response_variability_carrabin.py` — intertrial variability
 - `switch_probability_jiang.py` — switch probability vs conflict
 - `response_change_yoo.py` — power-law decay of update magnitude
+- `response_change_vs_weight_activity.py` — yoo brain–behavior vs weight activity
+- `noisy_representations.py` — carrabin neural vs response noise experiments
+- `iti_perturbation.py` / `plot_iti_perturbation.py` — ITI noise injection and figure
 - `plot_activities.py` — neural population activity (5 panels)
+- `NEF_plots.py` — NEF probe dynamics from `data/probe_*.pkl`
 
 ---
 
