@@ -15,12 +15,13 @@ import seaborn as sns
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
-from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
+from utils.plot_style import FIGURE_SIZE, apply_style
 
 SAMPLE_PIDS = [6, 7]  # high/low alpha_0 example pids for panel 1
 SAMPLE_QID = None  # auto-select qid with most repeats
 MIN_REPEATS = 10  # minimum trial repeats per qid for analysis
 READOUT_OFFSET = 0.5  # seconds into obs window for readout
+N_NEURONS_LIST = [50, 75, 100, 150, 200, 300, 500]
 
 
 def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
@@ -114,116 +115,163 @@ def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
     return pd.DataFrame(rows)
 
 
+def _load_pred_error_std(
+    out_dir: Path,
+    human: pd.DataFrame,
+    n_neurons_list: list[int],
+    pids: list[int],
+    min_repeats: int = 5,
+    readout_offset: float = 0.5,
+) -> pd.DataFrame:
+    """
+    For each (n_neurons, pid, qid), compute std of |error[1]| at readout
+    timepoints across trials.
+    """
+    from collections import defaultdict
+
+    rows = []
+    for n_neurons in n_neurons_list:
+        for pid in pids:
+            probe_path = out_dir / f"probe_n{n_neurons}_carrabin_{pid}.pkl"
+            if not probe_path.exists():
+                continue
+            probes_raw = pd.read_pickle(probe_path)
+            probes = probes_raw if isinstance(probes_raw, list) else [probes_raw]
+            params = probes[0]["params"]
+            t_iti = float(params["t_iti"])
+            t_step = float(params["t_obs"]) + t_iti
+
+            human_pid = human[human["pid"] == pid]
+            trial_qid = (
+                human_pid.groupby(["trial", "observation"])["qid"].first().reset_index()
+            )
+
+            qid_vals = defaultdict(list)
+            for probe in probes:
+                trial = int(probe["trial"])
+                t = probe["t"]
+                error1 = np.abs(probe["error"][:, 1])
+                trial_map = trial_qid[trial_qid["trial"] == trial].set_index(
+                    "observation"
+                )["qid"]
+                for obs_n in range(1, 6):
+                    if obs_n not in trial_map.index:
+                        continue
+                    qid = trial_map[obs_n]
+                    t_readout = t_iti + (obs_n - 1) * t_step + readout_offset
+                    idx = int(np.argmin(np.abs(t - t_readout)))
+                    qid_vals[(qid, obs_n)].append(float(error1[idx]))
+
+            for (qid, _), vals in qid_vals.items():
+                if len(vals) < min_repeats:
+                    continue
+                rows.append(
+                    {
+                        "n_neurons": n_neurons,
+                        "pid": pid,
+                        "qid": qid,
+                        "pred_error_std": float(np.std(vals)),
+                    }
+                )
+
+    return pd.DataFrame(rows)
+
+
 def _plot_panel1(ax, sample_pid_data, human, color_0, color_1):
-    """sample_pid_data: list of dicts from metrics df rows"""
-    sorted_rows = sorted(sample_pid_data, key=lambda row: row["alpha_0"], reverse=True)
     colors = [color_0, color_1]
 
-    for pid_row, color in zip(sorted_rows, colors):
+    for pid_row, color in zip(sample_pid_data, colors):
+        pid = int(pid_row["pid"])
         probes = pid_row["_probes"]
         params = pid_row["_params"]
         t_iti = float(params["t_iti"])
         t_obs = float(params["t_obs"])
         t_step = t_obs + t_iti
 
+        # find length-1 qid with most repeats
+        human_pid = human[human["pid"] == pid]
+        qid_lengths = human_pid.groupby("qid")["observation"].count()
+        length1_qids = set(qid_lengths[qid_lengths == 1].index)
         qid_obs_vals = pid_row["_qid_obs_vals"]
 
-        human_pid = human[human["pid"] == int(pid_row["pid"])]
-        qid_lengths = human_pid.groupby("qid")["observation"].count()
-        length1_qids = qid_lengths[qid_lengths == 1].index.tolist()
+        candidates = [(k, v) for k, v in qid_obs_vals.items() if k[0] in length1_qids]
+        if not candidates:
+            candidates = list(qid_obs_vals.items())
+        best_qid, best_obs = max(candidates, key=lambda x: len(x[1]))[0]
 
-        best_key = max(
-            [(k, v) for k, v in qid_obs_vals.items() if k[0] in length1_qids],
-            key=lambda x: len(x[1]),
-            default=(None, []),
-        )[0]
-        if best_key is None:
-            best_key = max(
-                qid_obs_vals.keys(), key=lambda k: len(qid_obs_vals[k])
-            )
-        best_qid, best_obs = best_key
-
-        matching_trials = human_pid[
-            (human_pid["qid"] == best_qid) & (human_pid["observation"] == best_obs)
-        ]["trial"].values
-
+        matching_trials = set(
+            human_pid[
+                (human_pid["qid"] == best_qid) & (human_pid["observation"] == best_obs)
+            ]["trial"].values
+        )
         t_start = t_iti + (best_obs - 1) * t_step
         t_end = t_start + t_obs
 
+        # plot all matching trial traces
+        first = True
         for probe in probes:
             if int(probe["trial"]) not in matching_trials:
                 continue
             t = probe["t"]
             error1 = np.abs(probe["error"][:, 1])
             mask = (t >= t_start) & (t <= t_end)
-            t_rel = t[mask] - t_start
-            ax.plot(t_rel, error1[mask], color=color, alpha=0.15, linewidth=0.5)
+            label = f"pid={pid} (α₀={pid_row['alpha_0']:.2f})" if first else None
+            ax.plot(
+                t[mask] - t_start,
+                error1[mask],
+                color=color,
+                linewidth=0.5,
+                label=label,
+            )
+            first = False
 
-        ax.axvline(
-            READOUT_OFFSET,
-            color='k',
-            linewidth=1.5,
-            linestyle="--",
-            label=f"pid={int(pid_row['pid'])} (α₀={pid_row['alpha_0']:.2f})",
-        )
-
+    # readout line (no label — just visual reference)
+    ax.axvline(READOUT_OFFSET, color='k', linewidth=1.0, linestyle="--")
     ax.set_xlabel("Time within observation (s)")
-    ax.set_ylabel("|Decoded prediction error|")
+    ax.set_ylabel("|Prediction error|")
     ax.set_title("Prediction error timecourse")
-    ax.legend(frameon=False)
+
+    # legend: colored lines matching the traces
+    from matplotlib.lines import Line2D
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=colors[i],
+            linewidth=1.5,
+            label=f"pid={int(sample_pid_data[i]['pid'])} (α₀={sample_pid_data[i]['alpha_0']:.2f})",
+        )
+        for i in range(len(sample_pid_data))
+    ]
+    ax.legend(handles=handles, frameon=False)
     sns.despine(ax=ax, top=True, right=True)
 
 
 def _plot_panel2(ax, metrics_df, color_0, color_1):
     std_max = float(np.nanmax(np.abs(metrics_df["mean_std1"])))
     noise_max = float(np.nanmax(np.abs(metrics_df["response_noise"])))
-    use_twin = (
-        std_max > 0
-        and noise_max > 0
-        and max(std_max / noise_max, noise_max / std_max) > 5.0
+    sns.regplot(
+        data=metrics_df,
+        x="alpha_0",
+        y="response_noise",
+        scatter_kws={"color": color_0, "s": 30},
+        line_kws={"color": color_0, "linewidth": 1.5},
+        label="Mean response noise",
+        ci=95,
+        ax=ax,
     )
-
-    # std of prediction error vs alpha_0
     sns.regplot(
         data=metrics_df,
         x="alpha_0",
         y="mean_std1",
-        scatter_kws={"color": color_0, "s": 30},
-        line_kws={"color": color_0, "linewidth": 1.5},
+        scatter_kws={"color": color_1, "s": 30},
+        line_kws={"color": color_1, "linewidth": 1.5},
         label="Std prediction error",
         ci=95,
         ax=ax,
     )
-
-    if use_twin:
-        ax2 = ax.twinx()
-        sns.regplot(
-            data=metrics_df,
-            x="alpha_0",
-            y="response_noise",
-            scatter_kws={"color": color_1, "s": 30},
-            line_kws={"color": color_1, "linewidth": 1.5},
-            label="mean of response noise",
-            ci=95,
-            ax=ax2,
-        )
-        ax2.set_ylabel("Response noise", color=color_1)
-        ax2.tick_params(axis="y", labelcolor=color_1)
-        sns.despine(ax=ax2, top=True, left=True)
-        ax.legend(frameon=False)
-    else:
-        sns.regplot(
-            data=metrics_df,
-            x="alpha_0",
-            y="response_noise",
-            scatter_kws={"color": color_1, "s": 30},
-            line_kws={"color": color_1, "linewidth": 1.5},
-            label="Mean response noise",
-            ci=95,
-            ax=ax,
-        )
-        ax.legend(frameon=False)
-
+    ax.legend(frameon=False)
     ax.set_xlabel("Fitted α₀")
     ax.set_ylabel("Value")
     ax.set_title("Fitted learning rate α₀ affects neural and response noise")
@@ -258,7 +306,7 @@ def _plot_panel3(ax, metrics_df, color_0):
     print(f"Panel 3 — response_noise vs mean_std1: r={r:.3f}, p={p:.4f}")
 
 
-def _plot_panel4(ax, scan_per_qid, color_0):
+def _plot_panel4(ax, scan_per_qid, pred_error_df, scan_pid, color_0, color_1):
     if scan_per_qid.empty:
         ax.text(
             0.5,
@@ -268,7 +316,7 @@ def _plot_panel4(ax, scan_per_qid, color_0):
             va="center",
             transform=ax.transAxes,
             fontsize=10,
-            color="gray",
+            color=color_0,
         )
         ax.set_title("Neural noise vs response noise")
         sns.despine(ax=ax, top=True, right=True)
@@ -284,11 +332,24 @@ def _plot_panel4(ax, scan_per_qid, color_0):
         markersize=5,
         errorbar="ci",
         ax=ax,
-        label="NEF model (mean ± 95% CI)",
+        label="Mean response noise",
     )
+    if not pred_error_df.empty:
+        sns.lineplot(
+            data=pred_error_df,
+            x="n_neurons",
+            y="pred_error_std",
+            color=color_1,
+            linewidth=2.0,
+            marker="s",
+            markersize=5,
+            errorbar="ci",
+            ax=ax,
+            label="Std prediction error",
+        )
     ax.set_xlabel("Number of neurons")
-    ax.set_ylabel("Response noise (per-qid std)")
-    ax.set_title("More neurons → less response noise")
+    ax.set_ylabel("Value")
+    ax.set_title("More neurons → less neural and response noise")
     ax.legend(frameon=False)
     sns.despine(ax=ax, top=True, right=True)
 
@@ -376,7 +437,8 @@ def _run_probe_pids(
     )
     print(f"Loaded metrics for {len(metrics_df)} pids")
 
-    n_neurons_list = [50, 75, 100, 150, 200, 300, 500]
+    n_neurons_list = N_NEURONS_LIST
+    scan_pid = 14
     scan_dfs = []
     response_files = sorted(out_dir.glob("responses_carrabin_*_n*.pkl"))
     all_scan_pids = sorted({int(f.stem.split("_")[2]) for f in response_files})
@@ -402,6 +464,14 @@ def _run_probe_pids(
     else:
         scan_per_qid = pd.DataFrame()
 
+    all_scan_pids = [
+        int(f.stem.split("_")[2])
+        for f in sorted(out_dir.glob("responses_carrabin_*_n200.pkl"))
+    ]
+    pred_error_df = _load_pred_error_std(
+        out_dir, human, N_NEURONS_LIST, all_scan_pids
+    )
+
     print("\nProbe data:")
     for pid in analysis_pids:
         probe_path = out_dir / f"probe_NEF_recurrent_carrabin_{pid}.pkl"
@@ -419,10 +489,9 @@ def _run_probe_pids(
         return
 
     apply_style()
-    PALETTE = get_palette()
-    palette_list = list(PALETTE.values())
-    color_0 = palette_list[1]
-    color_1 = palette_list[3]
+    palette = sns.color_palette("colorblind")
+    color_0 = palette[0]
+    color_1 = palette[1]
 
     fig, axes = plt.subplots(
         1,
@@ -440,7 +509,7 @@ def _run_probe_pids(
     _plot_panel1(axes[0], sample_rows, human, color_0, color_1)
     _plot_panel2(axes[1], metrics_df, color_0, color_1)
     _plot_panel3(axes[2], metrics_df, color_0)
-    _plot_panel4(axes[3], scan_per_qid, color_0)
+    _plot_panel4(axes[3], scan_per_qid, pred_error_df, scan_pid, color_0, color_1)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(FIGURES_DIR / "noisy_representations.png", dpi=300)
