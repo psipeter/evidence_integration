@@ -303,6 +303,7 @@ def build_network(
             synapse=float(params["tau_probe"]),
             sample_every=float(params["dt"]),
         )
+        net.probe_error_neurons = nengo.Probe(net.error.neurons, synapse=None)
         net.probe_obs = nengo.Probe(
             net.node_input[0],
             synapse=None,
@@ -348,6 +349,19 @@ def _simulate_trial(
         "counting_count": sim.data[net.probe_counting_count].squeeze(),
         "t": np.arange(len(sim.data[net.probe_value])) * float(params["dt"]),
     }
+    t_obs = float(params["t_obs"])
+    t_iti = float(params["t_iti"])
+    t_step = t_obs + t_iti
+    dt = float(params["dt"])
+    readout_offset = 0.5
+    error_neuron_data = sim.data[net.probe_error_neurons]
+    readout_indices = []
+    for n in range(n_obs):
+        t_readout = t_iti + n * t_step + readout_offset
+        idx = int(np.round(t_readout / dt))
+        idx = int(np.clip(idx, 0, len(error_neuron_data) - 1))
+        readout_indices.append(idx)
+    probe_data["error_neurons"] = error_neuron_data[readout_indices]
     return responses, probe_data
 
 
