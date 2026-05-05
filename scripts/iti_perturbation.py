@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import RUNS_DIR, data_path
 
+# WhiteSignal upper frequency bound (Hz); single setting for probes + noise_scan.
+DEFAULT_ITI_NOISE_FREQ_HZ = 10.0
+
 
 def _add_iti_noise(net, params: dict, n_obs: int) -> None:
     """Add gated white noise to value ensemble during ITI periods."""
@@ -21,7 +24,7 @@ def _add_iti_noise(net, params: dict, n_obs: int) -> None:
     import nengo.processes
 
     amplitude = float(params.get("iti_noise_amplitude", 0.0))
-    freq = float(params.get("iti_noise_freq", 10.0))
+    freq = float(params.get("iti_noise_freq", DEFAULT_ITI_NOISE_FREQ_HZ))
     if amplitude == 0.0:
         return
     t_obs = float(params["t_obs"])
@@ -103,80 +106,48 @@ def _compute_metrics(resp: pd.DataFrame, qid_map: pd.DataFrame) -> dict:
 def _run_noise_scan(
     pids: list[int], args: argparse.Namespace, run_folder: Path, out_dir: Path
 ) -> None:
+    freq = DEFAULT_ITI_NOISE_FREQ_HZ
     for pid in pids:
         base = _load_base_params(pid, run_folder)
         for amp in args.noise_amplitudes:
-            freqs = [0.0] if amp == 0.0 else args.noise_freqs
-            for freq in freqs:
-                out_path = (
-                    out_dir / f"noise_scan_{pid}_amp{amp}_freq{freq}.pkl"
-                )
-                if out_path.exists():
-                    print(
-                        f"  Skipping pid={pid} amp={amp} freq={freq} (exists)"
-                    )
-                    continue
-                p = {**base, "iti_noise_amplitude": amp, "iti_noise_freq": freq}
-                responses = _nef_run_with_iti_noise(p)
-                responses["iti_noise_amplitude"] = amp
-                responses["iti_noise_freq"] = freq
-                responses.to_pickle(out_path)
-                print(f"  pid={pid} amp={amp} freq={freq}: saved")
-
-
-def _run_iti_scan(
-    pids: list[int], args: argparse.Namespace, run_folder: Path, out_dir: Path
-) -> None:
-    for pid in pids:
-        base = _load_base_params(pid, run_folder)
-        for t_iti in args.t_iti_values:
-            out_path = out_dir / f"iti_scan_{pid}_titi{t_iti}.pkl"
+            out_path = out_dir / f"noise_scan_{pid}_amp{amp}.pkl"
             if out_path.exists():
-                print(f"  Skipping pid={pid} t_iti={t_iti} (exists)")
+                print(f"  Skipping pid={pid} amp={amp} (exists)")
                 continue
-            p = {
-                **base,
-                "t_iti": t_iti,
-                "iti_noise_amplitude": args.fixed_noise_amplitude,
-                "iti_noise_freq": args.fixed_noise_freq,
-            }
+            p = {**base, "iti_noise_amplitude": amp}
+            if amp > 0.0:
+                p["iti_noise_freq"] = freq
             responses = _nef_run_with_iti_noise(p)
-            responses["t_iti"] = t_iti
-            responses["iti_noise_amplitude"] = args.fixed_noise_amplitude
-            responses["iti_noise_freq"] = args.fixed_noise_freq
+            responses["iti_noise_amplitude"] = amp
+            responses["iti_noise_freq"] = freq if amp > 0.0 else 0.0
             responses.to_pickle(out_path)
-            print(f"  pid={pid} t_iti={t_iti}: saved")
+            print(f"  pid={pid} amp={amp} (@ {freq:g} Hz): saved")
+
+
+# Panel-1 probes (``plot_iti_perturbation.py``): basename -> ITI noise RMS amplitude (fitted t_iti)
+PROBE_PANEL1_CONDITIONS: tuple[tuple[str, float], ...] = (
+    ("no_noise", 0.0),
+    ("amp0p1", 0.1),
+    ("amp0p05", 0.05),
+)
 
 
 def _run_probe_conditions(
     pid: int, args: argparse.Namespace, run_folder: Path, out_dir: Path
 ) -> None:
-    """Save probe data for 3 example conditions for panel 1."""
+    """Save probe data for ``plot_iti_perturbation`` panel 1 (three noise amplitudes, default ITI)."""
     base = _load_base_params(pid, run_folder)
+    freq = DEFAULT_ITI_NOISE_FREQ_HZ
 
-    conditions = [
-        {"label": "no_noise", "iti_noise_amplitude": 0.0, "t_iti": base["t_iti"]},
-        {
-            "label": "med_noise",
-            "iti_noise_amplitude": args.probe_amp_small * 3,
-            "iti_noise_freq": args.fixed_noise_freq,
-            "t_iti": base["t_iti"],
-        },
-        {
-            "label": "long_iti",
-            "iti_noise_amplitude": args.probe_amp_small,
-            "iti_noise_freq": args.fixed_noise_freq,
-            "t_iti": base["t_iti"] * 3,
-        },
-    ]
-
-    for cond in conditions:
-        out_path = out_dir / f"probe_panel1_{pid}_{cond['label']}.pkl"
+    for label, amp in PROBE_PANEL1_CONDITIONS:
+        out_path = out_dir / f"probe_panel1_{pid}_{label}.pkl"
         if out_path.exists():
-            print(f"  Skipping probe {cond['label']} (exists)")
+            print(f"  Skipping probe {label} (exists)")
             continue
-        p = {**base, **{k: v for k, v in cond.items() if k != "label"}}
-        print(f"  Running probe condition: {cond['label']}...")
+        p = {**base, "iti_noise_amplitude": amp}
+        if amp > 0.0:
+            p["iti_noise_freq"] = freq
+        print(f"  Running probe {label} (amp={amp}, t_iti={float(base['t_iti'])})...")
         _nef_run_with_iti_noise(p, save_probes=True)
         src = data_path(f"probe_NEF_recurrent_carrabin_{pid}.pkl")
         dst = out_path
@@ -187,18 +158,17 @@ def _run_probe_conditions(
 
 def _analyze(args: argparse.Namespace, out_dir: Path, human: pd.DataFrame, qid_map: pd.DataFrame) -> None:
     if args.experiment == "probe_conditions":
-        for label in ["no_noise", "med_noise", "long_iti"]:
+        for label, _ in PROBE_PANEL1_CONDITIONS:
             path = out_dir / f"probe_panel1_{args.pid}_{label}.pkl"
             print(f"  {label}: {'exists' if path.exists() else 'missing'}")
         return
 
     rows = []
-    pattern = "noise_scan" if args.experiment == "noise_scan" else "iti_scan"
-    for f in sorted(out_dir.glob(f"{pattern}_*.pkl")):
+    for f in sorted(out_dir.glob("noise_scan_*.pkl")):
         resp = pd.read_pickle(f)
         metrics = _compute_metrics(resp, qid_map)
         row = {"pid": int(resp["pid"].iloc[0]), **metrics}
-        for col in ("iti_noise_amplitude", "iti_noise_freq", "t_iti"):
+        for col in ("iti_noise_amplitude", "t_iti"):
             if col in resp.columns:
                 row[col] = float(resp[col].iloc[0])
         rows.append(row)
@@ -206,20 +176,12 @@ def _analyze(args: argparse.Namespace, out_dir: Path, human: pd.DataFrame, qid_m
         print("No data found.")
         return
     df = pd.DataFrame(rows)
-    if args.experiment == "noise_scan":
-        print("\nnoise_scan results (mean over pids):")
-        print(
-            df.groupby(["iti_noise_amplitude", "iti_noise_freq"])[
-                ["response_noise", "rmse"]
-            ]
-            .mean()
-            .round(4)
-        )
-    else:
-        print("\niti_scan results (mean over pids):")
-        print(
-            df.groupby("t_iti")[["response_noise", "rmse"]].mean().round(4)
-        )
+    print("\nnoise_scan results (mean over pids):")
+    print(
+        df.groupby("iti_noise_amplitude")[["response_noise", "rmse"]]
+        .mean()
+        .round(4)
+    )
 
 
 def main() -> None:
@@ -228,11 +190,10 @@ def main() -> None:
         "--experiment",
         type=str,
         default="probe_conditions",
-        choices=["probe_conditions", "noise_scan", "iti_scan"],
+        choices=["probe_conditions", "noise_scan"],
         help=(
-            "probe_conditions: save probe data for 3 example conditions (panel 1); "
-            "noise_scan: scan over noise amplitude/frequency; "
-            "iti_scan: scan over ITI duration"
+            "probe_conditions: save probe pickles for panel 1 (three noise amplitudes); "
+            "noise_scan: sweep noise amplitude at 10 Hz for panel 2"
         ),
     )
     parser.add_argument("--run_simulation", action="store_true", default=False)
@@ -254,24 +215,6 @@ def main() -> None:
         nargs="+",
         default=[0.0, 0.05, 0.1, 0.2, 0.5],
     )
-    parser.add_argument(
-        "--noise_freqs",
-        type=float,
-        nargs="+",
-        default=[5.0, 10.0, 20.0, 50.0],
-    )
-    parser.add_argument("--fixed_noise_freq", type=float, default=10.0)
-
-    parser.add_argument(
-        "--t_iti_values",
-        type=float,
-        nargs="+",
-        default=[0.5, 1.0, 1.5, 2.0, 3.0, 5.0],
-    )
-    parser.add_argument(
-        "--fixed_noise_amplitude", type=float, default=0.05
-    )
-    parser.add_argument("--probe_amp_small", type=float, default=0.02)
     args = parser.parse_args()
 
     run_folder = RUNS_DIR / args.run_folder
@@ -289,9 +232,6 @@ def main() -> None:
         elif args.experiment == "noise_scan":
             pids = list(range(1, 22)) if args.run_all_pids else [args.pid]
             _run_noise_scan(pids, args, run_folder, out_dir)
-        elif args.experiment == "iti_scan":
-            pids = list(range(1, 22)) if args.run_all_pids else [args.pid]
-            _run_iti_scan(pids, args, run_folder, out_dir)
 
     _analyze(args, out_dir, human, qid_map)
 

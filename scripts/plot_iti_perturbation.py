@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot figures for ITI perturbation experiments (probe timecourses + scan stubs)."""
+"""Plot figures for ITI perturbation (probe timecourses + noise amplitude scan summary)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -18,17 +19,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style
 
+from scripts.iti_perturbation import _compute_metrics
+
 CONDITION_LABELS = {
     "no_noise": "No noise",
-    "med_noise": "Medium noise (ITI)",
-    "long_iti": "Small noise, long ITI",
+    "amp0p1": "Noise 0.1",
+    "amp0p05": "Noise 0.05",
 }
+
+
+def _trial_is_two_plus_ones_after_obs2(
+    trial: int, trial_qid: pd.DataFrame
+) -> bool:
+    """True if obs 1 and 2 exist and the qid after obs 2 starts with '11' (two +1s).
+
+    Probes do not store qids; this must match ``carrabin.pkl`` semantics: the ``qid``
+    string grows with cumulative evidence (+1 ↦ '1', etc.), so ``'11'`` appears at
+    observation 2, not at observation 1 (where qid is ``'1'``).
+    """
+    tq = trial_qid[trial_qid["trial"] == trial].set_index("observation")["qid"]
+    if 1 not in tq.index or 2 not in tq.index:
+        return False
+    return str(tq.loc[2]).startswith("11")
 
 
 def _plot_panel1(ax, out_dir, pid, colors, human):
     human_pid = human[human["pid"] == pid]
-    all_qids = human_pid["qid"].unique()
-    target_qids = {q for q in all_qids if str(q).startswith("11")}
     trial_qid = human_pid.groupby(["trial", "observation"])["qid"].first().reset_index()
 
     for i, (label, display) in enumerate(CONDITION_LABELS.items()):
@@ -44,25 +60,17 @@ def _plot_panel1(ax, out_dir, pid, colors, human):
         rows = []
         for probe in probes:
             trial = int(probe["trial"])
-            tmap = trial_qid[trial_qid["trial"] == trial].set_index("observation")[
-                "qid"
-            ]
-            idx_set = set(tmap.index)
-            for obs_n, qid in tmap.items():
-                if qid not in target_qids:
-                    continue
-                if obs_n != 1:
-                    continue
-                if 2 not in idx_set:
-                    continue
-                t = probe["t"]
-                value = np.abs(probe["value"])
-                t_start = t_iti
-                t_end = t_start + t_obs + t_iti + t_obs
-                mask = (t >= t_start) & (t <= t_end)
-                t_rel = t[mask] - t_start
-                for t_val, v_val in zip(t_rel, value[mask]):
-                    rows.append({"t": float(t_val), "value": float(v_val)})
+            if not _trial_is_two_plus_ones_after_obs2(trial, trial_qid):
+                continue
+            t = probe["t"]
+            value = np.abs(probe["value"])
+            t_start = t_iti
+            # Stop before ITI #2 (noise spikes again after obs 2); exclusive upper edge
+            t_before_iti2 = t_start + t_obs + t_iti + t_obs
+            mask = (t >= t_start) & (t < t_before_iti2)
+            t_rel = t[mask] - t_start
+            for t_val, v_val in zip(t_rel, value[mask]):
+                rows.append({"t": float(t_val), "value": float(v_val)})
 
         if not rows:
             continue
@@ -97,16 +105,18 @@ def _plot_panel1(ax, out_dir, pid, colors, human):
             linewidth=0,
         )
 
-    ax.set_xlabel("Time from obs 1 onset (s)")
-    ax.set_ylabel("|Value estimate|")
-    ax.set_title("ITI noise disrupts value representation")
-    ax.legend(frameon=False)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Decoded value estimate")
+    handles, labels_ = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels_, frameon=False)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_noise_envelope(ax, out_dir, pid, colors):
+def _plot_noise_envelope(ax, out_dir: Path, pid: int, *, title: str) -> None:
     t_obs_ref = None
     t_iti_ref = None
+    y_chunks: list[np.ndarray] = []
     for i, (label, _) in enumerate(CONDITION_LABELS.items()):
         probe_path = out_dir / f"probe_panel1_{pid}_{label}.pkl"
         if not probe_path.exists():
@@ -124,47 +134,89 @@ def _plot_noise_envelope(ax, out_dir, pid, colors):
         t = probe["t"]
         noise = probe["iti_noise"]
         t_start = t_iti
-        t_end = t_start + t_obs + t_iti + t_obs
-        mask = (t >= t_start) & (t <= t_end)
+        t_before_iti2 = t_start + t_obs + t_iti + t_obs
+        mask = (t >= t_start) & (t < t_before_iti2)
         t_rel = t[mask] - t_start
-        ax.plot(t_rel, noise[mask], color=colors[i], linewidth=0.8, alpha=0.9)
+        y = noise[mask]
+        if y.size:
+            y_chunks.append(np.asarray(y, dtype=float).ravel())
+        ax.plot(
+            t_rel,
+            y,
+            color="0.12",
+            linewidth=0.95,
+            alpha=0.55 + 0.15 * i,
+            zorder=5 + i,
+        )
     if t_obs_ref is not None:
         ax.axvspan(t_obs_ref, t_obs_ref + t_iti_ref,
                    alpha=0.12, color="gray", linewidth=0)
 
-    ax.set_yticks([])
+    if y_chunks:
+        y_all = np.concatenate(y_chunks)
+        y_lo = float(np.nanmin(y_all))
+        y_hi = float(np.nanmax(y_all))
+        span = y_hi - y_lo
+        pad = 0.08 * span if span > 0 else max(0.02 * max(abs(y_lo), abs(y_hi)), 1e-6)
+        ax.set_ylim(y_lo - pad, y_hi + pad)
+
+    ax.set_title(title)
+    ax.yaxis.set_major_locator(MaxNLocator(3, prune="both"))
+    ax.tick_params(axis="x", bottom=False, labelbottom=False)
     ax.set_xticks([])
-    ax.set_ylabel("Noise\ninput", fontsize=7, labelpad=2)
-    sns.despine(ax=ax, top=True, right=True, bottom=True, left=True)
+    ax.set_ylabel("Noise", fontsize=7, labelpad=2)
+    sns.despine(ax=ax, top=True, right=True, bottom=True, left=False)
 
 
-def _plot_panel2(ax):
-    ax.text(
-        0.5,
-        0.5,
-        "Noise amplitude scan\n(TBD)",
-        ha="center",
-        va="center",
-        transform=ax.transAxes,
-        fontsize=10,
-        color="gray",
+def _plot_panel2(ax, out_dir: Path, pid: int, qid_map: pd.DataFrame) -> None:
+    """Plot mean response noise vs ITI noise amplitude from ``noise_scan_{pid}_*.pkl``."""
+    rows = []
+    for path in sorted(out_dir.glob(f"noise_scan_{pid}_*.pkl")):
+        resp = pd.read_pickle(path)
+        if resp.empty:
+            continue
+        m = _compute_metrics(resp, qid_map)
+        rows.append(
+            {
+                "iti_noise_amplitude": float(resp["iti_noise_amplitude"].iloc[0]),
+                **m,
+            }
+        )
+    if not rows:
+        ax.text(
+            0.5,
+            0.5,
+            "No noise_scan data.\nRun:\n"
+            "python scripts/iti_perturbation.py --experiment noise_scan "
+            "--run_simulation --pid "
+            f"{pid}",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=9,
+            color="gray",
+        )
+        ax.set_title("Response noise vs noise amplitude")
+        sns.despine(ax=ax, top=True, right=True)
+        return
+
+    df = pd.DataFrame(rows)
+    agg = (
+        df.groupby("iti_noise_amplitude", as_index=False)["response_noise"]
+        .mean()
+        .sort_values("iti_noise_amplitude")
     )
+    sns.lineplot(
+        data=agg,
+        x="iti_noise_amplitude",
+        y="response_noise",
+        marker="o",
+        ax=ax,
+        color=sns.color_palette("colorblind")[0],
+    )
+    ax.set_xlabel("ITI noise amplitude")
+    ax.set_ylabel("Response noise")
     ax.set_title("Response noise vs noise amplitude")
-    sns.despine(ax=ax, top=True, right=True)
-
-
-def _plot_panel3(ax):
-    ax.text(
-        0.5,
-        0.5,
-        "ITI duration scan\n(TBD)",
-        ha="center",
-        va="center",
-        transform=ax.transAxes,
-        fontsize=10,
-        color="gray",
-    )
-    ax.set_title("Response noise vs ITI duration")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -177,30 +229,45 @@ def main() -> None:
 
     out_dir = RUNS_DIR / args.out_folder
     human = pd.read_pickle(data_path("carrabin.pkl"))
+    qid_map = human[
+        ["pid", "trial", "observation", "qid", "value"]
+    ].drop_duplicates()
 
     apply_style()
     palette = sns.color_palette("colorblind")
     colors = [palette[0], palette[1], palette[2]]
 
     fig = plt.figure(
-        figsize=(FIGURE_SIZE[0] * 2.0, FIGURE_SIZE[1]),
+        figsize=(FIGURE_SIZE[0] * 1.7, FIGURE_SIZE[1]),
         constrained_layout=True,
     )
-    gs = GridSpec(1, 3, figure=fig)
+    gs = GridSpec(1, 2, figure=fig, width_ratios=[1.2, 1.0])
     inner_gs = GridSpecFromSubplotSpec(
         2, 1, subplot_spec=gs[0, 0], height_ratios=[1, 4], hspace=0.05
     )
     ax_noise = fig.add_subplot(inner_gs[0])
     ax_value = fig.add_subplot(inner_gs[1])
     ax2 = fig.add_subplot(gs[0, 1])
-    ax3 = fig.add_subplot(gs[0, 2])
 
-    _plot_noise_envelope(ax_noise, out_dir, args.pid, colors)
+    _plot_noise_envelope(
+        ax_noise,
+        out_dir,
+        args.pid,
+        title="ITI noise disrupts value representation",
+    )
     _plot_panel1(ax_value, out_dir, args.pid, colors, human)
     ax_noise.sharex(ax_value)
 
-    _plot_panel2(ax2)
-    _plot_panel3(ax3)
+    no_noise_path = out_dir / f"probe_panel1_{args.pid}_no_noise.pkl"
+    if no_noise_path.exists():
+        ref = pd.read_pickle(no_noise_path)[0]["params"]
+        t_obs_r = float(ref["t_obs"])
+        t_iti_r = float(ref["t_iti"])
+        ax_value.set_xlim(0.0, t_obs_r + t_iti_r + t_obs_r)
+
+    _plot_panel2(ax2, out_dir, args.pid, qid_map)
+
+    fig.align_titles()
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(FIGURES_DIR / "iti_perturbation.png", dpi=300)

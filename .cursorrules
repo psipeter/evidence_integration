@@ -143,8 +143,7 @@ python scripts/noisy_representations.py --experiment n_neurons_scan --run_simula
 
 # ITI perturbation
 python scripts/iti_perturbation.py --experiment probe_conditions --run_simulation --pid 14 --out_folder iti_perturbation
-python scripts/iti_perturbation.py --experiment noise_scan --run_simulation --run_all_pids --out_folder iti_perturbation
-python scripts/iti_perturbation.py --experiment iti_scan --run_simulation --run_all_pids --out_folder iti_perturbation
+python scripts/iti_perturbation.py --experiment noise_scan --run_simulation --run_all_pids --out_folder iti_perturbation  # 10 Hz fixed
 python scripts/plot_iti_perturbation.py --out_folder iti_perturbation
 ```
 
