@@ -258,47 +258,39 @@ def _plot_panel3(ax, metrics_df, color_0):
     print(f"Panel 3 — response_noise vs mean_std1: r={r:.3f}, p={p:.4f}")
 
 
-def _plot_panel4(ax, metrics_df, color_0):
-    if (
-        "mean_neural_std" not in metrics_df.columns
-        or metrics_df["mean_neural_std"].isna().all()
-    ):
+def _plot_panel4(ax, scan_per_qid, color_0):
+    if scan_per_qid.empty:
         ax.text(
             0.5,
             0.5,
-            "Neural-behavioral\ncorrelation\n(TBD)",
+            "n_neurons scan\n(TBD)",
             ha="center",
             va="center",
             transform=ax.transAxes,
             fontsize=10,
             color="gray",
         )
-        ax.set_title("Neural activity vs response noise")
+        ax.set_title("Neural noise vs response noise")
         sns.despine(ax=ax, top=True, right=True)
         return
 
-    sns.regplot(
-        data=metrics_df,
-        x="mean_neural_std",
+    sns.lineplot(
+        data=scan_per_qid,
+        x="n_neurons",
         y="response_noise",
-        scatter_kws={"color": color_0, "s": 30},
-        line_kws={"color": color_0, "linewidth": 1.5},
-        ci=95,
+        color=color_0,
+        linewidth=2.0,
+        marker="o",
+        markersize=5,
+        errorbar="ci",
         ax=ax,
+        label="NEF model (mean ± 95% CI)",
     )
-    ax.set_xlabel("Mean std of error neuron activity (across trials, same qid)")
+    ax.set_xlabel("Number of neurons")
     ax.set_ylabel("Response noise (per-qid std)")
-    ax.set_title("Neural variability predicts\nresponse variability")
+    ax.set_title("More neurons → less response noise")
+    ax.legend(frameon=False)
     sns.despine(ax=ax, top=True, right=True)
-
-    from scipy.stats import pearsonr
-
-    valid = metrics_df["mean_neural_std"].notna()
-    r, p = pearsonr(
-        metrics_df.loc[valid, "mean_neural_std"],
-        metrics_df.loc[valid, "response_noise"],
-    )
-    print(f"Panel 4 — response_noise vs mean_neural_std: r={r:.3f}, p={p:.4f}")
 
 
 def _sensitivity_analysis(run_folder: Path) -> None:
@@ -384,6 +376,32 @@ def _run_probe_pids(
     )
     print(f"Loaded metrics for {len(metrics_df)} pids")
 
+    n_neurons_list = [50, 75, 100, 150, 200, 300, 500]
+    scan_dfs = []
+    response_files = sorted(out_dir.glob("responses_carrabin_*_n*.pkl"))
+    all_scan_pids = sorted({int(f.stem.split("_")[2]) for f in response_files})
+    for pid in all_scan_pids:
+        for n_neurons in n_neurons_list:
+            path = out_dir / f"responses_carrabin_{pid}_n{n_neurons}.pkl"
+            if path.exists():
+                scan_dfs.append(pd.read_pickle(path))
+
+    if scan_dfs:
+        scan_resp = pd.concat(scan_dfs, ignore_index=True)
+        scan_resp = scan_resp.merge(
+            qid_map,
+            on=["pid", "trial", "observation"],
+            how="left",
+        )
+        scan_per_qid = (
+            scan_resp.groupby(["n_neurons", "pid", "qid"])["response"]
+            .std()
+            .reset_index()
+        )
+        scan_per_qid.columns = ["n_neurons", "pid", "qid", "response_noise"]
+    else:
+        scan_per_qid = pd.DataFrame()
+
     print("\nProbe data:")
     for pid in analysis_pids:
         probe_path = out_dir / f"probe_NEF_recurrent_carrabin_{pid}.pkl"
@@ -422,7 +440,7 @@ def _run_probe_pids(
     _plot_panel1(axes[0], sample_rows, human, color_0, color_1)
     _plot_panel2(axes[1], metrics_df, color_0, color_1)
     _plot_panel3(axes[2], metrics_df, color_0)
-    _plot_panel4(axes[3], metrics_df, color_0)
+    _plot_panel4(axes[3], scan_per_qid, color_0)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(FIGURES_DIR / "noisy_representations.png", dpi=300)
@@ -432,12 +450,13 @@ def _run_probe_pids(
 
 
 def _run_n_neurons_scan(
-    scan_pid: int,
+    scan_pids: list[int],
     n_neurons_list: list[int],
     run_folder: Path,
     out_folder: str,
     run_simulation: bool,
 ) -> None:
+    from fitting.losses import _mean_qid_std
     from fitting.model_params import MODEL_PARAMS
     from models.NEF import PARAM_DEFAULTS, run as nef_run
 
@@ -445,29 +464,63 @@ def _run_n_neurons_scan(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if run_simulation:
-        base_params = pd.read_pickle(
-            run_folder / f"NEF_recurrent_carrabin_{scan_pid}_params.pkl"
-        ).iloc[0].to_dict()
-        fixed = MODEL_PARAMS["carrabin"]["NEF_recurrent"].get("fixed", {})
-        base_params = {**PARAM_DEFAULTS, **fixed, **base_params}
-        base_params["nef_type"] = "recurrent"
-        base_params["dataset"] = "carrabin"
-        base_params["model_type"] = "NEF_recurrent"
+        for pid in scan_pids:
+            base_params = pd.read_pickle(
+                run_folder / f"NEF_recurrent_carrabin_{pid}_params.pkl"
+            ).iloc[0].to_dict()
+            fixed = MODEL_PARAMS["carrabin"]["NEF_recurrent"].get("fixed", {})
+            base_params = {**PARAM_DEFAULTS, **fixed, **base_params}
+            base_params["nef_type"] = "recurrent"
+            base_params["dataset"] = "carrabin"
+            base_params["model_type"] = "NEF_recurrent"
 
+            for n_neurons in n_neurons_list:
+                print(f"Simulating pid={pid}, n_neurons={n_neurons}...")
+                p = {**base_params, "n_neurons": n_neurons}
+                responses = nef_run(p, save_probes=True)
+                responses["n_neurons"] = n_neurons
+                out_path = out_dir / f"responses_carrabin_{pid}_n{n_neurons}.pkl"
+                responses.to_pickle(out_path)
+                src = data_path(f"probe_NEF_recurrent_carrabin_{pid}.pkl")
+                dst = out_dir / f"probe_n{n_neurons}_carrabin_{pid}.pkl"
+                if src.exists():
+                    src.rename(dst)
+                print(f"  Saved responses and probes for pid={pid}, n={n_neurons}")
+
+    qid_map = pd.read_pickle(data_path("carrabin.pkl"))[
+        ["pid", "trial", "observation", "qid"]
+    ].drop_duplicates()
+    all_scan_dfs = []
+    response_files = sorted(out_dir.glob("responses_carrabin_*_n*.pkl"))
+    all_scan_pids = sorted({int(f.stem.split("_")[2]) for f in response_files})
+    for pid in all_scan_pids:
         for n_neurons in n_neurons_list:
-            print(f"Simulating n_neurons={n_neurons}...")
-            p = {**base_params, "n_neurons": n_neurons}
-            responses = nef_run(p)
-            responses["n_neurons"] = n_neurons
-            out_path = out_dir / f"responses_carrabin_{scan_pid}_n{n_neurons}.pkl"
-            responses.to_pickle(out_path)
-            print(f"  Saved {out_path}")
+            path = out_dir / f"responses_carrabin_{pid}_n{n_neurons}.pkl"
+            if path.exists():
+                all_scan_dfs.append(pd.read_pickle(path))
 
-    print("\nn_neurons scan analysis TBD.")
-    for n_neurons in n_neurons_list:
-        out_path = out_dir / f"responses_carrabin_{scan_pid}_n{n_neurons}.pkl"
-        if out_path.exists():
-            print(f"  n_neurons={n_neurons}: responses available")
+    if all_scan_dfs:
+        scan_resp = pd.concat(all_scan_dfs, ignore_index=True)
+        scan_resp = scan_resp.merge(
+            qid_map, on=["pid", "trial", "observation"], how="left"
+        )
+        scan_per_qid = (
+            scan_resp.groupby(["n_neurons", "pid", "qid"])["response"]
+            .std()
+            .reset_index()
+        )
+        scan_per_qid.columns = ["n_neurons", "pid", "qid", "response_noise"]
+        summary = (
+            scan_per_qid.groupby("n_neurons")["response_noise"]
+            .mean()
+            .reset_index()
+            .sort_values("n_neurons")
+        )
+        print("\nn_neurons scan mean response noise across pids/qids:")
+        for _, row in summary.iterrows():
+            print(f"  n_neurons={int(row['n_neurons'])}: {row['response_noise']:.4f}")
+    else:
+        print("\nn_neurons scan analysis TBD.")
 
 
 def main() -> None:
@@ -497,8 +550,15 @@ def main() -> None:
     parser.add_argument(
         "--scan_pid",
         type=int,
-        default=14,
-        help="PID to use for n_neurons_scan experiment",
+        default=None,
+        help="Single PID alias for --scan_pids",
+    )
+    parser.add_argument(
+        "--scan_pids",
+        type=int,
+        nargs="+",
+        default=[14],
+        help="PIDs to use for n_neurons_scan (default: [14])",
     )
     parser.add_argument(
         "--n_neurons_list",
@@ -510,6 +570,8 @@ def main() -> None:
 
     run_folder = RUNS_DIR / args.run_folder
     out_folder = args.out_folder
+    if args.scan_pid is not None:
+        args.scan_pids = [args.scan_pid]
 
     _sensitivity_analysis(run_folder)
 
@@ -517,7 +579,7 @@ def main() -> None:
         _run_probe_pids(args.pids, run_folder, out_folder, args.run_simulation)
     elif args.experiment == "n_neurons_scan":
         _run_n_neurons_scan(
-            args.scan_pid,
+            args.scan_pids,
             args.n_neurons_list,
             run_folder,
             out_folder,
