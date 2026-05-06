@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style
 
-from scripts.iti_perturbation import _compute_metrics
+from fitting.losses import QID_MIN_TRIALS
 
 CONDITION_LABELS = {
     "no_noise": "No noise",
@@ -168,28 +168,44 @@ def _plot_noise_envelope(ax, out_dir: Path, pid: int, *, title: str) -> None:
     sns.despine(ax=ax, top=True, right=True, bottom=True, left=False)
 
 
-def _plot_panel2(ax, out_dir: Path, pid: int, qid_map: pd.DataFrame) -> None:
-    """Plot mean response noise vs ITI noise amplitude from ``noise_scan_{pid}_*.pkl``."""
-    rows = []
-    for path in sorted(out_dir.glob(f"noise_scan_{pid}_*.pkl")):
+def _response_noise_rows_per_qid(
+    resp: pd.DataFrame, qid_map: pd.DataFrame, amp: float, pid: int
+) -> list[dict]:
+    """One row per qid: std of model responses for that qid (same filter as fitting loss)."""
+    grp = resp.merge(qid_map, on=["pid", "trial", "observation"], how="left")
+    counts = grp.groupby("qid")["trial"].nunique()
+    valid_qids = counts[counts >= QID_MIN_TRIALS].index
+    if len(valid_qids) == 0:
+        return []
+    sub = grp[grp["qid"].isin(valid_qids)]
+    stds = sub.groupby("qid")["response"].std()
+    return [
+        {
+            "iti_noise_amplitude": amp,
+            "pid": pid,
+            "qid": qid,
+            "response_noise_qid": float(s),
+        }
+        for qid, s in stds.items()
+    ]
+
+
+def _plot_panel2(ax, out_dir: Path, qid_map: pd.DataFrame) -> None:
+    """Per-qid response std vs amplitude (mean ± default Seaborn CI across qids & pids)."""
+    rows_qid: list[dict] = []
+    for path in sorted(out_dir.glob("noise_scan_*.pkl")):
         resp = pd.read_pickle(path)
         if resp.empty:
             continue
-        m = _compute_metrics(resp, qid_map)
-        rows.append(
-            {
-                "iti_noise_amplitude": float(resp["iti_noise_amplitude"].iloc[0]),
-                **m,
-            }
-        )
-    if not rows:
+        amp = float(resp["iti_noise_amplitude"].iloc[0])
+        pid = int(resp["pid"].iloc[0])
+        rows_qid.extend(_response_noise_rows_per_qid(resp, qid_map, amp, pid))
+
+    if not rows_qid:
         ax.text(
             0.5,
             0.5,
-            "No noise_scan data.\nRun:\n"
-            "python scripts/iti_perturbation.py --experiment noise_scan "
-            "--run_simulation --pid "
-            f"{pid}",
+            "No noise_scan data in out_folder.\nRun noise_scan for one or more pids.",
             ha="center",
             va="center",
             transform=ax.transAxes,
@@ -200,23 +216,21 @@ def _plot_panel2(ax, out_dir: Path, pid: int, qid_map: pd.DataFrame) -> None:
         sns.despine(ax=ax, top=True, right=True)
         return
 
-    df = pd.DataFrame(rows)
-    agg = (
-        df.groupby("iti_noise_amplitude", as_index=False)["response_noise"]
-        .mean()
-        .sort_values("iti_noise_amplitude")
-    )
+    palette = sns.color_palette("colorblind")
+    df_q = pd.DataFrame(rows_qid)
     sns.lineplot(
-        data=agg,
+        data=df_q,
         x="iti_noise_amplitude",
-        y="response_noise",
+        y="response_noise_qid",
         marker="o",
         ax=ax,
-        color=sns.color_palette("colorblind")[0],
+        color=palette[0],
+        # label="Per-qid response std (mean ± 95% CI)",
     )
     ax.set_xlabel("ITI noise amplitude")
-    ax.set_ylabel("Response noise")
-    ax.set_title("Response noise vs noise amplitude")
+    ax.set_ylabel("Response Noise")
+    ax.set_title("ITI noise increases response noise")
+    ax.legend(frameon=False, loc="best")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -265,7 +279,7 @@ def main() -> None:
         t_iti_r = float(ref["t_iti"])
         ax_value.set_xlim(0.0, t_obs_r + t_iti_r + t_obs_r)
 
-    _plot_panel2(ax2, out_dir, args.pid, qid_map)
+    _plot_panel2(ax2, out_dir, qid_map)
 
     fig.align_titles()
 
