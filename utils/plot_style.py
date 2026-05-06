@@ -55,12 +55,12 @@ def label_panels(axes, labels=None, **kwargs) -> None:
     if labels is None:
         labels = [chr(ord("A") + i) for i in range(len(axs))]
     defaults = {
-        "x": -0.08,
-        "y": 1.06,
+        "x": -0.1,
+        "y": 1.1,
         "ha": "left",
         "va": "top",
         "fontweight": "bold",
-        "fontsize": plt.rcParams.get("axes.titlesize", 10),
+        "fontsize": plt.rcParams.get("axes.titlesize", 16),
     }
     defaults.update(kwargs)
     for ax, lab in zip(axs, labels):
