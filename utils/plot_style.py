@@ -49,6 +49,24 @@ def apply_style() -> None:
 FIGURE_SIZE = (14, 7)
 
 
+def label_panels(axes, labels=None, **kwargs) -> None:
+    """Add bold panel labels in upper-left corner of each axes."""
+    axs = np.ravel(axes).tolist()
+    if labels is None:
+        labels = [chr(ord("A") + i) for i in range(len(axs))]
+    defaults = {
+        "x": -0.08,
+        "y": 1.06,
+        "ha": "left",
+        "va": "top",
+        "fontweight": "bold",
+        "fontsize": plt.rcParams.get("axes.titlesize", 10),
+    }
+    defaults.update(kwargs)
+    for ax, lab in zip(axs, labels):
+        ax.text(s=lab, transform=ax.transAxes, **defaults)
+
+
 def get_palette() -> dict:
     """
     Return the project-wide model color palette.

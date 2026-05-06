@@ -230,7 +230,9 @@ def _plot_panel2(ax, out_dir: Path, qid_map: pd.DataFrame) -> None:
     ax.set_xlabel("ITI noise amplitude")
     ax.set_ylabel("Response Noise")
     ax.set_title("ITI noise increases response noise")
-    ax.legend(frameon=False, loc="best")
+    handles, labels_ = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels_, frameon=False, loc="best")
     sns.despine(ax=ax, top=True, right=True)
 
 
