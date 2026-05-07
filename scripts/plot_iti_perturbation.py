@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.ticker import MaxNLocator
 import numpy as np
@@ -24,7 +26,6 @@ from fitting.losses import QID_MIN_TRIALS
 CONDITION_LABELS = {
     "no_noise": "No noise",
     "amp0p1": "Noise 0.1",
-    "amp0p05": "Noise 0.05",
 }
 
 
@@ -113,10 +114,13 @@ def _plot_panel1(ax, out_dir, pid, colors, human):
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_noise_envelope(ax, out_dir: Path, pid: int, *, title: str) -> None:
+def _plot_noise_envelope(
+    ax, out_dir: Path, pid: int, human: pd.DataFrame, *, title: str
+) -> None:
     t_obs_ref = None
     t_iti_ref = None
-    y_chunks: list[np.ndarray] = []
+    t_rel_ref: np.ndarray | None = None
+    noise_handle = None
     for i, (label, _) in enumerate(CONDITION_LABELS.items()):
         probe_path = out_dir / f"probe_panel1_{pid}_{label}.pkl"
         if not probe_path.exists():
@@ -137,10 +141,10 @@ def _plot_noise_envelope(ax, out_dir: Path, pid: int, *, title: str) -> None:
         t_before_iti2 = t_start + t_obs + t_iti + t_obs
         mask = (t >= t_start) & (t < t_before_iti2)
         t_rel = t[mask] - t_start
+        if t_rel_ref is None:
+            t_rel_ref = np.asarray(t_rel, dtype=float)
         y = noise[mask]
-        if y.size:
-            y_chunks.append(np.asarray(y, dtype=float).ravel())
-        ax.plot(
+        (line_noise,) = ax.plot(
             t_rel,
             y,
             color="0.12",
@@ -148,23 +152,63 @@ def _plot_noise_envelope(ax, out_dir: Path, pid: int, *, title: str) -> None:
             alpha=0.55 + 0.15 * i,
             zorder=5 + i,
         )
+        if noise_handle is None:
+            noise_handle = line_noise
     if t_obs_ref is not None:
         ax.axvspan(t_obs_ref, t_obs_ref + t_iti_ref,
                    alpha=0.12, color="gray", linewidth=0)
 
-    if y_chunks:
-        y_all = np.concatenate(y_chunks)
-        y_lo = float(np.nanmin(y_all))
-        y_hi = float(np.nanmax(y_all))
-        span = y_hi - y_lo
-        pad = 0.08 * span if span > 0 else max(0.02 * max(abs(y_lo), abs(y_hi)), 1e-6)
-        ax.set_ylim(y_lo - pad, y_hi + pad)
+    obs_handle = None
+    if t_rel_ref is not None and t_obs_ref is not None and t_iti_ref is not None:
+        human_pid = human[human["pid"] == pid]
+        trial_qid = (
+            human_pid.groupby(["trial", "observation"])["qid"].first().reset_index()
+        )
+        valid_trials = sorted(
+            int(t)
+            for t in trial_qid["trial"].unique()
+            if _trial_is_two_plus_ones_after_obs2(int(t), trial_qid)
+        )
+        if valid_trials:
+            trial = valid_trials[0]
+            trial_vals = (
+                human_pid[human_pid["trial"] == trial]
+                .groupby("observation")["value"]
+                .first()
+                .to_dict()
+            )
+            obs1 = float(trial_vals.get(1, 0.0))
+            obs2 = float(trial_vals.get(2, 0.0))
+            obs_signal = np.zeros_like(t_rel_ref, dtype=float)
+            m1 = (t_rel_ref >= 0.0) & (t_rel_ref < t_obs_ref)
+            m2_start = t_obs_ref + t_iti_ref
+            m2 = (t_rel_ref >= m2_start) & (t_rel_ref < (m2_start + t_obs_ref))
+            obs_signal[m1] = obs1
+            obs_signal[m2] = obs2
+
+            (obs_handle,) = ax.step(
+                t_rel_ref,
+                obs_signal,
+                where="post",
+                color=sns.color_palette("colorblind")[2],
+                linewidth=1.3,
+                zorder=3,
+            )
 
     ax.set_title(title)
     ax.yaxis.set_major_locator(MaxNLocator(3, prune="both"))
     ax.tick_params(axis="x", bottom=False, labelbottom=False)
     ax.set_xticks([])
-    ax.set_ylabel("Noise", fontsize=7, labelpad=2)
+    ax.set_ylim(-0.2, 1.0)
+    ax.set_ylabel("Input / Noise", fontsize=7, labelpad=2)
+    if obs_handle is not None and noise_handle is not None:
+        ax.legend(
+            handles=[obs_handle, noise_handle],
+            labels=["Observation", "External noise"],
+            frameon=False,
+            loc="upper left",
+            fontsize=7,
+        )
     sns.despine(ax=ax, top=True, right=True, bottom=True, left=False)
 
 
@@ -190,7 +234,9 @@ def _response_noise_rows_per_qid(
     ]
 
 
-def _plot_panel2(ax, out_dir: Path, qid_map: pd.DataFrame) -> None:
+def _plot_panel2(
+    ax, out_dir: Path, qid_map: pd.DataFrame, human: pd.DataFrame
+) -> None:
     """Per-qid response std vs amplitude (mean ± default Seaborn CI across qids & pids)."""
     rows_qid: list[dict] = []
     for path in sorted(out_dir.glob("noise_scan_*.pkl")):
@@ -218,6 +264,21 @@ def _plot_panel2(ax, out_dir: Path, qid_map: pd.DataFrame) -> None:
 
     palette = sns.color_palette("colorblind")
     df_q = pd.DataFrame(rows_qid)
+    df_q = df_q[df_q["iti_noise_amplitude"].isin({0.0, 0.05, 0.1, 0.2, 0.3})].copy()
+    if df_q.empty:
+        ax.text(
+            0.5,
+            0.5,
+            "No noise_scan data in out_folder.\nRun noise_scan for one or more pids.",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=9,
+            color="gray",
+        )
+        ax.set_title("Response noise vs noise amplitude")
+        sns.despine(ax=ax, top=True, right=True)
+        return
     sns.lineplot(
         data=df_q,
         x="iti_noise_amplitude",
@@ -227,12 +288,51 @@ def _plot_panel2(ax, out_dir: Path, qid_map: pd.DataFrame) -> None:
         color=palette[0],
         # label="Per-qid response std (mean ± 95% CI)",
     )
+    ax.set_ylim(0.05, 0.2)
     ax.set_xlabel("ITI noise amplitude")
     ax.set_ylabel("Response Noise")
     ax.set_title("ITI noise increases response noise")
-    handles, labels_ = ax.get_legend_handles_labels()
-    if handles:
-        ax.legend(handles, labels_, frameon=False, loc="best")
+
+    # Human reference band (same response-noise definition: qid std then pid mean across qids).
+    human_rows: list[dict] = []
+    for pid, hpid in human.groupby("pid"):
+        counts = hpid.groupby("qid")["trial"].nunique()
+        valid_qids = counts[counts >= QID_MIN_TRIALS].index
+        if len(valid_qids) == 0:
+            continue
+        stds = hpid[hpid["qid"].isin(valid_qids)].groupby("qid")["response"].std()
+        if stds.empty:
+            continue
+        human_rows.append(
+            {"pid": int(pid), "response_noise_pid": float(stds.mean())}
+        )
+    if human_rows:
+        vals = pd.DataFrame(human_rows)["response_noise_pid"].to_numpy(dtype=float)
+        vals = vals[np.isfinite(vals)]
+        if vals.size >= 1:
+            q25, q50, q75 = np.quantile(vals, [0.25, 0.5, 0.75])
+            ax.axhspan(float(q25), float(q75), color="0.6", alpha=0.2, zorder=0)
+            ax.axhline(float(q50), color="0.5", linestyle="--", linewidth=1.0, zorder=1)
+            ax.text(
+                0.98,
+                float(q50),
+                "Human IQR",
+                transform=ax.get_yaxis_transform(),
+                ha="right",
+                va="center",
+                fontsize=7,
+                color="0.5",
+            )
+
+    ax.set_ylim(0.05, 0.2)
+    ax.legend(
+        handles=[
+            Patch(facecolor="0.6", alpha=0.2, edgecolor="0.6", label="Human response noise (IQR)"),
+            Line2D([0], [0], color=palette[0], marker="o", linewidth=1.5, label="Model response noise"),
+        ],
+        frameon=False,
+        loc="upper left",
+    )
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -269,6 +369,7 @@ def main() -> None:
         ax_noise,
         out_dir,
         args.pid,
+        human,
         title="ITI noise disrupts value representation",
     )
     _plot_panel1(ax_value, out_dir, args.pid, colors, human)
@@ -281,7 +382,7 @@ def main() -> None:
         t_iti_r = float(ref["t_iti"])
         ax_value.set_xlim(0.0, t_obs_r + t_iti_r + t_obs_r)
 
-    _plot_panel2(ax2, out_dir, qid_map)
+    _plot_panel2(ax2, out_dir, qid_map, human)
 
     fig.align_titles()
 
