@@ -750,8 +750,8 @@ def _plot_panel_e(ax, run_folder: str) -> None:
                     color=cb_palette[1],
                     linewidth=2.0,
                     label=(
-                        f"Error neurons (λ > {high_thr_lambda:.2f}, "
-                        f"n_pids={PANEL_E_LAMBDA_N})"
+                        f"High discounting (λ > {high_thr_lambda:.2f}, "
+                        f"n={PANEL_E_LAMBDA_N})"
                     ),
                 ),
                 Line2D(
@@ -760,8 +760,8 @@ def _plot_panel_e(ax, run_folder: str) -> None:
                     color=cb_palette[0],
                     linewidth=2.0,
                     label=(
-                        f"Error neurons (λ < {low_thr_lambda:.2f}, "
-                        f"n_pids={PANEL_E_LAMBDA_N})"
+                        f"Low discounting (λ < {low_thr_lambda:.2f}, "
+                        f"n={PANEL_E_LAMBDA_N})"
                     ),
                 ),
             ]
@@ -785,7 +785,7 @@ def _plot_panel_e(ax, run_folder: str) -> None:
                 [0],
                 color=cb_palette[2],
                 linewidth=2.0,
-                label=f"Count neurons (n_pids={n_yoo_task_pids})",
+                label=f"All participants (n={n_yoo_task_pids})",
             )
         )
 
@@ -1172,9 +1172,85 @@ def _plot_panel_g(ax, run_folder: str) -> None:
     )
 
 
+def _plot_panel_h(ax, noise_folder: str, run_folder: str, palette: dict) -> None:
+    """Response noise trajectory from multi-seed NEF responses."""
+    noise_run_dir = data_path("runs") / noise_folder
+    noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
+    if not noise_path.exists():
+        _empty_row_panel(ax)
+        return
+
+    noise_df = pd.read_pickle(noise_path)
+    required = {"pid", "trial", "observation", "response"}
+    if not required.issubset(noise_df.columns):
+        _empty_row_panel(ax)
+        return
+
+    per_qid_noise = (
+        noise_df.groupby(["pid", "trial", "observation"], as_index=False)["response"]
+        .agg(lambda s: float(np.std(s.to_numpy(dtype=float), ddof=0)))
+        .rename(columns={"response": "response_noise"})
+    )
+    if per_qid_noise.empty:
+        _empty_row_panel(ax)
+        return
+
+    split_run_dir = data_path("runs") / run_folder
+    weight_df, low_thr_lambda, high_thr_lambda = _panel_e_load_weight_yoo(split_run_dir)
+    if weight_df is None or high_thr_lambda is None:
+        _empty_row_panel(ax)
+        return
+
+    low_pids = set(
+        weight_df[weight_df["lambda_group"].str.startswith("low")]["pid"]
+        .dropna()
+        .astype(int)
+        .tolist()
+    )
+    high_pids = set(
+        weight_df[weight_df["lambda_group"].str.startswith("high")]["pid"]
+        .dropna()
+        .astype(int)
+        .tolist()
+    )
+    if not low_pids or not high_pids:
+        _empty_row_panel(ax)
+        return
+
+    low_noise = per_qid_noise[per_qid_noise["pid"].isin(low_pids)].copy()
+    high_noise = per_qid_noise[per_qid_noise["pid"].isin(high_pids)].copy()
+    if low_noise.empty or high_noise.empty:
+        _empty_row_panel(ax)
+        return
+
+    cb_palette = sns.color_palette("colorblind")
+    # Same convention as panel C: seaborn computes mean line + default CI region.
+    sns.lineplot(
+        data=high_noise,
+        x="observation",
+        y="response_noise",
+        color=cb_palette[1],
+        label=f"High discounting (λ > {high_thr_lambda:.2f})",
+        ax=ax,
+    )
+    sns.lineplot(
+        data=low_noise,
+        x="observation",
+        y="response_noise",
+        color=cb_palette[0],
+        label=f"Low discounting (λ < {low_thr_lambda:.2f})",
+        ax=ax,
+    )
+    ax.set_xlabel("Observation")
+    ax.set_ylabel("Response noise (std across seeds)")
+    ax.legend(frameon=False)
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder", type=str, default="response")
+    parser.add_argument("--noise_folder", type=str, default="yoo_response_noise")
     args = parser.parse_args()
 
     apply_style()
@@ -1193,9 +1269,7 @@ def main() -> None:
     _plot_panel_e(row1[0], args.run_folder)
     _plot_panel_f(row1[1], args.run_folder)
     _plot_panel_g(row1[2], args.run_folder)
-
-    for ax in row1[3:]:
-        _empty_row_panel(ax)
+    _plot_panel_h(row1[3], args.noise_folder, args.run_folder, palette)
 
     label_panels(axes)
 
