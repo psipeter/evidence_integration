@@ -32,12 +32,19 @@ def get_all_slurm_jobs() -> set[str]:
     return {line.strip() for line in result.stdout.strip().splitlines() if line.strip()}
 
 
-def scan_complete_logs() -> list[str]:
-    """Return list of job IDs whose log files contain JOB_COMPLETE."""
-    complete = []
-    for log_file in sorted(LOGS_DIR.glob("*.out")):
-        job_id = log_file.stem
-        if "JOB_COMPLETE" in log_file.read_text(errors="replace"):
+def scan_complete_logs(queued_job_ids: set[str]) -> list[str]:
+    """Return queued job IDs whose log tails contain JOB_COMPLETE."""
+    complete: list[str] = []
+    for job_id in sorted(queued_job_ids):
+        log_file = LOGS_DIR / f"{job_id}.out"
+        if not log_file.exists():
+            continue
+        with log_file.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 1024))
+            tail = f.read()
+        if b"JOB_COMPLETE" in tail:
             complete.append(job_id)
     return complete
 
@@ -52,7 +59,7 @@ def main() -> None:
     args = parser.parse_args()
 
     queued_ids = sorted(get_all_slurm_jobs())
-    complete_ids = scan_complete_logs()
+    complete_ids = scan_complete_logs(set(queued_ids))
     complete_set = set(complete_ids)
 
     cancelable = sorted(set(queued_ids) & complete_set)
