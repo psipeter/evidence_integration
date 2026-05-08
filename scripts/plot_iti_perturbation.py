@@ -24,8 +24,8 @@ from utils.plot_style import FIGURE_SIZE, apply_style
 from fitting.losses import QID_MIN_TRIALS
 
 CONDITION_LABELS = {
-    "no_noise": "No noise",
-    "amp0p1": "Noise 0.1",
+    "no_noise": "Control",
+    "amp0p1": "ITI Noise (RMS=0.1)",
 }
 
 
@@ -264,7 +264,7 @@ def _plot_panel2(
 
     palette = sns.color_palette("colorblind")
     df_q = pd.DataFrame(rows_qid)
-    df_q = df_q[df_q["iti_noise_amplitude"].isin({0.0, 0.05, 0.1, 0.2, 0.3})].copy()
+    df_q = df_q[df_q["iti_noise_amplitude"].isin({0.0, 0.05, 0.1, 0.15, 0.2})].copy()
     if df_q.empty:
         ax.text(
             0.5,

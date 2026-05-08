@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Yoo summary figure: row 1 (panels A–D), row 2 (E–H)."""
+"""Yoo summary figure: rows A–D, E–H, I–L."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.gridspec import GridSpecFromSubplotSpec
 from matplotlib.lines import Line2D
-from scipy.stats import linregress
+from scipy.stats import linregress, pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -114,7 +115,7 @@ def _empty_row_panel(ax) -> None:
 
 def _plot_panel_a(ax) -> None:
     """Render first page of figures/yoo_task.pdf into panel A."""
-    pdf_path = FIGURES_DIR / "yoo_task.pdf"
+    pdf_path = FIGURES_DIR / "yoo_task_wide.pdf"
     if not pdf_path.exists():
         _empty_pdf_panel(ax)
         return
@@ -543,7 +544,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
         ax=ax,
     )
     ax.set_xlabel("")
-    ax.set_ylabel("Power law fit error (|ΔA| + |Δλ|)")
+    ax.set_ylabel("Power law fit error (|Δα₀| + |Δλ|)")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -693,31 +694,22 @@ def _panel_e_load_weight_yoo(
 
 def _plot_panel_e(ax, run_folder: str) -> None:
     """
-    Error/weight activity (left y, λ groups) + counting activity (right y, twinx).
+    Error/weight activity on a single axis (λ groups).
     """
     from matplotlib.lines import Line2D
 
     run_dir = data_path("runs") / run_folder
     cb_palette = sns.color_palette("colorblind")
 
-    count_df, n_count_pids = _panel_e_load_counting_yoo(run_dir)
     weight_df, low_thr_lambda, high_thr_lambda = _panel_e_load_weight_yoo(run_dir)
 
-    if count_df is None and weight_df is None:
+    if weight_df is None:
         _placeholder(ax, "No activity data")
         return
 
     ax_left = ax
-    use_twin = count_df is not None and weight_df is not None
-    ax_right = ax_left.twinx() if use_twin else None
 
     legend_handles: list[Line2D] = []
-
-    yoo_pids_path = data_path("yoo.pkl")
-    if yoo_pids_path.exists():
-        n_yoo_task_pids = int(pd.read_pickle(yoo_pids_path)["pid"].nunique())
-    else:
-        n_yoo_task_pids = n_count_pids
 
     if weight_df is not None:
         low_df = weight_df[weight_df["lambda_group"].str.startswith("low")].copy()
@@ -767,38 +759,9 @@ def _plot_panel_e(ax, run_folder: str) -> None:
             ]
         )
 
-    if count_df is not None:
-        plot_ax = ax_right if ax_right is not None else ax_left
-        sns.lineplot(
-            data=count_df,
-            x="obs_plot",
-            y="mean_activity_pos",
-            color=cb_palette[2],
-            errorbar=PANEL_E_ERROR_STYLE,
-            ax=plot_ax,
-            legend=False,
-        )
-        plot_ax.set_ylabel("Count neuron activity (Hz)")
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color=cb_palette[2],
-                linewidth=2.0,
-                label=f"All participants (n={n_yoo_task_pids})",
-            )
-        )
-
     ax_left.set_xticks(range(0, 31, 5))
     ax_left.set_xlabel("Observation")
-
-    if ax_right is not None:
-        sns.despine(ax=ax_left, top=True, right=True)
-        ax_right.spines["right"].set_visible(True)
-        ax_right.spines["top"].set_visible(False)
-        ax_left.spines["left"].set_visible(True)
-    else:
-        sns.despine(ax=ax_left, top=True, right=True)
+    sns.despine(ax=ax_left, top=True, right=True)
 
     if legend_handles:
         ax_left.legend(
@@ -833,7 +796,7 @@ def _plot_g_regplot_panel(
             data=pid_df,
             x="delta",
             y="activity",
-            scatter=False,
+            scatter=True,
             line_kws={"color": c, "linewidth": 0.8},
             ci=95,
             ax=ax,
@@ -1064,18 +1027,15 @@ def _plot_panel_f(ax, run_folder: str) -> None:
         return
 
     cb = sns.color_palette("colorblind")
-    c_beh, c_neu = cb[0], cb[1]
+    c_beh = cb[0]
     lw = plt.rcParams.get("lines.linewidth", 1.5)
 
-    ax_left = ax
-    ax_right = ax_left.twinx()
-
-    plot_df = df[["lambda_", "beh_delta", "neural_delta"]].copy()
+    plot_df = df[["lambda_", "beh_delta"]].copy()
     sns.regplot(
         data=plot_df,
         x="lambda_",
         y="beh_delta",
-        ax=ax_left,
+        ax=ax,
         scatter=True,
         line_kws={
             "color": c_beh,
@@ -1089,65 +1049,15 @@ def _plot_panel_f(ax, run_folder: str) -> None:
             "zorder": 4,
         },
     )
-    sns.regplot(
-        data=plot_df,
-        x="lambda_",
-        y="neural_delta",
-        ax=ax_right,
-        scatter=True,
-        # ci=None,
-        line_kws={
-            "color": c_neu,
-            "linewidth": lw,
-        },
-        scatter_kws={
-            "color": c_neu,
-            "marker": "s",
-            "s": 26,
-            "edgecolors": c_neu,
-            "linewidths": 0.5,
-            "zorder": 4,
-        },
-    )
-
-    ax_left.set_xlabel("Fitted λ")
-    ax_left.set_ylabel("Δ response change (early vs late)")
-    ax_right.set_ylabel("Δ error neuron activity (early vs late, Hz)")
-
-    ax_left.tick_params(axis="y")
-    ax_right.tick_params(axis="y")
-
-    sns.despine(ax=ax_left, top=True, right=True)
-    ax_right.spines["top"].set_visible(False)
-    ax_right.spines["right"].set_visible(True)
-    ax_left.spines["left"].set_visible(True)
-
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            color=c_beh,
-            marker="o",
-            linestyle="--",
-            linewidth=plt.rcParams.get("lines.linewidth", 1.5),
-            markersize=5,
-            label="Behavior",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color=c_neu,
-            marker="s",
-            linestyle="--",
-            linewidth=plt.rcParams.get("lines.linewidth", 1.5),
-            markersize=5,
-            label="Neural activity",
-        ),
-    ]
-    ax_left.legend(handles=legend_handles, frameon=False, loc="best")
+    ax.set_xlabel("Fitted λ")
+    ax.set_ylabel("Δ response change (early − late)")
+    ax.tick_params(axis="y")
+    sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_g(ax, run_folder: str) -> None:
+def _plot_panel_g(
+    ax, run_folder: str, panel_g_show_significance: bool = False
+) -> None:
     """Single plot from scripts/response_change_vs_weight_activity.py."""
     run_dir = data_path("runs") / run_folder
     prep = _panel_g_prepare_data(run_dir)
@@ -1160,20 +1070,367 @@ def _plot_panel_g(ax, run_folder: str) -> None:
         return
 
     pal = get_palette()
-    _plot_g_regplot_panel(
-        ax,
-        pid_results,
-        mean_activity,
-        mean_delta,
-        pal["Bayes"],
-        pal["RL"],
-        title="",
-        ylabel="Error neuron activity (Hz)",
+    if panel_g_show_significance:
+        _plot_g_regplot_panel(
+            ax,
+            pid_results,
+            mean_activity,
+            mean_delta,
+            pal["Bayes"],
+            pal["RL"],
+            title="",
+            ylabel="Error neuron activity (Hz)",
+        )
+        return
+
+    mean_df = pd.DataFrame({"activity": mean_activity, "delta": mean_delta})
+    fin = np.isfinite(mean_df["activity"].values) & np.isfinite(mean_df["delta"].values)
+    if fin.sum() >= 2:
+        sns.regplot(
+            data=mean_df,
+            x="activity",
+            y="delta",
+            scatter=True,
+            line_kws={"color": pal["Bayes"], "linewidth": 2.5},
+            scatter_kws={"alpha": 0.6, "s": 20, "color": pal["Bayes"]},
+            ci=95,
+            truncate=True,
+            ax=ax,
+        )
+    ax.set_xlabel("Mean error neuron activity (Hz)")
+    ax.set_ylabel("Mean response change")
+    ax.set_title("")
+    leg = ax.get_legend()
+    if leg is not None:
+        leg.remove()
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_panel_h(ax, run_folder: str) -> None:
+    """Panel H: 2×2 human/NEF heatmaps of task error and response change by pid."""
+    human_path = data_path("yoo.pkl")
+    if not human_path.exists():
+        _empty_row_panel(ax)
+        return
+
+    human = pd.read_pickle(human_path)
+    if human.empty:
+        _empty_row_panel(ax)
+        return
+
+    # Reuse existing human per-pid power-law fitting logic used by panel C.
+    try:
+        fit_df = _fit_power_law_params(human)
+    except Exception:
+        fit_df = pd.DataFrame(columns=["pid", "lambda_"])
+    if fit_df.empty or not {"pid", "lambda_"}.issubset(fit_df.columns):
+        _empty_row_panel(ax)
+        return
+
+    # Human: per-trial running-mean task error and response change, then mean across trials.
+    rows_task: list[dict] = []
+    rows_delta: list[dict] = []
+    for (pid, trial), tdf in human.groupby(["pid", "trial"]):
+        tdf = tdf.sort_values("observation").copy()
+        running_mean = tdf["value"].expanding().mean()
+        task_error = (tdf["response"] - running_mean).abs()
+        delta = tdf["response"].diff().abs()
+        for obs, te in zip(tdf["observation"], task_error):
+            if np.isfinite(te):
+                rows_task.append(
+                    {"pid": int(pid), "observation": int(obs), "task_error": float(te)}
+                )
+        for obs, d in zip(tdf["observation"], delta):
+            if np.isfinite(d):
+                rows_delta.append(
+                    {"pid": int(pid), "observation": int(obs), "response_change": float(d)}
+                )
+
+    if not rows_task or not rows_delta:
+        _empty_row_panel(ax)
+        return
+
+    human_task_df = pd.DataFrame(rows_task).groupby(
+        ["pid", "observation"], as_index=False
+    )["task_error"].mean()
+    human_delta_df = pd.DataFrame(rows_delta).groupby(
+        ["pid", "observation"], as_index=False
+    )["response_change"].mean()
+
+    lam_by_pid = (
+        fit_df[["pid", "lambda_"]]
+        .dropna()
+        .drop_duplicates(subset=["pid"], keep="first")
+        .set_index("pid")["lambda_"]
+    )
+    pids_sorted = [int(p) for p in lam_by_pid.sort_values().index.tolist()]
+    if not pids_sorted:
+        _empty_row_panel(ax)
+        return
+
+    # Model: load per-pid response files, compute same metrics, then mean across trials.
+    run_dir = data_path("runs") / run_folder
+    value_map = human[["pid", "trial", "observation", "value"]].drop_duplicates()
+    model_rows_task: list[dict] = []
+    model_rows_delta: list[dict] = []
+    model_files = sorted(run_dir.glob("NEF_recurrent_yoo_*_responses.pkl"))
+    for f in model_files:
+        stem = f.stem
+        parts = stem.split("_")
+        if len(parts) < 5:
+            continue
+        pid_token = parts[-2]
+        if not pid_token.isdigit():
+            continue
+        pid = int(pid_token)
+        mdf = pd.read_pickle(f)
+        if mdf.empty:
+            continue
+        if not {"pid", "trial", "observation", "response"}.issubset(mdf.columns):
+            continue
+        # Model response pickles do not contain stimulus values; merge from human yoo data.
+        mdf = mdf.merge(
+            value_map[value_map["pid"] == pid],
+            on=["pid", "trial", "observation"],
+            how="left",
+        )
+        if "value" not in mdf.columns:
+            continue
+        for (_pid, trial), tdf in mdf.groupby(["pid", "trial"]):
+            tdf = tdf.sort_values("observation").copy()
+            tdf = tdf[tdf["value"].notna()].copy()
+            if tdf.empty:
+                continue
+            running_mean = tdf["value"].expanding().mean()
+            task_error = (tdf["response"] - running_mean).abs()
+            delta = tdf["response"].diff().abs()
+            for obs, te in zip(tdf["observation"], task_error):
+                if np.isfinite(te):
+                    model_rows_task.append(
+                        {"pid": int(pid), "observation": int(obs), "task_error": float(te)}
+                    )
+            for obs, d in zip(tdf["observation"], delta):
+                if np.isfinite(d):
+                    model_rows_delta.append(
+                        {
+                            "pid": int(pid),
+                            "observation": int(obs),
+                            "response_change": float(d),
+                        }
+                    )
+
+    if not model_rows_task or not model_rows_delta:
+        _empty_row_panel(ax)
+        return
+
+    model_task_df = pd.DataFrame(model_rows_task).groupby(
+        ["pid", "observation"], as_index=False
+    )["task_error"].mean()
+    model_delta_df = pd.DataFrame(model_rows_delta).groupby(
+        ["pid", "observation"], as_index=False
+    )["response_change"].mean()
+
+    nef_params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
+    if not nef_params_path.exists():
+        _empty_row_panel(ax)
+        return
+    nef_params = pd.read_pickle(nef_params_path)
+    if not {"pid", "lambda_"}.issubset(nef_params.columns):
+        _empty_row_panel(ax)
+        return
+    nef_lambda_by_pid = (
+        nef_params[["pid", "lambda_"]]
+        .dropna()
+        .drop_duplicates(subset=["pid"], keep="first")
+        .set_index("pid")["lambda_"]
+    )
+    pids_sorted_nef = [int(p) for p in nef_lambda_by_pid.sort_values().index.tolist()]
+    if not pids_sorted_nef:
+        _empty_row_panel(ax)
+        return
+
+    obs_cols = list(range(1, 31))
+    human_task_mat = (
+        human_task_df.pivot(index="pid", columns="observation", values="task_error")
+        .reindex(index=pids_sorted, columns=obs_cols)
+    )
+    human_delta_mat = (
+        human_delta_df.pivot(index="pid", columns="observation", values="response_change")
+        .reindex(index=pids_sorted, columns=obs_cols)
+    )
+    model_task_mat = (
+        model_task_df.pivot(index="pid", columns="observation", values="task_error")
+        .reindex(index=pids_sorted_nef, columns=obs_cols)
+    )
+    model_delta_mat = (
+        model_delta_df.pivot(index="pid", columns="observation", values="response_change")
+        .reindex(index=pids_sorted_nef, columns=obs_cols)
+    )
+
+    human_task_vals = human_task_mat.to_numpy().ravel()
+    human_task_vals = human_task_vals[np.isfinite(human_task_vals)]
+    human_delta_vals = human_delta_mat.to_numpy().ravel()
+    human_delta_vals = human_delta_vals[np.isfinite(human_delta_vals)]
+    model_task_vals = model_task_mat.to_numpy().ravel()
+    model_task_vals = model_task_vals[np.isfinite(model_task_vals)]
+    model_delta_vals = model_delta_mat.to_numpy().ravel()
+    model_delta_vals = model_delta_vals[np.isfinite(model_delta_vals)]
+    if (
+        human_task_vals.size == 0
+        or human_delta_vals.size == 0
+        or model_task_vals.size == 0
+        or model_delta_vals.size == 0
+    ):
+        _empty_row_panel(ax)
+        return
+    vmin_human_task, vmax_human_task = float(human_task_vals.min()), float(
+        human_task_vals.max()
+    )
+    vmin_human_delta, vmax_human_delta = float(human_delta_vals.min()), float(
+        human_delta_vals.max()
+    )
+    vmin_model_task, vmax_model_task = float(model_task_vals.min()), float(
+        model_task_vals.max()
+    )
+    vmin_model_delta, vmax_model_delta = float(model_delta_vals.min()), float(
+        model_delta_vals.max()
+    )
+
+    fig = ax.figure
+    parent_spec = ax.get_subplotspec()
+    ax.remove()
+    inner = GridSpecFromSubplotSpec(
+        2, 2, subplot_spec=parent_spec, wspace=0.02, hspace=0.01
+    )
+    ax_left_human = fig.add_subplot(inner[0, 0])
+    ax_right_human = fig.add_subplot(inner[0, 1], sharey=ax_left_human)
+    ax_left_model = fig.add_subplot(inner[1, 0], sharex=ax_left_human)
+    ax_right_model = fig.add_subplot(inner[1, 1], sharex=ax_right_human, sharey=ax_left_model)
+
+    hm_left_human = sns.heatmap(
+        human_task_mat,
+        cmap="viridis",
+        cbar=False,
+        vmin=vmin_human_task,
+        vmax=vmax_human_task,
+        ax=ax_left_human,
+    )
+    sns.heatmap(
+        human_delta_mat,
+        cmap="viridis",
+        cbar=False,
+        vmin=vmin_human_delta,
+        vmax=vmax_human_delta,
+        ax=ax_right_human,
+    )
+    hm_left_model = sns.heatmap(
+        model_task_mat,
+        cmap="viridis",
+        cbar=False,
+        vmin=vmin_model_task,
+        vmax=vmax_model_task,
+        ax=ax_left_model,
+    )
+    hm_right_model = sns.heatmap(
+        model_delta_mat,
+        cmap="viridis",
+        cbar=False,
+        vmin=vmin_model_delta,
+        vmax=vmax_model_delta,
+        ax=ax_right_model,
+    )
+
+    fig.colorbar(
+        hm_left_model.collections[0],
+        ax=[ax_left_human, ax_left_model],
+        orientation="horizontal",
+        location="bottom",
+        pad=0.10,
+        shrink=0.8,
+    )
+    fig.colorbar(
+        hm_right_model.collections[0],
+        ax=[ax_right_human, ax_right_model],
+        orientation="horizontal",
+        location="bottom",
+        pad=0.10,
+        shrink=0.8,
+    )
+
+    rep_idx = np.linspace(0, len(pids_sorted) - 1, 5, dtype=int)
+    rep_idx_set = set(int(i) for i in rep_idx.tolist())
+    labels = [
+        (f"λ={lam_by_pid.loc[pid]:.2f}" if i in rep_idx_set else "")
+        for i, pid in enumerate(pids_sorted)
+    ]
+    y_pos_human = np.arange(len(pids_sorted)) + 0.5
+    ax_left_human.set_yticks(y_pos_human)
+    ax_left_human.set_yticklabels(labels, fontsize=6, rotation=0)
+
+    rep_idx_nef = np.linspace(0, len(pids_sorted_nef) - 1, 5, dtype=int)
+    rep_idx_nef_set = set(int(i) for i in rep_idx_nef.tolist())
+    labels_nef = [
+        (f"λ={nef_lambda_by_pid.loc[pid]:.1f}" if i in rep_idx_nef_set else "")
+        for i, pid in enumerate(pids_sorted_nef)
+    ]
+    y_pos_nef = np.arange(len(pids_sorted_nef)) + 0.5
+    ax_left_model.set_yticks(y_pos_nef)
+    ax_left_model.set_yticklabels(labels_nef, fontsize=6, rotation=0)
+    ax_right_human.tick_params(axis="y", left=True, labelleft=False)
+    ax_right_model.tick_params(axis="y", left=True, labelleft=False)
+
+    x_pos = [0.5, 9.5, 19.5, 29.5]
+    x_lab = ["1", "10", "20", "30"]
+    ax_left_human.set_xticks(x_pos)
+    ax_left_human.set_xticklabels([])
+    ax_right_human.set_xticks(x_pos)
+    ax_right_human.set_xticklabels([])
+    ax_left_human.tick_params(axis="x", bottom=False, labelbottom=False)
+    ax_right_human.tick_params(axis="x", bottom=False, labelbottom=False)
+    ax_left_human.set_xlabel("")
+    ax_right_human.set_xlabel("")
+
+    ax_left_model.set_xticks(x_pos)
+    ax_left_model.set_xticklabels(x_lab, rotation=0)
+    ax_right_model.set_xticks(x_pos)
+    ax_right_model.set_xticklabels(x_lab, rotation=0)
+    ax_left_model.set_xlabel("Observation")
+    ax_right_model.set_xlabel("Observation")
+
+    ax_left_human.set_title("Task error")
+    ax_right_human.set_title("Response change")
+    ax_left_model.set_title("")
+    ax_right_model.set_title("")
+
+    for heat_ax in (ax_left_human, ax_right_human, ax_left_model, ax_right_model):
+        heat_ax.tick_params(axis="y", length=0)
+        heat_ax.tick_params(axis="x", length=0)
+        heat_ax.set_ylabel("")
+
+    ax_left_human.annotate(
+        "Human",
+        xy=(-0.35, 0.5),
+        xycoords="axes fraction",
+        rotation=90,
+        ha="center",
+        va="center",
+        fontsize=7,
+        fontweight="bold",
+    )
+    ax_left_model.annotate(
+        "NEF",
+        xy=(-0.35, 0.5),
+        xycoords="axes fraction",
+        rotation=90,
+        ha="center",
+        va="center",
+        fontsize=7,
+        fontweight="bold",
     )
 
 
-def _plot_panel_h(ax, noise_folder: str, run_folder: str, palette: dict) -> None:
-    """Response noise trajectory from multi-seed NEF responses."""
+def _plot_panel_k(ax, noise_folder: str, run_folder: str, palette: dict) -> None:
+    """Response noise trajectory (drawn in panel K); multi-seed NEF responses."""
     noise_run_dir = data_path("runs") / noise_folder
     noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
     if not noise_path.exists():
@@ -1242,7 +1499,142 @@ def _plot_panel_h(ax, noise_folder: str, run_folder: str, palette: dict) -> None
         ax=ax,
     )
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Response noise (std across seeds)")
+    ax.set_ylabel("Predicted response noise")
+    ax.legend(frameon=False)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_panel_i(ax, run_folder: str) -> None:
+    """α₀ vs λ correlation from fitted NEF_recurrent yoo params."""
+    run_dir = data_path("runs") / run_folder
+    params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
+    if not params_path.exists():
+        _placeholder(ax, "No params data")
+        return
+    params = pd.read_pickle(params_path)
+    if not {"alpha_0", "lambda_"}.issubset(params.columns):
+        _placeholder(ax, "No params data")
+        return
+    plot_df = (
+        params.groupby("pid")[["alpha_0", "lambda_"]]
+        .first()
+        .dropna()
+    )
+    if len(plot_df) < 2:
+        _placeholder(ax, "No params data")
+        return
+
+    cb0 = sns.color_palette("colorblind")[0]
+    sns.regplot(
+        data=plot_df,
+        x="alpha_0",
+        y="lambda_",
+        scatter=True,
+        truncate=True,
+        scatter_kws={"alpha": 0.6, "s": 20, "color": cb0},
+        line_kws={"color": cb0, "linewidth": 2.0},
+        ci=95,
+        ax=ax,
+    )
+    r_val, p_val = pearsonr(
+        plot_df["alpha_0"].to_numpy(dtype=float),
+        plot_df["lambda_"].to_numpy(dtype=float),
+    )
+    ax.text(
+        0.02,
+        0.98,
+        f"r = {float(r_val):.2f}, p = {float(p_val):.3f}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=7,
+    )
+    ax.set_xlabel("Fitted α₀")
+    ax.set_ylabel("Fitted λ")
+    leg = ax.get_legend()
+    if leg is not None:
+        leg.remove()
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _panel_j_split_by_alpha0(
+    run_dir: Path,
+) -> tuple[set[int], set[int], float, float] | None:
+    """Top/bottom PANEL_E_LAMBDA_N pids by α₀; thresholds match panel E λ-split style."""
+    params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
+    if not params_path.exists():
+        return None
+    params = pd.read_pickle(params_path)
+    if "alpha_0" not in params.columns:
+        return None
+    alphas_sorted = params.groupby("pid")["alpha_0"].first().sort_values()
+    if len(alphas_sorted) < PANEL_E_LAMBDA_N:
+        return None
+    low_pids = set(int(p) for p in alphas_sorted.index[:PANEL_E_LAMBDA_N].tolist())
+    high_pids = set(int(p) for p in alphas_sorted.index[-PANEL_E_LAMBDA_N:].tolist())
+    low_thr = float(alphas_sorted.iloc[PANEL_E_LAMBDA_N - 1])
+    high_thr = float(alphas_sorted.iloc[-PANEL_E_LAMBDA_N])
+    return low_pids, high_pids, low_thr, high_thr
+
+
+def _plot_panel_j(ax, noise_folder: str, run_folder: str, _palette: dict) -> None:
+    """Same as panel H but split by high/low α₀ instead of λ."""
+    noise_run_dir = data_path("runs") / noise_folder
+    noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
+    if not noise_path.exists():
+        _empty_row_panel(ax)
+        return
+
+    noise_df = pd.read_pickle(noise_path)
+    required = {"pid", "trial", "observation", "response"}
+    if not required.issubset(noise_df.columns):
+        _empty_row_panel(ax)
+        return
+
+    per_qid_noise = (
+        noise_df.groupby(["pid", "trial", "observation"], as_index=False)["response"]
+        .agg(lambda s: float(np.std(s.to_numpy(dtype=float), ddof=0)))
+        .rename(columns={"response": "response_noise"})
+    )
+    if per_qid_noise.empty:
+        _empty_row_panel(ax)
+        return
+
+    split_run_dir = data_path("runs") / run_folder
+    split = _panel_j_split_by_alpha0(split_run_dir)
+    if split is None:
+        _empty_row_panel(ax)
+        return
+    low_pids, high_pids, low_thr, high_thr = split
+    if not low_pids or not high_pids:
+        _empty_row_panel(ax)
+        return
+
+    low_noise = per_qid_noise[per_qid_noise["pid"].isin(low_pids)].copy()
+    high_noise = per_qid_noise[per_qid_noise["pid"].isin(high_pids)].copy()
+    if low_noise.empty or high_noise.empty:
+        _empty_row_panel(ax)
+        return
+
+    cb_palette = sns.color_palette("colorblind")
+    sns.lineplot(
+        data=high_noise,
+        x="observation",
+        y="response_noise",
+        color=cb_palette[1],
+        label=f"High initial learning (α₀ > {high_thr:.2f})",
+        ax=ax,
+    )
+    sns.lineplot(
+        data=low_noise,
+        x="observation",
+        y="response_noise",
+        color=cb_palette[0],
+        label=f"Low initial learning (α₀ < {low_thr:.2f})",
+        ax=ax,
+    )
+    ax.set_xlabel("Observation")
+    ax.set_ylabel("Predicted response noise")
     ax.legend(frameon=False)
     sns.despine(ax=ax, top=True, right=True)
 
@@ -1251,6 +1643,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder", type=str, default="response")
     parser.add_argument("--noise_folder", type=str, default="yoo_response_noise")
+    parser.add_argument("--panel_g_show_significance", action="store_true", default=False)
     args = parser.parse_args()
 
     apply_style()
@@ -1258,8 +1651,8 @@ def main() -> None:
     if "Human" not in palette:
         palette["Human"] = "black"
 
-    fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-    row0, row1 = axes[0], axes[1]
+    fig, axes = plt.subplots(3, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+    row0, row1, row2 = axes[0], axes[1], axes[2]
 
     _plot_panel_a(row0[0])
     _plot_panel_b(row0[1], args.run_folder, palette)
@@ -1268,8 +1661,13 @@ def main() -> None:
 
     _plot_panel_e(row1[0], args.run_folder)
     _plot_panel_f(row1[1], args.run_folder)
-    _plot_panel_g(row1[2], args.run_folder)
-    _plot_panel_h(row1[3], args.noise_folder, args.run_folder, palette)
+    _plot_panel_g(row1[2], args.run_folder, args.panel_g_show_significance)
+    _plot_panel_h(row1[3], args.run_folder)
+
+    _plot_panel_i(row2[0], args.run_folder)
+    _plot_panel_j(row2[1], args.noise_folder, args.run_folder, palette)
+    _plot_panel_k(row2[2], args.noise_folder, args.run_folder, palette)
+    _empty_row_panel(row2[3])
 
     label_panels(axes)
 

@@ -484,7 +484,7 @@ def _plot_panel1(ax, sample_pid_data, human, color_0, color_1):
     # readout line (no label — just visual reference)
     ax.axvline(READOUT_OFFSET, color="k", linewidth=1.0, linestyle="--")
     ax.set_xlabel("Time within observation (s)")
-    ax.set_ylabel("|Prediction error|")
+    ax.set_ylabel("Decoded prediction error")
     # ax.set_title("Prediction error timecourse")
 
     # legend: colored lines matching the traces
@@ -513,23 +513,24 @@ def _plot_panel2(ax, metrics_df, color_0, color_1):
         y="response_noise",
         scatter_kws={"color": color_0, "s": 30},
         line_kws={"color": color_0, "linewidth": 1.5},
-        label="Mean response noise",
+        # label="Mean response noise",
         ci=95,
         ax=ax,
     )
-    sns.regplot(
-        data=metrics_df,
-        x="alpha_0",
-        y="mean_std1",
-        scatter_kws={"color": color_1, "s": 30},
-        line_kws={"color": color_1, "linewidth": 1.5},
-        label="Std prediction error",
-        ci=95,
-        ax=ax,
-    )
+    # sns.regplot(
+    #     data=metrics_df,
+    #     x="alpha_0",
+    #     y="mean_std1",
+    #     scatter_kws={"color": color_1, "s": 30},
+    #     line_kws={"color": color_1, "linewidth": 1.5},
+    #     label="Std prediction error",
+    #     ci=95,
+    #     ax=ax,
+    # )
     ax.legend(frameon=False)
     ax.set_xlabel("Fitted α₀")
-    ax.set_ylabel("Value")
+    # ax.set_ylabel("Value")
+    ax.set_ylabel("Mean response noise")
     # ax.set_title("Fitted learning rate \n affects neural and response noise")
     sns.despine(ax=ax, top=True, right=True)
 
