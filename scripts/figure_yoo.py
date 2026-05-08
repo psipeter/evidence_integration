@@ -113,9 +113,9 @@ def _empty_row_panel(ax) -> None:
     ax.set_ylabel("")
 
 
-def _plot_panel_a(ax) -> None:
-    """Render first page of figures/yoo_task.pdf into panel A."""
-    pdf_path = FIGURES_DIR / "yoo_task_wide.pdf"
+def _plot_panel_a(ax, full: bool = False) -> None:
+    """Render first page of yoo_task PDF into panel A."""
+    pdf_path = FIGURES_DIR / ("yoo_task_wide.pdf" if full else "yoo_task.pdf")
     if not pdf_path.exists():
         _empty_pdf_panel(ax)
         return
@@ -1106,8 +1106,88 @@ def _plot_panel_g(
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_h(ax, run_folder: str) -> None:
-    """Panel H: 2×2 human/NEF heatmaps of task error and response change by pid."""
+def _classify_task_error_curves(
+    te_df: pd.DataFrame,
+    smooth_window: int = 5,
+    min_rise: float = 0.008,
+    persist: int = 3,
+    min_sign_change_obs: int = 5,
+) -> tuple[list[int], list[int]]:
+    """Classify pids into U-shaped vs decaying based on smoothed slope sign change."""
+    u_shaped: list[int] = []
+    decaying: list[int] = []
+    if te_df.empty:
+        return u_shaped, decaying
+
+    for pid, g in te_df.groupby("pid"):
+        g = g.sort_values("observation")
+        obs = g["observation"].to_numpy(dtype=int)
+        y = g["task_error"].to_numpy(dtype=float)
+        if len(y) < max(6, persist + 2):
+            continue
+        smooth = (
+            pd.Series(y)
+            .rolling(window=smooth_window, min_periods=1, center=True)
+            .mean()
+            .to_numpy()
+        )
+        dy = np.diff(smooth)
+        if dy.size == 0:
+            continue
+        sign = np.sign(dy)
+
+        found_u = False
+        for i in range(len(sign) - persist):
+            obs_next = obs[i + 1]
+            if obs_next < min_sign_change_obs:
+                continue
+            if sign[i] < 0 and np.all(sign[i + 1 : i + 1 + persist] > 0):
+                late_mask = obs >= 26
+                late_mean = (
+                    float(np.nanmean(y[late_mask]))
+                    if np.any(late_mask)
+                    else float(np.nanmean(y))
+                )
+                strength = late_mean - float(np.nanmin(smooth))
+                if np.isfinite(strength) and strength >= min_rise:
+                    found_u = True
+                    break
+
+        if found_u:
+            u_shaped.append(int(pid))
+        else:
+            decaying.append(int(pid))
+
+    return u_shaped, decaying
+
+
+def _u_strength(te_df: pd.DataFrame, smooth_window: int = 5) -> pd.Series:
+    """Per-pid U-strength = mean(task_error[26..30]) - min(smoothed task-error curve)."""
+    values: dict[int, float] = {}
+    for pid, g in te_df.groupby("pid"):
+        g = g.sort_values("observation")
+        obs = g["observation"].to_numpy(dtype=int)
+        y = g["task_error"].to_numpy(dtype=float)
+        if len(y) == 0:
+            continue
+        smooth = (
+            pd.Series(y)
+            .rolling(window=smooth_window, min_periods=1, center=True)
+            .mean()
+            .to_numpy()
+        )
+        late_mask = obs >= 26
+        late_mean = (
+            float(np.nanmean(y[late_mask])) if np.any(late_mask) else float(np.nanmean(y))
+        )
+        strength = late_mean - float(np.nanmin(smooth))
+        if np.isfinite(strength):
+            values[int(pid)] = float(strength)
+    return pd.Series(values, dtype=float)
+
+
+def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> None:
+    """Panel H modes: lineplot, heatmap, or curve_shape."""
     human_path = data_path("yoo.pkl")
     if not human_path.exists():
         _empty_row_panel(ax)
@@ -1229,6 +1309,192 @@ def _plot_panel_h(ax, run_folder: str) -> None:
     model_delta_df = pd.DataFrame(model_rows_delta).groupby(
         ["pid", "observation"], as_index=False
     )["response_change"].mean()
+
+    if panel_h_plot_type == "lineplot":
+        cb = sns.color_palette("colorblind")
+        c_task = cb[2]
+        c_delta = cb[0]
+        ax_left = ax
+        ax_right = ax_left.twinx()
+
+        sns.lineplot(
+            data=human_task_df,
+            x="observation",
+            y="task_error",
+            color=c_task,
+            linestyle="-",
+            label="Task error (human)",
+            ax=ax_left,
+        )
+        sns.lineplot(
+            data=model_task_df,
+            x="observation",
+            y="task_error",
+            color=c_task,
+            linestyle="--",
+            label="Task error (NEF)",
+            ax=ax_left,
+        )
+        sns.lineplot(
+            data=human_delta_df,
+            x="observation",
+            y="response_change",
+            color=c_delta,
+            linestyle="-",
+            label="Response change (human)",
+            ax=ax_right,
+        )
+        sns.lineplot(
+            data=model_delta_df,
+            x="observation",
+            y="response_change",
+            color=c_delta,
+            linestyle="--",
+            label="Response change (NEF)",
+            ax=ax_right,
+        )
+
+        ax_left.set_xlabel("Observation")
+        ax_left.set_ylabel("Task error")
+        ax_right.set_ylabel("Response change")
+
+        # Align y=0 across twin axes.
+        left_lo, left_hi = ax_left.get_ylim()
+        if left_hi != left_lo:
+            frac = (0.0 - left_lo) / (left_hi - left_lo)
+            right_lo, right_hi = ax_right.get_ylim()
+            span = right_hi - right_lo
+            if span != 0:
+                new_lo = 0.0 - frac * span
+                ax_right.set_ylim(new_lo, new_lo + span)
+
+        h1, l1 = ax_left.get_legend_handles_labels()
+        h2, l2 = ax_right.get_legend_handles_labels()
+        if ax_left.get_legend() is not None:
+            ax_left.get_legend().remove()
+        if ax_right.get_legend() is not None:
+            ax_right.get_legend().remove()
+        ax_left.legend(h1 + h2, l1 + l2, frameon=False, loc="upper right")
+        sns.despine(ax=ax_left, top=True, right=True)
+        ax_right.spines["top"].set_visible(False)
+        ax_right.spines["right"].set_visible(True)
+        return
+
+    if panel_h_plot_type == "curve_shape":
+        human_u_pids, human_dec_pids = _classify_task_error_curves(human_task_df)
+        if not human_u_pids or not human_dec_pids:
+            _empty_row_panel(ax)
+            return
+        human_task_u = human_task_df[human_task_df["pid"].isin(set(human_u_pids))].copy()
+        human_task_dec = human_task_df[human_task_df["pid"].isin(set(human_dec_pids))].copy()
+        if human_task_u.empty or human_task_dec.empty:
+            _empty_row_panel(ax)
+            return
+
+        u_series = _u_strength(model_task_df)
+        if u_series.empty:
+            _empty_row_panel(ax)
+            return
+        u_series = u_series.dropna()
+        med = float(u_series.median())
+        weak_pids = set(int(p) for p in u_series[u_series <= med].index.tolist())
+        strong_pids = set(int(p) for p in u_series[u_series > med].index.tolist())
+        if not weak_pids or not strong_pids:
+            ordered = u_series.sort_values()
+            cut = max(1, len(ordered) // 2)
+            weak_pids = set(int(p) for p in ordered.index[:cut].tolist())
+            strong_pids = set(int(p) for p in ordered.index[cut:].tolist())
+            if not weak_pids or not strong_pids:
+                _empty_row_panel(ax)
+                return
+        model_task_weak = model_task_df[model_task_df["pid"].isin(weak_pids)].copy()
+        model_task_strong = model_task_df[model_task_df["pid"].isin(strong_pids)].copy()
+        if model_task_weak.empty or model_task_strong.empty:
+            _empty_row_panel(ax)
+            return
+
+        human_lam_u = lam_by_pid.reindex(list(set(human_u_pids))).dropna()
+        human_lam_dec = lam_by_pid.reindex(list(set(human_dec_pids))).dropna()
+
+        nef_params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
+        if not nef_params_path.exists():
+            _empty_row_panel(ax)
+            return
+        nef_params = pd.read_pickle(nef_params_path)
+        if not {"pid", "lambda_"}.issubset(nef_params.columns):
+            _empty_row_panel(ax)
+            return
+        nef_lam_by_pid = (
+            nef_params[["pid", "lambda_"]]
+            .dropna()
+            .drop_duplicates(subset=["pid"], keep="first")
+            .set_index("pid")["lambda_"]
+        )
+        nef_lam_weak = nef_lam_by_pid.reindex(list(weak_pids)).dropna()
+        nef_lam_strong = nef_lam_by_pid.reindex(list(strong_pids)).dropna()
+        if (
+            human_lam_u.empty
+            or human_lam_dec.empty
+            or nef_lam_weak.empty
+            or nef_lam_strong.empty
+        ):
+            _empty_row_panel(ax)
+            return
+
+        cb = sns.color_palette("colorblind")
+        sns.lineplot(
+            data=human_task_dec,
+            x="observation",
+            y="task_error",
+            color=cb[0],
+            linestyle="-",
+            label=(
+                f"Human decaying (n={len(human_dec_pids)}, "
+                f"λ̄={float(human_lam_dec.mean()):.2f})"
+            ),
+            ax=ax,
+        )
+        sns.lineplot(
+            data=human_task_u,
+            x="observation",
+            y="task_error",
+            color=cb[0],
+            linestyle="--",
+            label=(
+                f"Human U-shaped (n={len(human_u_pids)}, "
+                f"λ̄={float(human_lam_u.mean()):.2f})"
+            ),
+            ax=ax,
+        )
+        sns.lineplot(
+            data=model_task_weak,
+            x="observation",
+            y="task_error",
+            color=cb[1],
+            linestyle="-",
+            label=(
+                f"NEF weak U-shape (n={len(weak_pids)}, "
+                f"λ̄={float(nef_lam_weak.mean()):.2f})"
+            ),
+            ax=ax,
+        )
+        sns.lineplot(
+            data=model_task_strong,
+            x="observation",
+            y="task_error",
+            color=cb[1],
+            linestyle="--",
+            label=(
+                f"NEF strong U-shape (n={len(strong_pids)}, "
+                f"λ̄={float(nef_lam_strong.mean()):.2f})"
+            ),
+            ax=ax,
+        )
+        ax.set_xlabel("Observation")
+        ax.set_ylabel("Task error")
+        ax.legend(frameon=False, loc="upper right")
+        sns.despine(ax=ax, top=True, right=True)
+        return
 
     nef_params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
     if not nef_params_path.exists():
@@ -1504,6 +1770,128 @@ def _plot_panel_k(ax, noise_folder: str, run_folder: str, palette: dict) -> None
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _plot_panel_l(ax, noise_folder: str) -> None:
+    """Panel L: early vs late binned response-change/noise correlation."""
+    noise_run_dir = data_path("runs") / noise_folder
+    noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
+    if not noise_path.exists():
+        _empty_row_panel(ax)
+        return
+
+    df = pd.read_pickle(noise_path)
+    required = {"pid", "seed", "trial", "observation", "response"}
+    if not required.issubset(df.columns):
+        _empty_row_panel(ax)
+        return
+
+    df = df.sort_values(["pid", "seed", "trial", "observation"]).copy()
+    df["response_change_abs"] = (
+        df.groupby(["pid", "seed", "trial"])["response"].diff().abs()
+    )
+    per_qid_noise = (
+        df.groupby(["pid", "trial", "observation"], as_index=False)["response"]
+        .std()
+        .rename(columns={"response": "response_noise"})
+    )
+
+    palette = sns.color_palette("colorblind")
+    bins = [
+        ("Obs 1–5", 1, 5, palette[0]),
+        ("Obs 6–30", 6, 30, palette[1]),
+    ]
+    plotted = 0
+    stats: dict[str, tuple[float, float]] = {}
+    for label, obs_lo, obs_hi, color in bins:
+        ch = (
+            df[df["observation"].between(obs_lo, obs_hi)]
+            .dropna(subset=["response_change_abs"])
+            .groupby("pid", as_index=False)["response_change_abs"]
+            .mean()
+            .rename(columns={"response_change_abs": "mean_response_change"})
+        )
+        nz = (
+            per_qid_noise[per_qid_noise["observation"].between(obs_lo, obs_hi)]
+            .groupby("pid", as_index=False)["response_noise"]
+            .mean()
+            .rename(columns={"response_noise": "mean_response_noise"})
+        )
+        plot_df = ch.merge(nz, on="pid", how="inner").dropna()
+        if len(plot_df) < 2:
+            continue
+
+        sns.regplot(
+            data=plot_df,
+            x="mean_response_change",
+            y="mean_response_noise",
+            scatter=True,
+            truncate=True,
+            ci=95,
+            scatter_kws={"alpha": 0.6, "s": 20, "color": color},
+            line_kws={"color": color, "linewidth": 2.0},
+            ax=ax,
+        )
+        r_val, p_val = pearsonr(
+            plot_df["mean_response_change"].to_numpy(dtype=float),
+            plot_df["mean_response_noise"].to_numpy(dtype=float),
+        )
+        stats[label] = (float(r_val), float(p_val))
+        plotted += 1
+
+    if plotted == 0:
+        _empty_row_panel(ax)
+        return
+    for label, obs_lo, obs_hi, color in bins:
+        ch = (
+            df[df["observation"].between(obs_lo, obs_hi)]
+            .dropna(subset=["response_change_abs"])
+            .groupby("pid", as_index=False)["response_change_abs"]
+            .mean()
+            .rename(columns={"response_change_abs": "mean_response_change"})
+        )
+        nz = (
+            per_qid_noise[per_qid_noise["observation"].between(obs_lo, obs_hi)]
+            .groupby("pid", as_index=False)["response_noise"]
+            .mean()
+            .rename(columns={"response_noise": "mean_response_noise"})
+        )
+        plot_df = ch.merge(nz, on="pid", how="inner").dropna()
+        if len(plot_df) < 2:
+            continue
+        sns.regplot(
+            data=plot_df,
+            x="mean_response_change",
+            y="mean_response_noise",
+            scatter=True,
+            truncate=True,
+            ci=95,
+            scatter_kws={"alpha": 0.6, "s": 20, "color": color},
+            line_kws={"color": color, "linewidth": 2.0},
+            ax=ax,
+        )
+    ax.set_xlabel("Mean response change")
+    ax.set_ylabel("Mean response noise")
+    r_early, p_early = stats.get("Obs 1–5", (float("nan"), float("nan")))
+    r_late, p_late = stats.get("Obs 6–30", (float("nan"), float("nan")))
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=palette[0],
+            linewidth=2,
+            label=f"Obs 1–5 (r={r_early:.2f}, p={p_early:.3f})",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=palette[1],
+            linewidth=2,
+            label=f"Obs 6–30 (r={r_late:.2f}, p={p_late:.3f})",
+        ),
+    ]
+    ax.legend(handles=handles, frameon=False)
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def _plot_panel_i(ax, run_folder: str) -> None:
     """α₀ vs λ correlation from fitted NEF_recurrent yoo params."""
     run_dir = data_path("runs") / run_folder
@@ -1644,6 +2032,13 @@ def main() -> None:
     parser.add_argument("--run_folder", type=str, default="response")
     parser.add_argument("--noise_folder", type=str, default="yoo_response_noise")
     parser.add_argument("--panel_g_show_significance", action="store_true", default=False)
+    parser.add_argument("--full", action="store_true", default=False)
+    parser.add_argument(
+        "--panel_h_plot_type",
+        type=str,
+        choices=["lineplot", "heatmap", "curve_shape"],
+        default="lineplot",
+    )
     args = parser.parse_args()
 
     apply_style()
@@ -1651,23 +2046,37 @@ def main() -> None:
     if "Human" not in palette:
         palette["Human"] = "black"
 
-    fig, axes = plt.subplots(3, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-    row0, row1, row2 = axes[0], axes[1], axes[2]
+    if args.full:
+        fig, axes = plt.subplots(3, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+        row0, row1, row2 = axes[0], axes[1], axes[2]
 
-    _plot_panel_a(row0[0])
-    _plot_panel_b(row0[1], args.run_folder, palette)
-    _plot_panel_c(row0[2], palette)
-    _plot_panel_d(row0[3], args.run_folder, palette)
+        _plot_panel_a(row0[0], full=True)
+        _plot_panel_b(row0[1], args.run_folder, palette)
+        _plot_panel_c(row0[2], palette)
+        _plot_panel_d(row0[3], args.run_folder, palette)
 
-    _plot_panel_e(row1[0], args.run_folder)
-    _plot_panel_f(row1[1], args.run_folder)
-    _plot_panel_g(row1[2], args.run_folder, args.panel_g_show_significance)
-    _plot_panel_h(row1[3], args.run_folder)
+        _plot_panel_e(row1[0], args.run_folder)
+        _plot_panel_f(row1[1], args.run_folder)
+        _plot_panel_g(row1[2], args.run_folder, args.panel_g_show_significance)
+        _plot_panel_h(row1[3], args.run_folder, args.panel_h_plot_type)
 
-    _plot_panel_i(row2[0], args.run_folder)
-    _plot_panel_j(row2[1], args.noise_folder, args.run_folder, palette)
-    _plot_panel_k(row2[2], args.noise_folder, args.run_folder, palette)
-    _empty_row_panel(row2[3])
+        _plot_panel_i(row2[0], args.run_folder)
+        _plot_panel_j(row2[1], args.noise_folder, args.run_folder, palette)
+        _plot_panel_k(row2[2], args.noise_folder, args.run_folder, palette)
+        _plot_panel_l(row2[3], args.noise_folder)
+    else:
+        fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+        row0, row1 = axes[0], axes[1]
+
+        _plot_panel_a(row0[0], full=False)
+        _plot_panel_b(row0[1], args.run_folder, palette)
+        _plot_panel_c(row0[2], palette)
+        _plot_panel_d(row0[3], args.run_folder, palette)
+
+        _plot_panel_e(row1[0], args.run_folder)
+        _plot_panel_g(row1[1], args.run_folder, args.panel_g_show_significance)
+        _plot_panel_h(row1[2], args.run_folder, "curve_shape")
+        _plot_panel_l(row1[3], args.noise_folder)
 
     label_panels(axes)
 
