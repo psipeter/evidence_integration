@@ -2118,7 +2118,8 @@ def main() -> None:
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(FIGURES_DIR / "figure_yoo.png", dpi=300)
     plt.savefig(FIGURES_DIR / "figure_yoo.pdf")
-    print("Saved figures/figure_yoo.{png,pdf}")
+    plt.savefig(FIGURES_DIR / "figure_yoo.svg")
+    print("Saved figures/figure_yoo.{png,pdf,svg}")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
 Save per-neuron activities and encoders for NEF ensembles.
-
-Timing ``once_per_dt_full`` uses the same probes as ``once_per_dt`` but saves the
-full simulated trial (ITI and observation intervals) to ``activities_full_*.npz``.
 """
 
 from __future__ import annotations
@@ -48,9 +45,6 @@ def simulate_and_save(
     windowed_data_by_ens: dict[str, list[np.ndarray]] = {
         ens_name: [] for ens_name in ensembles
     }
-    full_dt_data_by_ens: dict[str, list[np.ndarray]] = {
-        ens_name: [] for ens_name in ensembles
-    }
 
     for trial in sorted(human_pid["trial"].unique()):
         t_trial = time.time()
@@ -79,7 +73,7 @@ def simulate_and_save(
                 ens = _get_ensemble_obj(net, ens_name)
                 if timing == "once_per_obs":
                     probes[ens_name] = nengo.Probe(ens.neurons, synapse=tau_probe)
-                elif timing in ("once_per_dt", "once_per_dt_full"):
+                elif timing == "once_per_dt":
                     probes_dt[ens_name] = nengo.Probe(
                         ens.neurons,
                         synapse=float(params["tau_probe"]),
@@ -123,11 +117,6 @@ def simulate_and_save(
                         obs_windows.append(spike_data[start:end])
                     windowed_arr = np.stack(obs_windows, axis=0)
                     windowed_data_by_ens[ens_name].append(windowed_arr)
-            elif timing == "once_per_dt_full":
-                for ens_name in ensembles:
-                    spike_data = sim.data[probes_dt[ens_name]]
-                    full_arr = np.asarray(spike_data, dtype=np.float32)
-                    full_dt_data_by_ens[ens_name].append(full_arr)
             else:
                 raise ValueError(f"Unknown timing mode in simulate_and_save: {timing!r}")
 
@@ -146,59 +135,6 @@ def simulate_and_save(
             enc = encoders_by_ens[ens_name]
             if enc is None:
                 raise RuntimeError(f"No encoders captured for ensemble {ens_name!r}")
-            enc_rows = []
-            for neuron_idx in range(enc.shape[0]):
-                row = {
-                    "pid": int(pid),
-                    "ensemble": ens_name,
-                    "neuron_idx": int(neuron_idx),
-                }
-                for d in range(enc.shape[1]):
-                    row[f"enc_dim_{d}"] = float(enc[neuron_idx, d])
-                enc_rows.append(row)
-            enc_df = pd.DataFrame(enc_rows)
-            encoders_path = out_dir / f"encoders_{ens_name}_{params['dataset']}_{pid}.pkl"
-            enc_df.to_pickle(encoders_path)
-            print(f"Saved {encoders_path}")
-    elif timing == "once_per_dt_full":
-        trial_ids = np.array(sorted(human_pid["trial"].unique()), dtype=int)
-        n_obs_max = max(
-            len(human_pid[human_pid["trial"] == trial])
-            for trial in trial_ids
-        )
-        max_steps = max(
-            a.shape[0]
-            for ens_name in ensembles
-            for a in full_dt_data_by_ens[ens_name]
-        )
-        t_axis = np.arange(max_steps, dtype=np.float64) * dt_sample
-
-        for ens_name in ensembles:
-            trial_arrays = full_dt_data_by_ens[ens_name]
-            padded = []
-            for a in trial_arrays:
-                if a.shape[0] < max_steps:
-                    pad_shape = (max_steps - a.shape[0], a.shape[1])
-                    padding = np.full(pad_shape, np.nan, dtype=np.float32)
-                    a = np.concatenate([a, padding], axis=0)
-                padded.append(a.astype(np.float32))
-            activities_arr = np.stack(padded, axis=0)
-            enc = encoders_by_ens[ens_name]
-            if enc is None:
-                raise RuntimeError(f"No encoders captured for ensemble {ens_name!r}")
-            out_path = out_dir / f"activities_full_{ens_name}_{params['dataset']}_{pid}.npz"
-            np.savez_compressed(
-                out_path,
-                activities=activities_arr,
-                encoders=enc,
-                trial_ids=trial_ids,
-                dt_sample=np.array(dt_sample),
-                t=t_axis,
-                t_obs=np.array(float(params["t_obs"])),
-                t_iti=np.array(float(params["t_iti"])),
-                n_obs=np.array(n_obs_max, dtype=np.int64),
-            )
-            print(f"Saved {out_path} — shape {activities_arr.shape}")
             enc_rows = []
             for neuron_idx in range(enc.shape[0]):
                 row = {

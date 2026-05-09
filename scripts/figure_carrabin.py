@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from scipy.stats import gaussian_kde
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -278,6 +279,111 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
     ax.set_xlabel("")
     ax.set_ylabel("Response noise difference (sequence-wise)")
     sns.despine(ax=ax, top=True, right=True)
+
+
+def _save_panel_c_kde(human: pd.DataFrame) -> None:
+    """Bottom-left KDE panel from ``scripts/response_noise_carrabin.py`` (verbatim)."""
+    from fitting.losses import _mean_qid_std
+
+    apply_style()
+    PALETTE = get_palette()
+    LINESTYLES = ["solid", "dashed", "dotted"]
+    SAMPLE_PIDS = {"low": 14, "medium": 18, "high": 17}
+
+    pid_stds: list[float] = []
+    for _pid, grp in human.groupby("pid"):
+        pid_stds.append(_mean_qid_std(grp))
+
+    pid_stds_vals = [s for s in pid_stds if np.isfinite(s)]
+    fig, ax_kde = plt.subplots(figsize=(3, 3))
+    if pid_stds_vals:
+        sns.kdeplot(
+            pid_stds_vals, ax=ax_kde, color=PALETTE["Human"], fill=True, alpha=0.3
+        )
+        kde_fn = gaussian_kde(pid_stds_vals)
+        for i, (_, pid) in enumerate(SAMPLE_PIDS.items()):
+            std_val = _mean_qid_std(human[human["pid"] == pid])
+            if not np.isfinite(std_val):
+                continue
+            kde_height = float(kde_fn(np.array([std_val]))[0])
+            ax_kde.plot(
+                [std_val, std_val],
+                [0, kde_height],
+                color=PALETTE["Human"],
+                linestyle=LINESTYLES[i],
+                linewidth=1.5,
+                label=f"#{pid}",
+            )
+        ax_kde.legend(title="Participant", frameon=False)
+    ax_kde.set_xlabel("Response noise")
+    ax_kde.set_ylabel("Density")
+    ax_kde.set_title("Population response noise distribution")
+    sns.despine(ax=ax_kde, top=True, right=True)
+    plt.tight_layout()
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_pdf = FIGURES_DIR / "carrabin_response_noise_kde.pdf"
+    out_svg = FIGURES_DIR / "carrabin_response_noise_kde.svg"
+    fig.savefig(out_pdf)
+    fig.savefig(out_svg)
+    plt.close(fig)
+    print(f"Saved {out_pdf.name} and {out_svg.name}")
+
+
+def _save_qid_kde(human: pd.DataFrame) -> None:
+    """Per-PID KDE of trial responses demeaned within each valid qid, then pooled."""
+    from fitting.losses import QID_MIN_TRIALS
+
+    apply_style()
+    PALETTE = get_palette()
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    for pid in (14, 18, 17):
+        human_pid = human[human["pid"] == pid]
+        qid_counts = human_pid.groupby("qid")["trial"].nunique()
+        valid_qids = qid_counts[qid_counts >= QID_MIN_TRIALS].index
+
+        demeaned_pieces: list[np.ndarray] = []
+        for qid in valid_qids:
+            responses = (
+                human_pid[human_pid["qid"] == qid]["response"].values.astype(float)
+            )
+            if responses.size == 0:
+                continue
+            m = float(responses.mean())
+            demeaned_pieces.append(responses - m)
+        demeaned = (
+            np.concatenate(demeaned_pieces)
+            if demeaned_pieces
+            else np.array([], dtype=float)
+        )
+
+        fig, ax = plt.subplots(figsize=(3, 3))
+        if demeaned.size >= 2:
+            sns.kdeplot(
+                demeaned,
+                ax=ax,
+                fill=True,
+                alpha=0.4,
+                color=PALETTE["Human"],
+            )
+        ax.axvline(
+            0.0,
+            color=PALETTE["Human"],
+            linestyle="--",
+            linewidth=1.0,
+        )
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        plt.tight_layout()
+        stem = FIGURES_DIR / f"carrabin_demeaned_kde_pid{pid}"
+        fig.savefig(stem.with_suffix(".svg"))
+        fig.savefig(stem.with_suffix(".pdf"))
+        plt.close(fig)
 
 
 def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
@@ -772,7 +878,10 @@ def main() -> None:
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(FIGURES_DIR / "figure_carrabin.png", dpi=300)
     plt.savefig(FIGURES_DIR / "figure_carrabin.pdf")
-    print("Saved figures/figure_carrabin.{png,pdf}")
+    plt.savefig(FIGURES_DIR / "figure_carrabin.svg")
+    print("Saved figures/figure_carrabin.{png,pdf,svg}")
+    _save_panel_c_kde(human)
+    _save_qid_kde(human)
 
 
 if __name__ == "__main__":

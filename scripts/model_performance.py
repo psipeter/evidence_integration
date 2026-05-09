@@ -146,4 +146,5 @@ for ax, dataset in zip(axes, ["carrabin", "jiang", "yoo"]):
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 plt.savefig(FIGURES_DIR / "model_performance.png", dpi=300)
 plt.savefig(FIGURES_DIR / "model_performance.pdf")
+plt.savefig(FIGURES_DIR / "model_performance.svg")
 print("Saved figures/model_performance.{png,pdf}")
