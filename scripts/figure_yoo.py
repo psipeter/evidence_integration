@@ -1186,6 +1186,48 @@ def _u_strength(te_df: pd.DataFrame, smooth_window: int = 5) -> pd.Series:
     return pd.Series(values, dtype=float)
 
 
+def _pl_r2(te_df: pd.DataFrame, smooth_window: int = 5) -> pd.Series:
+    """Per-pid power-law fit R2 on smoothed mean task-error curves."""
+    from scipy.optimize import curve_fit
+
+    def _pl(n, A, lam):
+        return A * (n ** (-lam))
+
+    out: dict[int, float] = {}
+    for pid, g in te_df.groupby("pid"):
+        g = g.sort_values("observation")
+        n = g["observation"].to_numpy(dtype=float)
+        y = g["task_error"].to_numpy(dtype=float)
+        if len(y) < 3:
+            continue
+        y_s = (
+            pd.Series(y)
+            .rolling(window=smooth_window, min_periods=1, center=True)
+            .mean()
+            .to_numpy()
+        )
+        mask = np.isfinite(n) & np.isfinite(y_s) & (n > 0) & (y_s > 0)
+        if int(mask.sum()) < 3:
+            continue
+        x = n[mask]
+        yy = y_s[mask]
+        try:
+            p0 = (float(np.nanmax(yy)), 0.5)
+            bounds = ([1e-8, 0.0], [10.0, 5.0])
+            popt, _ = curve_fit(_pl, x, yy, p0=p0, bounds=bounds, maxfev=20000)
+            y_hat = _pl(x, *popt)
+            ss_res = float(np.sum((yy - y_hat) ** 2))
+            ss_tot = float(np.sum((yy - float(np.mean(yy))) ** 2))
+            if ss_tot <= 0:
+                continue
+            r2 = 1.0 - ss_res / ss_tot
+            if np.isfinite(r2):
+                out[int(pid)] = float(r2)
+        except Exception:
+            continue
+    return pd.Series(out, dtype=float)
+
+
 def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> None:
     """Panel H modes: lineplot, heatmap, or curve_shape."""
     human_path = data_path("yoo.pkl")
@@ -1381,32 +1423,25 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
         return
 
     if panel_h_plot_type == "curve_shape":
-        human_u_pids, human_dec_pids = _classify_task_error_curves(human_task_df)
-        if not human_u_pids or not human_dec_pids:
+        pl_r2 = _pl_r2(human_task_df)
+        if len(pl_r2) < 10:
             _empty_row_panel(ax)
             return
-        human_task_u = human_task_df[human_task_df["pid"].isin(set(human_u_pids))].copy()
-        human_task_dec = human_task_df[human_task_df["pid"].isin(set(human_dec_pids))].copy()
+        pl_r2 = pl_r2.sort_values()
+        human_u_pids = set(int(p) for p in pl_r2.index[:10].tolist())
+        human_dec_pids = set(int(p) for p in pl_r2.index[-10:].tolist())
+        human_task_u = human_task_df[human_task_df["pid"].isin(human_u_pids)].copy()
+        human_task_dec = human_task_df[human_task_df["pid"].isin(human_dec_pids)].copy()
         if human_task_u.empty or human_task_dec.empty:
             _empty_row_panel(ax)
             return
 
-        u_series = _u_strength(model_task_df)
-        if u_series.empty:
+        u_series = _u_strength(model_task_df).dropna().sort_values()
+        if len(u_series) < 10:
             _empty_row_panel(ax)
             return
-        u_series = u_series.dropna()
-        med = float(u_series.median())
-        weak_pids = set(int(p) for p in u_series[u_series <= med].index.tolist())
-        strong_pids = set(int(p) for p in u_series[u_series > med].index.tolist())
-        if not weak_pids or not strong_pids:
-            ordered = u_series.sort_values()
-            cut = max(1, len(ordered) // 2)
-            weak_pids = set(int(p) for p in ordered.index[:cut].tolist())
-            strong_pids = set(int(p) for p in ordered.index[cut:].tolist())
-            if not weak_pids or not strong_pids:
-                _empty_row_panel(ax)
-                return
+        weak_pids = set(int(p) for p in u_series.index[:10].tolist())
+        strong_pids = set(int(p) for p in u_series.index[-10:].tolist())
         model_task_weak = model_task_df[model_task_df["pid"].isin(weak_pids)].copy()
         model_task_strong = model_task_df[model_task_df["pid"].isin(strong_pids)].copy()
         if model_task_weak.empty or model_task_strong.empty:
@@ -1449,7 +1484,7 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
             color=cb[0],
             linestyle="-",
             label=(
-                f"Human decaying (n={len(human_dec_pids)}, "
+                f"Human decaying (n=10, "
                 f"λ̄={float(human_lam_dec.mean()):.2f})"
             ),
             ax=ax,
@@ -1461,7 +1496,7 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
             color=cb[0],
             linestyle="--",
             label=(
-                f"Human U-shaped (n={len(human_u_pids)}, "
+                f"Human U-shaped (n=10, "
                 f"λ̄={float(human_lam_u.mean()):.2f})"
             ),
             ax=ax,
@@ -1473,7 +1508,7 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
             color=cb[1],
             linestyle="-",
             label=(
-                f"NEF weak U-shape (n={len(weak_pids)}, "
+                f"NEF weak U-shape (n=10, "
                 f"λ̄={float(nef_lam_weak.mean()):.2f})"
             ),
             ax=ax,
@@ -1485,7 +1520,7 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
             color=cb[1],
             linestyle="--",
             label=(
-                f"NEF strong U-shape (n={len(strong_pids)}, "
+                f"NEF strong U-shape (n=10, "
                 f"λ̄={float(nef_lam_strong.mean()):.2f})"
             ),
             ax=ax,
