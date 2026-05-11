@@ -25,12 +25,16 @@ from utils.plot_style import (
     label_panels,
 )
 
-MODEL_ORDER = ["Mean", "RL"]
+MODEL_ORDER = ["Mean", "RL", "PopulationCoding"]
 DATASET = "usher"
 
 
 def _display(model_type: str) -> str:
-    return "NEF" if model_type.startswith("NEF") else model_type
+    if model_type.startswith("NEF"):
+        return "NEF"
+    if model_type == "PopulationCoding":
+        return "PopCode"
+    return model_type
 
 
 def _placeholder(ax, text: str) -> None:
@@ -141,8 +145,17 @@ def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
     df = pd.concat(rows, ignore_index=True)
     order = [_display(m) for m in MODEL_ORDER]
     available = [m for m in order if m in set(df["model_disp"])]
-    # TODO: [decision needed] Fallback gray for any model_disp not in get_palette() keys
-    pal = {m: palette.get(m, "0.5") for m in available}
+    pal = {}
+    for m in available:
+        if m == "PopCode":
+            # TODO: add PopulationCoding to get_palette() in plot_style.py; model_performance
+            #  uses get_palette() keys only — no PopulationCoding entry yet
+            pal[m] = palette.get(
+                "PopulationCoding",
+                sns.color_palette("colorblind")[4],
+            )
+        else:
+            pal[m] = palette.get(m, "0.5")
     sns.boxplot(
         data=df,
         x="model_disp",
