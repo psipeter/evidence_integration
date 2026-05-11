@@ -110,4 +110,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
         "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },
+    "usher": {
+        "Mean": {},
+        "RL": {
+            "alpha": (0.001, 1.0, 0.001),
+        },
+    },
 }

@@ -12,6 +12,7 @@ Ported and redesigned from
 - **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive),
 - **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
 - **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
+- **usher:** ``Mean`` (optimal), ``RL`` (naive); same sequential update as yoo
 
 **Unified interface**
 
@@ -19,7 +20,7 @@ Every model is run via ``run(params, save=False, trials=None)``. Required keys i
 ``params`` for all models:
 
 - ``"model_type"`` (``str``): one of the strings above for the chosen dataset
-- ``"dataset"`` (``str``): ``"carrabin"``, ``"jiang"``, or ``"yoo"``
+- ``"dataset"`` (``str``): ``"carrabin"``, ``"jiang"``, ``"yoo"``, or ``"usher"``
 - ``"pid"`` (``int``): participant id
 
 Additional keys are model-specific (learning rates, noise scales, etc.). The
@@ -179,6 +180,8 @@ _CARRABIN_MODELS = frozenset(
 )
 _JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL", "RL_lambda", "RL_lambda_rd"})
 _YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
+# TODO: add RL_lambda, ADM, NEF for usher when supported
+_USHER_MODELS = frozenset({"Mean", "RL"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -200,7 +203,7 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
     rows: list[dict] = []
-    if dataset in ("carrabin", "yoo"):
+    if dataset in ("carrabin", "yoo", "usher"):
         pairs = (
             human_pid[["trial", "observation"]]
             .drop_duplicates()
@@ -253,9 +256,11 @@ def _validate_model_dataset(model_type: str, dataset: str) -> None:
         allowed = _JIANG_MODELS
     elif dataset == "yoo":
         allowed = _YOO_MODELS
+    elif dataset == "usher":
+        allowed = _USHER_MODELS
     else:
         raise ValueError(
-            f"Unknown dataset {dataset!r}; expected 'carrabin', 'jiang', or 'yoo'"
+            f"Unknown dataset {dataset!r}; expected 'carrabin', 'jiang', 'yoo', or 'usher'"
         )
     if model_type not in allowed:
         raise ValueError(
@@ -271,7 +276,7 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_carrabin(params, human_pid, trial, step)
     if dataset == "jiang":
         return _run_jiang(params, human_pid, trial, step)
-    if dataset == "yoo":
+    if dataset in ("yoo", "usher"):
         return _run_yoo(params, human_pid, trial, step)
     raise AssertionError("unreachable")
 

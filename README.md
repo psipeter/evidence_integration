@@ -21,6 +21,7 @@ To navigate uncertain environments, the brain must continuously integrate new in
 | `carrabin` | Prat-Carrabin & Woodford (2024) | 21 | Continuous slider | Response distribution variability |
 | `jiang` | Jiang et al. (2023) | 209 | Binary choice | Switch probability vs. social conflict |
 | `yoo` | Yoo et al. (2025) | 38 | Continuous slider | Power-law decay of update magnitude |
+| `usher` | Rosenbaum et al. (2021) | 97 | Continuous slider (final obs only) | Trial-wise RMSE |
 
 ---
 

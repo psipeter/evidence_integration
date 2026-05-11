@@ -4,7 +4,7 @@ Loss computation for model fitting across experiments.
 Supports multiple objectives:
 
 - **``response``** — single response-accuracy objective for all datasets:
-  mean squared error on carrabin and yoo; for jiang, total negative log-likelihood
+  mean squared error on carrabin, yoo, and usher (usher: observation 10); for jiang, total negative log-likelihood
   of human binary choices under ``sigmoid(beta * model_expectation)`` (requires
   ``beta`` in ``params``).
 - **``shape``** — distribution / curve distance (Wasserstein): full response
@@ -316,27 +316,34 @@ def response_loss(
     """
     Response-accuracy loss for all datasets.
 
-    Carrabin and yoo: root mean squared error (RMSE) between model and human
-    responses.
+    Carrabin, yoo, and usher: root mean squared error (RMSE) between model and human
+    responses (usher: observation 10 only).
     Jiang: mean negative log-likelihood of human binary choices under
     sigmoid(beta * model_expectation), averaged over all (trial, stage) pairs.
     """
     dataset = params["dataset"]
     sq_errors: list[float] = []
 
-    if dataset in ("carrabin", "yoo"):
+    if dataset in ("carrabin", "yoo", "usher"):
+        if dataset == "usher":
+            # TODO: revisit usher masking if fold splits or observation indexing change
+            human_f = human[human["observation"] == 10]
+            model_f = model[model["observation"] == 10]
+        else:
+            human_f = human
+            model_f = model
         pairs = (
-            human[["trial", "observation"]]
+            human_f[["trial", "observation"]]
             .drop_duplicates()
             .sort_values(["trial", "observation"])
         )
         for _, pair in pairs.iterrows():
             trial = int(pair["trial"])
             observation = int(pair["observation"])
-            h = human.query("trial == @trial & observation == @observation")[
+            h = human_f.query("trial == @trial & observation == @observation")[
                 "response"
             ]
-            m = model.query("trial == @trial & observation == @observation")[
+            m = model_f.query("trial == @trial & observation == @observation")[
                 "response"
             ]
             if h.empty or m.empty:
@@ -390,7 +397,9 @@ def response_loss(
             raise ValueError(f"response_loss (mean NLL) is not finite: {out}")
         return out
 
-    raise ValueError("params['dataset'] must be one of 'carrabin', 'jiang', 'yoo'")
+    raise ValueError(
+        "params['dataset'] must be one of 'carrabin', 'jiang', 'yoo', 'usher'"
+    )
 
 
 def shape_loss(
