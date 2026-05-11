@@ -12,7 +12,9 @@ Ported and redesigned from
 - **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive),
 - **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
 - **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
-- **usher:** ``Mean`` (optimal), ``RL`` (naive); same sequential update as yoo
+- **usher:** ``Mean`` (optimal), ``RL`` (naive); ``PopulationCoding`` (Brezis,
+  Bronfman & Usher 2018-style population coding for approximate numerical averaging
+  on the normalized ``value`` scale ``[0, 1]``)
 
 **Unified interface**
 
@@ -181,7 +183,7 @@ _CARRABIN_MODELS = frozenset(
 _JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL", "RL_lambda", "RL_lambda_rd"})
 _YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
 # TODO: add RL_lambda, ADM, NEF for usher when supported
-_USHER_MODELS = frozenset({"Mean", "RL"})
+_USHER_MODELS = frozenset({"Mean", "RL", "PopulationCoding"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -276,9 +278,47 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_carrabin(params, human_pid, trial, step)
     if dataset == "jiang":
         return _run_jiang(params, human_pid, trial, step)
+    if dataset == "usher" and params["model_type"] == "PopulationCoding":
+        return _run_usher_population_coding(params, human_pid, trial, step)
     if dataset in ("yoo", "usher"):
         return _run_yoo(params, human_pid, trial, step)
     raise AssertionError("unreachable")
+
+
+def _run_usher_population_coding(
+    params: dict,
+    human_pid: pd.DataFrame,
+    trial: int,
+    observation: int,
+) -> float:
+    """
+    Brezis, Bronfman & Usher (2018)-style population coding: Gaussian tuning
+    on ``[0, 1]``, accumulate firing across observations 1..n, decode running
+    center of mass at each n.
+    """
+    # TODO: [usher] Revisit if stimulus scale or column semantics differ from ``value`` on [0, 1]
+    subdata = human_pid.query("trial == @trial & observation <= @observation").sort_values(
+        "observation"
+    )
+    values = subdata["value"].to_numpy(dtype=float)
+    if len(values) == 0:
+        return 0.5
+
+    n_neurons = int(round(float(params["n_neurons"])))
+    sigma = float(params["sigma"])
+    if sigma <= 0.0:
+        sigma = 1e-6
+
+    T = np.linspace(0.0, 1.0, n_neurons)
+    total_F = np.zeros(n_neurons, dtype=float)
+    eps = 1e-10
+    for x_t in values:
+        diff = (float(x_t) - T) / sigma
+        total_F += np.exp(-0.5 * diff * diff)
+
+    denom = float(np.sum(total_F)) + eps
+    com = float(np.sum(total_F * T) / denom)
+    return float(np.clip(com, 0.0, 1.0))
 
 
 def _run_carrabin(

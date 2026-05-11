@@ -115,5 +115,9 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
         },
+        "PopulationCoding": {
+            "sigma": (0.01, 1.0, 0.001),
+            "n_neurons": (10, 500, 1),
+        },
     },
 }
