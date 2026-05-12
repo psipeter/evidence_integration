@@ -129,5 +129,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "sigma": (0.01, 1.0, 0.001),
             "n_neurons": (10, 500, 1),
         },
+        "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
+        "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },
 }

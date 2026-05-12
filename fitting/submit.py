@@ -1,5 +1,8 @@
 """
 Submit, resubmit, or locally run model fitting jobs.
+
+Jobs are enumerated from ``MODEL_PARAMS`` (datasets include carrabin, jiang,
+yoo, usher); NEF models use the same SLURM templates as other datasets.
 """
 
 from __future__ import annotations

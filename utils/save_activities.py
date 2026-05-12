@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 Save per-neuron activities and encoders for NEF ensembles.
+
+Works for any dataset with ``{dataset}.pkl`` containing ``trial``, ``observation``,
+and ``value`` columns (carrabin, yoo, jiang, usher). Jiang additionally requires
+``rd`` for alpha bias. Usher matches the yoo-style sequential layout (no ``rd``).
 """
+
+# TODO: [usher] once_per_dt windowed export is skipped for non-carrabin in submit resubmit
 
 from __future__ import annotations
 
@@ -50,11 +56,11 @@ def simulate_and_save(
         t_trial = time.time()
         trial_data = human_pid[human_pid["trial"] == trial].sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        rd_values = (
-            trial_data["rd"].to_numpy(dtype=float)
-            if params["dataset"] == "jiang"
-            else np.zeros(len(obs_values))
-        )
+        # TODO: [usher] Revisit if alpha_bias semantics diverge from yoo (currently zeros)
+        if params["dataset"] == "jiang":
+            rd_values = trial_data["rd"].to_numpy(dtype=float)
+        else:
+            rd_values = np.zeros(len(obs_values))
         p = {**params, "alpha_bias_array": rd_values}
 
         n_obs = len(obs_values)

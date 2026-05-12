@@ -2,6 +2,11 @@
 """
 NEF model of evidence integration (recurrent or synaptic value dynamics).
 
+Supports **carrabin**, **yoo**, **jiang**, and **usher**: sequential scalar
+``value`` inputs per observation (usher: 10 obs/trial, [0, 1] scale, no ``rd`` /
+``qid`` — same loading path as yoo). Jiang additionally uses ``rd`` as the
+alpha-bias channel on ``error[0]``.
+
 Architecture (per trial):
     counting subnetwork (LMU or integrator, pretrained decoders)
     counting → error[dim 0]   (alpha(n) via W_weight decoder)
@@ -417,11 +422,12 @@ def run(
         t_trial = time.time()
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        alpha_bias = (
-            trial_data["rd"].to_numpy(dtype=float)
-            if pfull["dataset"] == "jiang"
-            else np.zeros(len(obs_values))
-        )
+        # TODO: [usher] Confirm observation ordering / missing obs rows if data schema changes
+        if pfull["dataset"] == "jiang":
+            alpha_bias = trial_data["rd"].to_numpy(dtype=float)
+        else:
+            # carrabin, yoo, usher: no rd column; alpha_bias channel unused (zeros)
+            alpha_bias = np.zeros(len(obs_values))
         trial_seed = _trial_seed(int(pfull["seed"]), int(trial))
         p = {**pfull, "alpha_bias_array": alpha_bias, "seed": trial_seed}
         if save_probes:
@@ -459,7 +465,12 @@ def run(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="NEF evidence integration (recurrent / synaptic)")
-    p.add_argument("--dataset", type=str, default="carrabin")
+    p.add_argument(
+        "--dataset",
+        type=str,
+        default="carrabin",
+        choices=("carrabin", "yoo", "jiang", "usher"),
+    )
     p.add_argument("--pid", type=int, default=1)
     p.add_argument("--model_type", type=str, default="NEF_recurrent")
     p.add_argument("--counting", type=str, default=PARAM_DEFAULTS["counting"], choices=("lmu", "integrator"))

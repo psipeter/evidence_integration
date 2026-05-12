@@ -63,6 +63,7 @@ DEFAULT_LOSS: dict[str, str] = {
     "carrabin": "response",
     "jiang": "response",
     "yoo": "response",
+    "usher": "response",
 }
 
 
@@ -228,8 +229,9 @@ def _enqueue_warm_start(
     """
     If RL_lambda params exist for this pid/dataset, enqueue them as the first
     Optuna trial. Returns True if warm start was enqueued, False otherwise.
-    Only applies to NEF models.
+    Only applies to NEF models (carrabin, yoo, jiang, usher).
     """
+    # TODO: [usher] Consider warm-start from RL_lambda_boost if RL_lambda pickle is absent
     if not model_type.startswith("NEF"):
         return False
     warm_path = run_folder / f"RL_lambda_{dataset}_{pid}_params.pkl"

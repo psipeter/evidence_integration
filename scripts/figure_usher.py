@@ -35,17 +35,26 @@ _COLOR_MAP = {
     "PopulationCoding": _PALETTE_COLORS[4],
     # TODO: add RL_lambda_boost to get_palette() in utils/plot_style.py
     "RL_lambda_boost": _PALETTE_COLORS[5],
+    # TODO: [usher] add NEF_recurrent to get_palette() in utils/plot_style.py
+    "NEF_recurrent": _PALETTE_COLORS[6],
 }
 DATASET = "usher"
 
 
-def _model_order(include_rl_lambda: bool, include_rl_lambda_boost: bool) -> list[str]:
-    order = ["Mean", "EmpiricalWeights", "RL"]
-    if include_rl_lambda:
-        order.append("RL_lambda")
-    if include_rl_lambda_boost:
-        order.append("RL_lambda_boost")
-    order.append("PopulationCoding")
+def _model_order(show_extra_models: bool, show_nef: bool) -> list[str]:
+    if show_extra_models:
+        order = [
+            "Mean",
+            "EmpiricalWeights",
+            "RL",
+            "RL_lambda",
+            "RL_lambda_boost",
+            "PopulationCoding",
+        ]
+    else:
+        order = ["Mean", "RL", "PopulationCoding"]
+    if show_nef:
+        order = order + ["NEF_recurrent"]
     return order
 
 
@@ -274,8 +283,8 @@ def _plot_panel_c(
     ax,
     palette: dict,
     run_folder: str,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
     show_models: bool,
 ) -> None:
     """Panel C: task error vs sequence std (human per-pid gray lines; optional pooled model lines)."""
@@ -321,7 +330,7 @@ def _plot_panel_c(
     if show_models:
         run_dir = data_path("runs") / run_folder
         line_kw_mod = {"linewidth": 2.0}
-        active = _model_order(include_rl_lambda, include_rl_lambda_boost)
+        active = _model_order(show_extra_models, show_nef)
         for mt in active:
             mp = run_dir / f"{mt}_{DATASET}_responses.pkl"
             if not mp.exists():
@@ -396,12 +405,12 @@ def _plot_panel_b(
     ax,
     run_folder: str,
     palette: dict,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
 ) -> None:
     """Panel B: cross-participant RMSE by model (boxplot)."""
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    model_order = _model_order(show_extra_models, show_nef)
     rows = []
     for mt in model_order:
         f = run_dir / f"{mt}_{DATASET}_performance.pkl"
@@ -445,8 +454,8 @@ def _plot_panel_d(
     ax,
     run_folder: str,
     palette: dict,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
 ) -> None:
     """Panel D: absolute slope mismatch between each model and human (seq_std vs task_error)."""
     human = pd.read_pickle(data_path("usher.pkl"))
@@ -456,7 +465,7 @@ def _plot_panel_d(
         return
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    model_order = _model_order(show_extra_models, show_nef)
     rows: list[dict] = []
     for mt in model_order:
         resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
@@ -516,8 +525,8 @@ def _plot_panel_e(
     ax,
     run_folder: str,
     palette: dict,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
     show_models: bool,
 ) -> None:
     """Panel E: serial-position regression weights (human + optional model overlays)."""
@@ -530,7 +539,7 @@ def _plot_panel_e(
         return
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    model_order = _model_order(show_extra_models, show_nef)
     if show_models:
         for mt in model_order:
             resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
@@ -575,8 +584,8 @@ def _plot_panel_f(
     ax,
     run_folder: str,
     palette: dict,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
 ) -> None:
     """Panel F: RMSE between each model's per-pid weight profile and human (boxplot)."""
     obs_cols = [f"obs_{i}" for i in range(1, 11)]
@@ -588,7 +597,7 @@ def _plot_panel_f(
         return
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    model_order = _model_order(show_extra_models, show_nef)
     rows: list[dict] = []
     for mt in model_order:
         resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
@@ -641,8 +650,8 @@ def _plot_panel_g(
     palette: dict,
     show_models: bool,
     run_folder: str,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
 ) -> None:
     """Panel G: KDE of human per-pid compression ratios (optional model overlays)."""
     human = pd.read_pickle(data_path("usher.pkl"))
@@ -653,7 +662,7 @@ def _plot_panel_g(
 
     human_color = palette.get("Human", "black")
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    model_order = _model_order(show_extra_models, show_nef)
 
     if show_models:
         for mt in model_order:
@@ -710,8 +719,8 @@ def _plot_panel_h(
     ax,
     run_folder: str,
     palette: dict,
-    include_rl_lambda: bool,
-    include_rl_lambda_boost: bool,
+    show_extra_models: bool,
+    show_nef: bool,
 ) -> None:
     """Panel H: mean compression ratio error (model − human) per model."""
     human = pd.read_pickle(data_path("usher.pkl"))
@@ -722,7 +731,7 @@ def _plot_panel_h(
     human_mean = float(human_r.mean())
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    model_order = _model_order(show_extra_models, show_nef)
     labels: list[str] = []
     errors: list[float] = []
     colors: list[str] = []
@@ -761,16 +770,19 @@ def main() -> None:
         help="Run folder under data/runs/ for performance pickles",
     )
     parser.add_argument(
-        "--include_rl_lambda",
+        "--show_extra_models",
         action="store_true",
         default=False,
-        help="Include RL_lambda (display RL_λ) in panels B–H",
+        help=(
+            "Panels B–H: include EmpiricalWeights, RL_lambda, RL_lambda_boost "
+            "in model order (after RL, before PopulationCoding)"
+        ),
     )
     parser.add_argument(
-        "--include_rl_lambda_boost",
+        "--show_nef",
         action="store_true",
         default=False,
-        help="Include RL_lambda_boost (display RL_λ+) in panels B–H",
+        help="Panels B–H: append NEF_recurrent to model order",
     )
     parser.add_argument(
         "--show_models",
@@ -791,53 +803,53 @@ def main() -> None:
         row0[1],
         args.run_folder,
         palette,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
     )
     _plot_panel_c(
         row0[2],
         palette,
         args.run_folder,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
         args.show_models,
     )
     _plot_panel_d(
         row0[3],
         args.run_folder,
         palette,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
     )
     _plot_panel_e(
         row1[0],
         args.run_folder,
         palette,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
         args.show_models,
     )
     _plot_panel_f(
         row1[1],
         args.run_folder,
         palette,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
     )
     _plot_panel_g(
         row1[2],
         palette,
         args.show_models,
         args.run_folder,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
     )
     _plot_panel_h(
         row1[3],
         args.run_folder,
         palette,
-        args.include_rl_lambda,
-        args.include_rl_lambda_boost,
+        args.show_extra_models,
+        args.show_nef,
     )
 
     label_panels(axes)
