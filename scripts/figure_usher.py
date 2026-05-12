@@ -26,14 +26,25 @@ from utils.plot_style import (
     label_panels,
 )
 
-_COLORBLIND = sns.color_palette("colorblind")
+_PALETTE_COLORS = sns.color_palette("colorblind")
+_COLOR_MAP = {
+    "Mean": _PALETTE_COLORS[0],
+    "EmpiricalWeights": _PALETTE_COLORS[1],
+    "RL": _PALETTE_COLORS[2],
+    "RL_lambda": _PALETTE_COLORS[3],
+    "PopulationCoding": _PALETTE_COLORS[4],
+    # TODO: add RL_lambda_boost to get_palette() in utils/plot_style.py
+    "RL_lambda_boost": _PALETTE_COLORS[5],
+}
 DATASET = "usher"
 
 
-def _model_order(include_rl_lambda: bool) -> list[str]:
+def _model_order(include_rl_lambda: bool, include_rl_lambda_boost: bool) -> list[str]:
     order = ["Mean", "EmpiricalWeights", "RL"]
     if include_rl_lambda:
         order.append("RL_lambda")
+    if include_rl_lambda_boost:
+        order.append("RL_lambda_boost")
     order.append("PopulationCoding")
     return order
 
@@ -45,30 +56,17 @@ def _display(model_type: str) -> str:
         return "PopCode"
     if model_type == "RL_lambda":
         return "RL_λ"
+    if model_type == "RL_lambda_boost":
+        return "RL_λ+"
     if model_type == "EmpiricalWeights":
         return "EmpWeights"
     return model_type
 
 
 def _model_color(mt: str, palette: dict) -> str:
-    """Color for math model type ``mt``; PopulationCoding / RL_lambda use shared fallbacks."""
-    if mt == "PopulationCoding":
-        return palette.get("PopulationCoding", _COLORBLIND[4])
-    if mt == "RL_lambda":
-        return palette.get("RL_lambda", _COLORBLIND[5])
-    if mt == "EmpiricalWeights":
-        # TODO: add EmpiricalWeights to get_palette() in utils/plot_style.py
-        return palette.get("EmpiricalWeights", _COLORBLIND[6])
-    d = _display(mt)
-    if d == "Mean":
-        return palette.get("Mean", _COLORBLIND[0])
-    if d == "RL":
-        return palette.get("RL", _COLORBLIND[1])
-    if d == "PopCode":
-        return palette.get("PopulationCoding", _COLORBLIND[4])
-    if d == "RL_λ":
-        return palette.get("RL_lambda", _COLORBLIND[5])
-    return palette.get(d, "0.5")
+    """Sequential colorblind color by model type (see ``_COLOR_MAP``)."""
+    _ = palette  # reserved for API compatibility with panel call sites
+    return _COLOR_MAP.get(mt, "0.5")
 
 
 def _placeholder(ax, text: str) -> None:
@@ -233,12 +231,52 @@ def _serial_weights(df: pd.DataFrame, use_human_values: bool = False) -> pd.Data
     return out
 
 
+def _compression_ratio(
+    resp_df: pd.DataFrame, use_human_values: bool = False
+) -> pd.Series:
+    """Per-pid compression ratio: mean(|r−0.5|) / mean(|μ−0.5|) at observation 10."""
+    obs10 = resp_df.loc[resp_df["observation"] == 10, ["pid", "trial", "response"]].copy()
+    if obs10.empty:
+        return pd.Series(dtype=float, name="compression_ratio")
+
+    if use_human_values:
+        human = pd.read_pickle(data_path("usher.pkl"))
+        trial_stats = (
+            human.groupby(["pid", "trial"], sort=False)["value"]
+            .mean()
+            .rename("true_mean")
+            .reset_index()
+        )
+    else:
+        if "value" not in resp_df.columns:
+            return pd.Series(dtype=float, name="compression_ratio")
+        trial_stats = (
+            resp_df.groupby(["pid", "trial"], sort=False)["value"]
+            .mean()
+            .rename("true_mean")
+            .reset_index()
+        )
+
+    merged = obs10.merge(trial_stats, on=["pid", "trial"], how="inner")
+    merged["num"] = (merged["response"].astype(float) - 0.5).abs()
+    merged["den"] = (merged["true_mean"].astype(float) - 0.5).abs()
+
+    ratios: dict[int, float] = {}
+    for pid, grp in merged.groupby("pid"):
+        den_mean = float(grp["den"].mean())
+        if den_mean < 1e-15:
+            continue
+        ratios[int(pid)] = float(grp["num"].mean() / den_mean)
+    return pd.Series(ratios, name="compression_ratio")
+
+
 def _plot_panel_c(
     ax,
     palette: dict,
     run_folder: str,
     include_rl_lambda: bool,
-    panel_c_show_models: bool,
+    include_rl_lambda_boost: bool,
+    show_models: bool,
 ) -> None:
     """Panel C: task error vs sequence std (human per-pid gray lines; optional pooled model lines)."""
     df = _usher_seq_std_task_error()
@@ -277,13 +315,13 @@ def _plot_panel_c(
         color="black",
         line_kws=line_kw_pop,
     )
-    if panel_c_show_models:
+    if show_models:
         ax.lines[-1].set_label("Human")
 
-    if panel_c_show_models:
+    if show_models:
         run_dir = data_path("runs") / run_folder
         line_kw_mod = {"linewidth": 2.0}
-        active = _model_order(include_rl_lambda)
+        active = _model_order(include_rl_lambda, include_rl_lambda_boost)
         for mt in active:
             mp = run_dir / f"{mt}_{DATASET}_responses.pkl"
             if not mp.exists():
@@ -354,10 +392,16 @@ def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
     return perf_df["cv_loss_mean"]
 
 
-def _plot_panel_b(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -> None:
+def _plot_panel_b(
+    ax,
+    run_folder: str,
+    palette: dict,
+    include_rl_lambda: bool,
+    include_rl_lambda_boost: bool,
+) -> None:
     """Panel B: cross-participant RMSE by model (boxplot)."""
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda)
+    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
     rows = []
     for mt in model_order:
         f = run_dir / f"{mt}_{DATASET}_performance.pkl"
@@ -397,7 +441,13 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
         annotate_violins(ax, df, "model_disp", "plot_loss", available)
 
 
-def _plot_panel_d(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -> None:
+def _plot_panel_d(
+    ax,
+    run_folder: str,
+    palette: dict,
+    include_rl_lambda: bool,
+    include_rl_lambda_boost: bool,
+) -> None:
     """Panel D: absolute slope mismatch between each model and human (seq_std vs task_error)."""
     human = pd.read_pickle(data_path("usher.pkl"))
     human_slope = _seq_std_slope(human)
@@ -406,7 +456,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
         return
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda)
+    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
     rows: list[dict] = []
     for mt in model_order:
         resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
@@ -462,8 +512,15 @@ def _weights_long(weights: pd.DataFrame, obs_cols: list[str]) -> pd.DataFrame:
     return long.drop(columns=["_c"])
 
 
-def _plot_panel_e(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -> None:
-    """Panel E: serial-position regression weights (human + models; SE across pids)."""
+def _plot_panel_e(
+    ax,
+    run_folder: str,
+    palette: dict,
+    include_rl_lambda: bool,
+    include_rl_lambda_boost: bool,
+    show_models: bool,
+) -> None:
+    """Panel E: serial-position regression weights (human + optional model overlays)."""
     obs_cols = [f"obs_{i}" for i in range(1, 11)]
 
     human = pd.read_pickle(data_path("usher.pkl"))
@@ -471,6 +528,29 @@ def _plot_panel_e(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
     if human_w.empty:
         _placeholder(ax, "No human weight data")
         return
+
+    run_dir = data_path("runs") / run_folder
+    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    if show_models:
+        for mt in model_order:
+            resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
+            if not resp_path.exists():
+                continue
+            model_df = pd.read_pickle(resp_path)
+            mw = _serial_weights(model_df, use_human_values=True)
+            if mw.empty:
+                continue
+            model_long = _weights_long(mw, obs_cols)
+            sns.lineplot(
+                data=model_long,
+                x="observation",
+                y="weight",
+                ax=ax,
+                errorbar="se",
+                color=_model_color(mt, palette),
+                linewidth=2.0,
+                label=_display(mt),
+            )
 
     human_long = _weights_long(human_w, obs_cols)
     sns.lineplot(
@@ -484,28 +564,6 @@ def _plot_panel_e(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
         label="Human",
     )
 
-    run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda)
-    for mt in model_order:
-        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
-        if not resp_path.exists():
-            continue
-        model_df = pd.read_pickle(resp_path)
-        mw = _serial_weights(model_df, use_human_values=True)
-        if mw.empty:
-            continue
-        model_long = _weights_long(mw, obs_cols)
-        sns.lineplot(
-            data=model_long,
-            x="observation",
-            y="weight",
-            ax=ax,
-            errorbar="se",
-            color=_model_color(mt, palette),
-            linewidth=2.0,
-            label=_display(mt),
-        )
-
     ax.set_xticks(list(range(1, 11)))
     ax.set_xlabel("Observation")
     ax.set_ylabel("Regression weight")
@@ -513,7 +571,13 @@ def _plot_panel_e(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_f(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -> None:
+def _plot_panel_f(
+    ax,
+    run_folder: str,
+    palette: dict,
+    include_rl_lambda: bool,
+    include_rl_lambda_boost: bool,
+) -> None:
     """Panel F: RMSE between each model's per-pid weight profile and human (boxplot)."""
     obs_cols = [f"obs_{i}" for i in range(1, 11)]
 
@@ -524,7 +588,7 @@ def _plot_panel_f(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
         return
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(include_rl_lambda)
+    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
     rows: list[dict] = []
     for mt in model_order:
         resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
@@ -572,6 +636,122 @@ def _plot_panel_f(ax, run_folder: str, palette: dict, include_rl_lambda: bool) -
         annotate_violins(ax, plot_df, "model_disp", "rmse", available)
 
 
+def _plot_panel_g(
+    ax,
+    palette: dict,
+    show_models: bool,
+    run_folder: str,
+    include_rl_lambda: bool,
+    include_rl_lambda_boost: bool,
+) -> None:
+    """Panel G: KDE of human per-pid compression ratios (optional model overlays)."""
+    human = pd.read_pickle(data_path("usher.pkl"))
+    ratios = _compression_ratio(human, use_human_values=False)
+    if ratios.empty or len(ratios) < 2:
+        _placeholder(ax, "No compression ratio data")
+        return
+
+    human_color = palette.get("Human", "black")
+    run_dir = data_path("runs") / run_folder
+    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+
+    if show_models:
+        for mt in model_order:
+            resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
+            if not resp_path.exists():
+                continue
+            model_df = pd.read_pickle(resp_path)
+            mr = _compression_ratio(model_df, use_human_values=True)
+            if mr.empty or len(mr) < 2:
+                continue
+            sns.kdeplot(
+                x=mr,
+                ax=ax,
+                color=_model_color(mt, palette),
+                fill=True,
+                alpha=0.2,
+                linewidth=1.5,
+                label=_display(mt),
+            )
+
+    sns.kdeplot(
+        x=ratios,
+        ax=ax,
+        color=human_color,
+        fill=True,
+        alpha=0.3,
+        linewidth=1.5,
+        label="Human" if show_models else None,
+    )
+    ax.axvline(
+        1.0,
+        color="0.4",
+        linestyle="--",
+        linewidth=1.0,
+        label="No compression",
+    )
+    ax.text(
+        0.05,
+        0.95,
+        r"ratio $= \frac{\overline{|r - 0.5|}}{\overline{|\mu - 0.5|}}$",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8,
+    )
+    ax.set_xlabel("Compression ratio")
+    ax.set_ylabel("Density")
+    ax.legend(loc="upper right", frameon=False)
+    ax.set_ylim(0, 10)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_panel_h(
+    ax,
+    run_folder: str,
+    palette: dict,
+    include_rl_lambda: bool,
+    include_rl_lambda_boost: bool,
+) -> None:
+    """Panel H: mean compression ratio error (model − human) per model."""
+    human = pd.read_pickle(data_path("usher.pkl"))
+    human_r = _compression_ratio(human, use_human_values=False)
+    if human_r.empty:
+        _placeholder(ax, "No human compression data")
+        return
+    human_mean = float(human_r.mean())
+
+    run_dir = data_path("runs") / run_folder
+    model_order = _model_order(include_rl_lambda, include_rl_lambda_boost)
+    labels: list[str] = []
+    errors: list[float] = []
+    colors: list[str] = []
+    for mt in model_order:
+        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
+        if not resp_path.exists():
+            continue
+        model_df = pd.read_pickle(resp_path)
+        mr = _compression_ratio(model_df, use_human_values=True)
+        if mr.empty:
+            continue
+        labels.append(_display(mt))
+        errors.append(float(mr.mean() - human_mean))
+        colors.append(_model_color(mt, palette))
+
+    if not labels:
+        _placeholder(ax, "No model responses")
+        return
+
+    x = np.arange(len(labels))
+    ax.bar(x, errors, color=colors, width=0.65, edgecolor="none")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.axhline(0.0, color="0.4", linestyle="--", linewidth=1.0)
+    ax.set_xlabel("")
+    ax.set_ylabel("Mean compression ratio error (model − human)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Usher summary figure (panels A–H).")
     parser.add_argument(
@@ -584,13 +764,19 @@ def main() -> None:
         "--include_rl_lambda",
         action="store_true",
         default=False,
-        help="Include RL_lambda (display RL_λ) in panels B–F",
+        help="Include RL_lambda (display RL_λ) in panels B–H",
     )
     parser.add_argument(
-        "--panel_c_show_models",
+        "--include_rl_lambda_boost",
         action="store_true",
         default=False,
-        help="Panel C: overlay population regplots per model + legend",
+        help="Include RL_lambda_boost (display RL_λ+) in panels B–H",
+    )
+    parser.add_argument(
+        "--show_models",
+        action="store_true",
+        default=False,
+        help="Panels C, E, G: overlay model population curves / KDEs + legend where applicable",
     )
     args = parser.parse_args()
 
@@ -601,19 +787,58 @@ def main() -> None:
     row0, row1 = axes[0], axes[1]
 
     _plot_panel_a(row0[0])
-    _plot_panel_b(row0[1], args.run_folder, palette, args.include_rl_lambda)
+    _plot_panel_b(
+        row0[1],
+        args.run_folder,
+        palette,
+        args.include_rl_lambda,
+        args.include_rl_lambda_boost,
+    )
     _plot_panel_c(
         row0[2],
         palette,
         args.run_folder,
         args.include_rl_lambda,
-        args.panel_c_show_models,
+        args.include_rl_lambda_boost,
+        args.show_models,
     )
-    _plot_panel_d(row0[3], args.run_folder, palette, args.include_rl_lambda)
-    _plot_panel_e(row1[0], args.run_folder, palette, args.include_rl_lambda)
-    _plot_panel_f(row1[1], args.run_folder, palette, args.include_rl_lambda)
-    for ax in row1[2:]:
-        _blank_panel(ax)
+    _plot_panel_d(
+        row0[3],
+        args.run_folder,
+        palette,
+        args.include_rl_lambda,
+        args.include_rl_lambda_boost,
+    )
+    _plot_panel_e(
+        row1[0],
+        args.run_folder,
+        palette,
+        args.include_rl_lambda,
+        args.include_rl_lambda_boost,
+        args.show_models,
+    )
+    _plot_panel_f(
+        row1[1],
+        args.run_folder,
+        palette,
+        args.include_rl_lambda,
+        args.include_rl_lambda_boost,
+    )
+    _plot_panel_g(
+        row1[2],
+        palette,
+        args.show_models,
+        args.run_folder,
+        args.include_rl_lambda,
+        args.include_rl_lambda_boost,
+    )
+    _plot_panel_h(
+        row1[3],
+        args.run_folder,
+        palette,
+        args.include_rl_lambda,
+        args.include_rl_lambda_boost,
+    )
 
     label_panels(axes)
 

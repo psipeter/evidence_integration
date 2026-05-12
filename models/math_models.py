@@ -13,8 +13,8 @@ Ported and redesigned from
 - **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
 - **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
 - **usher:** ``Mean`` (optimal), ``EmpiricalWeights`` (population OLS serial weights),
-  ``RL`` (naive), ``RL_lambda`` (same update rule as
-  yoo); ``PopulationCoding`` (Brezis,
+  ``RL`` (naive), ``RL_lambda`` / ``RL_lambda_boost`` (same base update as yoo;
+  boost adds ``beta`` on the final observation for usher), ``PopulationCoding`` (Brezis,
   Bronfman & Usher 2018-style population coding for approximate numerical averaging
   on the normalized ``value`` scale ``[0, 1]``)
 
@@ -203,7 +203,14 @@ EMPIRICAL_WEIGHTS = np.array(
 
 # TODO: add ADM, NEF for usher when supported
 _USHER_MODELS = frozenset(
-    {"Mean", "EmpiricalWeights", "RL", "RL_lambda", "PopulationCoding"}
+    {
+        "Mean",
+        "EmpiricalWeights",
+        "RL",
+        "RL_lambda",
+        "RL_lambda_boost",
+        "PopulationCoding",
+    }
 )
 
 
@@ -548,6 +555,20 @@ def _run_yoo(
         expectation = 0.0
         for n, value in enumerate(values, start=1):
             alpha = alpha_0 / (n ** lambda_)
+            error = value - expectation
+            expectation += alpha * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
+    if model_type == "RL_lambda_boost":
+        if dataset != "usher":
+            raise ValueError("RL_lambda_boost is defined only for dataset 'usher'")
+        alpha_0 = float(params["alpha_0"])
+        lambda_ = float(params["lambda_"])
+        beta = float(params["beta"])
+        n_total = 10
+        expectation = 0.0
+        for n, value in enumerate(values, start=1):
+            alpha = alpha_0 / (n ** lambda_) + (beta if n == n_total else 0.0)
             error = value - expectation
             expectation += alpha * error
             expectation = float(np.clip(expectation, -1, 1))

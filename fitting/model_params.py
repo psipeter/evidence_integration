@@ -120,6 +120,11 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
+        "RL_lambda_boost": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            "beta": (0.0, 1.0, 0.001),
+        },
         "PopulationCoding": {
             "sigma": (0.01, 1.0, 0.001),
             "n_neurons": (10, 500, 1),
