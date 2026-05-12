@@ -17,6 +17,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.gridspec import GridSpecFromSubplotSpec
 from matplotlib.lines import Line2D
+from scipy.optimize import curve_fit
 from scipy.stats import linregress, pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,6 +30,7 @@ from fitting.losses import (
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import (
     FIGURE_SIZE,
+    annotate_violins,
     apply_style,
     get_palette,
     label_panels,
@@ -42,7 +44,7 @@ MODEL_ORDER = ["Mean", "RL", "ADM", "NEF_recurrent"]
 OBS_MAX = 30
 # Panel C: line / fit styling
 PANEL_C_MEAN_LINE_COLOR = "#1a1a2e"
-PANEL_C_GROUP_FIT_COLOR = "#c0392b"
+PANEL_C_GROUP_FIT_COLOR = "black"
 PANEL_C_PID_LINE_COLOR = "0.75"
 # Shift whole slope triangle right (observation units) so it clears the curve
 PANEL_C_TRIANGLE_SHIFT_N = 2.5
@@ -165,8 +167,6 @@ def _yoo_abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:
 
 def _fit_power_law_to_mean_curve(curve: pd.Series) -> tuple[float, float] | None:
     """Fit A·n^(−λ) to a mean |Δ| curve (smoothing + log-log regression, as in losses.py)."""
-    from scipy.stats import linregress
-
     curve = curve[curve.index >= 2]
     if len(curve) < 3:
         return None
@@ -286,10 +286,11 @@ def _plot_group_slope_triangle(
     ax.set_ylim(0.0, new_top)
 
 
-def _plot_panel_c(ax, _palette: dict) -> None:
+def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
     """
-    Group mean |Δresponse| vs observation (seaborn lineplot + CI), group power-law
-    overlay, and per-participant power-law curves (fitting.losses logic).
+    Per-pid human power-law curves, model mean |Δresponse| (lineplot + CI) with dashed
+    population power-law overlays, human mean |Δresponse| (lineplot + CI), and dashed
+    human population power-law overlay.
     """
     human_path = data_path("yoo.pkl")
     if not human_path.exists():
@@ -328,6 +329,47 @@ def _plot_panel_c(ax, _palette: dict) -> None:
             clip_on=False,
         )
 
+    run_dir = data_path("runs") / run_folder
+    dataset = "yoo"
+    for mt in MODEL_ORDER:
+        resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
+        if not resp_path.exists():
+            continue
+        resp = pd.read_pickle(resp_path)
+        long_m = _yoo_abs_delta_long(resp)
+        long_m = long_m[long_m["delta"].notna() & (long_m["observation"] >= 2)].copy()
+        if long_m.empty:
+            continue
+        disp = _display(mt)
+        col = palette.get(disp, palette.get(mt, "0.5"))
+        sns.lineplot(
+            data=long_m,
+            x="observation",
+            y="delta",
+            color=col,
+            linewidth=1.5,
+            errorbar="ci",
+            ax=ax,
+            zorder=2,
+            label=disp,
+        )
+        curve_m = long_m.groupby("observation")["delta"].mean()
+        fit_m = _fit_power_law_to_mean_curve(curve_m)
+        if fit_m is not None:
+            amp_m, lam_m = fit_m
+            n_fine_m = np.linspace(1.0, float(OBS_MAX), 200)
+            y_fit_m = amp_m * (n_fine_m**-lam_m)
+            ax.plot(
+                n_fine_m,
+                y_fit_m,
+                color=col,
+                linewidth=1.5,
+                linestyle="--",
+                zorder=2.5,
+                label="_nolegend_",
+                clip_on=False,
+            )
+
     sns.lineplot(
         data=long_df,
         x="observation",
@@ -336,7 +378,8 @@ def _plot_panel_c(ax, _palette: dict) -> None:
         linewidth=2.0,
         errorbar="ci",
         ax=ax,
-        zorder=2,
+        zorder=3,
+        label="Human",
     )
 
     if group_fit is not None:
@@ -348,8 +391,9 @@ def _plot_panel_c(ax, _palette: dict) -> None:
             y_fit,
             color=PANEL_C_GROUP_FIT_COLOR,
             linewidth=2.2,
-            linestyle="-",
+            linestyle="--",
             zorder=4,
+            clip_on=False,
         )
 
     ax.set_xlim(0.5, float(OBS_MAX))
@@ -358,47 +402,22 @@ def _plot_panel_c(ax, _palette: dict) -> None:
 
     ax.set_xlabel("Observation")
     ax.set_ylabel("Response change")
-    ax.text(
-        0.98,
-        0.98,
-        r"$\Delta r = \frac{\alpha_0}{n^{\lambda}}$",
-        transform=ax.transAxes,
-        ha="right",
-        va="top",
-        fontsize=plt.rcParams.get("font.size", 9),
-    )
 
-    if group_fit is not None:
-        amp_g, lam_g = group_fit
-        n_alpha = 1.0
-        y_alpha = amp_g * (n_alpha**-lam_g)
-        ax.annotate(
-            r"$\alpha_0$",
-            xy=(n_alpha, y_alpha),
-            xytext=(22, 28),
-            textcoords="offset points",
-            color=PANEL_C_GROUP_FIT_COLOR,
-            fontsize=plt.rcParams.get("font.size", 9),
-            fontweight="bold",
-            arrowprops=dict(
-                arrowstyle="-|>",
-                color=PANEL_C_GROUP_FIT_COLOR,
-                shrinkA=0,
-                shrinkB=3,
-                lw=0.8,
-                mutation_scale=8,
-            ),
-            zorder=6,
-        )
-        _plot_group_slope_triangle(
-            ax,
-            amp_g,
-            lam_g,
-            PANEL_C_GROUP_FIT_COLOR,
-            n_lo=2.0,
-            n_hi=14.0,
-            lift_frac=0.1,
-            zorder=5,
+    legend_order = ["Human"] + [_display(m) for m in MODEL_ORDER]
+    h_in, lab_in = ax.get_legend_handles_labels()
+    by_lbl: dict[str, object] = {}
+    for h, lab in zip(h_in, lab_in):
+        if lab in legend_order and lab not in by_lbl:
+            by_lbl[lab] = h
+    h_out = [by_lbl[l] for l in legend_order if l in by_lbl]
+    l_out = [l for l in legend_order if l in by_lbl]
+    if h_out:
+        ax.legend(
+            h_out,
+            l_out,
+            frameon=False,
+            title=None,
+            loc="upper right",
         )
 
     sns.despine(ax=ax, top=True, right=True)
@@ -450,93 +469,112 @@ def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _load_loss_long(
-    run_dir: Path,
-    model_order: list[str],
-    dataset: str,
-) -> pd.DataFrame:
-    """
-    Load per-pid shape loss for each model.
-    Prefers shape_component from performance files when available and
-    non-NaN; falls back to recomputing via losses.shape_loss().
-    Returns DataFrame with columns: pid, model_type, loss.
+def _panel_d_mean_abs_delta_per_pid_obs(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean |Δresponse| per (pid, observation) across trials (observation ≥ 2)."""
+    g = df[df["delta"].notna() & (df["observation"] >= 2)].copy()
+    if g.empty:
+        return pd.DataFrame(columns=["pid", "observation", "delta"])
+    return (
+        g.groupby(["pid", "observation"], sort=False)["delta"]
+        .mean()
+        .reset_index()
+    )
 
-    Copied from scripts/response_change_yoo.py.
-    """
-    import fitting.losses as losses_mod
 
-    rows = []
-    human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
+def _panel_d_fit_lambda_per_pid(pid_obs: pd.DataFrame) -> pd.Series:
+    """Per-pid decay exponent λ from ``curve_fit`` to A·n^(-λ) on mean |Δ| vs observation."""
 
-    for mt in model_order:
-        perf_path = run_dir / f"{mt}_{dataset}_performance.pkl"
-        resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
-        if not perf_path.exists():
+    def power_law(n: np.ndarray, A: float, lam: float) -> np.ndarray:
+        return A * np.power(np.asarray(n, dtype=float), -lam)
+
+    out: dict[int, float] = {}
+    for pid, grp in pid_obs.groupby("pid", sort=False):
+        gg = grp.sort_values("observation")
+        n_obs = gg["observation"].to_numpy(dtype=float)
+        y = gg["delta"].to_numpy(dtype=float)
+        if len(n_obs) < 3:
+            out[int(pid)] = float("nan")
             continue
-        perf = pd.read_pickle(perf_path)
-
-        if "shape_component" in perf.columns and perf["shape_component"].notna().all():
-            for _, row in perf.iterrows():
-                rows.append(
-                    {
-                        "pid": int(row["pid"]),
-                        "model_type": mt,
-                        "loss": float(row["shape_component"]),
-                    }
-                )
+        if not (np.all(np.isfinite(n_obs)) and np.all(np.isfinite(y))):
+            out[int(pid)] = float("nan")
             continue
-
-        if not resp_path.exists():
-            print(f"Warning: missing {resp_path.name}, cannot compute loss for {mt}")
-            continue
-        responses = pd.read_pickle(resp_path)
-        for pid, model_pid in responses.groupby("pid"):
-            human_pid = human_full[human_full["pid"] == pid]
-            params = {"dataset": dataset, "pid": int(pid)}
-            if dataset == "jiang":
-                params_path = run_dir / f"{mt}_{dataset}_params.pkl"
-                if params_path.exists():
-                    params_df = pd.read_pickle(params_path)
-                    beta_row = params_df[params_df["pid"] == pid]
-                    if not beta_row.empty and "beta" in beta_row.columns:
-                        params["beta"] = float(beta_row["beta"].iloc[0])
-            try:
-                loss = losses_mod.shape_loss(params, model_pid, human_pid)
-                rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
-            except Exception as e:
-                print(f"Warning: shape_loss failed for {mt} pid={pid}: {e}")
-
-    return pd.DataFrame(rows)
+        try:
+            popt, _ = curve_fit(
+                power_law,
+                n_obs,
+                y,
+                p0=[0.1, 0.5],
+                bounds=([0.0, 0.0], [2.0, 2.0]),
+                maxfev=2000,
+            )
+            out[int(pid)] = float(popt[1])
+        except (RuntimeError, ValueError, TypeError):
+            out[int(pid)] = float("nan")
+    return pd.Series(out, name="lambda_")
 
 
 def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
-    """Shape loss boxplot — colors match scripts/response_change_yoo.py plot_palette."""
+    """Per-pid |λ_model − λ_human| boxplot (λ from power-law fit to mean |Δresponse| vs observation)."""
+    human_path = data_path("yoo.pkl")
+    if not human_path.exists():
+        _placeholder(ax, "No human data")
+        return
+
+    human = pd.read_pickle(human_path)
+    long_h = _yoo_abs_delta_long(human)
+    human_pid_obs = _panel_d_mean_abs_delta_per_pid_obs(long_h)
+    if human_pid_obs.empty:
+        _placeholder(ax, "No human data")
+        return
+
+    lam_human = _panel_d_fit_lambda_per_pid(human_pid_obs)
+    lam_human = lam_human[np.isfinite(lam_human)]
+    if lam_human.empty:
+        _placeholder(ax, "No human data")
+        return
+
     run_dir = data_path("runs") / run_folder
-    loss_df = _load_loss_long(run_dir, MODEL_ORDER, "yoo")
-    if loss_df.empty:
+    dataset = "yoo"
+    rows: list[dict] = []
+    for mt in MODEL_ORDER:
+        resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
+        if not resp_path.exists():
+            continue
+        resp = pd.read_pickle(resp_path)
+        long_m = _yoo_abs_delta_long(resp)
+        pid_obs_m = _panel_d_mean_abs_delta_per_pid_obs(long_m)
+        lam_model = _panel_d_fit_lambda_per_pid(pid_obs_m)
+        for pid, lm in lam_model.items():
+            if int(pid) not in lam_human.index:
+                continue
+            lh = float(lam_human[int(pid)])
+            lm = float(lm)
+            if not (np.isfinite(lh) and np.isfinite(lm)):
+                continue
+            rows.append(
+                {
+                    "pid": int(pid),
+                    "model_disp": _display(mt),
+                    "lambda_error": abs(lm - lh),
+                }
+            )
+
+    if not rows:
         _placeholder(ax, "No model data")
         return
 
-    loss_df["model_disp"] = loss_df["model_type"].apply(_display)
-    models_with_loss = loss_df["model_disp"].unique().tolist()
-    df = loss_df.groupby("pid").filter(
-        lambda g: len(g) == len(models_with_loss)
-    ).copy()
-    if df.empty:
-        _placeholder(ax, "No model data")
-        return
-
+    df = pd.DataFrame(rows)
     order = [_display(m) for m in MODEL_ORDER]
     available = [m for m in order if m in set(df["model_disp"])]
-    plot_palette = {
-        _display(mt): palette.get(mt, palette.get(_display(mt), "gray"))
-        for mt in MODEL_ORDER
-    }
-    pal = {m: plot_palette[m] for m in available}
+    if not available:
+        _placeholder(ax, "No model data")
+        return
+
+    pal = {m: palette.get(m, "0.5") for m in available}
     sns.boxplot(
         data=df,
         x="model_disp",
-        y="loss",
+        y="lambda_error",
         order=available,
         hue="model_disp",
         palette=pal,
@@ -544,8 +582,10 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
         ax=ax,
     )
     ax.set_xlabel("")
-    ax.set_ylabel("Power law fit error (|Δα₀| + |Δλ|)")
+    ax.set_ylabel("Decay rate error (|Δλ|)")
     sns.despine(ax=ax, top=True, right=True)
+    if len(available) >= 2:
+        annotate_violins(ax, df, "model_disp", "lambda_error", available)
 
 
 def _panel_e_load_counting_yoo(run_dir: Path) -> tuple[Optional[pd.DataFrame], int]:
@@ -2087,7 +2127,7 @@ def main() -> None:
 
         _plot_panel_a(row0[0], full=True)
         _plot_panel_b(row0[1], args.run_folder, palette)
-        _plot_panel_c(row0[2], palette)
+        _plot_panel_c(row0[2], args.run_folder, palette)
         _plot_panel_d(row0[3], args.run_folder, palette)
 
         _plot_panel_e(row1[0], args.run_folder)
@@ -2105,7 +2145,7 @@ def main() -> None:
 
         _plot_panel_a(row0[0], full=False)
         _plot_panel_b(row0[1], args.run_folder, palette)
-        _plot_panel_c(row0[2], palette)
+        _plot_panel_c(row0[2], args.run_folder, palette)
         _plot_panel_d(row0[3], args.run_folder, palette)
 
         _plot_panel_e(row1[0], args.run_folder)
