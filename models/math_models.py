@@ -12,7 +12,8 @@ Ported and redesigned from
 - **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive),
 - **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
 - **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
-- **usher:** ``Mean`` (optimal), ``RL`` (naive), ``RL_lambda`` (same update rule as
+- **usher:** ``Mean`` (optimal), ``EmpiricalWeights`` (population OLS serial weights),
+  ``RL`` (naive), ``RL_lambda`` (same update rule as
   yoo); ``PopulationCoding`` (Brezis,
   Bronfman & Usher 2018-style population coding for approximate numerical averaging
   on the normalized ``value`` scale ``[0, 1]``)
@@ -183,8 +184,27 @@ _CARRABIN_MODELS = frozenset(
 )
 _JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL", "RL_lambda", "RL_lambda_rd"})
 _YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
+# Population-mean human serial-position OLS weights (usher); see EmpiricalWeights.
+EMPIRICAL_WEIGHTS = np.array(
+    [
+        0.0638,
+        0.0775,
+        0.0723,
+        0.0704,
+        0.0656,
+        0.0781,
+        0.0754,
+        0.0755,
+        0.0684,
+        0.1503,
+    ],
+    dtype=float,
+)
+
 # TODO: add ADM, NEF for usher when supported
-_USHER_MODELS = frozenset({"Mean", "RL", "RL_lambda", "PopulationCoding"})
+_USHER_MODELS = frozenset(
+    {"Mean", "EmpiricalWeights", "RL", "RL_lambda", "PopulationCoding"}
+)
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -493,11 +513,28 @@ def _run_yoo(
     observation: int,
 ) -> float:
     model_type = params["model_type"]
+    dataset = params["dataset"]
     subdata = human_pid.query("trial == @trial & observation <= @observation")
     values = subdata["value"].to_numpy()
 
     if model_type == "Mean":
         return float(np.mean(values))
+    if model_type == "EmpiricalWeights":
+        if dataset != "usher":
+            raise ValueError("EmpiricalWeights is defined only for dataset 'usher'")
+        sub_sorted = human_pid.query("trial == @trial & observation <= @observation").sort_values(
+            "observation"
+        )
+        vals = sub_sorted["value"].to_numpy(dtype=float)
+        n = len(vals)
+        if n == 0:
+            return 0.5
+        w = EMPIRICAL_WEIGHTS[:n]
+        den = float(np.sum(w))
+        if den <= 0.0:
+            return 0.5
+        num = float(np.sum(w * vals))
+        return float(np.clip(num / den, 0.0, 1.0))
     if model_type == "RL":
         expectation = 0.0
         for value in values:

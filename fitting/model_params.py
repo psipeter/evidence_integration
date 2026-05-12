@@ -112,6 +112,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
     "usher": {
         "Mean": {},
+        "EmpiricalWeights": {},
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
         },
