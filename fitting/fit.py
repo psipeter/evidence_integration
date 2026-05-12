@@ -271,7 +271,6 @@ def fit(
     run_folder = Path(run_folder)
     if loss_type is None:
         loss_type = DEFAULT_LOSS.get(dataset, "response")
-    start = time.time()
     human = pd.read_pickle(data_path(f"{dataset}.pkl"))
     human = human.query("pid == @pid")
     if human.empty:
@@ -313,6 +312,7 @@ def fit(
         )
         params["seed"] = abs(hash((int(params["pid"]), trial.number))) % (2**31)
 
+        trial_wall_start = time.time()
         # run full simulation once
         if model_type in ("NEF_recurrent", "NEF_synaptic"):
             model_responses_full = _run_nef_all_trials(params, human)
@@ -340,6 +340,11 @@ def fit(
             mean_loss, fold_losses = _cross_validate(
                 params, model_responses_full, human, k=k, loss_type=loss_type
             )
+
+        trial.set_user_attr(
+            "runtime_minutes",
+            (time.time() - trial_wall_start) / 60.0,
+        )
 
         resp_c = trial.user_attrs.get("response_component", float("nan"))
         shape_c = trial.user_attrs.get("shape_component", float("nan"))
@@ -392,7 +397,10 @@ def fit(
             best_trial.user_attrs.get("beta", float("nan"))
         )
 
-    runtime = (time.time() - start) / 60.0
+    # TODO: runtime now represents total wall time per Optuna trial across all folds
+    # (one model simulation + loss/CV through the last fold); performance.pkl stores
+    # this for the best trial only, not elapsed time for the entire study.
+    runtime = float(best_trial.user_attrs.get("runtime_minutes", float("nan")))
     params_df = pd.DataFrame([best_params])
     performance_df = pd.DataFrame(
         [
@@ -407,7 +415,7 @@ def fit(
                 "shape_component": float(
                     best_trial.user_attrs.get("shape_component", float("nan"))
                 ),
-                "runtime": float(runtime),
+                "runtime": runtime,
             }
         ]
     )
