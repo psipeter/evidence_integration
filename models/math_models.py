@@ -12,7 +12,8 @@ Ported and redesigned from
 - **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive),
 - **jiang:** ``Bayes`` (optimal), ``DeGroot`` (human-matching), ``RL`` (naive)
 - **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
-- **usher:** ``Mean`` (optimal), ``RL`` (naive); ``PopulationCoding`` (Brezis,
+- **usher:** ``Mean`` (optimal), ``RL`` (naive), ``RL_lambda`` (same update rule as
+  yoo); ``PopulationCoding`` (Brezis,
   Bronfman & Usher 2018-style population coding for approximate numerical averaging
   on the normalized ``value`` scale ``[0, 1]``)
 
@@ -182,8 +183,8 @@ _CARRABIN_MODELS = frozenset(
 )
 _JIANG_MODELS = frozenset({"Bayes", "DeGroot", "RL", "RL_lambda", "RL_lambda_rd"})
 _YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
-# TODO: add RL_lambda, ADM, NEF for usher when supported
-_USHER_MODELS = frozenset({"Mean", "RL", "PopulationCoding"})
+# TODO: add ADM, NEF for usher when supported
+_USHER_MODELS = frozenset({"Mean", "RL", "RL_lambda", "PopulationCoding"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
