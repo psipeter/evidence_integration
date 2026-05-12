@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Usher summary figure: row 1 (panels A–D), row 2 reserved (E–H)."""
+"""Usher summary figure: 2×4 panels (A–D task / behavior; E compression; F–H reserved)."""
 
 from __future__ import annotations
 
@@ -26,39 +26,26 @@ from utils.plot_style import (
     label_panels,
 )
 
-_PALETTE_COLORS = sns.color_palette("colorblind")
-_COLOR_MAP = {
-    "Mean": _PALETTE_COLORS[0],
-    "EmpiricalWeights": _PALETTE_COLORS[1],
-    "RL": _PALETTE_COLORS[2],
-    "RL_lambda": _PALETTE_COLORS[3],
-    "PopulationCoding": _PALETTE_COLORS[4],
-    # TODO: add RL_lambda_boost to get_palette() in utils/plot_style.py
-    "RL_lambda_boost": _PALETTE_COLORS[5],
-    # TODO: [usher] add NEF_recurrent to get_palette() in utils/plot_style.py
-    "NEF_recurrent": _PALETTE_COLORS[6],
-}
 DATASET = "usher"
 
 
-def _model_order(show_extra_models: bool, show_nef: bool) -> list[str]:
+def _model_order(show_extra_models: bool) -> list[str]:
     if show_extra_models:
-        order = [
+        return [
             "Mean",
             "EmpiricalWeights",
             "RL",
             "RL_lambda",
             "RL_lambda_boost",
             "PopulationCoding",
+            "NEF_recurrent",
         ]
-    else:
-        order = ["Mean", "RL", "PopulationCoding"]
-    if show_nef:
-        order = order + ["NEF_recurrent"]
-    return order
+    return ["Mean", "RL", "PopulationCoding", "NEF_recurrent"]
 
 
 def _display(model_type: str) -> str:
+    if model_type == "NEF_recurrent":
+        return "NEF"
     if model_type.startswith("NEF"):
         return "NEF"
     if model_type == "PopulationCoding":
@@ -73,9 +60,26 @@ def _display(model_type: str) -> str:
 
 
 def _model_color(mt: str, palette: dict) -> str:
-    """Sequential colorblind color by model type (see ``_COLOR_MAP``)."""
-    _ = palette  # reserved for API compatibility with panel call sites
-    return _COLOR_MAP.get(mt, "0.5")
+    """Model color from ``get_palette()`` (same keys as figure_carrabin / figure_yoo)."""
+    cb = sns.color_palette("colorblind")
+    if mt in ("NEF_recurrent", "NEF_synaptic") or mt.startswith("NEF"):
+        return palette.get("NEF", palette.get("NEF_recurrent", "0.5"))
+    if mt == "Mean":
+        return palette.get("Mean", "0.5")
+    if mt == "RL":
+        return palette.get("RL", "0.5")
+    if mt == "RL_lambda":
+        return palette.get("RL_lambda", "0.5")
+    if mt == "EmpiricalWeights":
+        # TODO: add EmpiricalWeights to get_palette() in utils/plot_style.py
+        return palette.get("EmpiricalWeights", cb[4])
+    if mt == "PopulationCoding":
+        # Intentional: same palette role as NoisyCounting / ADM (human-matching) in get_palette().
+        return palette.get("ADM", palette.get("NoisyCounting", "0.5"))
+    if mt == "RL_lambda_boost":
+        # TODO: add RL_lambda_boost to get_palette() in utils/plot_style.py
+        return palette.get("RL_lambda_boost", cb[6])
+    return palette.get(mt, "0.5")
 
 
 def _placeholder(ax, text: str) -> None:
@@ -229,6 +233,9 @@ def _serial_weights(df: pd.DataFrame, use_human_values: bool = False) -> pd.Data
         if coef.size < 11:
             continue
         w = coef[1:11]
+        w_sum = w.sum()
+        if abs(w_sum) > 1e-10:
+            w = w / w_sum
         row = {"pid": int(pid)}
         for i in range(10):
             row[f"obs_{i + 1}"] = float(w[i])
@@ -284,10 +291,8 @@ def _plot_panel_c(
     palette: dict,
     run_folder: str,
     show_extra_models: bool,
-    show_nef: bool,
-    show_models: bool,
 ) -> None:
-    """Panel C: task error vs sequence std (human per-pid gray lines; optional pooled model lines)."""
+    """Panel C: task error vs sequence std (human per-pid gray; population + model overlays)."""
     df = _usher_seq_std_task_error()
     if df.empty or len(df) < 2:
         _placeholder(ax, "No usher data")
@@ -324,72 +329,35 @@ def _plot_panel_c(
         color="black",
         line_kws=line_kw_pop,
     )
-    if show_models:
-        ax.lines[-1].set_label("Human")
+    ax.lines[-1].set_label("Human")
 
-    if show_models:
-        run_dir = data_path("runs") / run_folder
-        line_kw_mod = {"linewidth": 2.0}
-        active = _model_order(show_extra_models, show_nef)
-        for mt in active:
-            mp = run_dir / f"{mt}_{DATASET}_responses.pkl"
-            if not mp.exists():
-                continue
-            trial_pool = _model_per_trial_seq_std_task_error(pd.read_pickle(mp))
-            if len(trial_pool) < 2:
-                continue
-            disp = _display(mt)
-            sns.regplot(
-                data=trial_pool,
-                x="seq_std",
-                y="task_error",
-                ax=ax,
-                scatter=False,
-                truncate=True,
-                ci=95,
-                color=_model_color(mt, palette),
-                line_kws=line_kw_mod,
-            )
-            ax.lines[-1].set_label(disp)
-        ax.legend(frameon=False)
+    run_dir = data_path("runs") / run_folder
+    line_kw_mod = {"linewidth": 2.0}
+    active = _model_order(show_extra_models)
+    for mt in active:
+        mp = run_dir / f"{mt}_{DATASET}_responses.pkl"
+        if not mp.exists():
+            continue
+        trial_pool = _model_per_trial_seq_std_task_error(pd.read_pickle(mp))
+        if len(trial_pool) < 2:
+            continue
+        disp = _display(mt)
+        sns.regplot(
+            data=trial_pool,
+            x="seq_std",
+            y="task_error",
+            ax=ax,
+            scatter=False,
+            truncate=True,
+            ci=95,
+            color=_model_color(mt, palette),
+            line_kws=line_kw_mod,
+        )
+        ax.lines[-1].set_label(disp)
+    ax.legend(frameon=False)
     ax.set_xlabel("Sequence std")
     ax.set_ylabel("Task error")
     sns.despine(ax=ax, top=True, right=True)
-
-
-def _seq_std_slope(df: pd.DataFrame) -> pd.Series:
-    """
-    Per-pid OLS slope of task_error ~ seq_std (linregress), matching panel C
-    construction. ``df`` is full human usher data, or model responses (uses
-    ``usher.pkl`` for ``value`` / ``true_mean`` when ``value`` is absent).
-    """
-    from scipy.stats import linregress
-
-    if "value" in df.columns:
-        human_src = df
-    else:
-        human_src = pd.read_pickle(data_path("usher.pkl"))
-    trial_stats = (
-        human_src.groupby(["pid", "trial"], sort=False)["value"]
-        .agg(seq_std="std", true_mean="mean")
-        .reset_index()
-    )
-    final = df.loc[df["observation"] == 10, ["pid", "trial", "response"]]
-    per_trial = final.merge(trial_stats, on=["pid", "trial"], how="inner")
-    per_trial["task_error"] = (
-        per_trial["response"].astype(float) - per_trial["true_mean"].astype(float)
-    ).abs()
-
-    slopes: dict[int, float] = {}
-    for pid, grp in per_trial.groupby("pid"):
-        if len(grp) < 2:
-            continue
-        slope, _, _, _, _ = linregress(
-            grp["seq_std"].to_numpy(dtype=float),
-            grp["task_error"].to_numpy(dtype=float),
-        )
-        slopes[int(pid)] = float(slope)
-    return pd.Series(slopes, name="slope")
 
 
 def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
@@ -406,11 +374,10 @@ def _plot_panel_b(
     run_folder: str,
     palette: dict,
     show_extra_models: bool,
-    show_nef: bool,
 ) -> None:
     """Panel B: cross-participant RMSE by model (boxplot)."""
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(show_extra_models, show_nef)
+    model_order = _model_order(show_extra_models)
     rows = []
     for mt in model_order:
         f = run_dir / f"{mt}_{DATASET}_performance.pkl"
@@ -450,68 +417,6 @@ def _plot_panel_b(
         annotate_violins(ax, df, "model_disp", "plot_loss", available)
 
 
-def _plot_panel_d(
-    ax,
-    run_folder: str,
-    palette: dict,
-    show_extra_models: bool,
-    show_nef: bool,
-) -> None:
-    """Panel D: absolute slope mismatch between each model and human (seq_std vs task_error)."""
-    human = pd.read_pickle(data_path("usher.pkl"))
-    human_slope = _seq_std_slope(human)
-    if human_slope.empty:
-        _placeholder(ax, "No human slopes")
-        return
-
-    run_dir = data_path("runs") / run_folder
-    model_order = _model_order(show_extra_models, show_nef)
-    rows: list[dict] = []
-    for mt in model_order:
-        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
-        if not resp_path.exists():
-            continue
-        model_df = pd.read_pickle(resp_path)
-        m_slope = _seq_std_slope(model_df)
-        common = human_slope.index.intersection(m_slope.index)
-        for pid in common:
-            err = abs(float(m_slope.loc[pid]) - float(human_slope.loc[pid]))
-            rows.append(
-                {"pid": int(pid), "model_disp": _display(mt), "slope_err": err}
-            )
-
-    if not rows:
-        _placeholder(ax, "No model responses")
-        return
-
-    plot_df = pd.DataFrame(rows)
-    order = [_display(m) for m in model_order]
-    available = [m for m in order if m in set(plot_df["model_disp"])]
-    if not available:
-        _placeholder(ax, "No slope data")
-        return
-
-    pal = {
-        m: _model_color(next(mt for mt in model_order if _display(mt) == m), palette)
-        for m in available
-    }
-    sns.boxplot(
-        data=plot_df,
-        x="model_disp",
-        y="slope_err",
-        order=available,
-        hue="model_disp",
-        palette=pal,
-        legend=False,
-        ax=ax,
-    )
-    ax.set_xlabel("")
-    ax.set_ylabel("Slope error (|model − human|)")
-    sns.despine(ax=ax, top=True, right=True)
-    if len(available) >= 2 and not plot_df.empty:
-        annotate_violins(ax, plot_df, "model_disp", "slope_err", available)
-
-
 def _weights_long(weights: pd.DataFrame, obs_cols: list[str]) -> pd.DataFrame:
     """Long format: pid, observation (1–10), weight (for lineplot + errorbar across pids)."""
     long = weights.reset_index().melt(
@@ -521,15 +426,13 @@ def _weights_long(weights: pd.DataFrame, obs_cols: list[str]) -> pd.DataFrame:
     return long.drop(columns=["_c"])
 
 
-def _plot_panel_e(
+def _plot_panel_d(
     ax,
     run_folder: str,
     palette: dict,
     show_extra_models: bool,
-    show_nef: bool,
-    show_models: bool,
 ) -> None:
-    """Panel E: serial-position regression weights (human + optional model overlays)."""
+    """Panel D: serial-position regression weights (model overlays, then human on top)."""
     obs_cols = [f"obs_{i}" for i in range(1, 11)]
 
     human = pd.read_pickle(data_path("usher.pkl"))
@@ -539,27 +442,26 @@ def _plot_panel_e(
         return
 
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(show_extra_models, show_nef)
-    if show_models:
-        for mt in model_order:
-            resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
-            if not resp_path.exists():
-                continue
-            model_df = pd.read_pickle(resp_path)
-            mw = _serial_weights(model_df, use_human_values=True)
-            if mw.empty:
-                continue
-            model_long = _weights_long(mw, obs_cols)
-            sns.lineplot(
-                data=model_long,
-                x="observation",
-                y="weight",
-                ax=ax,
-                errorbar="se",
-                color=_model_color(mt, palette),
-                linewidth=2.0,
-                label=_display(mt),
-            )
+    model_order = _model_order(show_extra_models)
+    for mt in model_order:
+        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
+        if not resp_path.exists():
+            continue
+        model_df = pd.read_pickle(resp_path)
+        mw = _serial_weights(model_df, use_human_values=True)
+        if mw.empty:
+            continue
+        model_long = _weights_long(mw, obs_cols)
+        sns.lineplot(
+            data=model_long,
+            x="observation",
+            y="weight",
+            ax=ax,
+            errorbar="se",
+            color=_model_color(mt, palette),
+            linewidth=2.0,
+            label=_display(mt),
+        )
 
     human_long = _weights_long(human_w, obs_cols)
     sns.lineplot(
@@ -580,80 +482,13 @@ def _plot_panel_e(
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_f(
-    ax,
-    run_folder: str,
-    palette: dict,
-    show_extra_models: bool,
-    show_nef: bool,
-) -> None:
-    """Panel F: RMSE between each model's per-pid weight profile and human (boxplot)."""
-    obs_cols = [f"obs_{i}" for i in range(1, 11)]
-
-    human = pd.read_pickle(data_path("usher.pkl"))
-    human_w = _serial_weights(human, use_human_values=False)
-    if human_w.empty:
-        _placeholder(ax, "No human weight data")
-        return
-
-    run_dir = data_path("runs") / run_folder
-    model_order = _model_order(show_extra_models, show_nef)
-    rows: list[dict] = []
-    for mt in model_order:
-        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
-        if not resp_path.exists():
-            continue
-        model_df = pd.read_pickle(resp_path)
-        mw = _serial_weights(model_df, use_human_values=True)
-        common = human_w.index.intersection(mw.index)
-        for pid in common:
-            diff = mw.loc[pid, obs_cols].to_numpy(dtype=float) - human_w.loc[
-                pid, obs_cols
-            ].to_numpy(dtype=float)
-            rmse = float(np.sqrt(np.mean(diff**2)))
-            rows.append({"pid": int(pid), "model_disp": _display(mt), "rmse": rmse})
-
-    if not rows:
-        _placeholder(ax, "No model weight RMSE")
-        return
-
-    plot_df = pd.DataFrame(rows)
-    order = [_display(m) for m in model_order]
-    available = [m for m in order if m in set(plot_df["model_disp"])]
-    if not available:
-        _placeholder(ax, "No RMSE data")
-        return
-
-    pal = {
-        m: _model_color(next(mt for mt in model_order if _display(mt) == m), palette)
-        for m in available
-    }
-    sns.boxplot(
-        data=plot_df,
-        x="model_disp",
-        y="rmse",
-        order=available,
-        hue="model_disp",
-        palette=pal,
-        legend=False,
-        ax=ax,
-    )
-    ax.set_xlabel("")
-    ax.set_ylabel("Weight profile RMSE")
-    sns.despine(ax=ax, top=True, right=True)
-    if len(available) >= 2 and not plot_df.empty:
-        annotate_violins(ax, plot_df, "model_disp", "rmse", available)
-
-
-def _plot_panel_g(
+def _plot_panel_e(
     ax,
     palette: dict,
-    show_models: bool,
     run_folder: str,
     show_extra_models: bool,
-    show_nef: bool,
 ) -> None:
-    """Panel G: KDE of human per-pid compression ratios (optional model overlays)."""
+    """Panel E: KDE of per-pid compression ratios (model overlays, then human on top)."""
     human = pd.read_pickle(data_path("usher.pkl"))
     ratios = _compression_ratio(human, use_human_values=False)
     if ratios.empty or len(ratios) < 2:
@@ -662,26 +497,25 @@ def _plot_panel_g(
 
     human_color = palette.get("Human", "black")
     run_dir = data_path("runs") / run_folder
-    model_order = _model_order(show_extra_models, show_nef)
+    model_order = _model_order(show_extra_models)
 
-    if show_models:
-        for mt in model_order:
-            resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
-            if not resp_path.exists():
-                continue
-            model_df = pd.read_pickle(resp_path)
-            mr = _compression_ratio(model_df, use_human_values=True)
-            if mr.empty or len(mr) < 2:
-                continue
-            sns.kdeplot(
-                x=mr,
-                ax=ax,
-                color=_model_color(mt, palette),
-                fill=True,
-                alpha=0.2,
-                linewidth=1.5,
-                label=_display(mt),
-            )
+    for mt in model_order:
+        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
+        if not resp_path.exists():
+            continue
+        model_df = pd.read_pickle(resp_path)
+        mr = _compression_ratio(model_df, use_human_values=True)
+        if mr.empty or len(mr) < 2:
+            continue
+        sns.kdeplot(
+            x=mr,
+            ax=ax,
+            color=_model_color(mt, palette),
+            fill=True,
+            alpha=0.2,
+            linewidth=1.5,
+            label=_display(mt),
+        )
 
     sns.kdeplot(
         x=ratios,
@@ -690,7 +524,7 @@ def _plot_panel_g(
         fill=True,
         alpha=0.3,
         linewidth=1.5,
-        label="Human" if show_models else None,
+        label="Human",
     )
     ax.axvline(
         1.0,
@@ -715,54 +549,10 @@ def _plot_panel_g(
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_h(
-    ax,
-    run_folder: str,
-    palette: dict,
-    show_extra_models: bool,
-    show_nef: bool,
-) -> None:
-    """Panel H: mean compression ratio error (model − human) per model."""
-    human = pd.read_pickle(data_path("usher.pkl"))
-    human_r = _compression_ratio(human, use_human_values=False)
-    if human_r.empty:
-        _placeholder(ax, "No human compression data")
-        return
-    human_mean = float(human_r.mean())
-
-    run_dir = data_path("runs") / run_folder
-    model_order = _model_order(show_extra_models, show_nef)
-    labels: list[str] = []
-    errors: list[float] = []
-    colors: list[str] = []
-    for mt in model_order:
-        resp_path = run_dir / f"{mt}_{DATASET}_responses.pkl"
-        if not resp_path.exists():
-            continue
-        model_df = pd.read_pickle(resp_path)
-        mr = _compression_ratio(model_df, use_human_values=True)
-        if mr.empty:
-            continue
-        labels.append(_display(mt))
-        errors.append(float(mr.mean() - human_mean))
-        colors.append(_model_color(mt, palette))
-
-    if not labels:
-        _placeholder(ax, "No model responses")
-        return
-
-    x = np.arange(len(labels))
-    ax.bar(x, errors, color=colors, width=0.65, edgecolor="none")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.axhline(0.0, color="0.4", linestyle="--", linewidth=1.0)
-    ax.set_xlabel("")
-    ax.set_ylabel("Mean compression ratio error (model − human)")
-    sns.despine(ax=ax, top=True, right=True)
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Usher summary figure (panels A–H).")
+    parser = argparse.ArgumentParser(
+        description="Usher summary figure (2×4 panels: A–D row 1, E–H row 2).",
+    )
     parser.add_argument(
         "--run_folder",
         type=str,
@@ -774,26 +564,16 @@ def main() -> None:
         action="store_true",
         default=False,
         help=(
-            "Panels B–H: include EmpiricalWeights, RL_lambda, RL_lambda_boost "
+            "Panels B–E: include EmpiricalWeights, RL_lambda, RL_lambda_boost "
             "in model order (after RL, before PopulationCoding)"
         ),
-    )
-    parser.add_argument(
-        "--show_nef",
-        action="store_true",
-        default=False,
-        help="Panels B–H: append NEF_recurrent to model order",
-    )
-    parser.add_argument(
-        "--show_models",
-        action="store_true",
-        default=False,
-        help="Panels C, E, G: overlay model population curves / KDEs + legend where applicable",
     )
     args = parser.parse_args()
 
     apply_style()
     palette = get_palette()
+    if "Human" not in palette:
+        palette["Human"] = "black"
 
     fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
     row0, row1 = axes[0], axes[1]
@@ -804,53 +584,27 @@ def main() -> None:
         args.run_folder,
         palette,
         args.show_extra_models,
-        args.show_nef,
     )
     _plot_panel_c(
         row0[2],
         palette,
         args.run_folder,
         args.show_extra_models,
-        args.show_nef,
-        args.show_models,
     )
     _plot_panel_d(
         row0[3],
         args.run_folder,
         palette,
         args.show_extra_models,
-        args.show_nef,
     )
     _plot_panel_e(
         row1[0],
-        args.run_folder,
         palette,
-        args.show_extra_models,
-        args.show_nef,
-        args.show_models,
-    )
-    _plot_panel_f(
-        row1[1],
-        args.run_folder,
-        palette,
-        args.show_extra_models,
-        args.show_nef,
-    )
-    _plot_panel_g(
-        row1[2],
-        palette,
-        args.show_models,
         args.run_folder,
         args.show_extra_models,
-        args.show_nef,
     )
-    _plot_panel_h(
-        row1[3],
-        args.run_folder,
-        palette,
-        args.show_extra_models,
-        args.show_nef,
-    )
+    for ax in row1[1:]:
+        _blank_panel(ax)
 
     label_panels(axes)
 
