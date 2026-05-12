@@ -38,9 +38,10 @@ def _model_order(show_extra_models: bool) -> list[str]:
             "RL_lambda",
             "RL_lambda_boost",
             "PopulationCoding",
+            "PoissonCoding",
             "NEF_recurrent",
         ]
-    return ["Mean", "RL", "PopulationCoding", "NEF_recurrent"]
+    return ["Mean", "RL", "PopulationCoding", "PoissonCoding", "NEF_recurrent"]
 
 
 def _display(model_type: str) -> str:
@@ -50,6 +51,8 @@ def _display(model_type: str) -> str:
         return "NEF"
     if model_type == "PopulationCoding":
         return "PopCode"
+    if model_type == "PoissonCoding":
+        return "PoissonCode"
     if model_type == "RL_lambda":
         return "RL_λ"
     if model_type == "RL_lambda_boost":
@@ -76,6 +79,9 @@ def _model_color(mt: str, palette: dict) -> str:
     if mt == "PopulationCoding":
         # Intentional: same palette role as NoisyCounting / ADM (human-matching) in get_palette().
         return palette.get("ADM", palette.get("NoisyCounting", "0.5"))
+    if mt == "PoissonCoding":
+        # TODO: add PoissonCoding to get_palette() in utils/plot_style.py; use sequential color for now.
+        return cb[7]
     if mt == "RL_lambda_boost":
         # TODO: add RL_lambda_boost to get_palette() in utils/plot_style.py
         return palette.get("RL_lambda_boost", cb[6])

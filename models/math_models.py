@@ -16,7 +16,8 @@ Ported and redesigned from
   ``RL`` (naive), ``RL_lambda`` / ``RL_lambda_boost`` (same base update as yoo;
   boost adds ``beta`` on the final observation for usher), ``PopulationCoding`` (Brezis,
   Bronfman & Usher 2018-style population coding for approximate numerical averaging
-  on the normalized ``value`` scale ``[0, 1]``)
+  on the normalized ``value`` scale ``[0, 1]``), ``PoissonCoding`` (same as
+  ``PopulationCoding`` but per-observation Poisson noise on tuning-curve rates)
 
 **Unified interface**
 
@@ -210,6 +211,7 @@ _USHER_MODELS = frozenset(
         "RL_lambda",
         "RL_lambda_boost",
         "PopulationCoding",
+        "PoissonCoding",
     }
 )
 
@@ -308,6 +310,8 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_jiang(params, human_pid, trial, step)
     if dataset == "usher" and params["model_type"] == "PopulationCoding":
         return _run_usher_population_coding(params, human_pid, trial, step)
+    if dataset == "usher" and params["model_type"] == "PoissonCoding":
+        return _run_usher_poisson_coding(params, human_pid, trial, step)
     if dataset in ("yoo", "usher"):
         return _run_yoo(params, human_pid, trial, step)
     raise AssertionError("unreachable")
@@ -343,6 +347,52 @@ def _run_usher_population_coding(
     for x_t in values:
         diff = (float(x_t) - T) / sigma
         total_F += np.exp(-0.5 * diff * diff)
+
+    denom = float(np.sum(total_F)) + eps
+    com = float(np.sum(total_F * T) / denom)
+    return float(np.clip(com, 0.0, 1.0))
+
+
+def _run_usher_poisson_coding(
+    params: dict,
+    human_pid: pd.DataFrame,
+    trial: int,
+    observation: int,
+) -> float:
+    """
+    Like ``PopulationCoding`` (Gaussian tuning on ``[0, 1]``, accumulate and decode
+    running center of mass), but each observation's tuning-curve rates are realized
+    as Poisson draws scaled by ``gain`` before accumulation.
+    """
+    subdata = human_pid.query("trial == @trial & observation <= @observation").sort_values(
+        "observation"
+    )
+    if len(subdata) == 0:
+        return 0.5
+
+    n_neurons = int(round(float(params["n_neurons"])))
+    sigma = float(params["sigma"])
+    if sigma <= 0.0:
+        sigma = 1e-6
+    gain = float(params["gain"])
+    if gain <= 0.0:
+        gain = 1e-6
+
+    T = np.linspace(0.0, 1.0, n_neurons)
+    total_F = np.zeros(n_neurons, dtype=float)
+    eps = 1e-10
+    base_seed = int(params.get("seed", 0))
+
+    for obs_idx, x_t in zip(
+        subdata["observation"].astype(int),
+        subdata["value"].astype(float),
+    ):
+        rng = np.random.default_rng(base_seed + int(trial) * 10000 + int(obs_idx))
+        diff = (float(x_t) - T) / sigma
+        F_i = np.exp(-0.5 * diff * diff)
+        lam = F_i * gain
+        F_i_noisy = rng.poisson(lam).astype(float) / gain
+        total_F += F_i_noisy
 
     denom = float(np.sum(total_F)) + eps
     com = float(np.sum(total_F * T) / denom)
