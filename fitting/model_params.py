@@ -34,11 +34,13 @@ _NEF_FIXED: dict[str, object] = {
     "n_seeds": 1,
     "seed": 0,
     "pes_learning_rate": 1e-4,
+    # TODO: 0.113 derived from human OLS serial weight analysis (mean obs10 weight 0.213 minus equal-weighting baseline 0.1); set to 0.113 in this dict to enable usher obs10 boost.
+    "obs10_boost": 0.113,
 }
 
 _NEF_RANGES: dict[str, tuple] = {
-    "lambda_": (0.01, 1.0, 0.001),
-    "alpha_0": (0.01, 1.0, 0.001),
+    "lambda_": (1.0, 1.0, 0.001),
+    "alpha_0": (1.0, 1.0, 0.001),
 }
 
 _NEF_RANGES_JIANG: dict[str, tuple] = {

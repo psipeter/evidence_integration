@@ -70,6 +70,7 @@ PARAM_DEFAULTS: dict = {
     "alpha_0": 1,
     "T_error": 0.5,  # transform on error→value connection; defaults to tau_fb for backward compatibility
     "tau_error": 0.1,
+    "obs10_boost": 0.0,  # default; fixed value also in _NEF_FIXED (see fitting.model_params)
 }
 
 
@@ -115,6 +116,22 @@ def _make_alpha_bias_input(obs_values: np.ndarray, params: dict) -> callable:
         phase = (t - t_iti) - step * t_step
         if step < n_obs and phase < t_obs:
             return float(bias[step])
+        return 0.0
+
+    return fn
+
+
+def _make_obs10_boost_input(params: dict) -> callable:
+    """Scalar boost on error[0] during usher observation 10 only; 0 otherwise."""
+    t_obs = float(params["t_obs"])
+    t_iti = float(params["t_iti"])
+    boost = float(params["obs10_boost"])
+    t_start = t_iti + 9.0 * (t_obs + t_iti)
+    t_end = t_start + t_obs
+
+    def fn(t: float) -> float:
+        if t_start <= t < t_end:
+            return boost
         return 0.0
 
     return fn
@@ -314,6 +331,18 @@ def build_network(
             synapse=None,
             sample_every=float(params["dt"]),
         )
+
+        if float(params.get("obs10_boost", 0.0)) > 0.0 and params.get("dataset") == "usher":
+            net.node_obs10_boost = nengo.Node(
+                _make_obs10_boost_input(params),
+                label="node_obs10_boost",
+            )
+            nengo.Connection(
+                net.node_obs10_boost,
+                net.error[0],
+                synapse=float(params["tau_ff"]),
+                seed=seed,
+            )
 
     return net
 
