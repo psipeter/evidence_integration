@@ -1,39 +1,17 @@
+# NOTE: shape_loss, joint_loss archived in archive/fitting/archive_losses.py
 """
 Loss computation for model fitting across experiments.
 
-Supports multiple objectives:
-
-- **``response``** — single response-accuracy objective for all datasets:
-  mean squared error on carrabin, yoo, and usher (usher: observation 10); for jiang, total negative log-likelihood
-  of human binary choices under ``sigmoid(beta * model_expectation)`` (requires
-  ``beta`` in ``params``).
-- **``shape``** — distribution / curve distance (Wasserstein): full response
-  distribution for carrabin, smoothed mean ``|Δresponse|`` curve for yoo,
-  mean |human_coef - model_coef| for jiang ND-weighted OLS coefficients predicting
-  current response sign, averaged over stages 1 and 2 (requires ``beta`` for model
-  sampling). The human-side target is built from
-  the full task pickle for all ``pid`` in the fold slice; the model side uses
-  only fold-filtered ``model`` rows.
-- **``joint``** — combined ``(1 - w) * response_loss + w * shape_loss`` with
-  dataset-specific ``w`` (see ``JOINT_LOSS_W``).
+Response-accuracy loss: root mean squared error (RMSE) on carrabin and yoo.
 
 This module does not depend on the model implementation layer.
 """
 
 import numpy as np
 import pandas as pd
-import scipy.special
-from scipy.stats import wasserstein_distance
 
-DELTA_SMOOTH_WINDOW = 3  # rolling window for smoothing delta curves in shape_loss
-POWER_LAW_SMOOTH_WINDOW = 5  # smoothing window for power law fitting in yoo shape loss
-JOINT_LOSS_W = {
-    "carrabin": 0.2,
-    "yoo":      0.5,
-    "jiang":    0.8,
-}
-
-QID_MIN_TRIALS = 10  # minimum trials per qid to include in carrabin shape loss
+POWER_LAW_SMOOTH_WINDOW = 5  # smoothing window for power law fitting in yoo figures / diagnostics
+QID_MIN_TRIALS = 10  # minimum trials per qid to include in carrabin qid-std diagnostic (figures)
 
 
 def _mean_qid_std(df: pd.DataFrame, qid_min_trials: int = QID_MIN_TRIALS) -> float:
@@ -90,425 +68,50 @@ def _fit_power_law_params(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _observations_switch_conflict(
-    human_df: pd.DataFrame,
-    model_responses: pd.Series,
-) -> pd.DataFrame:
-    """
-    Compute (pid, trial, stage, switch, conflict) for all stages > 0.
-
-    ``human_df`` must include jiang columns ``pid``, ``trial``, ``stage``,
-    ``value``, ``response`` (human ``response`` is ignored when
-    ``model_responses`` is provided).
-
-    ``model_responses`` is indexed by ``(pid, trial, stage)`` with binary
-    ``±1`` responses. Conflict is the fraction of neighbor ``value`` entries
-    at the current stage that disagree with the model's sign at the previous
-    stage.
-    """
-    rows: list[dict] = []
-    for (pid, trial), grp in human_df.groupby(["pid", "trial"], sort=False):
-        for st in sorted(grp["stage"].unique()):
-            if st <= 0:
-                continue
-            prev = grp[grp["stage"] == st - 1]
-            curr = grp[grp["stage"] == st]
-            if len(prev) == 0 or len(curr) == 0:
-                continue
-            key_p = (int(pid), int(trial), int(st - 1))
-            key_c = (int(pid), int(trial), int(st))
-            try:
-                prev_resp = float(model_responses.loc[key_p])
-                curr_resp = float(model_responses.loc[key_c])
-            except KeyError:
-                continue
-            switch = int(
-                not np.isclose(prev_resp, curr_resp, rtol=0.0, atol=1e-5)
-            )
-            prev_dir = float(np.sign(prev_resp))
-            if prev_dir == 0.0:
-                prev_dir = 1.0
-            disagree = (curr["value"].astype(float) != prev_dir).sum()
-            n = len(curr)
-            conflict = float(disagree / n)
-            rows.append(
-                {
-                    "pid": int(pid),
-                    "trial": int(trial),
-                    "stage": int(st),
-                    "switch": switch,
-                    "conflict": conflict,
-                }
-            )
-    return pd.DataFrame(rows)
-
-
-def _apply_beta_sampling(
-    model: pd.DataFrame,
-    params: dict,
-    seed: int | None = None,
-) -> pd.Series:
-    """
-    Convert continuous model responses to binary ±1 via sigmoid(beta * response),
-    then return as Series indexed by (pid, trial, stage).
-    """
-    if seed is None:
-        seed = int(params.get("seed", 42))
-    rng = np.random.RandomState(seed)
-    beta = float(params["beta"])
-    df = model.copy()
-    p_pos = scipy.special.expit(beta * df["response"].to_numpy(dtype=float))
-    samples = rng.binomial(1, p_pos)
-    df["response"] = np.where(samples == 1, 1.0, -1.0)
-    s = df.set_index(["pid", "trial", "stage"])["response"]
-    if s.index.duplicated().any():
-        s = s[~s.index.duplicated(keep="first")]
-    return s
-
-
-def _logistic_switch_slope(
-    model: pd.DataFrame,
-    human: pd.DataFrame,
-) -> pd.Series:
-    """
-    For each pid, fit logistic regression slope of P(switch) vs true_rd,
-    using only disagreeing neighbors at stages 2 and 3.
-    """
-    from scipy.optimize import minimize
-    from scipy.special import expit
-
-    model_resp = (
-        model[model["stage"].isin([1, 2, 3])][["pid", "trial", "stage", "response"]]
-        .drop_duplicates(["pid", "trial", "stage"])
-        .rename(columns={"response": "model_response"})
-    )
-    rows = []
-    for (pid, trial), grp in human.groupby(["pid", "trial"], sort=False):
-        for stage in [2, 3]:
-            curr = grp[grp["stage"] == stage]
-            prev_stage = stage - 1
-            prev_resp = model_resp.query(
-                "pid == @pid & trial == @trial & stage == @prev_stage"
-            )
-            curr_resp = model_resp.query(
-                "pid == @pid & trial == @trial & stage == @stage"
-            )
-            if prev_resp.empty or curr.empty or curr_resp.empty:
-                continue
-            prev_sign = float(prev_resp["model_response"].iloc[0])
-            curr_sign = float(curr_resp["model_response"].iloc[0])
-            switch = int(prev_sign != curr_sign)
-            for _, neighbor in curr.iterrows():
-                if float(neighbor["value"]) != prev_sign:
-                    rows.append(
-                        {
-                            "pid": int(pid),
-                            "true_rd": float(neighbor["true_rd"]),
-                            "switch": switch,
-                        }
-                    )
-
-    if not rows:
-        return pd.Series(dtype=float)
-    df = pd.DataFrame(rows)
-
-    slopes: dict[int, float] = {}
-    for pid, grp in df.groupby("pid"):
-        if len(grp) < 10:
-            continue
-        x_arr = grp["true_rd"].values
-        y_arr = grp["switch"].values.astype(float)
-
-        def neg_log_lik(params_xy):
-            a, bpar = params_xy
-            p = np.clip(expit(a * x_arr + bpar), 1e-7, 1 - 1e-7)
-            return -np.sum(y_arr * np.log(p) + (1 - y_arr) * np.log(1 - p))
-
-        res = minimize(neg_log_lik, [1.0, 0.0], method="Nelder-Mead")
-        slopes[int(pid)] = float(res.x[0])
-    return pd.Series(slopes)
-
-
-def _compute_nd_coef_loss(
-    model: pd.DataFrame,
-    human: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    For each pid and stage (1 and 2), compute OLS coefficient for ND-weighted
-    sum of observations (orthogonalized against unweighted sum) predicting
-    current response sign. Returns DataFrame with columns: pid, stage, coef_nd.
-
-    model must have binary ±1 responses (after beta sampling).
-    """
-    from numpy.linalg import lstsq
-
-    rows: list[dict] = []
-    for (pid, trial), grp in human.groupby(["pid", "trial"], sort=False):
-        for stage in [1, 2]:
-            curr = grp[grp["stage"] == stage]
-            model_stage = model[
-                (model["pid"] == pid)
-                & (model["trial"] == trial)
-                & (model["stage"] == stage)
-            ]
-            if curr.empty or model_stage.empty:
-                continue
-            curr_sign = float(model_stage["response"].iloc[0])
-            obs = curr["value"].astype(float).values
-            rd = curr["true_rd"].values
-            rows.append(
-                {
-                    "pid": int(pid),
-                    "trial": int(trial),
-                    "stage": int(stage),
-                    "curr_sign": curr_sign,
-                    "unweighted": float(np.sum(obs)),
-                    "nd_weighted": float(np.sum(rd * obs)),
-                }
-            )
-
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(rows)
-    result_rows: list[dict] = []
-
-    for stage in [1, 2]:
-        s_df = df[df["stage"] == stage].copy()
-        if len(s_df) < 10:
-            continue
-        b = lstsq(
-            s_df["unweighted"].values.reshape(-1, 1),
-            s_df["nd_weighted"].values,
-            rcond=None,
-        )[0][0]
-        s_df["nd_orth"] = s_df["nd_weighted"] - b * s_df["unweighted"]
-
-        for pid, grp in s_df.groupby("pid"):
-            if len(grp) < 5:
-                continue
-            X = np.column_stack(
-                [
-                    np.ones(len(grp)),
-                    grp["unweighted"].values,
-                    grp["nd_orth"].values,
-                ]
-            )
-            coeffs, _, _, _ = lstsq(
-                X, grp["curr_sign"].values.astype(float), rcond=None
-            )
-            result_rows.append(
-                {
-                    "pid": int(pid),
-                    "stage": int(stage),
-                    "coef_nd": float(coeffs[2]),
-                }
-            )
-
-    return pd.DataFrame(result_rows)
-
-
 def response_loss(
     params: dict,
     model: pd.DataFrame,
     human: pd.DataFrame,
 ) -> float:
     """
-    Response-accuracy loss for all datasets.
-
-    Carrabin, yoo, and usher: root mean squared error (RMSE) between model and human
-    responses (usher: observation 10 only).
-    Jiang: mean negative log-likelihood of human binary choices under
-    sigmoid(beta * model_expectation), averaged over all (trial, stage) pairs.
+    Response-accuracy loss for carrabin and yoo: root mean squared error (RMSE)
+    between model and human responses.
     """
     dataset = params["dataset"]
+    if dataset not in ("carrabin", "yoo"):
+        raise ValueError(
+            "params['dataset'] must be one of 'carrabin', 'yoo'"
+        )
+
     sq_errors: list[float] = []
-
-    if dataset in ("carrabin", "yoo", "usher"):
-        if dataset == "usher":
-            # TODO: revisit usher masking if fold splits or observation indexing change
-            human_f = human[human["observation"] == 10]
-            model_f = model[model["observation"] == 10]
-        else:
-            human_f = human
-            model_f = model
-        pairs = (
-            human_f[["trial", "observation"]]
-            .drop_duplicates()
-            .sort_values(["trial", "observation"])
-        )
-        for _, pair in pairs.iterrows():
-            trial = int(pair["trial"])
-            observation = int(pair["observation"])
-            h = human_f.query("trial == @trial & observation == @observation")[
-                "response"
-            ]
-            m = model_f.query("trial == @trial & observation == @observation")[
-                "response"
-            ]
-            if h.empty or m.empty:
-                raise ValueError(
-                    f"Missing response for (trial={trial}, observation={observation})"
-                )
-            human_response = float(h.iloc[0])
-            model_response = float(m.iloc[0])
-            err = human_response - model_response
-            sq_errors.append(err**2)
-
-        out = float(np.sqrt(np.mean(sq_errors)))
-        if not np.isfinite(out):
-            raise ValueError(f"response_loss is not finite: {out}")
-        return out
-
-    if dataset == "jiang":
-        if "beta" not in params:
-            raise ValueError(
-                "params must include 'beta' for jiang response_loss computation"
-            )
-        beta = float(params["beta"])
-        pairs = (
-            human[["trial", "stage"]]
-            .drop_duplicates()
-            .sort_values(["trial", "stage"])
-        )
-        total_logp = 0.0
-        for _, pair in pairs.iterrows():
-            trial = int(pair["trial"])
-            stage = int(pair["stage"])
-            h = human.query("trial == @trial & stage == @stage")["response"]
-            m = model.query("trial == @trial & stage == @stage")["response"]
-            if h.empty or m.empty:
-                raise ValueError(f"Missing response for (trial={trial}, stage={stage})")
-            if h.nunique() != 1:
-                raise ValueError(
-                    f"Non-unique human response at (trial={trial}, stage={stage})"
-                )
-            human_response = float(h.iloc[0])
-            model_response = float(m.iloc[0])
-            p = float(
-                np.clip(
-                    scipy.special.expit(beta * model_response), 1e-10, 1 - 1e-10
-                )
-            )
-            total_logp += np.log(p) if human_response == 1 else np.log(1.0 - p)
-        n_obs = len(pairs)
-        out = float(-total_logp / n_obs)
-        if not np.isfinite(out):
-            raise ValueError(f"response_loss (mean NLL) is not finite: {out}")
-        return out
-
-    raise ValueError(
-        "params['dataset'] must be one of 'carrabin', 'jiang', 'yoo', 'usher'"
+    pairs = (
+        human[["trial", "observation"]]
+        .drop_duplicates()
+        .sort_values(["trial", "observation"])
     )
-
-
-def shape_loss(
-    params: dict,
-    model: pd.DataFrame,
-    human: pd.DataFrame,
-) -> float:
-    """
-    Distance between human and model response shape:
-    - carrabin: |mean_per_qid_std(human) - mean_per_qid_std(model)| (qids with >= QID_MIN_TRIALS trials)
-    - yoo: Wasserstein on smoothed mean |delta response| curve
-    - jiang: mean per-pid |human_coef - model_coef| for ND-weighted OLS coefficient
-      predicting current response sign, averaged over stages 1 and 2
-
-    Human-side targets use the full task pickle for all ``pid`` values present
-    in ``human``; the model side uses only the fold-filtered ``model`` frame.
-    """
-    dataset = params["dataset"]
-    if dataset not in ("carrabin", "yoo", "jiang"):
-        raise ValueError(
-            f"shape_loss() is not implemented for dataset={dataset!r}"
-        )
-
-    from utils.paths import data_path
-
-    pids = human["pid"].unique()
-    human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    human_full = human_full[human_full["pid"].isin(pids)]
-
-    if dataset == "carrabin":
-        # merge qid into model responses using human trial/observation index
-        qid_map = human_full[["pid", "trial", "observation", "qid"]].drop_duplicates()
-        model_with_qid = model.merge(
-            qid_map, on=["pid", "trial", "observation"], how="left"
-        )
-        h_std = _mean_qid_std(human_full)
-        m_std = _mean_qid_std(model_with_qid)
-        if not np.isfinite(h_std) or not np.isfinite(m_std):
+    for _, pair in pairs.iterrows():
+        trial = int(pair["trial"])
+        observation = int(pair["observation"])
+        h = human.query("trial == @trial & observation == @observation")[
+            "response"
+        ]
+        m = model.query("trial == @trial & observation == @observation")[
+            "response"
+        ]
+        if h.empty or m.empty:
             raise ValueError(
-                f"shape_loss: non-finite qid std (human={h_std}, model={m_std})"
+                f"Missing response for (trial={trial}, observation={observation})"
             )
-        return float(abs(h_std - m_std))
-    if dataset == "yoo":
-        h_params = _fit_power_law_params(human_full)
-        m_params = _fit_power_law_params(model)
-        if h_params.empty or m_params.empty:
-            return float("nan")
-        merged = h_params.merge(m_params, on="pid", suffixes=("_h", "_m"))
-        if merged.empty:
-            return float("nan")
-        loss_A = (merged["A_h"] - merged["A_m"]).abs().mean()
-        loss_lambda = (merged["lambda__h"] - merged["lambda__m"]).abs().mean()
-        return float(loss_A + loss_lambda)
-    if dataset == "jiang":
-        if "beta" not in params:
-            raise ValueError("params must include 'beta' for jiang shape_loss")
-        model_binary = model.copy()
-        beta = float(params["beta"])
-        seed = int(params.get("seed", 42))
-        rng = np.random.RandomState(seed)
-        p_pos = scipy.special.expit(
-            beta * model_binary["response"].to_numpy(dtype=float)
-        )
-        model_binary["response"] = np.where(rng.binomial(1, p_pos) == 1, 1.0, -1.0)
+        human_response = float(h.iloc[0])
+        model_response = float(m.iloc[0])
+        err = human_response - model_response
+        sq_errors.append(err**2)
 
-        model_coefs = _compute_nd_coef_loss(model_binary, human_full)
-        human_coefs = _compute_nd_coef_loss(human_full, human_full)
-
-        if model_coefs.empty or human_coefs.empty:
-            return float("nan")
-
-        merged = human_coefs.merge(
-            model_coefs, on=["pid", "stage"], suffixes=("_h", "_m")
-        )
-        if merged.empty:
-            return float("nan")
-        return float((merged["coef_nd_h"] - merged["coef_nd_m"]).abs().mean())
+    out = float(np.sqrt(np.mean(sq_errors)))
+    if not np.isfinite(out):
+        raise ValueError(f"response_loss is not finite: {out}")
+    return out
 
 
-def joint_loss(
-    params: dict,
-    model: pd.DataFrame,
-    human: pd.DataFrame,
-) -> float:
-    """
-    Combined response and shape loss: (1-w) * response_loss + w * shape_loss.
-    - carrabin: w=0.2
-    - yoo: w=0.5
-    - jiang: w=0.95 (default; tune via ``wasserstein_w`` / ``JOINT_LOSS_W``)
-    """
-    dataset = params["dataset"]
-    if dataset not in ("carrabin", "yoo", "jiang"):
-        raise ValueError(
-            f"joint_loss() is only implemented for carrabin, yoo, and jiang; "
-            f"got dataset={dataset!r}"
-        )
-    w = float(params.get("wasserstein_w", JOINT_LOSS_W[dataset]))
-    return (1.0 - w) * response_loss(params, model, human) + w * shape_loss(
-        params, model, human
-    )
-
-
-def compute_loss(
-    loss_type: str, params: dict, model: pd.DataFrame, human: pd.DataFrame
-) -> float:
-    if loss_type == "response":
-        return response_loss(params, model, human)
-    if loss_type == "shape":
-        return shape_loss(params, model, human)
-    if loss_type == "joint":
-        return joint_loss(params, model, human)
-    raise ValueError(f"Unknown loss_type: {loss_type!r}")
+def compute_loss(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
+    return response_loss(params, model, human)

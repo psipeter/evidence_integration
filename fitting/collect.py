@@ -65,7 +65,7 @@ def _collect_params(run_folder: Path) -> None:
 def _collect_responses(run_folder: Path) -> None:
     groups = _load_groups(run_folder)
     available_model_types = sorted({model_type for _, model_type in groups.keys()})
-    for dataset in ("carrabin", "jiang", "yoo", "usher"):
+    for dataset in ("carrabin", "yoo"):
         for model_type in available_model_types:
             files = sorted(run_folder.glob(f"{model_type}_{dataset}_*_responses.pkl"))
             if files:
@@ -78,7 +78,7 @@ def _collect_responses(run_folder: Path) -> None:
 def _collect_activities(run_folder: Path, ensembles: list[str], timing: str) -> None:
     out_dir = run_folder
     out_dir.mkdir(parents=True, exist_ok=True)
-    datasets = ("carrabin", "jiang", "yoo", "usher")
+    datasets = ("carrabin", "yoo")
     for dataset in datasets:
         for ens_name in ensembles:
             if timing == "once_per_dt":

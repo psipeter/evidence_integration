@@ -12,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import RUNS_DIR, data_path
+from utils.paths import RUNS_DIR, data_path, resolve_run_folder
 
 # WhiteSignal upper frequency bound (Hz); single setting for probes + noise_scan.
 DEFAULT_ITI_NOISE_FREQ_HZ = 10.0
@@ -73,22 +73,9 @@ def _nef_run_with_iti_noise(
 
 
 def _load_base_params(pid: int, run_folder: Path) -> dict:
-    from fitting.model_params import MODEL_PARAMS
-    from models.NEF import PARAM_DEFAULTS
+    from utils.run_params import load_run_params
 
-    params = pd.read_pickle(
-        run_folder / f"NEF_recurrent_carrabin_{pid}_params.pkl"
-    ).iloc[0].to_dict()
-    fixed = MODEL_PARAMS["carrabin"]["NEF_recurrent"].get("fixed", {})
-    params = {**PARAM_DEFAULTS, **fixed, **params}
-    params.update(
-        {
-            "nef_type": "recurrent",
-            "dataset": "carrabin",
-            "model_type": "NEF_recurrent",
-        }
-    )
-    return params
+    return load_run_params(pid, "carrabin", "NEF_recurrent", run_folder)
 
 
 def _compute_metrics(resp: pd.DataFrame, qid_map: pd.DataFrame) -> dict:
@@ -217,7 +204,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    run_folder = RUNS_DIR / args.run_folder
+    run_folder = resolve_run_folder(args.run_folder)
     out_dir = RUNS_DIR / args.out_folder
     out_dir.mkdir(parents=True, exist_ok=True)
 

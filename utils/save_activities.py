@@ -3,11 +3,8 @@
 Save per-neuron activities and encoders for NEF ensembles.
 
 Works for any dataset with ``{dataset}.pkl`` containing ``trial``, ``observation``,
-and ``value`` columns (carrabin, yoo, jiang, usher). Jiang additionally requires
-``rd`` for alpha bias. Usher matches the yoo-style sequential layout (no ``rd``).
+and ``value`` columns (carrabin, yoo).
 """
-
-# TODO: [usher] once_per_dt windowed export is skipped for non-carrabin in submit resubmit
 
 from __future__ import annotations
 
@@ -20,10 +17,8 @@ import numpy as np
 import pandas as pd
 
 from models.NEF import PARAM_DEFAULTS, _pretrain, build_network
-from utils.paths import RUNS_DIR, data_path
+from utils.paths import data_path, resolve_run_folder
 
-EXPERIMENT_NAME = "save_activities"
-RUN_FOLDER = "joint_loss"
 READOUT_OFFSET = 0.5  # seconds into observation window for once-per-obs readout
 
 VALID_ENSEMBLES = {"error", "value", "counting"}
@@ -56,12 +51,7 @@ def simulate_and_save(
         t_trial = time.time()
         trial_data = human_pid[human_pid["trial"] == trial].sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        # TODO: [usher] Revisit if alpha_bias semantics diverge from yoo (currently zeros)
-        if params["dataset"] == "jiang":
-            rd_values = trial_data["rd"].to_numpy(dtype=float)
-        else:
-            rd_values = np.zeros(len(obs_values))
-        p = {**params, "alpha_bias_array": rd_values}
+        p = {**params}
 
         n_obs = len(obs_values)
         t_obs = float(params["t_obs"])
@@ -104,9 +94,6 @@ def simulate_and_save(
                             "trial": int(trial),
                             "observation": int(row["observation"]),
                         }
-                        if params["dataset"] == "jiang":
-                            out_row["stage"] = int(row["stage"])
-                            out_row["trial_obs_idx"] = n_idx
                         for j, val in enumerate(activity):
                             out_row[f"n{j}"] = float(val)
                         activities_rows[ens_name].append(out_row)
@@ -210,17 +197,11 @@ def run(
     dt_sample: float = 0.01,
     model_type: str = "NEF_recurrent",
 ) -> None:
-    from fitting.model_params import MODEL_PARAMS
+    from utils.run_params import load_run_params
 
-    params_path = RUNS_DIR / run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
-    params = pd.read_pickle(params_path).iloc[0].to_dict()
-    fixed = MODEL_PARAMS[dataset][model_type].get("fixed", {})
-    params = {**PARAM_DEFAULTS, **fixed, **params}
-    params["nef_type"] = "recurrent" if "recurrent" in model_type else "synaptic"
-    params["dataset"] = dataset
-    params["model_type"] = model_type
+    params = load_run_params(pid, dataset, model_type, run_folder)
 
-    out_dir = RUNS_DIR / run_folder
+    out_dir = resolve_run_folder(run_folder)
     out_dir.mkdir(parents=True, exist_ok=True)
     simulate_and_save(pid, params, ensembles, timing, out_dir, dt_sample=dt_sample)
 

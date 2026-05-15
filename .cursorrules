@@ -1,203 +1,176 @@
 # Cursor Rules — evidence_integration
 
-## Project Context
+## Project context
 
-Research codebase for modeling individual variability in evidence integration across three cognitive tasks (carrabin, jiang, yoo). Combines mathematical models, behavioral data fitting with Optuna, and biophysical neural network simulations in Nengo (NEF).
-
----
-
-## Workflow
-
-**Cursor is the code execution layer in a three-stage workflow:**
-
-1. Researcher and Claude discuss goals and design decisions
-2. Claude drafts an explicit Cursor prompt describing exactly what to implement
-3. Cursor executes that prompt
-
-Follow prompts as written. Add `# TODO: [decision needed]` for ambiguous decisions and proceed conservatively.
+Computational and neural modeling of **sequential evidence integration** with a **power-law learning rate** \(\alpha(t) = \alpha_0 / t^{\lambda}\). **Active behavioral tasks:** **carrabin** and **yoo** only—individual differences in **primacy vs. recency** weighting of observations. Implementations span **`models/math_models.py`** (compact equations) and **`models/NEF.py`** (spiking **Nengo** networks via the **Neural Engineering Framework**).
 
 ---
 
-## Cursor Prompt Format
+## Active datasets
 
-- Title: `Cursor Prompt 00X — Brief description`
-- Body: single fenced code block with language `markdown`
-- Numbering: sequential across entire project, never reset — **next prompt is 383**
-- One prompt per response; combine multi-file changes into labeled sections
-- File paths always relative to project root
-- Self-contained — Cursor should execute without reading conversation history
+- **`carrabin`** — Prat-Carrabin & Woodford-style slider integration; **`qid`** links observations to question identity.
+- **`yoo`** — Yoo et al.-style slider task; rich trial × observation trajectories for update dynamics.
+
+**Jiang**, **usher**, and related experiment code are **archived under `archive/`**. Do **not** add dataset branches for them to active modules (`fitting/`, `models/`, `utils/`, `scripts/` outside archive). Do **not** `import` from **`archive/`** in production code paths.
 
 ---
 
-## Data Schema
+## Workflow (Cursor)
 
-All three task dataframes share a common column schema:
+1. Researcher and Claude agree on design.
+2. Claude emits an explicit numbered **Cursor Prompt** (self-contained markdown).
+3. Cursor implements that prompt only.
 
-- `pid`         — participant ID
-- `trial`       — trial index
-- `observation` — sequential observation index within trial (carrabin, yoo)
-- `stage`       — social round index, jiang only
-- `value`       — stimulus input
-- `response`    — participant or model output
+Add `# TODO: [decision needed]` when requirements are ambiguous and choose the conservative default.
 
-Jiang-specific: `network`, `who`, `degree`, `rd`, `stage`
-Carrabin-specific: `qid`
+### Cursor prompt format
 
-### Jiang network data
-- Stored in `data/jiang_networks.npy`, shape (7, 7, 43)
-- Network index in jiang.pkl is 1-indexed: use `networks[:,:,network_id-1]`
-- Agent indices are 1-indexed: use `who - 1` for 0-indexed array
-- Focal participant = `who` from stage-0 row
+- Title: `Cursor Prompt NNN — Short description`
+- Body: one fenced markdown block
+- Number prompts **sequentially** across the project (never reset)
+- Paths relative to repo root; one prompt may span multiple labeled sections
 
 ---
 
-## Model Interface
+## Code conventions
 
-All models expose a unified interface:
+### Layout
+
+| Concern | Location |
+|---------|-----------|
+| Math models | `models/math_models.py` |
+| NEF build / simulate | `models/NEF.py` (+ `counting_*.py`) |
+| Search spaces & NEF fixed scalars | `fitting/model_params.py` → **`MODEL_PARAMS`**, **`_NEF_FIXED`** |
+| Training objective | `fitting/losses.py` → **`response_loss`** / **`compute_loss`** |
+| Optuna orchestration | `fitting/fit.py` |
+| Job enumeration / SLURM / `--local` | `fitting/submit.py` |
+| Aggregating pickles | `fitting/collect.py` |
+| Paths, palettes, SLURM templates | `utils/paths.py`, `utils/plot_style.py`, `utils/slurm.py` |
+| Load merged params + **`trial_seed`** | `utils/run_params.py` |
+| Regenerate NEF responses | `utils/save_responses.py` |
+| Save spikes / activities | `utils/save_activities.py`, `utils/plot_spikes.py` |
+| Publication figures | `scripts/figure_carrabin.py`, `scripts/figure_yoo.py` |
+
+Prefer **new figure panels** inside existing **`figure_*.py`** scripts rather than spawning many one-off plotting scripts.
+
+### Parameter naming
+
+- Power-law / NEF fitted scalars: **`alpha_0`**, **`lambda_`** (trailing underscore on lambda).
+- Plain RL: **`alpha`**.
+- Carrabin NoisyCounting: **`mu`**, **`sigma_c`**, **`nu`**.
+- Yoo ADM: **`phi`**, **`rho`** (see **`MODEL_PARAMS`** for ranges).
+- Fixed NEF architecture (times, radii, neuron counts, **LMU** settings, **`pes_learning_rate`**, …): **`_NEF_FIXED`** merged into **`PARAM_DEFAULTS`** then overridden by fitted rows from pickles.
+
+Merge order when rebuilding dicts for simulation: **`PARAM_DEFAULTS`** \< **`_NEF_FIXED`** \< **fitted Optuna params** (see **`utils.run_params.load_run_params`**).
+
+### Seeds
+
+Use **`trial_seed(base_seed, trial_number)`** from **`utils.run_params`** everywhere a per-trial RNG seed is needed. **`models/NEF.py`** and **`models/math_models.py`** import it as **`_trial_seed`**—do **not** reintroduce local definitions.
+
+### Performance pickles
+
+- **Current fits:** columns include **`loss`**, **`runtime`** (and identifiers **`model_type`**, **`dataset`**, **`pid`**).
+- **Legacy folders:** may use **`cv_loss_mean`** instead of **`loss`**.
+
+In **`scripts/figure_*.py`**, read loss via **`_get_loss(perf_df)`** (fallback **`cv_loss_mean`**), never hard-code **`["cv_loss_mean"]`** alone.
+
+### Run folders
+
+Pass **`run_folder`** as a **short name** resolved under **`RUNS_DIR`** (e.g. **`response`**, **`test_local`**)—that is what **`fitting.submit`** / **`fitting.collect`** expect.
+
+Avoid passing **`data/runs/foo`** strings in hand-written commands; **`utils.paths.resolve_run_folder`** will normalize common mistakes, but short names prevent confusion.
+
+Cluster submission expands to absolute paths internally; local **`python -m fitting.fit`** should still receive either a short name or an **absolute** path—avoid ambiguous **`data/runs/...`** relative strings unless you rely on **`resolve_run_folder`**.
+
+### Fitting pipeline facts
+
+- **`fitting.submit`** writes **`run_config.json`** listing jobs.
+- **`fitting.fit`** creates **`study`** with TPESampler; objective = mean **k-fold** **`response_loss`** (RMSE).
+- **No `loss_type` CLI or parameter**—only RMSE response matching.
+- **NEF:** one simulation per Optuna trial covering all behavioral trials; CV splits by trial IDs held out from that cached dataframe.
+- **Warm-start:** if **`RL_lambda_{dataset}_{pid}_params.pkl`** exists in the run folder before an **NEF** fit, **`alpha_0`** and **`lambda_`** from that row are enqueued as trial 0.
+
+### Unified model API
 
 ```python
 run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame
 ```
 
-- `params` must contain `"model_type"`, `"dataset"`, `"pid"` plus model-specific keys
-- Returns DataFrame with columns: `"model_type"`, `"pid"`, `"trial"`, `"observation"` or `"stage"`, `"response"`
-- `trials` restricts execution to a subset of trial ids
+**`params`** must include **`model_type`**, **`dataset`**, **`pid`**, plus model-specific keys. Output columns always include **`model_type`**, **`pid`**, **`trial`**, **`observation`** (or task-appropriate indices), **`response`**.
+
+### Local completion marker
+
+Functions invoked under **`fitting.submit --local`** must print **`JOB_COMPLETE`** as the **final** stdout line.
 
 ---
 
-## Parameter Reference
+## What NOT to do
 
-| Parameter | Symbol | Used in |
-|---|---|---|
-| Learning rate | `alpha` | RL (all tasks) |
-| Decay exponent | `lambda_` | NEF (fitted, 0.01–1.0) |
-| Baseline learning rate | `alpha_0` | NEF (fitted, 0.01–1.0) |
-| Inverse temperature | `beta` | jiang all models (fitted) |
-| Primacy | `phi` | yoo ADM |
-| Recency | `rho` | yoo ADM |
-| Baseline | `nu` | yoo ADM (fixed=0.01), carrabin NoisyCounting |
-| Cognitive noise | `sigma_c` | carrabin NoisyCounting |
-| Mean increment | `mu` | carrabin NoisyCounting |
-| PES learning rate | `pes_learning_rate` | NEF_synaptic (fixed) |
-| Error→value transform | `T_error` | NEF (fixed=0.4) |
-| Inhibition release synapse | `tau_error` | NEF (fixed=0.1) |
-| Feedback time constant | `tau_fb` | NEF (fixed=0.2) |
-| Feedforward time constant | `tau_ff` | NEF (fixed=0.01) |
-| Error ensemble radius | `radius_e` | NEF (fixed=2.0) |
+- Do **not** wire **jiang / usher** back into **`MODEL_PARAMS`**, **`losses.response_loss`**, or **`collect`** without an explicit archival reversal plan.
+- Do **not** add **`loss_type`**, **`shape_loss`**, **`joint_loss`**, softmax **`beta`**, **`alpha_bias_array`**, or **`rd`** bias hooks to active **NEF** / fitting code (historical variants live in **`archive/`**).
+- Do **not** redefine **`_trial_seed`** locally.
+- Do **not** read **`cv_loss_mean`** directly in figures—use **`_get_loss`**.
+- Do **not** commit secrets, push git, or edit **`archive/`** unless the prompt explicitly requires it.
 
 ---
 
-## Fitting Interface
+## Adding a new dataset (e.g. Diederen)
 
-```python
-fit(dataset, model_type, pid, n_trials=100, k=5, storage=None,
-    loss_type=None, n_runs=1, run_folder=None)
-```
-
-- NEF models run one simulation per Optuna trial (all trials), then evaluate k-fold CV on cached responses
-- Default loss: `response` for all datasets
-- Loss type stored inside `params.pkl`, not in filename
-
-Loss functions in `fitting/losses.py`:
-- `response` — RMSE on carrabin/yoo; mean NLL on jiang (default objective for fits)
-- `shape` — diagnostic / alternate objective; **jiang**: ND-weighted OLS coefficient distance vs human (carrabin/yoo definitions in module docstring)
-- `joint` — optional weighted mix of response + shape (`JOINT_LOSS_W`); not the default fitting workflow
+1. Add **`data/<dataset>.pkl`** with columns compatible with **`fitting.fit`** queries (at minimum **`pid`**, **`trial`**, **`observation`**, **`value`**, **`response`**).
+2. Extend **`MODEL_PARAMS[<dataset>]`** in **`fitting/model_params.py`**.
+3. Implement **`_run_<dataset>`** (or equivalent) in **`models/math_models.py`** and register in dataset / model validation.
+4. Allow **`response_loss`** to accept the new **`params["dataset"]`** in **`fitting/losses.py`**.
+5. Add **`fitting.collect`** awareness if new model types need special casing (often automatic via **`run_config.json`**).
+6. Add **`scripts/figure_<dataset>.py`** mirroring structure of **`figure_yoo.py`** where possible.
+7. Add / update **`DEFAULT_TIME_LIMITS`** / **`DEFAULT_MEM_LIMITS`** in **`utils/slurm.py`** for any new **`model_type`** strings.
 
 ---
 
-## Job Management
+## NEF implementation notes
+
+- Build with **`build_network(obs_values, params, decoders)`** after **`_pretrain(params)`** for the counting subsystem.
+- **`counting`** in **`_NEF_FIXED`**: **`"integrator"`** or **`"lmu"`**.
+- **`base_seed`** (from params) stabilizes counting pretrain; **`trial_seed`** separates per-trial variability in the main network.
+- Default scale: **`n_neurons=200`** (value / error), **`n_neurons_counting=1000`**, **`lmu_n_obs_max=30`** (max sequence length for LMU pretraining).
+- Synaptic variant: **`NEF_synaptic`**; check **`PARAM_DEFAULTS`** / **`_NEF_FIXED`** for **`pes_learning_rate`** and time constants (**`tau_*`**, **`T_error`**, …).
+
+---
+
+## Key file relationships
+
+- **`fitting/fit.py`** → **`models.NEF`**, **`models.math_models`**, **`fitting.losses`**, **`fitting.model_params`**, **`utils.paths`**, **`utils.save_responses`**
+- **`utils/save_activities.py`** → **`models.NEF`**, **`utils.run_params`**, **`utils.paths`**
+- **`scripts/figure_yoo.py`** / **`scripts/figure_carrabin.py`** → **`fitting.losses`** (diagnostics), **`utils.plot_style`**, **`utils.paths`**
+- **`models/NEF.py`** → **`fitting.model_params`** (**`_NEF_FIXED`** only). **Keep this dependency shallow**—do not import arbitrary fitting modules from **`models/`**.
+
+---
+
+## Common commands
 
 ```bash
-# New fits
-python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --loss_type response --run_folder response
-python -m fitting.submit carrabin NEF_recurrent --run_folder response --pid 1 --local
-python -m fitting.submit jiang DeGroot --n_trials 500 --loss_type response --run_folder response
+# One participant, local CLI (positional — no --n_trials flag)
+python -m fitting.fit carrabin RL_lambda 1 500 5 response 42
 
-# Resubmit
-python -m fitting.submit --resubmit params --run_folder response
-python -m fitting.submit --resubmit responses --run_folder response --model_type NEF_recurrent
-python -m fitting.submit --resubmit activities --run_folder response --ensembles error value counting
-python -m fitting.submit --resubmit activities --run_folder response --ensembles error --timing once_per_dt
-```
+# Submit one model × all PIDs
+python -m fitting.submit carrabin RL_lambda --n_trials 500 --run_folder response
 
-Optional filters with `--resubmit`: first positional **`target`** = dataset (`all` scans every job in `run_config.json`), second positional **`model_type`**, and **`--pid`**.
-
-SLURM time limits: `utils/slurm.py` `DEFAULT_TIME_LIMITS` (includes `RL_lambda`, `RL_lambda_rd`, `RL_lambda_offset`, and NEF models).
-
-```bash
 python -m fitting.collect response --type params
 python -m fitting.collect response --type responses
-python -m fitting.collect response --type activities --ensembles error value counting
-python -m fitting.collect response --type activities --ensembles error --timing once_per_dt
-python scripts/check_jobs.py --cancel
+
+python -m fitting.submit --resubmit params --run_folder response
+
+python -m utils.save_activities carrabin NEF_recurrent 1 response error once_per_obs
+
+python scripts/figure_carrabin.py --run_folder response
+python scripts/figure_yoo.py --run_folder response --noise_folder yoo_response_noise
+python scripts/dynamics_NEF.py --dataset carrabin --pid 1 --run_folder response
+
+python scripts/check_jobs.py --cancel   # inspect / cleanup SLURM artifacts as documented in script
 ```
 
-Run folders live under `data/runs/` (e.g. `response`, `noisy_representations`, `iti_perturbation`). `run_config.json` records all job specs and git commit.
-
-### Experiment scripts
-
-```bash
-# Noisy representations
-python scripts/noisy_representations.py --experiment probe_pids --run_folder response --out_folder noisy_representations
-python scripts/noisy_representations.py --experiment n_neurons_scan --run_simulation --scan_pids 14 --out_folder noisy_representations
-
-# ITI perturbation
-python scripts/iti_perturbation.py --experiment probe_conditions --run_simulation --pid 14 --out_folder iti_perturbation
-python scripts/iti_perturbation.py --experiment noise_scan --run_simulation --run_all_pids --out_folder iti_perturbation  # 10 Hz fixed
-python scripts/plot_iti_perturbation.py --out_folder iti_perturbation
-```
-
-### Architecture notes (May 2026)
-
-- NEF seeds: **`base_seed`** for the counting subnetwork; **per-trial `trial_seed`** for the remainder of the network
-- **`READOUT_OFFSET = 0.5`** (seconds into each observation window) in `utils/save_activities.py` for aligned activity readouts
-- Warm start: NEF Optuna enqueue reads **`RL_lambda_{dataset}_{pid}_params.pkl`** (when present) for `alpha_0` / `lambda_` as trial 0 (`fitting/fit.py`)
-- Default loss for production fits: **`response`**; shape losses are diagnostics unless explicitly selected
-- Recommend **`beta_outside_optuna=False`** (default on `fitting.submit`) for all models unless you intentionally override
-- Probe pickles from `save_probes=True` are **`list`s of dicts (all trials)**; not limited to trial 0
-- ITI noise injection: when `iti_noise_amplitude > 0`, `NEF._simulate_trial` imports and calls **`scripts.iti_perturbation._add_iti_noise`** after `build_network`
-
 ---
 
-## SLURM Job Scripts
+## Style & tooling
 
-Any function invoked when `--local` is passed must print `JOB_COMPLETE` as the very last line of output. This allows `check_jobs.py` to identify finished jobs not yet cleaned up by SLURM.
-
----
-
-## Activity Saving
-
-Per-neuron activities and encoders are saved flat in the run folder alongside responses:
-
-- `once_per_obs`: `activities_{ens}_{dataset}.pkl`, `encoders_{ens}_{dataset}.pkl`
-- `once_per_dt`: `activities_windowed_{ens}_{dataset}.npz` (carrabin error ensemble only)
-
-Utility modules: `utils/save_responses.py`, `utils/save_activities.py`
-
----
-
-## Plotting
-
-Figure scripts in `scripts/`. Save PNG (300 dpi) + PDF to `figures/`. No `plt.show()`. Most take `--run_folder` when reading fits from `data/runs/` (exceptions noted in script CLIs).
-
-- `model_performance.py` — model performance
-- `response_variability_carrabin.py` — intertrial variability
-- `switch_probability_jiang.py` — switch probability vs conflict
-- `response_change_yoo.py` — power-law decay of update magnitude
-- `response_change_vs_weight_activity.py` — yoo brain–behavior vs weight activity
-- `noisy_representations.py` — carrabin neural vs response noise experiments
-- `iti_perturbation.py` / `plot_iti_perturbation.py` — ITI noise injection and figure
-- `plot_activities.py` — neural population activity (5 panels)
-- `NEF_plots.py` — NEF probe dynamics from `data/probe_*.pkl`
-
----
-
-## Code Style
-
-- Python 3.11 (conda: `PY311`; venv: `venv/`)
-- PEP 8, `black` formatting
-- No hardcoded paths — use `data_path()` from `utils/paths.py`
-- No silent failures
-- Do not push to git — commits are made manually
-- No Jupyter notebooks — all figures are standalone scripts in `scripts/`
-- Do not modify files outside the scope of the current prompt
+- **Python 3.11**; format with **`black`**; prefer **`pathlib`** via **`utils.paths`** (**`data_path`**, **`RUNS_DIR`**, **`resolve_run_folder`**, **`FIGURES_DIR`**).
+- Figures: save **PNG** (300 dpi) + **PDF** under **`figures/`** from scripts; avoid **`plt.show()`** in batch figure scripts.

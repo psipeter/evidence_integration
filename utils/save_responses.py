@@ -6,23 +6,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pandas as pd
-
-from fitting.model_params import MODEL_PARAMS
 from models import NEF
-from models.NEF import PARAM_DEFAULTS
+from utils.paths import resolve_run_folder
+from utils.run_params import load_run_params
 
 
 def save(pid: int, dataset: str, run_folder: str | Path, model_type: str) -> None:
-    run_folder = Path(run_folder)
-    params = pd.read_pickle(
-        run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
-    ).iloc[0].to_dict()
-    fixed = MODEL_PARAMS[dataset][model_type].get("fixed", {})
-    params = {**PARAM_DEFAULTS, **fixed, **params}
-    params["nef_type"] = "recurrent" if "recurrent" in model_type else "synaptic"
-    params["dataset"] = dataset
-    params["model_type"] = model_type
+    run_folder = resolve_run_folder(run_folder)
+    params = load_run_params(pid, dataset, model_type, run_folder)
     responses = NEF.run(params)
     responses.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl")
     print(f"Saved responses for {dataset} {model_type} pid={pid}")

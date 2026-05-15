@@ -55,14 +55,14 @@ PANEL_F_DATASET = "yoo"
 PANEL_F_EARLY_OBS = (1, 5)
 PANEL_F_LATE_OBS = (26, 30)
 
-# --- Panel G (copied from scripts/response_change_vs_weight_activity.py) ---
+# --- Panel G (logic inlined from former scripts/response_change_vs_weight_activity.py) ---
 PANEL_G_ENCODER_THRESHOLD = 0.5  # minimum enc_dim_0 to be classified as on-weight neuron
 PANEL_G_OBS_MIN = 2
 PANEL_G_OBS_MAX = 30
 PANEL_G_MODEL_TYPE = "NEF_recurrent"
 PANEL_G_DATASET = "yoo"
 
-# --- Panel E (copied from scripts/plot_activities.py panels 2 & 3, yoo / NEF_recurrent only)
+# --- Panel E (logic inlined from former scripts/plot_activities.py panels 2 & 3, yoo / NEF_recurrent only)
 PANEL_E_ENCODER_THRESHOLD = 0.5
 PANEL_E_MODEL_TYPE = "NEF_recurrent"
 PANEL_E_PE_COL = "prediction_error_raw"
@@ -424,16 +424,15 @@ def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
 
 
 def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
-    """Return response_component if available, else cv_loss_mean."""
-    if "response_component" in perf_df.columns:
-        rc = perf_df["response_component"]
-        if rc.notna().all():
-            return rc
+    # "loss" is the current column name; fall back to "cv_loss_mean"
+    # for performance pickles produced before the column rename.
+    if "loss" in perf_df.columns:
+        return perf_df["loss"]
     return perf_df["cv_loss_mean"]
 
 
 def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
-    """Per-pid RMSE (response loss) distribution — logic from scripts/model_performance.py."""
+    """Per-pid RMSE (response loss) distribution — logic inlined from former scripts/model_performance.py."""
     run_dir = data_path("runs") / run_folder
     dataset = "yoo"
     rows = []
@@ -589,7 +588,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
 
 
 def _panel_e_load_counting_yoo(run_dir: Path) -> tuple[Optional[pd.DataFrame], int]:
-    """Mean positive counting-encoder activity vs observation (plot_activities panel 2)."""
+    """Mean positive counting-encoder activity vs observation (former plot_activities panel 2)."""
     counting_activities_path = run_dir / "activities_counting_yoo.pkl"
     counting_encoders_path = run_dir / "encoders_counting_yoo.pkl"
     if not counting_activities_path.exists() or not counting_encoders_path.exists():
@@ -628,7 +627,7 @@ def _panel_e_load_weight_yoo(
     run_dir: Path,
 ) -> tuple[Optional[pd.DataFrame], Optional[float], Optional[float]]:
     """
-    Error-ensemble weight-on activity split by λ group (plot_activities panel 3).
+    Error-ensemble weight-on activity split by λ group (former plot_activities panel 3).
     Returns (dataframe, low_thresh_lambda, high_thresh_lambda) where thresholds match
     ``lambdas_sorted.iloc[LAMBDA_N-1]`` and ``lambdas_sorted.iloc[-LAMBDA_N]``.
     """
@@ -823,7 +822,7 @@ def _plot_g_regplot_panel(
     title: str = "",
     ylabel: str | None = "Mean on-weight neuron activity (Hz)",
 ) -> None:
-    """Panel 1 from response_change_vs_weight_activity.py: significance + pop mean."""
+    """Panel 1 from former response_change_vs_weight_activity.py: significance + pop mean."""
     n_sig = sum(1 for p in pid_results_subset if p["pval"] < 0.05)
     n_nonsig = len(pid_results_subset) - n_sig
 
@@ -890,7 +889,7 @@ def _panel_g_prepare_data(
     run_dir: Path,
 ) -> tuple[list[dict], np.ndarray, np.ndarray] | None:
     """
-    Correlation prep from scripts/response_change_vs_weight_activity.py main().
+    Correlation prep from former scripts/response_change_vs_weight_activity.py main().
     Returns (pid_results, mean_activity, mean_delta) or None if inputs missing.
     """
     acts_all_p = run_dir / f"activities_error_{PANEL_G_DATASET}.pkl"
@@ -1098,7 +1097,7 @@ def _plot_panel_f(ax, run_folder: str) -> None:
 def _plot_panel_g(
     ax, run_folder: str, panel_g_show_significance: bool = False
 ) -> None:
-    """Single plot from scripts/response_change_vs_weight_activity.py."""
+    """Single plot from former scripts/response_change_vs_weight_activity.py."""
     run_dir = data_path("runs") / run_folder
     prep = _panel_g_prepare_data(run_dir)
     if prep is None:

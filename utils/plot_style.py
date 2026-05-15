@@ -74,7 +74,7 @@ def get_palette() -> dict:
     Colors assigned by model role:
         optimal  (Bayes, Mean):                       palette[0]
         naive    (RL):                                palette[1]
-        human-matching (NoisyCounting, DeGroot, ADM): palette[2]
+        human-matching (NoisyCounting, ADM): palette[2]
         Human data:                                   "0.3" (neutral grey)
     """
     palette = sns.color_palette("colorblind")
@@ -84,18 +84,12 @@ def get_palette() -> dict:
         "Mean":          palette[0],
         "RL":            palette[1],
         "NoisyCounting": palette[2],
-        "DeGroot":       palette[2],
         "ADM":           palette[2],
         "NEF":           palette[3],
         "NEF_recurrent": palette[3],
         "NEF_synaptic":  palette[3],
         "RL_lambda":    "#9B59B6",  # purple
-        "RL_lambda_rd": "#6C3483",  # dark purple
     }
-
-
-# Marker shapes for sample participants (narrow/low, medium, broad/high)
-SAMPLE_MARKERS = ["o", "s", "^"]
 
 
 def pvalue_to_stars(p: float) -> str:

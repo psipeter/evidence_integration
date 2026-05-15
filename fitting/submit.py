@@ -1,8 +1,8 @@
 """
 Submit, resubmit, or locally run model fitting jobs.
 
-Jobs are enumerated from ``MODEL_PARAMS`` (datasets include carrabin, jiang,
-yoo, usher); NEF models use the same SLURM templates as other datasets.
+Jobs are enumerated from ``MODEL_PARAMS`` (datasets: carrabin, yoo); NEF models
+use the same SLURM templates as other datasets.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from fitting.fit import DEFAULT_LOSS, fit
+from fitting.fit import fit
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import DATA_DIR, RUNS_DIR, data_path
 from utils.slurm import (
@@ -82,9 +82,7 @@ def _resolve_jobs(
     pid: int | None,
     n_trials: int,
     k: int,
-    loss_type: str | None,
     optuna_seed: int,
-    beta_outside_optuna: bool,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -97,7 +95,6 @@ def _resolve_jobs(
             else [model_type]
         )
         for mt in models:
-            lt = loss_type if loss_type is not None else DEFAULT_LOSS.get(ds, "response")
             pids_all = pd.read_pickle(data_path(f"{ds}.pkl"))["pid"].unique()
             pids = [int(pid)] if pid is not None else [int(p) for p in pids_all]
             model_spec = MODEL_PARAMS[ds].get(mt, {})
@@ -111,9 +108,7 @@ def _resolve_jobs(
                         "pid": p,
                         "n_trials": effective_n_trials,
                         "k": k,
-                        "loss_type": lt,
                         "optuna_seed": optuna_seed,
-                        "beta_outside_optuna": bool(beta_outside_optuna),
                     }
                 )
     return jobs
@@ -153,13 +148,11 @@ def _submit_job(
     pid = job["pid"]
     n_trials = job["n_trials"]
     k = int(job.get("k", 5))
-    lt = job["loss_type"]
+    seed = job.get("optuna_seed", 42)
     cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
-        f"{lt} {k} {run_folder} {job.get('optuna_seed', 42)}"
+        f"{k} {run_folder} {seed}"
     )
-    if job.get("beta_outside_optuna", False):
-        cmd += " --beta_outside_optuna"
     _submit_command(
         script_name=f"{mt}_{ds}_{pid}.sh",
         command=cmd,
@@ -178,7 +171,6 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     pid = job["pid"]
     n_trials = job["n_trials"]
     k = int(job.get("k", 5))
-    lt = job["loss_type"]
 
     if dry_run:
         print(f"[dry_run] would run locally: {mt} {ds} pid={pid}")
@@ -191,10 +183,8 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         pid,
         n_trials=n_trials,
         k=k,
-        loss_type=lt,
         run_folder=run_folder,
         optuna_seed=job.get("optuna_seed", 42),
-        beta_outside_optuna=bool(job.get("beta_outside_optuna", False)),
     )
 
 
@@ -329,9 +319,7 @@ def main() -> None:
     parser.add_argument("--pid", type=int, default=None)
     parser.add_argument("--n_trials", type=int, default=200)
     parser.add_argument("--k", type=int, default=5)
-    parser.add_argument("--loss_type", default=None)
     parser.add_argument("--optuna_seed", type=int, default=42)
-    parser.add_argument("--beta_outside_optuna", action="store_true", default=False)
     parser.add_argument("--run_folder", type=str, default=None)
     parser.add_argument("--ensembles", nargs="+", default=["error"])
     parser.add_argument("--timing", type=str, default="once_per_obs")
@@ -363,9 +351,7 @@ def main() -> None:
         args.pid,
         args.n_trials,
         args.k,
-        args.loss_type,
         args.optuna_seed,
-        args.beta_outside_optuna,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder

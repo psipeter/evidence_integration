@@ -18,14 +18,14 @@ from scipy.stats import gaussian_kde
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
+from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
 
 
 MODEL_ORDER_B = ["Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
 MODEL_ORDER_D = ["Human", "Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
 
-# --- noisy representations row (copied from scripts/noisy_representations.py) ---
+# --- noisy representations row (logic inlined from former scripts/noisy_representations.py) ---
 SAMPLE_PIDS = [6, 7]  # high/low alpha_0 example pids for panel 1
 MIN_REPEATS = 10  # minimum trial repeats per qid for analysis
 READOUT_OFFSET = 0.5  # seconds into obs window for readout
@@ -143,11 +143,10 @@ def _plot_panel_c(ax) -> None:
 
 
 def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
-    """Return response_component if available, else cv_loss_mean."""
-    if "response_component" in perf_df.columns:
-        rc = perf_df["response_component"]
-        if rc.notna().all():
-            return rc
+    # "loss" is the current column name; fall back to "cv_loss_mean"
+    # for performance pickles produced before the column rename.
+    if "loss" in perf_df.columns:
+        return perf_df["loss"]
     return perf_df["cv_loss_mean"]
 
 
@@ -203,46 +202,28 @@ def _load_loss_long(
     dataset: str,
 ) -> pd.DataFrame:
     """
-    Load per-pid shape loss for each model.
-    Prefers shape_component from performance files when available and
-    non-NaN; falls back to recomputing via losses.shape_loss().
+    Load per-pid qid-std shape metric for each model.
     Returns DataFrame with columns: pid, model_type, loss.
     """
-    import fitting.losses as losses_mod
+    from fitting.losses import _mean_qid_std
 
     rows = []
     human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
 
     for mt in model_order:
-        perf_path = run_dir / f"{mt}_{dataset}_performance.pkl"
         resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
-        if not perf_path.exists():
-            continue
-        perf = pd.read_pickle(perf_path)
-
-        if "shape_component" in perf.columns and perf["shape_component"].notna().all():
-            for _, row in perf.iterrows():
-                rows.append(
-                    {
-                        "pid": int(row["pid"]),
-                        "model_type": mt,
-                        "loss": float(row["shape_component"]),
-                    }
-                )
-            continue
-
         if not resp_path.exists():
             print(f"Warning: missing {resp_path.name}, cannot compute loss for {mt}")
             continue
         responses = pd.read_pickle(resp_path)
         for pid, model_pid in responses.groupby("pid"):
             human_pid = human_full[human_full["pid"] == pid]
-            params = {"dataset": dataset, "pid": int(pid)}
-            try:
-                loss = losses_mod.shape_loss(params, model_pid, human_pid)
-                rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
-            except Exception as e:
-                print(f"Warning: shape_loss failed for {mt} pid={pid}: {e}")
+            qid_map = human_pid[["pid", "trial", "observation", "qid"]].drop_duplicates()
+            model_with_qid = model_pid.merge(
+                qid_map, on=["pid", "trial", "observation"], how="left"
+            )
+            loss = abs(_mean_qid_std(human_pid) - _mean_qid_std(model_with_qid))
+            rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
 
     return pd.DataFrame(rows)
 
@@ -457,8 +438,11 @@ def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
 
         grp = nef_resp[nef_resp["pid"] == pid]
         grp_qid = grp.merge(qid_map, on=["pid", "trial", "observation"], how="left")
+        param_rows = nef_params[nef_params["pid"] == pid]
+        if grp.empty or param_rows.empty:
+            continue
         noise = _mean_qid_std(grp_qid)
-        p = nef_params[nef_params["pid"] == pid].iloc[0]
+        p = param_rows.iloc[0]
         rows.append(
             {
                 "pid": pid,
@@ -841,7 +825,7 @@ def main() -> None:
     color_0, color_1 = palette_cb[0], palette_cb[1]
     metrics_df, human, scan_per_qid, pred_error_df = (
         _load_noisy_representations_figure_data(
-            RUNS_DIR / args.run_folder,
+            resolve_run_folder(args.run_folder),
             args.out_folder,
             list(args.n_neurons_list),
         )
@@ -855,11 +839,14 @@ def main() -> None:
                 "(matching --run_folder/--out_folder).",
             )
     else:
-        sample_rows = [
-            metrics_df[metrics_df["pid"] == pid].iloc[0].to_dict()
-            for pid in SAMPLE_PIDS
-            if pid in metrics_df["pid"].values
-        ]
+        sample_rows = []
+        for pid in SAMPLE_PIDS:
+            if pid not in metrics_df["pid"].values:
+                continue
+            rows_pid = metrics_df[metrics_df["pid"] == pid]
+            if rows_pid.empty:
+                continue
+            sample_rows.append(rows_pid.iloc[0].to_dict())
         scan_pid_plot = args.scan_pids[0] if args.scan_pids else 14
         _plot_panel1(row1[0], sample_rows, human, color_0, color_1)
         _plot_panel2(row1[1], metrics_df, color_0, color_1)

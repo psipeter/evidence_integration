@@ -2,10 +2,8 @@
 """
 NEF model of evidence integration (recurrent or synaptic value dynamics).
 
-Supports **carrabin**, **yoo**, **jiang**, and **usher**: sequential scalar
-``value`` inputs per observation (usher: 10 obs/trial, [0, 1] scale, no ``rd`` /
-``qid`` — same loading path as yoo). Jiang additionally uses ``rd`` as the
-alpha-bias channel on ``error[0]``.
+Supports **carrabin** and **yoo**: sequential scalar ``value`` inputs per
+observation.
 
 Architecture (per trial):
     counting subnetwork (LMU or integrator, pretrained decoders)
@@ -60,6 +58,7 @@ from models.counting_lmu import (
     simulate_network as simulate_counting_lmu,
 )
 from utils.paths import data_path
+from utils.run_params import trial_seed as _trial_seed
 
 from fitting.model_params import _NEF_FIXED
 
@@ -71,11 +70,6 @@ PARAM_DEFAULTS: dict = {
     "T_error": 0.5,  # transform on error→value connection; defaults to tau_fb for backward compatibility
     "tau_error": 0.1,
 }
-
-
-def _trial_seed(base_seed: int, trial_number: int) -> int:
-    """Derive a reproducible per-trial seed from base_seed and trial number."""
-    return abs(hash((int(base_seed), int(trial_number)))) % (2**31)
 
 
 def _make_input(obs_values: np.ndarray, params: dict) -> callable:
@@ -93,29 +87,6 @@ def _make_input(obs_values: np.ndarray, params: dict) -> callable:
         if step < n_obs and phase < t_obs:
             return [float(obs_values[step]), 0.0]
         return [0.0, 1.0]
-
-    return fn
-
-
-def _make_alpha_bias_input(obs_values: np.ndarray, params: dict) -> callable:
-    """
-    Outputs alpha_bias_array[step] during each observation, 0 during ITI.
-    For non-jiang datasets, alpha_bias_array is all zeros so output is always 0.
-    """
-    t_obs = float(params["t_obs"])
-    t_iti = float(params["t_iti"])
-    t_step = t_obs + t_iti
-    n_obs = len(obs_values)
-    bias = np.array(params.get("alpha_bias_array", np.zeros(n_obs)), dtype=float)
-
-    def fn(t: float) -> float:
-        if t < t_iti:
-            return 0.0
-        step = int((t - t_iti) / t_step)
-        phase = (t - t_iti) - step * t_step
-        if step < n_obs and phase < t_obs:
-            return float(bias[step])
-        return 0.0
 
     return fn
 
@@ -198,17 +169,6 @@ def build_network(
             seed=seed,
             label="error",
         )
-        net.node_alpha_bias = nengo.Node(
-            _make_alpha_bias_input(obs_values, params),
-            label="node_alpha_bias",
-        )
-        nengo.Connection(
-            net.node_alpha_bias,
-            net.error[0],
-            synapse=None,
-            seed=seed,
-        )
-
         if params["counting"] == "lmu":
             nengo.Connection(
                 net.counting.lmu_ea.output,
@@ -422,14 +382,8 @@ def run(
         t_trial = time.time()
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        # TODO: [usher] Confirm observation ordering / missing obs rows if data schema changes
-        if pfull["dataset"] == "jiang":
-            alpha_bias = trial_data["rd"].to_numpy(dtype=float)
-        else:
-            # carrabin, yoo, usher: no rd column; alpha_bias channel unused (zeros)
-            alpha_bias = np.zeros(len(obs_values))
         trial_seed = _trial_seed(int(pfull["seed"]), int(trial))
-        p = {**pfull, "alpha_bias_array": alpha_bias, "seed": trial_seed}
+        p = {**pfull, "seed": trial_seed}
         if save_probes:
             responses, probe_data = _simulate_trial(
                 obs_values, p, decoders, return_probes=True
@@ -449,8 +403,6 @@ def run(
                 "observation": int(row["observation"]),
                 "response": float(responses[i]),
             }
-            if pfull["dataset"] == "jiang":
-                entry["stage"] = int(row["stage"])
             rows.append(entry)
 
     out = pd.DataFrame(rows)
@@ -469,7 +421,7 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         type=str,
         default="carrabin",
-        choices=("carrabin", "yoo", "jiang", "usher"),
+        choices=("carrabin", "yoo"),
     )
     p.add_argument("--pid", type=int, default=1)
     p.add_argument("--model_type", type=str, default="NEF_recurrent")

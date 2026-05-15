@@ -22,9 +22,14 @@ import seaborn as sns
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from models.NEF import _pretrain, build_network
-from utils.run_params import load_run_params, trial_seed as _trial_seed
-from utils.paths import FIGURES_DIR, data_path
+from fitting.model_params import MODEL_PARAMS
+from models.NEF import (
+    PARAM_DEFAULTS,
+    _pretrain,
+    _trial_seed,
+    build_network,
+)
+from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
 from utils.plot_spikes import cm_gray_r_a, plot_spikes, preprocess_spikes
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -587,7 +592,14 @@ def _panel_count(
 def _load_params(
     dataset: str, pid: int, model_type: str, run_folder: str
 ) -> dict:
-    params = load_run_params(pid, dataset, model_type, run_folder)
+    params_path = RUNS_DIR / run_folder / f"{model_type}_{dataset}_{pid}_params.pkl"
+    raw = pd.read_pickle(params_path).iloc[0].to_dict()
+    fixed = MODEL_PARAMS[dataset][model_type].get("fixed", {})
+    params = {**PARAM_DEFAULTS, **fixed, **raw}
+    params["nef_type"] = "recurrent" if "recurrent" in model_type else "synaptic"
+    params["dataset"] = dataset
+    params["model_type"] = model_type
+    params["pid"] = int(pid)
     params["base_seed"] = int(params.get("seed", params.get("base_seed", 0)))
     return params
 
@@ -832,9 +844,15 @@ def main() -> None:
         "observation"
     )
     obs_values = trial_data["value"].to_numpy(dtype=float)
+    rd_values = (
+        trial_data["rd"].to_numpy(dtype=float)
+        if args.dataset == "jiang"
+        else np.zeros(len(obs_values))
+    )
     trial_seed = _trial_seed(int(base_params["seed"]), trial_db_id)
     sim_params = {
         **base_params,
+        "alpha_bias_array": rd_values,
         "seed": trial_seed,
     }
 
