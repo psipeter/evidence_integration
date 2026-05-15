@@ -31,7 +31,6 @@ Behavioral pickles live under `data/` (e.g. `carrabin.pkl`, `yoo.pkl`). Columns 
 | **carrabin** | NoisyCounting | Human-matching process model (Prat-Carrabin & Woodford 2024) | `mu`, `sigma_c`, `nu` |
 | **carrabin** | RL | Rescorla–Wagner / delta rule | `alpha` |
 | **carrabin** | RL_lambda | Delta rule with power-law \(\alpha(t)\) | `alpha_0`, `lambda_` |
-| **carrabin** | RL_lambda_offset | Power-law rule with offset denominator | `alpha_0`, `lambda_` |
 | **carrabin** | NEF_recurrent | Spiking NEF evidence integrator | `alpha_0`, `lambda_` |
 | **carrabin** | NEF_synaptic | Spiking NEF (synaptic-learning variant) | `alpha_0`, `lambda_` |
 | **yoo** | Mean | Optimal running mean | *(none)* |

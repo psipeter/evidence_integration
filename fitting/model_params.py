@@ -57,10 +57,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
-        "RL_lambda_offset": {
-            "alpha_0": (0.01, 1.0, 0.01),
-            "lambda_": (0.01, 1.0, 0.01),
-        },
         "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
         "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },

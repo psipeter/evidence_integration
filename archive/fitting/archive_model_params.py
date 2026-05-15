@@ -94,3 +94,12 @@ MODEL_PARAMS_USHER: dict[str, dict[str, object]] = {
     "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
 }
+
+# Archived from fitting/model_params.py MODEL_PARAMS["carrabin"]
+# RL_lambda_offset (removed from active codebase — see archive_math_models.py).
+ARCHIVED_MODEL_PARAMS_CARRABIN_RL_LAMBDA_OFFSET = {
+    "RL_lambda_offset": {
+        "alpha_0": (0.01, 1.0, 0.01),
+        "lambda_": (0.01, 1.0, 0.01),
+    },
+}

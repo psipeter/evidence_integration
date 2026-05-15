@@ -404,3 +404,23 @@ def _run_usher_rl_lambda_boost(
         expectation += alpha * error
         expectation = float(np.clip(expectation, -1, 1))
     return expectation
+
+
+# -----------------------------------------------------------------------------
+# Archived from models/math_models.py _run_carrabin()
+# RL_lambda_offset: power-law delta rule with offset denominator
+# (n+3) instead of n, fitted to carrabin only. Removed as it was
+# not meaningfully different from RL_lambda in practice.
+# -----------------------------------------------------------------------------
+#
+# Verbatim branch formerly in _run_carrabin() (after ``values`` computed):
+#
+#     if model_type == "RL_lambda_offset":
+#         alpha_0 = float(params["alpha_0"])
+#         lambda_ = float(params["lambda_"])
+#         expectation = 0.0
+#         for n, obs in enumerate(values, start=1):
+#             alpha = alpha_0 / ((n + 3) ** lambda_)
+#             expectation += alpha * (float(obs) - expectation)
+#             expectation = float(np.clip(expectation, -1.0, 1.0))
+#         return expectation

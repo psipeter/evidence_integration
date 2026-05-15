@@ -31,7 +31,7 @@ from utils.run_params import trial_seed as _trial_seed
 
 
 _CARRABIN_MODELS = frozenset(
-    {"Bayes", "NoisyCounting", "RL", "RL_lambda", "RL_lambda_offset"}
+    {"Bayes", "NoisyCounting", "RL", "RL_lambda"}
 )
 _YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
 
@@ -155,15 +155,6 @@ def _run_carrabin(
             error = value - expectation
             expectation += alpha * error
             expectation = float(np.clip(expectation, -1, 1))
-        return expectation
-    if model_type == "RL_lambda_offset":
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        expectation = 0.0
-        for n, obs in enumerate(values, start=1):
-            alpha = alpha_0 / ((n + 3) ** lambda_)
-            expectation += alpha * (float(obs) - expectation)
-            expectation = float(np.clip(expectation, -1.0, 1.0))
         return expectation
     raise AssertionError("unreachable")
 
