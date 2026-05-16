@@ -35,6 +35,7 @@ OBS_MIN = 2  # obs=1 has no previous response (diff is NaN)
 
 PID_LINE_COLOR = "0.75"
 MIN_LAMBDA_PLOT = 0.02  # skip degenerate per-pid power-law fits
+MIN_PIDS_PER_OBS = 15  # minimum pids required to plot a group mean
 
 
 def _abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:
@@ -204,10 +205,17 @@ def _fit_power_law_per_pid(pid_obs: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _filter_pid_means_by_n(pid_means: pd.DataFrame) -> pd.DataFrame:
+    obs_counts = pid_means.groupby("observation")["pid"].count()
+    valid_obs = obs_counts[obs_counts >= MIN_PIDS_PER_OBS].index
+    return pid_means[pid_means["observation"].isin(valid_obs)]
+
+
 def _plot_panel_a(ax, long_df: pd.DataFrame) -> None:
     palette_colors = get_palette()
     raw_color = palette_colors[0]
     clean_color = palette_colors[1]
+    post_color = palette_colors[2]
 
     df = long_df.copy()
     if "switched" not in df.columns:
@@ -220,6 +228,7 @@ def _plot_panel_a(ax, long_df: pd.DataFrame) -> None:
     pre_pid_means = (
         pre_df.groupby(["pid", "observation"])["delta"].mean().reset_index()
     )
+    pre_pid_means = _filter_pid_means_by_n(pre_pid_means)
 
     per_pid_fits = _fit_power_law_per_pid(pre_pid_means)
     n_grid = np.arange(OBS_MIN, OBS_MAX + 1, dtype=float)
@@ -257,33 +266,58 @@ def _plot_panel_a(ax, long_df: pd.DataFrame) -> None:
         .mean()
         .reset_index()
     )
-    sns.lineplot(
-        data=raw_pid_means,
-        x="observation",
-        y="delta",
-        color=raw_color,
-        linewidth=1.8,
-        errorbar="se",
-        label="All observations",
-        zorder=2,
-        ax=ax,
+    raw_pid_means = _filter_pid_means_by_n(raw_pid_means)
+
+    post_switch = df[df["oss"].notna() & df["delta"].notna()].copy()
+    post_switch["oss"] = post_switch["oss"].astype(float)
+    pid_oss = (
+        post_switch.groupby(["pid", "oss"])["delta"].mean().reset_index()
     )
-    sns.lineplot(
-        data=pre_pid_means,
-        x="observation",
-        y="delta",
-        color=clean_color,
-        linewidth=2.0,
-        errorbar="se",
-        label="Pre-first-switch",
-        zorder=3,
-        ax=ax,
-    )
+    pid_oss["observation"] = pid_oss["oss"] + 1  # align: oss=1 -> x=2, oss=2 -> x=3, ...
+    pid_oss = pid_oss.drop(columns=["oss"])
+    pid_oss = _filter_pid_means_by_n(pid_oss)
+
+    if not raw_pid_means.empty:
+        sns.lineplot(
+            data=raw_pid_means,
+            x="observation",
+            y="delta",
+            color=raw_color,
+            linewidth=1.8,
+            errorbar="se",
+            label="All observations",
+            zorder=2,
+            ax=ax,
+        )
+    if not pid_oss.empty:
+        sns.lineplot(
+            data=pid_oss,
+            x="observation",
+            y="delta",
+            color=post_color,
+            linewidth=1.8,
+            errorbar="se",
+            label="Post-switch",
+            zorder=2,
+            ax=ax,
+        )
+    if not pre_pid_means.empty:
+        sns.lineplot(
+            data=pre_pid_means,
+            x="observation",
+            y="delta",
+            color=clean_color,
+            linewidth=2.0,
+            errorbar="se",
+            label="Pre-first-switch",
+            zorder=3,
+            ax=ax,
+        )
 
     ax.set_xlim(1.5, 10.5)
     ax.set_xticks(range(2, 11))
     ax.set_ylim(0.0, 0.5)
-    ax.set_xlabel("Observation")
+    ax.set_xlabel("Observation  /  obs since switch")
     ax.set_ylabel("Response change")
     ax.legend(frameon=False, fontsize=7)
     sns.despine(ax=ax, top=True, right=True)
@@ -337,50 +371,86 @@ def _plot_panel_b(ax, carry: pd.DataFrame) -> None:
 
 
 def _plot_panel_c(ax, long_df: pd.DataFrame) -> None:
-    colors = get_palette(2)
-    labels_sd = {
-        0.1: "Low variance (SD=5)",
-        0.3: "High variance (SD=15)",
-    }
+    pal = get_palette()
+    pre_color = pal[1]
+    post_color = pal[2]
 
-    clean = long_df[
-        (long_df["oss"].isna() | (long_df["oss"] > 2))
-        & long_df["observation"].between(2, 5)
-        & long_df["delta"].notna()
-    ].copy()
-    ctrl_pcb = clean[clean["group"].isin(["CTRL", "PCB"])].copy()
+    df = long_df.copy()
+    if "switched" not in df.columns:
+        df["tis_gap"] = df.groupby(["pid", "trial"])["trial_in_session"].diff()
+        df["switched"] = df["tis_gap"] > 1
 
-    if "sd_value" not in ctrl_pcb.columns:
-        ax.set_xlim(1.5, 5.5)
-        ax.set_ylim(0.0, 0.5)
-        ax.set_xlabel("Observation")
-        ax.set_ylabel("Response change")
-        sns.despine(ax=ax, top=True, right=True)
-        return
+    pre_df = _pre_switch_rows(df)
+    pre_df = pre_df[pre_df["delta"].notna() & (pre_df["observation"] >= OBS_MIN)]
 
-    sd_num = pd.to_numeric(ctrl_pcb["sd_value"], errors="coerce")
-    for idx, sd in enumerate([0.1, 0.3]):
-        subset = ctrl_pcb[sd_num == float(sd)].copy()
+    for sd, ls, label in [
+        (0.1, "-", "Pre-switch, SD=5"),
+        (0.3, "--", "Pre-switch, SD=15"),
+    ]:
+        subset = pre_df[pre_df["sd_value"] == sd]
         if subset.empty:
             continue
         pid_mean = (
             subset.groupby(["pid", "observation"])["delta"].mean().reset_index()
         )
+        pid_mean = _filter_pid_means_by_n(pid_mean)
+        if pid_mean.empty:
+            continue
         sns.lineplot(
             data=pid_mean,
             x="observation",
             y="delta",
-            color=colors[idx],
+            color=pre_color,
+            linestyle=ls,
             linewidth=1.8,
             errorbar="se",
-            label=labels_sd[sd],
+            label=label,
             ax=ax,
         )
 
-    ax.set_xlim(1.5, 5.5)
+    post_df = df[df["oss"].notna() & df["delta"].notna()].copy()
+    post_df["x"] = post_df["oss"].astype(float) + 1
+    post_df["cond"] = post_df["group"].map(
+        {
+            "CTRL": "Ctrl/PCB",
+            "PCB": "Ctrl/PCB",
+            "SUL": "DA-mod",
+            "BRO": "DA-mod",
+        }
+    )
+
+    for cond, ls, label in [
+        ("Ctrl/PCB", "-", "Post-switch, Ctrl/PCB"),
+        ("DA-mod", "--", "Post-switch, DA-mod"),
+    ]:
+        subset = post_df[post_df["cond"] == cond]
+        if subset.empty:
+            continue
+        pid_mean = (
+            subset.groupby(["pid", "x"])["delta"]
+            .mean()
+            .reset_index()
+            .rename(columns={"x": "observation"})
+        )
+        pid_mean = _filter_pid_means_by_n(pid_mean)
+        if pid_mean.empty:
+            continue
+        sns.lineplot(
+            data=pid_mean,
+            x="observation",
+            y="delta",
+            color=post_color,
+            linestyle=ls,
+            linewidth=1.8,
+            errorbar="se",
+            label=label,
+            ax=ax,
+        )
+
+    ax.set_xlim(1.5, 10.5)
+    ax.set_xticks(range(2, 11))
     ax.set_ylim(0.0, 0.5)
-    ax.set_xticks(range(1, 6))
-    ax.set_xlabel("Observation")
+    ax.set_xlabel("Observation  /  obs since switch")
     ax.set_ylabel("Response change")
     ax.legend(frameon=False, fontsize=7)
     sns.despine(ax=ax, top=True, right=True)
@@ -413,16 +483,14 @@ def main() -> None:
     carry = _compute_carryover_metrics(valid)
 
     fig, axes = plt.subplots(
-        2, 4, figsize=FIGURE_SIZE, constrained_layout=True
+        1, 4, figsize=FIGURE_SIZE, constrained_layout=True
     )
-    _plot_panel_a(axes[0, 0], long_df)
-    _plot_panel_b(axes[0, 1], carry)
-    _plot_panel_c(axes[0, 2], long_df)
-    axes[0, 3].set_visible(False)
-    for col in range(4):
-        axes[1, col].set_visible(False)
+    _plot_panel_a(axes[0], long_df)
+    _plot_panel_b(axes[1], carry)
+    _plot_panel_c(axes[2], long_df)
+    axes[3].set_visible(False)
 
-    label_panels([axes[0, 0], axes[0, 1], axes[0, 2]])
+    label_panels([axes[0], axes[1], axes[2]])
 
     out_dir = Path(args.out_folder) if args.out_folder else FIGURES_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
