@@ -217,8 +217,8 @@ def _eval_idx(params: dict, t_len: int) -> np.ndarray:
 
 def analysis(all_test_outputs: list[dict], params: dict) -> None:
     apply_style()
-    palette = get_palette()
-    nef_color = palette["NEF"]
+    pal = get_palette(10)
+    nef_color = pal[3]
     grey = "0.45"
 
     count_all = np.stack([o["count"] for o in all_test_outputs], axis=0)

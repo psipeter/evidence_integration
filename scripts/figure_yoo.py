@@ -39,7 +39,8 @@ from utils.plot_style import (
 # TODO: [decision needed] Row-2 empty panels use minimal decoration only; confirm
 # if future panels need a shared aspect or different spine visibility.
 
-MODEL_ORDER = ["Mean", "RL", "ADM", "NEF_recurrent"]
+# Model display order determines color assignment from get_palette()
+MODEL_ORDER = ["Mean", "RL", "RL_lambda", "ADM", "NEF_recurrent", "NEF_synaptic"]
 
 OBS_MAX = 30
 # Panel C: line / fit styling
@@ -738,7 +739,7 @@ def _plot_panel_e(ax, run_folder: str) -> None:
     from matplotlib.lines import Line2D
 
     run_dir = data_path("runs") / run_folder
-    cb_palette = sns.color_palette("colorblind")
+    cb_palette = get_palette(2)
 
     weight_df, low_thr_lambda, high_thr_lambda = _panel_e_load_weight_yoo(run_dir)
 
@@ -1065,7 +1066,7 @@ def _plot_panel_f(ax, run_folder: str) -> None:
         _placeholder(ax, "No data")
         return
 
-    cb = sns.color_palette("colorblind")
+    cb = get_palette(2)
     c_beh = cb[0]
     lw = plt.rcParams.get("lines.linewidth", 1.5)
 
@@ -1108,15 +1109,15 @@ def _plot_panel_g(
         _placeholder(ax, "No activity data")
         return
 
-    pal = get_palette()
+    pal = get_palette(2)
     if panel_g_show_significance:
         _plot_g_regplot_panel(
             ax,
             pid_results,
             mean_activity,
             mean_delta,
-            pal["Bayes"],
-            pal["RL"],
+            pal[0],
+            pal[1],
             title="",
             ylabel="Error neuron activity (Hz)",
         )
@@ -1130,8 +1131,8 @@ def _plot_panel_g(
             x="activity",
             y="delta",
             scatter=True,
-            line_kws={"color": pal["Bayes"], "linewidth": 2.5},
-            scatter_kws={"alpha": 0.6, "s": 20, "color": pal["Bayes"]},
+            line_kws={"color": pal[0], "linewidth": 2.5},
+            scatter_kws={"alpha": 0.6, "s": 20, "color": pal[0]},
             ci=95,
             truncate=True,
             ax=ax,
@@ -1392,7 +1393,7 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
     )["response_change"].mean()
 
     if panel_h_plot_type == "lineplot":
-        cb = sns.color_palette("colorblind")
+        cb = get_palette(4)
         c_task = cb[2]
         c_delta = cb[0]
         ax_left = ax
@@ -1515,7 +1516,7 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
             _empty_row_panel(ax)
             return
 
-        cb = sns.color_palette("colorblind")
+        cb = get_palette(2)
         sns.lineplot(
             data=human_task_dec,
             x="observation",
@@ -1820,7 +1821,7 @@ def _plot_panel_k(ax, noise_folder: str, run_folder: str, palette: dict) -> None
         _empty_row_panel(ax)
         return
 
-    cb_palette = sns.color_palette("colorblind")
+    cb_palette = get_palette(2)
     # Same convention as panel C: seaborn computes mean line + default CI region.
     sns.lineplot(
         data=high_noise,
@@ -1868,7 +1869,7 @@ def _plot_panel_l(ax, noise_folder: str) -> None:
         .rename(columns={"response": "response_noise"})
     )
 
-    palette = sns.color_palette("colorblind")
+    palette = get_palette(2)
     bins = [
         ("Obs 1–5", 1, 5, palette[0]),
         ("Obs 6–30", 6, 30, palette[1]),
@@ -1986,7 +1987,7 @@ def _plot_panel_i(ax, run_folder: str) -> None:
         _placeholder(ax, "No params data")
         return
 
-    cb0 = sns.color_palette("colorblind")[0]
+    cb0 = get_palette(1)[0]
     sns.regplot(
         data=plot_df,
         x="alpha_0",
@@ -2078,7 +2079,7 @@ def _plot_panel_j(ax, noise_folder: str, run_folder: str, _palette: dict) -> Non
         _empty_row_panel(ax)
         return
 
-    cb_palette = sns.color_palette("colorblind")
+    cb_palette = get_palette(2)
     sns.lineplot(
         data=high_noise,
         x="observation",
@@ -2116,9 +2117,9 @@ def main() -> None:
     args = parser.parse_args()
 
     apply_style()
-    palette = get_palette()
-    if "Human" not in palette:
-        palette["Human"] = "black"
+    _pal = get_palette(len(MODEL_ORDER))
+    palette = {m: _pal[i] for i, m in enumerate(MODEL_ORDER)}
+    palette["Human"] = "0.3"
 
     if args.full:
         fig, axes = plt.subplots(3, 4, figsize=FIGURE_SIZE, constrained_layout=True)

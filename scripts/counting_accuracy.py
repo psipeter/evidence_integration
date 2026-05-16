@@ -88,7 +88,7 @@ def run_one(mechanism: str, n_neurons_counting: int, seed: int) -> dict:
 
 def main() -> None:
     apply_style()
-    palette = get_palette()
+    pal = get_palette(10)
 
     rows = []
     for mechanism in ("integrator", "lmu"):
@@ -99,7 +99,7 @@ def main() -> None:
     df = pd.DataFrame(rows)
     print(df)
 
-    colors = {"integrator": palette["RL"], "lmu": palette["NEF"]}
+    colors = {"integrator": pal[1], "lmu": pal[3]}
     fig, axes = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
 
     titles = ["Count RMSE", "Weight RMSE", "Runtime (s)"]

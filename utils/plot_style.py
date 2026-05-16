@@ -67,29 +67,13 @@ def label_panels(axes, labels=None, **kwargs) -> None:
         ax.text(s=lab, transform=ax.transAxes, **defaults)
 
 
-def get_palette() -> dict:
+def get_palette(n: int = 10) -> list:
+    """Return the seaborn colorblind palette as a list of colors.
+
+    Colors are assigned by index — callers should plot items in a consistent
+    order so that the same item always gets the same color.
     """
-    Return the project-wide model color palette.
-    Call after apply_style() to ensure seaborn palette is initialized.
-    Colors assigned by model role:
-        optimal  (Bayes, Mean):                       palette[0]
-        naive    (RL):                                palette[1]
-        human-matching (NoisyCounting, ADM): palette[2]
-        Human data:                                   "0.3" (neutral grey)
-    """
-    palette = sns.color_palette("colorblind")
-    return {
-        "Human":         "0.3",
-        "Bayes":         palette[0],
-        "Mean":          palette[0],
-        "RL":            palette[1],
-        "NoisyCounting": palette[2],
-        "ADM":           palette[2],
-        "NEF":           palette[3],
-        "NEF_recurrent": palette[3],
-        "NEF_synaptic":  palette[3],
-        "RL_lambda":    "#9B59B6",  # purple
-    }
+    return sns.color_palette("colorblind", n)
 
 
 def pvalue_to_stars(p: float) -> str:

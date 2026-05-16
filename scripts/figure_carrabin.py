@@ -21,9 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
 
-
-MODEL_ORDER_B = ["Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
+MODEL_ORDER = ["Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
+MODEL_ORDER_B = MODEL_ORDER
 MODEL_ORDER_D = ["Human", "Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
+
+HUMAN_NEUTRAL_COLOR = "0.3"
 
 # --- noisy representations row (logic inlined from former scripts/noisy_representations.py) ---
 SAMPLE_PIDS = [6, 7]  # high/low alpha_0 example pids for panel 1
@@ -267,7 +269,7 @@ def _save_panel_c_kde(human: pd.DataFrame) -> None:
     from fitting.losses import _mean_qid_std
 
     apply_style()
-    PALETTE = get_palette()
+    PALETTE = {"Human": HUMAN_NEUTRAL_COLOR}
     LINESTYLES = ["solid", "dashed", "dotted"]
     SAMPLE_PIDS = {"low": 14, "medium": 18, "high": 17}
 
@@ -316,7 +318,7 @@ def _save_qid_kde(human: pd.DataFrame) -> None:
     from fitting.losses import QID_MIN_TRIALS
 
     apply_style()
-    PALETTE = get_palette()
+    PALETTE = {"Human": HUMAN_NEUTRAL_COLOR}
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
     for pid in (14, 18, 17):
@@ -809,9 +811,9 @@ def main() -> None:
         args.scan_pids = [args.scan_pid]
 
     apply_style()
-    palette = get_palette()
-    if "Human" not in palette:
-        palette["Human"] = "black"
+    _pal = get_palette(len(MODEL_ORDER))
+    palette = {m: _pal[i] for i, m in enumerate(MODEL_ORDER)}
+    palette["Human"] = HUMAN_NEUTRAL_COLOR
 
     fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
     row0, row1 = axes[0], axes[1]
@@ -821,7 +823,7 @@ def main() -> None:
     _plot_panel_c(row0[2])
     _plot_panel_d(row0[3], args.run_folder, palette)
 
-    palette_cb = sns.color_palette("colorblind")
+    palette_cb = get_palette(2)
     color_0, color_1 = palette_cb[0], palette_cb[1]
     metrics_df, human, scan_per_qid, pred_error_df = (
         _load_noisy_representations_figure_data(
