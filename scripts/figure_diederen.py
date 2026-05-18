@@ -1,16 +1,23 @@
 """
-Behavioral analysis figure for the Diederen dataset (pure data, no model fits).
+Diederen dataset figure: 2×4 layout, panels A–E.
 
-Panel A uses OBS_MAX=10 on the x-axis; long_df is truncated to observations
-≤ OBS_MAX before plotting.
+Panel A: task diagram (figures/diederen_task.pdf)
+Panel B: model RMSE boxplot (requires model fits in --run_folder)
+Panel C: response change vs observation (raw vs pre-switch, post-switch)
+Panel D: carryover bias vs observations since context switch
+Panel E: response change by SD condition and drug condition
+Panels F–H: reserved for future panels
 """
 
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -36,6 +43,12 @@ OBS_MIN = 2  # obs=1 has no previous response (diff is NaN)
 PID_LINE_COLOR = "0.75"
 MIN_LAMBDA_PLOT = 0.02  # skip degenerate per-pid power-law fits
 MIN_PIDS_PER_OBS = 15  # minimum pids required to plot a group mean
+
+MODEL_ORDER = ["Mean", "RL", "RL_lambda", "PearceHall", "NEF_recurrent", "NEF_synaptic"]
+
+
+def _display(model_type: str) -> str:
+    return "NEF" if model_type.startswith("NEF") else model_type
 
 
 def _abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:
@@ -211,7 +224,92 @@ def _filter_pid_means_by_n(pid_means: pd.DataFrame) -> pd.DataFrame:
     return pid_means[pid_means["observation"].isin(valid_obs)]
 
 
-def _plot_panel_a(ax, long_df: pd.DataFrame) -> None:
+def _placeholder(ax, text: str) -> None:
+    ax.text(
+        0.5,
+        0.5,
+        text,
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
+        fontsize=8,
+        color="0.5",
+    )
+    ax.set_xticks([])
+    ax.set_yticks([])
+    sns.despine(ax=ax, left=True, bottom=True)
+
+
+def _plot_panel_a(ax) -> None:
+    """Render first page of figures/diederen_task.pdf into panel A."""
+    pdf_path = FIGURES_DIR / "diederen_task.pdf"
+    if not pdf_path.exists():
+        _placeholder(ax, "diederen_task.pdf not found")
+        return
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_prefix = Path(tmpdir) / "diederen_task"
+        cmd = ["pdftoppm", "-png", "-singlefile", str(pdf_path), str(out_prefix)]
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            _placeholder(ax, "pdftoppm failed")
+            return
+        img_path = out_prefix.with_suffix(".png")
+        if not img_path.exists():
+            _placeholder(ax, "diederen_task.pdf render failed")
+            return
+        img = mpimg.imread(img_path)
+    ax.imshow(img, interpolation="nearest")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.set_aspect("equal")
+    ax.set_anchor("C")
+
+
+def _plot_panel_b(
+    ax, run_folder: str, palette: dict, model_order: list[str]
+) -> None:
+    """Per-pid RMSE boxplot for all fitted models."""
+    run_dir = data_path("runs") / run_folder
+    rows = []
+    for mt in model_order:
+        f = run_dir / f"{mt}_diederen_performance.pkl"
+        if not f.exists():
+            continue
+        perf = pd.read_pickle(f).copy()
+        loss_col = "loss" if "loss" in perf.columns else "cv_loss_mean"
+        perf["plot_loss"] = perf[loss_col]
+        perf["model_disp"] = mt
+        rows.append(perf[["pid", "model_disp", "plot_loss"]])
+    if not rows:
+        _placeholder(ax, "No performance data\n(run model fits first)")
+        return
+    df = pd.concat(rows, ignore_index=True)
+    available = [m for m in model_order if m in set(df["model_disp"])]
+    pal = {m: palette.get(m, "0.5") for m in available}
+    sns.boxplot(
+        data=df,
+        x="model_disp",
+        y="plot_loss",
+        order=available,
+        hue="model_disp",
+        palette=pal,
+        legend=False,
+        ax=ax,
+    )
+    ax.set_xlabel("")
+    ax.set_ylabel("Response error (RMSE)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_panel_c(ax, long_df: pd.DataFrame) -> None:
     palette_colors = get_palette()
     raw_color = palette_colors[0]
     clean_color = palette_colors[1]
@@ -255,7 +353,7 @@ def _plot_panel_a(ax, long_df: pd.DataFrame) -> None:
     n_total = len(per_pid_fits)
     if excluded_count > 0 and n_total > 0:
         print(
-            f"Panel A: {excluded_count}/{n_total} pids "
+            f"Panel C: {excluded_count}/{n_total} pids "
             f"({100 * excluded_count / n_total:.0f}%) excluded from per-pid "
             f"power-law lines (lambda_ < {MIN_LAMBDA_PLOT} or NaN)."
         )
@@ -323,7 +421,7 @@ def _plot_panel_a(ax, long_df: pd.DataFrame) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_b(ax, carry: pd.DataFrame) -> None:
+def _plot_panel_d(ax, carry: pd.DataFrame) -> None:
     pal = get_palette(2)
     d = carry.dropna(subset=["pull", "bias", "oss"]).copy()
     d = d[(d["oss"] >= 1) & (d["oss"] <= 5) & (d["pull"] != 0)].copy()
@@ -370,7 +468,7 @@ def _plot_panel_b(ax, carry: pd.DataFrame) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_c(ax, long_df: pd.DataFrame) -> None:
+def _plot_panel_e(ax, long_df: pd.DataFrame) -> None:
     pal = get_palette()
     pre_color = pal[1]
     post_color = pal[2]
@@ -462,17 +560,31 @@ def main() -> None:
     )
     parser.add_argument("--out_folder", type=str, default=None)
     parser.add_argument(
+        "--run_folder",
+        type=str,
+        default="refit",
+        help="Run folder for model performance files.",
+    )
+    parser.add_argument(
         "--include_rl_lambda",
         action="store_true",
         default=False,
-        help="Include RL_lambda model in top-row panels (excluded by default).",
+        help="Include RL_lambda in panel B (excluded by default).",
     )
     args = parser.parse_args()
 
-    # TODO: apply RL_lambda filter to top-row model panels once model fits
-    # are added to this figure.
+    model_order = [
+        m for m in MODEL_ORDER if args.include_rl_lambda or m != "RL_lambda"
+    ]
 
     apply_style()
+
+    _pal = get_palette(len(model_order))
+    palette = {m: _pal[i] for i, m in enumerate(model_order)}
+    for mt in model_order:
+        disp = _display(mt)
+        if disp not in palette:
+            palette[disp] = palette[mt]
 
     human = pd.read_pickle(data_path("diederen.pkl"))
     valid = human[
@@ -491,15 +603,17 @@ def main() -> None:
     long_df = _add_oss_to_long_df(long_df)
     carry = _compute_carryover_metrics(valid)
 
-    fig, axes = plt.subplots(
-        1, 4, figsize=FIGURE_SIZE, constrained_layout=True
-    )
-    _plot_panel_a(axes[0], long_df)
-    _plot_panel_b(axes[1], carry)
-    _plot_panel_c(axes[2], long_df)
-    axes[3].set_visible(False)
+    fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
 
-    label_panels([axes[0], axes[1], axes[2]])
+    _plot_panel_a(axes[0, 0])
+    _plot_panel_b(axes[0, 1], args.run_folder, palette, model_order)
+    _plot_panel_c(axes[0, 2], long_df)
+    _plot_panel_d(axes[0, 3], carry)
+    _plot_panel_e(axes[1, 0], long_df)
+    for col in range(1, 4):
+        axes[1, col].set_visible(False)
+
+    label_panels([axes[0, 0], axes[0, 1], axes[0, 2], axes[0, 3], axes[1, 0]])
 
     out_dir = Path(args.out_folder) if args.out_folder else FIGURES_DIR
     out_dir.mkdir(parents=True, exist_ok=True)

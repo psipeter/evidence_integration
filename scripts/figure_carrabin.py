@@ -729,6 +729,10 @@ def main() -> None:
     apply_style()
     _pal = get_palette(len(model_order))
     palette = {m: _pal[i] for i, m in enumerate(model_order)}
+    for mt in model_order:
+        disp = _display(mt)
+        if disp not in palette:
+            palette[disp] = palette[mt]
     palette["Human"] = HUMAN_NEUTRAL_COLOR
 
     fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
