@@ -461,7 +461,16 @@ def main() -> None:
         description="Behavioral decay figure for Diederen dataset."
     )
     parser.add_argument("--out_folder", type=str, default=None)
+    parser.add_argument(
+        "--include_rl_lambda",
+        action="store_true",
+        default=False,
+        help="Include RL_lambda model in top-row panels (excluded by default).",
+    )
     args = parser.parse_args()
+
+    # TODO: apply RL_lambda filter to top-row model panels once model fits
+    # are added to this figure.
 
     apply_style()
 

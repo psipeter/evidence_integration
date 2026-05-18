@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
 
-MODEL_ORDER = ["Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
+MODEL_ORDER = ["Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF_recurrent"]
 MODEL_ORDER_B = MODEL_ORDER
-MODEL_ORDER_D = ["Human", "Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
+MODEL_ORDER_D = ["Human", "Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF_recurrent"]
 
 HUMAN_NEUTRAL_COLOR = "0.3"
 
@@ -152,10 +152,10 @@ def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
     return perf_df["cv_loss_mean"]
 
 
-def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
+def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
     run_dir = data_path("runs") / run_folder
     rows = []
-    for mt in MODEL_ORDER_B:
+    for mt in model_order:
         f = run_dir / f"{mt}_carrabin_performance.pkl"
         if not f.exists():
             continue
@@ -169,7 +169,7 @@ def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
         return
 
     df = pd.concat(rows, ignore_index=True)
-    order = [_display(m) for m in MODEL_ORDER_B]
+    order = [_display(m) for m in model_order]
     available = [m for m in order if m in set(df["model_disp"])]
     pal = {m: palette.get(m, "0.5") for m in available}
     sns.boxplot(
@@ -230,9 +230,9 @@ def _load_loss_long(
     return pd.DataFrame(rows)
 
 
-def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
+def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
     run_dir = data_path("runs") / run_folder
-    loss_df = _load_loss_long(run_dir, MODEL_ORDER_B, "carrabin")
+    loss_df = _load_loss_long(run_dir, model_order, "carrabin")
     if loss_df.empty:
         _placeholder(ax, "No model data")
         return
@@ -246,7 +246,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
         _placeholder(ax, "No model data")
         return
 
-    order = [_display(m) for m in MODEL_ORDER_B]
+    order = [_display(m) for m in model_order]
     available = [m for m in order if m in set(df["model_disp"])]
     pal = {m: palette.get(m, "0.5") for m in available}
     sns.boxplot(
@@ -805,23 +805,33 @@ def main() -> None:
         nargs="+",
         default=list(N_NEURONS_LIST),
     )
+    parser.add_argument(
+        "--include_rl_lambda",
+        action="store_true",
+        default=False,
+        help="Include RL_lambda model in top-row panels (excluded by default).",
+    )
     args = parser.parse_args()
 
     if args.scan_pid is not None:
         args.scan_pids = [args.scan_pid]
 
+    model_order = [
+        m for m in MODEL_ORDER if args.include_rl_lambda or m != "RL_lambda"
+    ]
+
     apply_style()
-    _pal = get_palette(len(MODEL_ORDER))
-    palette = {m: _pal[i] for i, m in enumerate(MODEL_ORDER)}
+    _pal = get_palette(len(model_order))
+    palette = {m: _pal[i] for i, m in enumerate(model_order)}
     palette["Human"] = HUMAN_NEUTRAL_COLOR
 
     fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
     row0, row1 = axes[0], axes[1]
 
     _plot_panel_a(row0[0])
-    _plot_panel_b(row0[1], args.run_folder, palette)
+    _plot_panel_b(row0[1], args.run_folder, palette, model_order)
     _plot_panel_c(row0[2])
-    _plot_panel_d(row0[3], args.run_folder, palette)
+    _plot_panel_d(row0[3], args.run_folder, palette, model_order)
 
     palette_cb = get_palette(2)
     color_0, color_1 = palette_cb[0], palette_cb[1]

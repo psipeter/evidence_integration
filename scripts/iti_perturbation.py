@@ -187,7 +187,7 @@ def main() -> None:
     parser.add_argument(
         "--run_folder",
         type=str,
-        default="response",
+        default="refit",
         help="Source folder for fitted NEF params",
     )
     parser.add_argument("--out_folder", type=str, default="iti_perturbation")

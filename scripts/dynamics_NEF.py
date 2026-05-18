@@ -809,7 +809,7 @@ def main() -> None:
     p.add_argument(
         "--run_folder",
         type=str,
-        default="response",
+        default="refit",
         help="Under data/runs/, for params pickle and context",
     )
     args = p.parse_args()

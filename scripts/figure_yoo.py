@@ -287,7 +287,7 @@ def _plot_group_slope_triangle(
     ax.set_ylim(0.0, new_top)
 
 
-def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
+def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
     """
     Per-pid human power-law curves, model mean |Δresponse| (lineplot + CI) with dashed
     population power-law overlays, human mean |Δresponse| (lineplot + CI), and dashed
@@ -332,7 +332,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
 
     run_dir = data_path("runs") / run_folder
     dataset = "yoo"
-    for mt in MODEL_ORDER:
+    for mt in model_order:
         resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
         if not resp_path.exists():
             continue
@@ -404,7 +404,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
     ax.set_xlabel("Observation")
     ax.set_ylabel("Response change")
 
-    legend_order = ["Human"] + [_display(m) for m in MODEL_ORDER]
+    legend_order = ["Human"] + [_display(m) for m in model_order]
     h_in, lab_in = ax.get_legend_handles_labels()
     by_lbl: dict[str, object] = {}
     for h, lab in zip(h_in, lab_in):
@@ -432,12 +432,12 @@ def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
     return perf_df["cv_loss_mean"]
 
 
-def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
+def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
     """Per-pid RMSE (response loss) distribution — logic inlined from former scripts/model_performance.py."""
     run_dir = data_path("runs") / run_folder
     dataset = "yoo"
     rows = []
-    for mt in MODEL_ORDER:
+    for mt in model_order:
         f = run_dir / f"{mt}_{dataset}_performance.pkl"
         if not f.exists():
             continue
@@ -451,7 +451,7 @@ def _plot_panel_b(ax, run_folder: str, palette: dict) -> None:
         return
 
     df = pd.concat(rows, ignore_index=True)
-    order = [_display(m) for m in MODEL_ORDER]
+    order = [_display(m) for m in model_order]
     available = [m for m in order if m in set(df["model_disp"])]
     pal = {m: palette.get(m, "0.5") for m in available}
     sns.boxplot(
@@ -513,7 +513,7 @@ def _panel_d_fit_lambda_per_pid(pid_obs: pd.DataFrame) -> pd.Series:
     return pd.Series(out, name="lambda_")
 
 
-def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
+def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
     """Per-pid |λ_model − λ_human| boxplot (λ from power-law fit to mean |Δresponse| vs observation)."""
     human_path = data_path("yoo.pkl")
     if not human_path.exists():
@@ -536,7 +536,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
     run_dir = data_path("runs") / run_folder
     dataset = "yoo"
     rows: list[dict] = []
-    for mt in MODEL_ORDER:
+    for mt in model_order:
         resp_path = run_dir / f"{mt}_{dataset}_responses.pkl"
         if not resp_path.exists():
             continue
@@ -564,7 +564,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
         return
 
     df = pd.DataFrame(rows)
-    order = [_display(m) for m in MODEL_ORDER]
+    order = [_display(m) for m in model_order]
     available = [m for m in order if m in set(df["model_disp"])]
     if not available:
         _placeholder(ax, "No model data")
@@ -2104,7 +2104,7 @@ def _plot_panel_j(ax, noise_folder: str, run_folder: str, _palette: dict) -> Non
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_folder", type=str, default="response")
+    parser.add_argument("--run_folder", type=str, default="refit")
     parser.add_argument("--noise_folder", type=str, default="yoo_response_noise")
     parser.add_argument("--panel_g_show_significance", action="store_true", default=False)
     parser.add_argument("--full", action="store_true", default=False)
@@ -2114,11 +2114,21 @@ def main() -> None:
         choices=["lineplot", "heatmap", "curve_shape"],
         default="lineplot",
     )
+    parser.add_argument(
+        "--include_rl_lambda",
+        action="store_true",
+        default=False,
+        help="Include RL_lambda model in top-row panels (excluded by default).",
+    )
     args = parser.parse_args()
 
+    model_order = [
+        m for m in MODEL_ORDER if args.include_rl_lambda or m != "RL_lambda"
+    ]
+
     apply_style()
-    _pal = get_palette(len(MODEL_ORDER))
-    palette = {m: _pal[i] for i, m in enumerate(MODEL_ORDER)}
+    _pal = get_palette(len(model_order))
+    palette = {m: _pal[i] for i, m in enumerate(model_order)}
     palette["Human"] = "0.3"
 
     if args.full:
@@ -2126,9 +2136,9 @@ def main() -> None:
         row0, row1, row2 = axes[0], axes[1], axes[2]
 
         _plot_panel_a(row0[0], full=True)
-        _plot_panel_b(row0[1], args.run_folder, palette)
-        _plot_panel_c(row0[2], args.run_folder, palette)
-        _plot_panel_d(row0[3], args.run_folder, palette)
+        _plot_panel_b(row0[1], args.run_folder, palette, model_order)
+        _plot_panel_c(row0[2], args.run_folder, palette, model_order)
+        _plot_panel_d(row0[3], args.run_folder, palette, model_order)
 
         _plot_panel_e(row1[0], args.run_folder)
         _plot_panel_f(row1[1], args.run_folder)
@@ -2144,9 +2154,9 @@ def main() -> None:
         row0, row1 = axes[0], axes[1]
 
         _plot_panel_a(row0[0], full=False)
-        _plot_panel_b(row0[1], args.run_folder, palette)
-        _plot_panel_c(row0[2], args.run_folder, palette)
-        _plot_panel_d(row0[3], args.run_folder, palette)
+        _plot_panel_b(row0[1], args.run_folder, palette, model_order)
+        _plot_panel_c(row0[2], args.run_folder, palette, model_order)
+        _plot_panel_d(row0[3], args.run_folder, palette, model_order)
 
         _plot_panel_e(row1[0], args.run_folder)
         _plot_panel_g(row1[1], args.run_folder, args.panel_g_show_significance)
