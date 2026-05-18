@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Yoo summary figure: rows A–D, E–H, I–L."""
+"""Yoo summary figure: 2×4 layout, panels A–H."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.gridspec import GridSpecFromSubplotSpec
 from matplotlib.lines import Line2D
 from scipy.optimize import curve_fit
 from scipy.stats import linregress, pearsonr
@@ -30,7 +29,6 @@ from fitting.losses import (
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import (
     FIGURE_SIZE,
-    annotate_violins,
     apply_style,
     get_palette,
     label_panels,
@@ -47,14 +45,6 @@ OBS_MAX = 30
 PANEL_C_MEAN_LINE_COLOR = "#1a1a2e"
 PANEL_C_GROUP_FIT_COLOR = "black"
 PANEL_C_PID_LINE_COLOR = "0.75"
-# Shift whole slope triangle right (observation units) so it clears the curve
-PANEL_C_TRIANGLE_SHIFT_N = 2.5
-
-# --- Panel F: λ vs early−late Δ (model behavior + error activity) ---
-PANEL_F_MODEL_TYPE = "NEF_recurrent"
-PANEL_F_DATASET = "yoo"
-PANEL_F_EARLY_OBS = (1, 5)
-PANEL_F_LATE_OBS = (26, 30)
 
 # --- Panel G (logic inlined from former scripts/response_change_vs_weight_activity.py) ---
 PANEL_G_ENCODER_THRESHOLD = 0.5  # minimum enc_dim_0 to be classified as on-weight neuron
@@ -69,7 +59,7 @@ PANEL_E_MODEL_TYPE = "NEF_recurrent"
 PANEL_E_PE_COL = "prediction_error_raw"
 PANEL_E_OBS_RANGE_YOO = (2, 30)
 PANEL_E_COUNTING_OBS_RANGE_YOO = (1, 30)
-PANEL_E_LAMBDA_N = 5
+PANEL_E_LAMBDA_N = 10
 PANEL_E_ERROR_STYLE = "ci"
 
 
@@ -154,6 +144,51 @@ def _plot_panel_a(ax, full: bool = False) -> None:
     ax.set_anchor("C")
 
 
+def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
+    # "loss" is the current column name; fall back to "cv_loss_mean"
+    # for performance pickles produced before the column rename.
+    if "loss" in perf_df.columns:
+        return perf_df["loss"]
+    return perf_df["cv_loss_mean"]
+
+
+def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
+    """Per-pid RMSE (response loss) distribution — logic inlined from former scripts/model_performance.py."""
+    run_dir = data_path("runs") / run_folder
+    dataset = "yoo"
+    rows = []
+    for mt in model_order:
+        f = run_dir / f"{mt}_{dataset}_performance.pkl"
+        if not f.exists():
+            continue
+        perf = pd.read_pickle(f).copy()
+        perf["plot_loss"] = _get_loss(perf)
+        perf["model_disp"] = _display(mt)
+        rows.append(perf[["pid", "model_disp", "plot_loss"]])
+
+    if not rows:
+        _placeholder(ax, "No performance data")
+        return
+
+    df = pd.concat(rows, ignore_index=True)
+    order = [_display(m) for m in model_order]
+    available = [m for m in order if m in set(df["model_disp"])]
+    pal = {m: palette.get(m, "0.5") for m in available}
+    sns.boxplot(
+        data=df,
+        x="model_disp",
+        y="plot_loss",
+        order=available,
+        hue="model_disp",
+        palette=pal,
+        legend=False,
+        ax=ax,
+    )
+    ax.set_xlabel("")
+    ax.set_ylabel("Response error (trial-wise RMSE)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def _yoo_abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:
     """Long-format per-trial |Δresponse| (same trial construction as fitting.losses)."""
     pieces = []
@@ -177,114 +212,6 @@ def _fit_power_law_to_mean_curve(curve: pd.Series) -> tuple[float, float] | None
         return None
     slope, intercept, _, _, _ = linregress(np.log(n), np.log(d))
     return float(np.exp(intercept)), float(-slope)
-
-
-def _plot_group_slope_triangle(
-    ax,
-    amp_g: float,
-    lam_g: float,
-    color: str,
-    *,
-    n_lo: float = 2.0,
-    n_hi: float = 8.0,
-    lift_frac: float = 0.25,
-    zorder: float = 5,
-) -> None:
-    """
-    Right-angle slope triangle for y = amp_g * n^(-lam_g): horizontal span n_lo..n_hi,
-    tangent slope at mid-observation; lifted above the curve by lift_frac * y-axis span.
-    """
-    if n_hi <= n_lo:
-        return
-
-    n_lo = n_lo + PANEL_C_TRIANGLE_SHIFT_N
-    n_hi = min(n_hi + PANEL_C_TRIANGLE_SHIFT_N, float(OBS_MAX))
-
-    def f(n):
-        return float(amp_g * np.asarray(n, dtype=float) ** (-lam_g))
-
-    def fp(n):
-        return float(-lam_g * amp_g * np.asarray(n, dtype=float) ** (-lam_g - 1))
-
-    h_run = n_hi - n_lo
-    n_c = 0.5 * (n_lo + n_hi)
-    m = fp(n_c)
-
-    y_span = ax.get_ylim()[1] - ax.get_ylim()[0]
-    lift = lift_frac * y_span
-    # On [n_lo, n_hi] the group curve is decreasing in n for λ>0; stay above that arc.
-    y_max_arc = max(f(n_lo), f(n_hi))
-    y_horiz = y_max_arc + lift
-    y_tip = y_horiz + m * h_run
-
-    ax.plot(
-        [n_lo, n_hi],
-        [y_horiz, y_horiz],
-        color=color,
-        linewidth=0.9,
-        zorder=zorder,
-        clip_on=False,
-        solid_capstyle="round",
-    )
-    ax.plot(
-        [n_hi, n_hi],
-        [y_horiz, y_tip],
-        color=color,
-        linewidth=0.9,
-        zorder=zorder,
-        clip_on=False,
-        solid_capstyle="round",
-    )
-    # Hypotenuse: top-left (n_lo, y_horiz) to bottom-right (n_hi, y_tip)
-    ax.plot(
-        [n_lo, n_hi],
-        [y_horiz, y_tip],
-        color=color,
-        linewidth=0.9,
-        linestyle=":",
-        zorder=zorder,
-        clip_on=False,
-        solid_capstyle="round",
-    )
-
-    x_span = ax.get_xlim()[1] - ax.get_xlim()[0]
-    ax.text(
-        (n_lo + n_hi) / 2,
-        y_horiz + 0.018 * y_span,
-        r"$n$",
-        ha="center",
-        va="bottom",
-        fontsize=7,
-        color=color,
-        clip_on=False,
-    )
-    ax.text(
-        n_hi + 0.015 * x_span,
-        (y_horiz + y_tip) / 2,
-        r"$\Delta r$",
-        ha="left",
-        va="center",
-        fontsize=7,
-        color=color,
-        clip_on=False,
-    )
-    cx = (n_lo + n_hi + n_hi) / 3.0
-    cy = (y_horiz + y_horiz + y_tip) / 3.0
-    ax.text(
-        cx,
-        cy,
-        r"$\lambda$",
-        ha="center",
-        va="center",
-        fontsize=7,
-        color=color,
-        clip_on=False,
-    )
-
-    ymin_cur, ymax_cur = ax.get_ylim()
-    pad = 0.02 * max(ymax_cur - ymin_cur, 1e-12)
-    new_top = max(ymax_cur, y_horiz + pad)
-    ax.set_ylim(0.0, new_top)
 
 
 def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
@@ -424,51 +351,6 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
-    # "loss" is the current column name; fall back to "cv_loss_mean"
-    # for performance pickles produced before the column rename.
-    if "loss" in perf_df.columns:
-        return perf_df["loss"]
-    return perf_df["cv_loss_mean"]
-
-
-def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
-    """Per-pid RMSE (response loss) distribution — logic inlined from former scripts/model_performance.py."""
-    run_dir = data_path("runs") / run_folder
-    dataset = "yoo"
-    rows = []
-    for mt in model_order:
-        f = run_dir / f"{mt}_{dataset}_performance.pkl"
-        if not f.exists():
-            continue
-        perf = pd.read_pickle(f).copy()
-        perf["plot_loss"] = _get_loss(perf)
-        perf["model_disp"] = _display(mt)
-        rows.append(perf[["pid", "model_disp", "plot_loss"]])
-
-    if not rows:
-        _placeholder(ax, "No performance data")
-        return
-
-    df = pd.concat(rows, ignore_index=True)
-    order = [_display(m) for m in model_order]
-    available = [m for m in order if m in set(df["model_disp"])]
-    pal = {m: palette.get(m, "0.5") for m in available}
-    sns.boxplot(
-        data=df,
-        x="model_disp",
-        y="plot_loss",
-        order=available,
-        hue="model_disp",
-        palette=pal,
-        legend=False,
-        ax=ax,
-    )
-    ax.set_xlabel("")
-    ax.set_ylabel("Response error (trial-wise RMSE)")
-    sns.despine(ax=ax, top=True, right=True)
-
-
 def _panel_d_mean_abs_delta_per_pid_obs(df: pd.DataFrame) -> pd.DataFrame:
     """Mean |Δresponse| per (pid, observation) across trials (observation ≥ 2)."""
     g = df[df["delta"].notna() & (df["observation"] >= 2)].copy()
@@ -584,8 +466,6 @@ def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     ax.set_xlabel("")
     ax.set_ylabel("Decay rate error (|Δλ|)")
     sns.despine(ax=ax, top=True, right=True)
-    if len(available) >= 2:
-        annotate_violins(ax, df, "model_disp", "lambda_error", available)
 
 
 def _panel_e_load_counting_yoo(run_dir: Path) -> tuple[Optional[pd.DataFrame], int]:
@@ -990,112 +870,7 @@ def _panel_g_prepare_data(
     return pid_results, mean_activity, mean_delta
 
 
-def _panel_f_prepare_early_late(run_dir: Path) -> Optional[pd.DataFrame]:
-    """
-    Per-pid fitted λ, Δ|Δresponse| (model, early−late obs), and Δ error activity.
-    """
-    responses_path = run_dir / f"{PANEL_F_MODEL_TYPE}_{PANEL_F_DATASET}_responses.pkl"
-    activities_path = run_dir / f"activities_error_{PANEL_F_DATASET}.pkl"
-    params_path = run_dir / f"{PANEL_F_MODEL_TYPE}_{PANEL_F_DATASET}_params.pkl"
-    if not all(p.exists() for p in (responses_path, activities_path, params_path)):
-        return None
-
-    responses_all = pd.read_pickle(responses_path)
-    acts_all = pd.read_pickle(activities_path)
-    params = pd.read_pickle(params_path)
-    if "pid" not in params.columns or "lambda_" not in params.columns:
-        return None
-    params = params[["pid", "lambda_"]].drop_duplicates(subset=["pid"], keep="first")
-
-    neuron_cols = [c for c in acts_all.columns if c.startswith("n")]
-    if not neuron_cols:
-        return None
-
-    lo_e, hi_e = PANEL_F_EARLY_OBS
-    lo_l, hi_l = PANEL_F_LATE_OBS
-    rows: list[dict] = []
-
-    for pid in sorted(responses_all["pid"].unique()):
-        pr = params[params["pid"] == pid]
-        if pr.empty:
-            continue
-        lam = float(pr["lambda_"].iloc[0])
-
-        rpid = responses_all[responses_all["pid"] == pid].sort_values(
-            ["trial", "observation"]
-        )
-        rpid = rpid.copy()
-        rpid["prev_response"] = rpid.groupby("trial")["response"].shift(1)
-        rpid["delta_abs"] = (rpid["response"] - rpid["prev_response"]).abs()
-        early_beh = rpid[rpid["observation"].between(lo_e, hi_e)]["delta_abs"].mean()
-        late_beh = rpid[rpid["observation"].between(lo_l, hi_l)]["delta_abs"].mean()
-        if not (np.isfinite(early_beh) and np.isfinite(late_beh)):
-            continue
-        beh_delta = float(early_beh - late_beh)
-
-        ap = acts_all[acts_all["pid"] == pid]
-        if ap.empty:
-            continue
-        ap = ap.copy()
-        ap["mean_error"] = ap[neuron_cols].mean(axis=1)
-        early_neu = ap[ap["observation"].between(lo_e, hi_e)]["mean_error"].mean()
-        late_neu = ap[ap["observation"].between(lo_l, hi_l)]["mean_error"].mean()
-        if not (np.isfinite(early_neu) and np.isfinite(late_neu)):
-            continue
-        neural_delta = float(early_neu - late_neu)
-
-        rows.append(
-            {
-                "pid": int(pid),
-                "lambda_": lam,
-                "beh_delta": beh_delta,
-                "neural_delta": neural_delta,
-            }
-        )
-
-    if not rows:
-        return None
-    return pd.DataFrame(rows)
-
-
-def _plot_panel_f(ax, run_folder: str) -> None:
-    """Fitted λ vs early−late Δ (model |Δresponse| left, error activity right)."""
-    run_dir = data_path("runs") / run_folder
-    df = _panel_f_prepare_early_late(run_dir)
-    if df is None or df.empty:
-        _placeholder(ax, "No data")
-        return
-
-    cb = get_palette(2)
-    c_beh = cb[0]
-    lw = plt.rcParams.get("lines.linewidth", 1.5)
-
-    plot_df = df[["lambda_", "beh_delta"]].copy()
-    sns.regplot(
-        data=plot_df,
-        x="lambda_",
-        y="beh_delta",
-        ax=ax,
-        scatter=True,
-        line_kws={
-            "color": c_beh,
-            "linewidth": lw,
-        },
-        scatter_kws={
-            "color": c_beh,
-            "s": 28,
-            "edgecolors": c_beh,
-            "linewidths": 0.5,
-            "zorder": 4,
-        },
-    )
-    ax.set_xlabel("Fitted λ")
-    ax.set_ylabel("Δ response change (early − late)")
-    ax.tick_params(axis="y")
-    sns.despine(ax=ax, top=True, right=True)
-
-
-def _plot_panel_g(
+def _plot_panel_f(
     ax, run_folder: str, panel_g_show_significance: bool = False
 ) -> None:
     """Single plot from former scripts/response_change_vs_weight_activity.py."""
@@ -1144,61 +919,6 @@ def _plot_panel_g(
     if leg is not None:
         leg.remove()
     sns.despine(ax=ax, top=True, right=True)
-
-
-def _classify_task_error_curves(
-    te_df: pd.DataFrame,
-    smooth_window: int = 5,
-    min_rise: float = 0.008,
-    persist: int = 3,
-    min_sign_change_obs: int = 5,
-) -> tuple[list[int], list[int]]:
-    """Classify pids into U-shaped vs decaying based on smoothed slope sign change."""
-    u_shaped: list[int] = []
-    decaying: list[int] = []
-    if te_df.empty:
-        return u_shaped, decaying
-
-    for pid, g in te_df.groupby("pid"):
-        g = g.sort_values("observation")
-        obs = g["observation"].to_numpy(dtype=int)
-        y = g["task_error"].to_numpy(dtype=float)
-        if len(y) < max(6, persist + 2):
-            continue
-        smooth = (
-            pd.Series(y)
-            .rolling(window=smooth_window, min_periods=1, center=True)
-            .mean()
-            .to_numpy()
-        )
-        dy = np.diff(smooth)
-        if dy.size == 0:
-            continue
-        sign = np.sign(dy)
-
-        found_u = False
-        for i in range(len(sign) - persist):
-            obs_next = obs[i + 1]
-            if obs_next < min_sign_change_obs:
-                continue
-            if sign[i] < 0 and np.all(sign[i + 1 : i + 1 + persist] > 0):
-                late_mask = obs >= 26
-                late_mean = (
-                    float(np.nanmean(y[late_mask]))
-                    if np.any(late_mask)
-                    else float(np.nanmean(y))
-                )
-                strength = late_mean - float(np.nanmin(smooth))
-                if np.isfinite(strength) and strength >= min_rise:
-                    found_u = True
-                    break
-
-        if found_u:
-            u_shaped.append(int(pid))
-        else:
-            decaying.append(int(pid))
-
-    return u_shaped, decaying
 
 
 def _u_strength(te_df: pd.DataFrame, smooth_window: int = 5) -> pd.Series:
@@ -1268,8 +988,8 @@ def _pl_r2(te_df: pd.DataFrame, smooth_window: int = 5) -> pd.Series:
     return pd.Series(out, dtype=float)
 
 
-def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> None:
-    """Panel H modes: lineplot, heatmap, or curve_shape."""
+def _plot_panel_g(ax, run_folder: str) -> None:
+    """Panel G: human vs NEF task-error curves (U-shaped vs decaying groups)."""
     human_path = data_path("yoo.pkl")
     if not human_path.exists():
         _empty_row_panel(ax)
@@ -1330,25 +1050,25 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
         _empty_row_panel(ax)
         return
 
-    # Model: load per-pid response files, compute same metrics, then mean across trials.
+    # Model: combined responses pickle; compute same metrics, then mean across trials.
     run_dir = data_path("runs") / run_folder
     value_map = human[["pid", "trial", "observation", "value"]].drop_duplicates()
     model_rows_task: list[dict] = []
     model_rows_delta: list[dict] = []
-    model_files = sorted(run_dir.glob("NEF_recurrent_yoo_*_responses.pkl"))
-    for f in model_files:
-        stem = f.stem
-        parts = stem.split("_")
-        if len(parts) < 5:
-            continue
-        pid_token = parts[-2]
-        if not pid_token.isdigit():
-            continue
-        pid = int(pid_token)
-        mdf = pd.read_pickle(f)
+    responses_path = run_dir / "NEF_recurrent_yoo_responses.pkl"
+    if not responses_path.exists():
+        _placeholder(ax, "NEF_recurrent_yoo_responses.pkl not found")
+        return
+    mdf_all = pd.read_pickle(responses_path)
+    if mdf_all.empty or not {"pid", "trial", "observation", "response"}.issubset(
+        mdf_all.columns
+    ):
+        _empty_row_panel(ax)
+        return
+    for pid, mdf in mdf_all.groupby("pid"):
+        pid = int(pid)
+        mdf = mdf.copy()
         if mdf.empty:
-            continue
-        if not {"pid", "trial", "observation", "response"}.issubset(mdf.columns):
             continue
         # Model response pickles do not contain stimulus values; merge from human yoo data.
         mdf = mdf.merge(
@@ -1392,184 +1112,33 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
         ["pid", "observation"], as_index=False
     )["response_change"].mean()
 
-    if panel_h_plot_type == "lineplot":
-        cb = get_palette(4)
-        c_task = cb[2]
-        c_delta = cb[0]
-        ax_left = ax
-        ax_right = ax_left.twinx()
-
-        sns.lineplot(
-            data=human_task_df,
-            x="observation",
-            y="task_error",
-            color=c_task,
-            linestyle="-",
-            label="Task error (human)",
-            ax=ax_left,
-        )
-        sns.lineplot(
-            data=model_task_df,
-            x="observation",
-            y="task_error",
-            color=c_task,
-            linestyle="--",
-            label="Task error (NEF)",
-            ax=ax_left,
-        )
-        sns.lineplot(
-            data=human_delta_df,
-            x="observation",
-            y="response_change",
-            color=c_delta,
-            linestyle="-",
-            label="Response change (human)",
-            ax=ax_right,
-        )
-        sns.lineplot(
-            data=model_delta_df,
-            x="observation",
-            y="response_change",
-            color=c_delta,
-            linestyle="--",
-            label="Response change (NEF)",
-            ax=ax_right,
-        )
-
-        ax_left.set_xlabel("Observation")
-        ax_left.set_ylabel("Task error")
-        ax_right.set_ylabel("Response change")
-
-        # Align y=0 across twin axes.
-        left_lo, left_hi = ax_left.get_ylim()
-        if left_hi != left_lo:
-            frac = (0.0 - left_lo) / (left_hi - left_lo)
-            right_lo, right_hi = ax_right.get_ylim()
-            span = right_hi - right_lo
-            if span != 0:
-                new_lo = 0.0 - frac * span
-                ax_right.set_ylim(new_lo, new_lo + span)
-
-        h1, l1 = ax_left.get_legend_handles_labels()
-        h2, l2 = ax_right.get_legend_handles_labels()
-        if ax_left.get_legend() is not None:
-            ax_left.get_legend().remove()
-        if ax_right.get_legend() is not None:
-            ax_right.get_legend().remove()
-        ax_left.legend(h1 + h2, l1 + l2, frameon=False, loc="upper right")
-        sns.despine(ax=ax_left, top=True, right=True)
-        ax_right.spines["top"].set_visible(False)
-        ax_right.spines["right"].set_visible(True)
+    pl_r2 = _pl_r2(human_task_df)
+    if len(pl_r2) < 10:
+        _empty_row_panel(ax)
+        return
+    pl_r2 = pl_r2.sort_values()
+    human_u_pids = set(int(p) for p in pl_r2.index[:10].tolist())
+    human_dec_pids = set(int(p) for p in pl_r2.index[-10:].tolist())
+    human_task_u = human_task_df[human_task_df["pid"].isin(human_u_pids)].copy()
+    human_task_dec = human_task_df[human_task_df["pid"].isin(human_dec_pids)].copy()
+    if human_task_u.empty or human_task_dec.empty:
+        _empty_row_panel(ax)
         return
 
-    if panel_h_plot_type == "curve_shape":
-        pl_r2 = _pl_r2(human_task_df)
-        if len(pl_r2) < 10:
-            _empty_row_panel(ax)
-            return
-        pl_r2 = pl_r2.sort_values()
-        human_u_pids = set(int(p) for p in pl_r2.index[:10].tolist())
-        human_dec_pids = set(int(p) for p in pl_r2.index[-10:].tolist())
-        human_task_u = human_task_df[human_task_df["pid"].isin(human_u_pids)].copy()
-        human_task_dec = human_task_df[human_task_df["pid"].isin(human_dec_pids)].copy()
-        if human_task_u.empty or human_task_dec.empty:
-            _empty_row_panel(ax)
-            return
-
-        u_series = _u_strength(model_task_df).dropna().sort_values()
-        if len(u_series) < 10:
-            _empty_row_panel(ax)
-            return
-        weak_pids = set(int(p) for p in u_series.index[:10].tolist())
-        strong_pids = set(int(p) for p in u_series.index[-10:].tolist())
-        model_task_weak = model_task_df[model_task_df["pid"].isin(weak_pids)].copy()
-        model_task_strong = model_task_df[model_task_df["pid"].isin(strong_pids)].copy()
-        if model_task_weak.empty or model_task_strong.empty:
-            _empty_row_panel(ax)
-            return
-
-        human_lam_u = lam_by_pid.reindex(list(set(human_u_pids))).dropna()
-        human_lam_dec = lam_by_pid.reindex(list(set(human_dec_pids))).dropna()
-
-        nef_params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
-        if not nef_params_path.exists():
-            _empty_row_panel(ax)
-            return
-        nef_params = pd.read_pickle(nef_params_path)
-        if not {"pid", "lambda_"}.issubset(nef_params.columns):
-            _empty_row_panel(ax)
-            return
-        nef_lam_by_pid = (
-            nef_params[["pid", "lambda_"]]
-            .dropna()
-            .drop_duplicates(subset=["pid"], keep="first")
-            .set_index("pid")["lambda_"]
-        )
-        nef_lam_weak = nef_lam_by_pid.reindex(list(weak_pids)).dropna()
-        nef_lam_strong = nef_lam_by_pid.reindex(list(strong_pids)).dropna()
-        if (
-            human_lam_u.empty
-            or human_lam_dec.empty
-            or nef_lam_weak.empty
-            or nef_lam_strong.empty
-        ):
-            _empty_row_panel(ax)
-            return
-
-        cb = get_palette(2)
-        sns.lineplot(
-            data=human_task_dec,
-            x="observation",
-            y="task_error",
-            color=cb[0],
-            linestyle="-",
-            label=(
-                f"Human decaying (n=10, "
-                f"λ̄={float(human_lam_dec.mean()):.2f})"
-            ),
-            ax=ax,
-        )
-        sns.lineplot(
-            data=human_task_u,
-            x="observation",
-            y="task_error",
-            color=cb[0],
-            linestyle="--",
-            label=(
-                f"Human U-shaped (n=10, "
-                f"λ̄={float(human_lam_u.mean()):.2f})"
-            ),
-            ax=ax,
-        )
-        sns.lineplot(
-            data=model_task_weak,
-            x="observation",
-            y="task_error",
-            color=cb[1],
-            linestyle="-",
-            label=(
-                f"NEF weak U-shape (n=10, "
-                f"λ̄={float(nef_lam_weak.mean()):.2f})"
-            ),
-            ax=ax,
-        )
-        sns.lineplot(
-            data=model_task_strong,
-            x="observation",
-            y="task_error",
-            color=cb[1],
-            linestyle="--",
-            label=(
-                f"NEF strong U-shape (n=10, "
-                f"λ̄={float(nef_lam_strong.mean()):.2f})"
-            ),
-            ax=ax,
-        )
-        ax.set_xlabel("Observation")
-        ax.set_ylabel("Task error")
-        ax.legend(frameon=False, loc="upper right")
-        sns.despine(ax=ax, top=True, right=True)
+    u_series = _u_strength(model_task_df).dropna().sort_values()
+    if len(u_series) < 10:
+        _empty_row_panel(ax)
         return
+    weak_pids = set(int(p) for p in u_series.index[:10].tolist())
+    strong_pids = set(int(p) for p in u_series.index[-10:].tolist())
+    model_task_weak = model_task_df[model_task_df["pid"].isin(weak_pids)].copy()
+    model_task_strong = model_task_df[model_task_df["pid"].isin(strong_pids)].copy()
+    if model_task_weak.empty or model_task_strong.empty:
+        _empty_row_panel(ax)
+        return
+
+    human_lam_u = lam_by_pid.reindex(list(set(human_u_pids))).dropna()
+    human_lam_dec = lam_by_pid.reindex(list(set(human_dec_pids))).dropna()
 
     nef_params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
     if not nef_params_path.exists():
@@ -1579,274 +1148,80 @@ def _plot_panel_h(ax, run_folder: str, panel_h_plot_type: str = "lineplot") -> N
     if not {"pid", "lambda_"}.issubset(nef_params.columns):
         _empty_row_panel(ax)
         return
-    nef_lambda_by_pid = (
+    nef_lam_by_pid = (
         nef_params[["pid", "lambda_"]]
         .dropna()
         .drop_duplicates(subset=["pid"], keep="first")
         .set_index("pid")["lambda_"]
     )
-    pids_sorted_nef = [int(p) for p in nef_lambda_by_pid.sort_values().index.tolist()]
-    if not pids_sorted_nef:
-        _empty_row_panel(ax)
-        return
-
-    obs_cols = list(range(1, 31))
-    human_task_mat = (
-        human_task_df.pivot(index="pid", columns="observation", values="task_error")
-        .reindex(index=pids_sorted, columns=obs_cols)
-    )
-    human_delta_mat = (
-        human_delta_df.pivot(index="pid", columns="observation", values="response_change")
-        .reindex(index=pids_sorted, columns=obs_cols)
-    )
-    model_task_mat = (
-        model_task_df.pivot(index="pid", columns="observation", values="task_error")
-        .reindex(index=pids_sorted_nef, columns=obs_cols)
-    )
-    model_delta_mat = (
-        model_delta_df.pivot(index="pid", columns="observation", values="response_change")
-        .reindex(index=pids_sorted_nef, columns=obs_cols)
-    )
-
-    human_task_vals = human_task_mat.to_numpy().ravel()
-    human_task_vals = human_task_vals[np.isfinite(human_task_vals)]
-    human_delta_vals = human_delta_mat.to_numpy().ravel()
-    human_delta_vals = human_delta_vals[np.isfinite(human_delta_vals)]
-    model_task_vals = model_task_mat.to_numpy().ravel()
-    model_task_vals = model_task_vals[np.isfinite(model_task_vals)]
-    model_delta_vals = model_delta_mat.to_numpy().ravel()
-    model_delta_vals = model_delta_vals[np.isfinite(model_delta_vals)]
+    nef_lam_weak = nef_lam_by_pid.reindex(list(weak_pids)).dropna()
+    nef_lam_strong = nef_lam_by_pid.reindex(list(strong_pids)).dropna()
     if (
-        human_task_vals.size == 0
-        or human_delta_vals.size == 0
-        or model_task_vals.size == 0
-        or model_delta_vals.size == 0
+        human_lam_u.empty
+        or human_lam_dec.empty
+        or nef_lam_weak.empty
+        or nef_lam_strong.empty
     ):
         _empty_row_panel(ax)
         return
-    vmin_human_task, vmax_human_task = float(human_task_vals.min()), float(
-        human_task_vals.max()
-    )
-    vmin_human_delta, vmax_human_delta = float(human_delta_vals.min()), float(
-        human_delta_vals.max()
-    )
-    vmin_model_task, vmax_model_task = float(model_task_vals.min()), float(
-        model_task_vals.max()
-    )
-    vmin_model_delta, vmax_model_delta = float(model_delta_vals.min()), float(
-        model_delta_vals.max()
-    )
 
-    fig = ax.figure
-    parent_spec = ax.get_subplotspec()
-    ax.remove()
-    inner = GridSpecFromSubplotSpec(
-        2, 2, subplot_spec=parent_spec, wspace=0.02, hspace=0.01
-    )
-    ax_left_human = fig.add_subplot(inner[0, 0])
-    ax_right_human = fig.add_subplot(inner[0, 1], sharey=ax_left_human)
-    ax_left_model = fig.add_subplot(inner[1, 0], sharex=ax_left_human)
-    ax_right_model = fig.add_subplot(inner[1, 1], sharex=ax_right_human, sharey=ax_left_model)
-
-    hm_left_human = sns.heatmap(
-        human_task_mat,
-        cmap="viridis",
-        cbar=False,
-        vmin=vmin_human_task,
-        vmax=vmax_human_task,
-        ax=ax_left_human,
-    )
-    sns.heatmap(
-        human_delta_mat,
-        cmap="viridis",
-        cbar=False,
-        vmin=vmin_human_delta,
-        vmax=vmax_human_delta,
-        ax=ax_right_human,
-    )
-    hm_left_model = sns.heatmap(
-        model_task_mat,
-        cmap="viridis",
-        cbar=False,
-        vmin=vmin_model_task,
-        vmax=vmax_model_task,
-        ax=ax_left_model,
-    )
-    hm_right_model = sns.heatmap(
-        model_delta_mat,
-        cmap="viridis",
-        cbar=False,
-        vmin=vmin_model_delta,
-        vmax=vmax_model_delta,
-        ax=ax_right_model,
-    )
-
-    fig.colorbar(
-        hm_left_model.collections[0],
-        ax=[ax_left_human, ax_left_model],
-        orientation="horizontal",
-        location="bottom",
-        pad=0.10,
-        shrink=0.8,
-    )
-    fig.colorbar(
-        hm_right_model.collections[0],
-        ax=[ax_right_human, ax_right_model],
-        orientation="horizontal",
-        location="bottom",
-        pad=0.10,
-        shrink=0.8,
-    )
-
-    rep_idx = np.linspace(0, len(pids_sorted) - 1, 5, dtype=int)
-    rep_idx_set = set(int(i) for i in rep_idx.tolist())
-    labels = [
-        (f"λ={lam_by_pid.loc[pid]:.2f}" if i in rep_idx_set else "")
-        for i, pid in enumerate(pids_sorted)
-    ]
-    y_pos_human = np.arange(len(pids_sorted)) + 0.5
-    ax_left_human.set_yticks(y_pos_human)
-    ax_left_human.set_yticklabels(labels, fontsize=6, rotation=0)
-
-    rep_idx_nef = np.linspace(0, len(pids_sorted_nef) - 1, 5, dtype=int)
-    rep_idx_nef_set = set(int(i) for i in rep_idx_nef.tolist())
-    labels_nef = [
-        (f"λ={nef_lambda_by_pid.loc[pid]:.1f}" if i in rep_idx_nef_set else "")
-        for i, pid in enumerate(pids_sorted_nef)
-    ]
-    y_pos_nef = np.arange(len(pids_sorted_nef)) + 0.5
-    ax_left_model.set_yticks(y_pos_nef)
-    ax_left_model.set_yticklabels(labels_nef, fontsize=6, rotation=0)
-    ax_right_human.tick_params(axis="y", left=True, labelleft=False)
-    ax_right_model.tick_params(axis="y", left=True, labelleft=False)
-
-    x_pos = [0.5, 9.5, 19.5, 29.5]
-    x_lab = ["1", "10", "20", "30"]
-    ax_left_human.set_xticks(x_pos)
-    ax_left_human.set_xticklabels([])
-    ax_right_human.set_xticks(x_pos)
-    ax_right_human.set_xticklabels([])
-    ax_left_human.tick_params(axis="x", bottom=False, labelbottom=False)
-    ax_right_human.tick_params(axis="x", bottom=False, labelbottom=False)
-    ax_left_human.set_xlabel("")
-    ax_right_human.set_xlabel("")
-
-    ax_left_model.set_xticks(x_pos)
-    ax_left_model.set_xticklabels(x_lab, rotation=0)
-    ax_right_model.set_xticks(x_pos)
-    ax_right_model.set_xticklabels(x_lab, rotation=0)
-    ax_left_model.set_xlabel("Observation")
-    ax_right_model.set_xlabel("Observation")
-
-    ax_left_human.set_title("Task error")
-    ax_right_human.set_title("Response change")
-    ax_left_model.set_title("")
-    ax_right_model.set_title("")
-
-    for heat_ax in (ax_left_human, ax_right_human, ax_left_model, ax_right_model):
-        heat_ax.tick_params(axis="y", length=0)
-        heat_ax.tick_params(axis="x", length=0)
-        heat_ax.set_ylabel("")
-
-    ax_left_human.annotate(
-        "Human",
-        xy=(-0.35, 0.5),
-        xycoords="axes fraction",
-        rotation=90,
-        ha="center",
-        va="center",
-        fontsize=7,
-        fontweight="bold",
-    )
-    ax_left_model.annotate(
-        "NEF",
-        xy=(-0.35, 0.5),
-        xycoords="axes fraction",
-        rotation=90,
-        ha="center",
-        va="center",
-        fontsize=7,
-        fontweight="bold",
-    )
-
-
-def _plot_panel_k(ax, noise_folder: str, run_folder: str, palette: dict) -> None:
-    """Response noise trajectory (drawn in panel K); multi-seed NEF responses."""
-    noise_run_dir = data_path("runs") / noise_folder
-    noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
-    if not noise_path.exists():
-        _empty_row_panel(ax)
-        return
-
-    noise_df = pd.read_pickle(noise_path)
-    required = {"pid", "trial", "observation", "response"}
-    if not required.issubset(noise_df.columns):
-        _empty_row_panel(ax)
-        return
-
-    per_qid_noise = (
-        noise_df.groupby(["pid", "trial", "observation"], as_index=False)["response"]
-        .agg(lambda s: float(np.std(s.to_numpy(dtype=float), ddof=0)))
-        .rename(columns={"response": "response_noise"})
-    )
-    if per_qid_noise.empty:
-        _empty_row_panel(ax)
-        return
-
-    split_run_dir = data_path("runs") / run_folder
-    weight_df, low_thr_lambda, high_thr_lambda = _panel_e_load_weight_yoo(split_run_dir)
-    if weight_df is None or high_thr_lambda is None:
-        _empty_row_panel(ax)
-        return
-
-    low_pids = set(
-        weight_df[weight_df["lambda_group"].str.startswith("low")]["pid"]
-        .dropna()
-        .astype(int)
-        .tolist()
-    )
-    high_pids = set(
-        weight_df[weight_df["lambda_group"].str.startswith("high")]["pid"]
-        .dropna()
-        .astype(int)
-        .tolist()
-    )
-    if not low_pids or not high_pids:
-        _empty_row_panel(ax)
-        return
-
-    low_noise = per_qid_noise[per_qid_noise["pid"].isin(low_pids)].copy()
-    high_noise = per_qid_noise[per_qid_noise["pid"].isin(high_pids)].copy()
-    if low_noise.empty or high_noise.empty:
-        _empty_row_panel(ax)
-        return
-
-    cb_palette = get_palette(2)
-    # Same convention as panel C: seaborn computes mean line + default CI region.
+    cb = get_palette(2)
     sns.lineplot(
-        data=high_noise,
+        data=human_task_dec,
         x="observation",
-        y="response_noise",
-        color=cb_palette[1],
-        label=f"High discounting (λ > {high_thr_lambda:.2f})",
+        y="task_error",
+        color=cb[0],
+        linestyle="-",
+        label=(
+            f"Human decaying (n=10, "
+            f"λ̄={float(human_lam_dec.mean()):.2f})"
+        ),
         ax=ax,
     )
     sns.lineplot(
-        data=low_noise,
+        data=human_task_u,
         x="observation",
-        y="response_noise",
-        color=cb_palette[0],
-        label=f"Low discounting (λ < {low_thr_lambda:.2f})",
+        y="task_error",
+        color=cb[0],
+        linestyle="--",
+        label=(
+            f"Human U-shaped (n=10, "
+            f"λ̄={float(human_lam_u.mean()):.2f})"
+        ),
+        ax=ax,
+    )
+    sns.lineplot(
+        data=model_task_weak,
+        x="observation",
+        y="task_error",
+        color=cb[1],
+        linestyle="-",
+        label=(
+            f"NEF weak U-shape (n=10, "
+            f"λ̄={float(nef_lam_weak.mean()):.2f})"
+        ),
+        ax=ax,
+    )
+    sns.lineplot(
+        data=model_task_strong,
+        x="observation",
+        y="task_error",
+        color=cb[1],
+        linestyle="--",
+        label=(
+            f"NEF strong U-shape (n=10, "
+            f"λ̄={float(nef_lam_strong.mean()):.2f})"
+        ),
         ax=ax,
     )
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Predicted response noise")
-    ax.legend(frameon=False)
+    ax.set_ylabel("Task error")
+    ax.legend(frameon=False, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_l(ax, noise_folder: str) -> None:
-    """Panel L: early vs late binned response-change/noise correlation."""
+def _plot_panel_h(ax, noise_folder: str) -> None:
+    """Panel H: early vs late binned response-change/noise correlation."""
     noise_run_dir = data_path("runs") / noise_folder
     noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
     if not noise_path.exists():
@@ -1967,153 +1342,11 @@ def _plot_panel_l(ax, noise_folder: str) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_i(ax, run_folder: str) -> None:
-    """α₀ vs λ correlation from fitted NEF_recurrent yoo params."""
-    run_dir = data_path("runs") / run_folder
-    params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
-    if not params_path.exists():
-        _placeholder(ax, "No params data")
-        return
-    params = pd.read_pickle(params_path)
-    if not {"alpha_0", "lambda_"}.issubset(params.columns):
-        _placeholder(ax, "No params data")
-        return
-    plot_df = (
-        params.groupby("pid")[["alpha_0", "lambda_"]]
-        .first()
-        .dropna()
-    )
-    if len(plot_df) < 2:
-        _placeholder(ax, "No params data")
-        return
-
-    cb0 = get_palette(1)[0]
-    sns.regplot(
-        data=plot_df,
-        x="alpha_0",
-        y="lambda_",
-        scatter=True,
-        truncate=True,
-        scatter_kws={"alpha": 0.6, "s": 20, "color": cb0},
-        line_kws={"color": cb0, "linewidth": 2.0},
-        ci=95,
-        ax=ax,
-    )
-    r_val, p_val = pearsonr(
-        plot_df["alpha_0"].to_numpy(dtype=float),
-        plot_df["lambda_"].to_numpy(dtype=float),
-    )
-    ax.text(
-        0.02,
-        0.98,
-        f"r = {float(r_val):.2f}, p = {float(p_val):.3f}",
-        transform=ax.transAxes,
-        ha="left",
-        va="top",
-        fontsize=7,
-    )
-    ax.set_xlabel("Fitted α₀")
-    ax.set_ylabel("Fitted λ")
-    leg = ax.get_legend()
-    if leg is not None:
-        leg.remove()
-    sns.despine(ax=ax, top=True, right=True)
-
-
-def _panel_j_split_by_alpha0(
-    run_dir: Path,
-) -> tuple[set[int], set[int], float, float] | None:
-    """Top/bottom PANEL_E_LAMBDA_N pids by α₀; thresholds match panel E λ-split style."""
-    params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
-    if not params_path.exists():
-        return None
-    params = pd.read_pickle(params_path)
-    if "alpha_0" not in params.columns:
-        return None
-    alphas_sorted = params.groupby("pid")["alpha_0"].first().sort_values()
-    if len(alphas_sorted) < PANEL_E_LAMBDA_N:
-        return None
-    low_pids = set(int(p) for p in alphas_sorted.index[:PANEL_E_LAMBDA_N].tolist())
-    high_pids = set(int(p) for p in alphas_sorted.index[-PANEL_E_LAMBDA_N:].tolist())
-    low_thr = float(alphas_sorted.iloc[PANEL_E_LAMBDA_N - 1])
-    high_thr = float(alphas_sorted.iloc[-PANEL_E_LAMBDA_N])
-    return low_pids, high_pids, low_thr, high_thr
-
-
-def _plot_panel_j(ax, noise_folder: str, run_folder: str, _palette: dict) -> None:
-    """Same as panel H but split by high/low α₀ instead of λ."""
-    noise_run_dir = data_path("runs") / noise_folder
-    noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
-    if not noise_path.exists():
-        _empty_row_panel(ax)
-        return
-
-    noise_df = pd.read_pickle(noise_path)
-    required = {"pid", "trial", "observation", "response"}
-    if not required.issubset(noise_df.columns):
-        _empty_row_panel(ax)
-        return
-
-    per_qid_noise = (
-        noise_df.groupby(["pid", "trial", "observation"], as_index=False)["response"]
-        .agg(lambda s: float(np.std(s.to_numpy(dtype=float), ddof=0)))
-        .rename(columns={"response": "response_noise"})
-    )
-    if per_qid_noise.empty:
-        _empty_row_panel(ax)
-        return
-
-    split_run_dir = data_path("runs") / run_folder
-    split = _panel_j_split_by_alpha0(split_run_dir)
-    if split is None:
-        _empty_row_panel(ax)
-        return
-    low_pids, high_pids, low_thr, high_thr = split
-    if not low_pids or not high_pids:
-        _empty_row_panel(ax)
-        return
-
-    low_noise = per_qid_noise[per_qid_noise["pid"].isin(low_pids)].copy()
-    high_noise = per_qid_noise[per_qid_noise["pid"].isin(high_pids)].copy()
-    if low_noise.empty or high_noise.empty:
-        _empty_row_panel(ax)
-        return
-
-    cb_palette = get_palette(2)
-    sns.lineplot(
-        data=high_noise,
-        x="observation",
-        y="response_noise",
-        color=cb_palette[1],
-        label=f"High initial learning (α₀ > {high_thr:.2f})",
-        ax=ax,
-    )
-    sns.lineplot(
-        data=low_noise,
-        x="observation",
-        y="response_noise",
-        color=cb_palette[0],
-        label=f"Low initial learning (α₀ < {low_thr:.2f})",
-        ax=ax,
-    )
-    ax.set_xlabel("Observation")
-    ax.set_ylabel("Predicted response noise")
-    ax.legend(frameon=False)
-    sns.despine(ax=ax, top=True, right=True)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder", type=str, default="refit")
-    parser.add_argument("--noise_folder", type=str, default="yoo_response_noise")
+    parser.add_argument("--noise_folder", type=str, default="refit")
     parser.add_argument("--panel_g_show_significance", action="store_true", default=False)
-    parser.add_argument("--full", action="store_true", default=False)
-    parser.add_argument(
-        "--panel_h_plot_type",
-        type=str,
-        choices=["lineplot", "heatmap", "curve_shape"],
-        default="lineplot",
-    )
     parser.add_argument(
         "--include_rl_lambda",
         action="store_true",
@@ -2131,37 +1364,18 @@ def main() -> None:
     palette = {m: _pal[i] for i, m in enumerate(model_order)}
     palette["Human"] = "0.3"
 
-    if args.full:
-        fig, axes = plt.subplots(3, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-        row0, row1, row2 = axes[0], axes[1], axes[2]
+    fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+    row0, row1 = axes[0], axes[1]
 
-        _plot_panel_a(row0[0], full=True)
-        _plot_panel_b(row0[1], args.run_folder, palette, model_order)
-        _plot_panel_c(row0[2], args.run_folder, palette, model_order)
-        _plot_panel_d(row0[3], args.run_folder, palette, model_order)
+    _plot_panel_a(row0[0])
+    _plot_panel_b(row0[1], args.run_folder, palette, model_order)
+    _plot_panel_c(row0[2], args.run_folder, palette, model_order)
+    _plot_panel_d(row0[3], args.run_folder, palette, model_order)
 
-        _plot_panel_e(row1[0], args.run_folder)
-        _plot_panel_f(row1[1], args.run_folder)
-        _plot_panel_g(row1[2], args.run_folder, args.panel_g_show_significance)
-        _plot_panel_h(row1[3], args.run_folder, args.panel_h_plot_type)
-
-        _plot_panel_i(row2[0], args.run_folder)
-        _plot_panel_j(row2[1], args.noise_folder, args.run_folder, palette)
-        _plot_panel_k(row2[2], args.noise_folder, args.run_folder, palette)
-        _plot_panel_l(row2[3], args.noise_folder)
-    else:
-        fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-        row0, row1 = axes[0], axes[1]
-
-        _plot_panel_a(row0[0], full=False)
-        _plot_panel_b(row0[1], args.run_folder, palette, model_order)
-        _plot_panel_c(row0[2], args.run_folder, palette, model_order)
-        _plot_panel_d(row0[3], args.run_folder, palette, model_order)
-
-        _plot_panel_e(row1[0], args.run_folder)
-        _plot_panel_g(row1[1], args.run_folder, args.panel_g_show_significance)
-        _plot_panel_h(row1[2], args.run_folder, "curve_shape")
-        _plot_panel_l(row1[3], args.noise_folder)
+    _plot_panel_e(row1[0], args.run_folder)
+    _plot_panel_f(row1[1], args.run_folder, args.panel_g_show_significance)
+    _plot_panel_g(row1[2], args.run_folder)
+    _plot_panel_h(row1[3], args.noise_folder)
 
     label_panels(axes)
 
