@@ -2,7 +2,7 @@
 """
 Loss computation for model fitting across experiments.
 
-Response-accuracy loss: root mean squared error (RMSE) on carrabin and yoo.
+Response-accuracy loss: root mean squared error (RMSE) on carrabin, yoo, and diederen.
 
 This module does not depend on the model implementation layer.
 """
@@ -74,14 +74,17 @@ def response_loss(
     human: pd.DataFrame,
 ) -> float:
     """
-    Response-accuracy loss for carrabin and yoo: root mean squared error (RMSE)
-    between model and human responses.
+    Response-accuracy loss for carrabin, yoo, and diederen: root mean squared error
+    (RMSE) between model and human responses.
     """
     dataset = params["dataset"]
-    if dataset not in ("carrabin", "yoo"):
+    if dataset not in ("carrabin", "yoo", "diederen"):
         raise ValueError(
-            "params['dataset'] must be one of 'carrabin', 'yoo'"
+            "params['dataset'] must be one of 'carrabin', 'yoo', 'diederen'"
         )
+
+    if dataset == "diederen":
+        human = human[~human["catch_trial"].astype(bool)]
 
     sq_errors: list[float] = []
     pairs = (

@@ -3,7 +3,7 @@
 Save per-neuron activities and encoders for NEF ensembles.
 
 Works for any dataset with ``{dataset}.pkl`` containing ``trial``, ``observation``,
-and ``value`` columns (carrabin, yoo).
+and ``value`` columns (carrabin, yoo, diederen).
 """
 
 from __future__ import annotations
