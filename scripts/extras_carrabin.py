@@ -50,14 +50,12 @@ probe_pids experiment:
   probe_NEF_recurrent_carrabin_<pid>.pkl   — raw NEF probe timeseries per pid
 
 n_neurons_scan experiment:
-  responses_carrabin_<pid>_n<N>.pkl        — responses at each neuron count
-  probe_n<N>_carrabin_<pid>.pkl            — probe data at each neuron count
+  scan_compact_carrabin_<pid>_n<N>.pkl     — readout response + abs_pred_error per obs
 
 Combined files (from ``--mode collect``):
 
   probe_pids_carrabin.pkl                  — all probe_pids probes (pid on each entry)
-  scan_responses_carrabin.pkl              — all n_neurons scan responses
-  scan_probes_carrabin.pkl                 — all n_neurons scan probes (pid, n_neurons on each)
+  scan_responses_carrabin.pkl              — combined compact scan rows (response, abs_pred_error)
 
 Per-pid files are read by ``scripts/figure_carrabin.py`` for the bottom panels.
 =============================================================================
@@ -69,6 +67,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -76,6 +75,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import RUNS_DIR, data_path
 
 N_NEURONS_LIST = [50, 75, 100, 150, 200, 300, 500]
+READOUT_OFFSET = 0.5  # seconds into observation window for readout
 
 
 def _run_probe_pids_simulate(
@@ -117,10 +117,12 @@ def _run_n_neurons_scan_simulate(
     out_folder: str,
 ) -> None:
     from fitting.model_params import MODEL_PARAMS
-    from models.NEF import PARAM_DEFAULTS, run as nef_run
+    from models.NEF import PARAM_DEFAULTS, _pretrain, _simulate_trial
+    from utils.run_params import trial_seed as _trial_seed
 
     out_dir = RUNS_DIR / out_folder
     out_dir.mkdir(parents=True, exist_ok=True)
+    human = pd.read_pickle(data_path("carrabin.pkl"))
 
     for pid in scan_pids:
         base_params = pd.read_pickle(
@@ -131,19 +133,50 @@ def _run_n_neurons_scan_simulate(
         base_params["nef_type"] = "recurrent"
         base_params["dataset"] = "carrabin"
         base_params["model_type"] = "NEF_recurrent"
+        base_params["pid"] = int(pid)
+        human_pid = human.query("pid == @pid")
 
         for n_neurons in n_neurons_list:
             print(f"Simulating pid={pid}, n_neurons={n_neurons}...")
             p = {**base_params, "n_neurons": n_neurons}
-            responses = nef_run(p, save_probes=True)
-            responses["n_neurons"] = n_neurons
-            out_path = out_dir / f"responses_carrabin_{pid}_n{n_neurons}.pkl"
-            responses.to_pickle(out_path)
-            src = data_path(f"probe_NEF_recurrent_carrabin_{pid}.pkl")
-            dst = out_dir / f"probe_n{n_neurons}_carrabin_{pid}.pkl"
-            if src.exists():
-                src.rename(dst)
-            print(f"  Saved responses and probes for pid={pid}, n={n_neurons}")
+            decoders = _pretrain(p)
+            compact_rows: list[dict] = []
+
+            for trial, trial_data in human_pid.groupby("trial"):
+                trial_data = trial_data.sort_values("observation")
+                obs_values = trial_data["value"].to_numpy(dtype=float)
+                trial_seed = _trial_seed(int(p["seed"]), int(trial))
+                p_trial = {**p, "seed": trial_seed}
+                _, probe_data = _simulate_trial(
+                    obs_values, p_trial, decoders, return_probes=True
+                )
+                t = probe_data["t"]
+                value_decoded = np.asarray(probe_data["value"]).squeeze()
+                error = probe_data["error"]
+                error1 = error[:, 1] if error.ndim > 1 else error
+                t_iti = float(p_trial["t_iti"])
+                t_obs = float(p_trial["t_obs"])
+                t_step = t_obs + t_iti
+                n_obs = len(obs_values)
+
+                for obs in range(1, n_obs + 1):
+                    t_readout = t_iti + (obs - 1) * t_step + READOUT_OFFSET
+                    idx = int(np.argmin(np.abs(t - t_readout)))
+                    compact_rows.append(
+                        {
+                            "pid": pid,
+                            "n_neurons": n_neurons,
+                            "trial": int(trial),
+                            "observation": obs,
+                            "response": float(value_decoded[idx]),
+                            "abs_pred_error": float(np.abs(error1[idx])),
+                        }
+                    )
+
+            compact_df = pd.DataFrame(compact_rows)
+            out_path = out_dir / f"scan_compact_carrabin_{pid}_n{n_neurons}.pkl"
+            compact_df.to_pickle(out_path)
+            print(f"  Saved {len(compact_df)} rows to {out_path}")
 
 
 def _collect_probe_pids(out_dir: Path) -> None:
@@ -166,58 +199,15 @@ def _collect_probe_pids(out_dir: Path) -> None:
     )
 
 
-def _collect_n_neurons_scan(out_dir: Path, n_neurons_list: list[int]) -> None:
-    response_dfs: list[pd.DataFrame] = []
-    for path in sorted(out_dir.glob("responses_carrabin_*_n*.pkl")):
-        parts = path.stem.split("_")
-        pid = int(parts[2])
-        n_neurons = int(parts[3][1:])
-        if n_neurons not in n_neurons_list:
-            continue
-        df = pd.read_pickle(path)
-        if "pid" not in df.columns:
-            df = df.copy()
-            df["pid"] = pid
-        if "n_neurons" not in df.columns:
-            df["n_neurons"] = n_neurons
-        response_dfs.append(df)
-
-    if response_dfs:
-        scan_resp = pd.concat(response_dfs, ignore_index=True)
-        resp_out = out_dir / "scan_responses_carrabin.pkl"
-        scan_resp.to_pickle(resp_out)
-        print(
-            f"Collected {len(response_dfs)} response file(s), "
-            f"{len(scan_resp)} rows -> {resp_out}"
-        )
-    else:
-        print("No responses_carrabin_*_n*.pkl files found for scan_responses.")
-
-    combined_probes: list[dict] = []
-    for n_neurons in n_neurons_list:
-        for path in sorted(out_dir.glob(f"probe_n{n_neurons}_carrabin_*.pkl")):
-            pid = int(path.stem.split("_")[-1])
-            probes_raw = pd.read_pickle(path)
-            probes = probes_raw if isinstance(probes_raw, list) else [probes_raw]
-            for probe in probes:
-                entry = dict(probe)
-                entry["pid"] = pid
-                entry["n_neurons"] = n_neurons
-                combined_probes.append(entry)
-
-    if combined_probes:
-        probes_out = out_dir / "scan_probes_carrabin.pkl"
-        pd.to_pickle(combined_probes, probes_out)
-        n_files = sum(
-            len(list(out_dir.glob(f"probe_n{n}_carrabin_*.pkl")))
-            for n in n_neurons_list
-        )
-        print(
-            f"Collected {n_files} probe file(s), "
-            f"{len(combined_probes)} probe entries -> {probes_out}"
-        )
-    else:
-        print("No probe_n<N>_carrabin_<pid>.pkl files found for scan_probes.")
+def _collect_n_neurons_scan(out_dir: Path, _n_neurons_list: list[int]) -> None:
+    compact_files = sorted(out_dir.glob("scan_compact_carrabin_*_n*.pkl"))
+    if not compact_files:
+        print("No compact scan files found.")
+        return
+    df = pd.concat([pd.read_pickle(f) for f in compact_files], ignore_index=True)
+    out = out_dir / "scan_responses_carrabin.pkl"
+    df.to_pickle(out)
+    print(f"Collected {len(compact_files)} files -> {out} ({df.shape})")
 
 
 def main() -> None:

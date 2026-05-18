@@ -369,7 +369,7 @@ def _save_qid_kde(human: pd.DataFrame) -> None:
         plt.close(fig)
 
 
-def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
+def _load_probe_metrics(pids, probes_list, human, nef_resp, nef_params, qid_map):
     """
     Returns DataFrame with columns:
     pid, alpha_0, lambda_, mean_error1, mean_std1, mean_cv1, response_noise
@@ -380,11 +380,9 @@ def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
 
     rows = []
     for pid in pids:
-        probe_path = out_dir / f"probe_NEF_recurrent_carrabin_{pid}.pkl"
-        if not probe_path.exists():
+        probes = [p for p in probes_list if int(p["pid"]) == pid]
+        if not probes:
             continue
-        probes_raw = pd.read_pickle(probe_path)
-        probes = probes_raw if isinstance(probes_raw, list) else [probes_raw]
         params = probes[0]["params"]
         t_iti = float(params["t_iti"])
         t_step = float(params["t_obs"]) + t_iti
@@ -460,68 +458,6 @@ def _load_probe_metrics(pids, out_dir, human, nef_resp, nef_params, qid_map):
                 "_params": params,
             }
         )
-    return pd.DataFrame(rows)
-
-
-def _load_pred_error_std(
-    out_dir: Path,
-    human: pd.DataFrame,
-    n_neurons_list: list[int],
-    pids: list[int],
-    min_repeats: int = 5,
-    readout_offset: float = 0.5,
-) -> pd.DataFrame:
-    """
-    For each (n_neurons, pid, qid), compute std of |error[1]| at readout
-    timepoints across trials.
-    """
-    from collections import defaultdict
-
-    rows = []
-    for n_neurons in n_neurons_list:
-        for pid in pids:
-            probe_path = out_dir / f"probe_n{n_neurons}_carrabin_{pid}.pkl"
-            if not probe_path.exists():
-                continue
-            probes_raw = pd.read_pickle(probe_path)
-            probes = probes_raw if isinstance(probes_raw, list) else [probes_raw]
-            params = probes[0]["params"]
-            t_iti = float(params["t_iti"])
-            t_step = float(params["t_obs"]) + t_iti
-
-            human_pid = human[human["pid"] == pid]
-            trial_qid = (
-                human_pid.groupby(["trial", "observation"])["qid"].first().reset_index()
-            )
-
-            qid_vals = defaultdict(list)
-            for probe in probes:
-                trial = int(probe["trial"])
-                t = probe["t"]
-                error1 = np.abs(probe["error"][:, 1])
-                trial_map = trial_qid[trial_qid["trial"] == trial].set_index(
-                    "observation"
-                )["qid"]
-                for obs_n in range(1, 6):
-                    if obs_n not in trial_map.index:
-                        continue
-                    qid = trial_map[obs_n]
-                    t_readout = t_iti + (obs_n - 1) * t_step + readout_offset
-                    idx = int(np.argmin(np.abs(t - t_readout)))
-                    qid_vals[(qid, obs_n)].append(float(error1[idx]))
-
-            for (qid, _), vals in qid_vals.items():
-                if len(vals) < min_repeats:
-                    continue
-                rows.append(
-                    {
-                        "n_neurons": n_neurons,
-                        "pid": pid,
-                        "qid": qid,
-                        "pred_error_std": float(np.std(vals)),
-                    }
-                )
-
     return pd.DataFrame(rows)
 
 
@@ -708,13 +644,11 @@ def _load_noisy_representations_figure_data(
     out_folder: str,
     n_neurons_list: list[int],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Assemble probe / scan data as in extras_carrabin._run_probe_pids."""
+    """Load combined extras_carrabin outputs from data/runs/<out_folder>/."""
     out_dir = RUNS_DIR / out_folder
-    all_probe_files = sorted(out_dir.glob("probe_NEF_recurrent_carrabin_*.pkl"))
-    analysis_pids = [int(f.stem.split("_")[-1]) for f in all_probe_files]
-
     human = pd.read_pickle(data_path("carrabin.pkl"))
     qid_map = human[["pid", "trial", "observation", "qid"]].drop_duplicates()
+
     nef_params_path = run_folder / "NEF_recurrent_carrabin_params.pkl"
     nef_resp_path = run_folder / "NEF_recurrent_carrabin_responses.pkl"
     if not nef_params_path.exists() or not nef_resp_path.exists():
@@ -722,25 +656,24 @@ def _load_noisy_representations_figure_data(
 
     nef_params = pd.read_pickle(nef_params_path)
     nef_resp = pd.read_pickle(nef_resp_path)
+
+    probe_combined = out_dir / "probe_pids_carrabin.pkl"
+    if probe_combined.exists():
+        all_probes = pd.read_pickle(probe_combined)
+        analysis_pids = sorted({int(p["pid"]) for p in all_probes})
+    else:
+        all_probes = []
+        analysis_pids = []
+
     metrics_df = _load_probe_metrics(
-        analysis_pids, out_dir, human, nef_resp, nef_params, qid_map
+        analysis_pids, all_probes, human, nef_resp, nef_params, qid_map
     )
 
-    scan_dfs = []
-    response_files = sorted(out_dir.glob("responses_carrabin_*_n*.pkl"))
-    all_scan_pids = sorted({int(f.stem.split("_")[2]) for f in response_files})
-    for pid in all_scan_pids:
-        for n_neurons in n_neurons_list:
-            path = out_dir / f"responses_carrabin_{pid}_n{n_neurons}.pkl"
-            if path.exists():
-                scan_dfs.append(pd.read_pickle(path))
-
-    if scan_dfs:
-        scan_resp = pd.concat(scan_dfs, ignore_index=True)
+    scan_resp_path = out_dir / "scan_responses_carrabin.pkl"
+    if scan_resp_path.exists():
+        scan_resp = pd.read_pickle(scan_resp_path)
         scan_resp = scan_resp.merge(
-            qid_map,
-            on=["pid", "trial", "observation"],
-            how="left",
+            qid_map, on=["pid", "trial", "observation"], how="left"
         )
         scan_per_qid = (
             scan_resp.groupby(["n_neurons", "pid", "qid"])["response"]
@@ -748,16 +681,15 @@ def _load_noisy_representations_figure_data(
             .reset_index()
         )
         scan_per_qid.columns = ["n_neurons", "pid", "qid", "response_noise"]
+        pred_error_df = (
+            scan_resp.groupby(["n_neurons", "pid", "qid"])["abs_pred_error"]
+            .std()
+            .reset_index()
+        )
+        pred_error_df.columns = ["n_neurons", "pid", "qid", "pred_error_std"]
     else:
         scan_per_qid = pd.DataFrame()
-
-    all_scan_pids = [
-        int(f.stem.split("_")[2])
-        for f in sorted(out_dir.glob("responses_carrabin_*_n200.pkl"))
-    ]
-    pred_error_df = _load_pred_error_std(
-        out_dir, human, n_neurons_list, all_scan_pids
-    )
+        pred_error_df = pd.DataFrame()
 
     return metrics_df, human, scan_per_qid, pred_error_df
 
@@ -765,27 +697,12 @@ def _load_noisy_representations_figure_data(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--experiment",
-        type=str,
-        default="probe_pids",
-        choices=["probe_pids", "n_neurons_scan"],
-        help="Which experiment to run",
-    )
-    parser.add_argument("--run_simulation", action="store_true", default=False)
-    parser.add_argument(
         "--run_folder",
         type=str,
         default="refit",
         help="Source folder for fitted NEF params",
     )
     parser.add_argument("--out_folder", type=str, default="refit")
-    parser.add_argument(
-        "--pids",
-        type=int,
-        nargs="+",
-        default=[6, 7],
-        help="PIDs to simulate for probe_pids experiment",
-    )
     parser.add_argument(
         "--scan_pid",
         type=int,
@@ -847,8 +764,8 @@ def main() -> None:
         for ax in row1:
             _placeholder(
                 ax,
-                "No probe data — generate with scripts/extras_carrabin.py "
-                "(matching --run_folder/--out_folder).",
+                "No probe data — run extras_carrabin.py --mode run then "
+                "--mode collect (matching --out_folder).",
             )
     else:
         sample_rows = []
