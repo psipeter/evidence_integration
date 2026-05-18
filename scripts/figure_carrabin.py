@@ -27,7 +27,7 @@ MODEL_ORDER_D = ["Human", "Bayes", "RL", "NoisyCounting", "NEF_recurrent"]
 
 HUMAN_NEUTRAL_COLOR = "0.3"
 
-# --- noisy representations row (logic inlined from former scripts/noisy_representations.py) ---
+# --- bottom row (E–H): data from scripts/extras_carrabin.py ---
 SAMPLE_PIDS = [6, 7]  # high/low alpha_0 example pids for panel 1
 MIN_REPEATS = 10  # minimum trial repeats per qid for analysis
 READOUT_OFFSET = 0.5  # seconds into obs window for readout
@@ -708,7 +708,7 @@ def _load_noisy_representations_figure_data(
     out_folder: str,
     n_neurons_list: list[int],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Assemble probe / scan data as in noisy_representations._run_probe_pids."""
+    """Assemble probe / scan data as in extras_carrabin._run_probe_pids."""
     out_dir = RUNS_DIR / out_folder
     all_probe_files = sorted(out_dir.glob("probe_NEF_recurrent_carrabin_*.pkl"))
     analysis_pids = [int(f.stem.split("_")[-1]) for f in all_probe_files]
@@ -775,10 +775,10 @@ def main() -> None:
     parser.add_argument(
         "--run_folder",
         type=str,
-        default="response",
+        default="refit",
         help="Source folder for fitted NEF params",
     )
-    parser.add_argument("--out_folder", type=str, default="noisy_representations")
+    parser.add_argument("--out_folder", type=str, default="refit")
     parser.add_argument(
         "--pids",
         type=int,
@@ -837,7 +837,7 @@ def main() -> None:
         for ax in row1:
             _placeholder(
                 ax,
-                "No probe data — generate with scripts/noisy_representations.py "
+                "No probe data — generate with scripts/extras_carrabin.py "
                 "(matching --run_folder/--out_folder).",
             )
     else:

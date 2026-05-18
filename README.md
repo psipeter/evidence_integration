@@ -171,8 +171,11 @@ python -m utils.save_activities carrabin NEF_recurrent 1 response error once_per
 
 ## Figures
 
+Bottom panels of the carrabin figure need probe data from `scripts/extras_carrabin.py`
+(see that module docstring and `jobs/submit_probe_pids.sh` / `jobs/submit_neurons_scan.sh`).
+
 ```bash
-python scripts/figure_carrabin.py --run_folder response
+python scripts/figure_carrabin.py --run_folder refit
 python scripts/figure_yoo.py --run_folder response --noise_folder yoo_response_noise
 python scripts/dynamics_NEF.py --dataset carrabin --pid 1 --run_folder response
 ```
