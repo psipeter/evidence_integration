@@ -6,7 +6,8 @@ Panel B: model RMSE boxplot (requires model fits in --run_folder)
 Panel C: response change vs observation (raw vs pre-switch, post-switch)
 Panel D: carryover bias vs observations since context switch
 Panel E: response change by SD condition and drug condition
-Panels F–H: reserved for future panels
+Panel F: response change diff (post-switch − pre-switch) vs absence_length
+Panels G–H: reserved for future panels
 """
 
 from __future__ import annotations
@@ -554,6 +555,114 @@ def _plot_panel_e(ax, long_df: pd.DataFrame) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _compute_switch_alpha_diff(valid: pd.DataFrame) -> pd.DataFrame:
+    """
+    For each context switch within a (pid, session), compute:
+      absence_length: number of consecutive other-distribution observations
+                      made while this distribution was inactive
+      diff: delta_post - delta_pre
+        delta_post: |response change| at the first obs after returning
+        delta_pre:  |response change| at the last obs before leaving
+
+    Switch detection uses distrib_index changes within (pid, session).
+    Delta values come from valid (free-response, non-missed rows only).
+    """
+    valid = valid.copy().sort_values(["pid", "session", "trial_in_session"])
+    valid["delta"] = valid.groupby(["pid", "trial"])["response"].diff().abs()
+
+    records = []
+    for (pid, session), grp in valid.groupby(["pid", "session"], sort=False):
+        grp = grp.sort_values("trial_in_session").reset_index(drop=True)
+        distribs = sorted(grp["distrib_index"].dropna().unique().tolist())
+        if len(distribs) != 2:
+            continue
+        n = len(grp)
+        for i in range(1, n):
+            if grp.loc[i, "distrib_index"] == grp.loc[i - 1, "distrib_index"]:
+                continue
+            absence_length = 0
+            j = i - 1
+            while j >= 0 and grp.loc[j, "distrib_index"] != grp.loc[i, "distrib_index"]:
+                absence_length += 1
+                j -= 1
+            delta_post = grp.loc[i, "delta"]
+            if pd.isna(delta_post):
+                continue
+            delta_pre = np.nan
+            k = j
+            while k >= 0 and grp.loc[k, "distrib_index"] == grp.loc[i, "distrib_index"]:
+                if not pd.isna(grp.loc[k, "delta"]):
+                    delta_pre = float(grp.loc[k, "delta"])
+                    break
+                k -= 1
+            if pd.isna(delta_pre):
+                continue
+            records.append(
+                {
+                    "pid": int(pid),
+                    "absence_length": int(absence_length),
+                    "diff": float(delta_post) - float(delta_pre),
+                }
+            )
+    return pd.DataFrame(records)
+
+
+def _plot_panel_f(ax, valid: pd.DataFrame) -> None:
+    from scipy.stats import linregress, wilcoxon
+
+    sw_df = _compute_switch_alpha_diff(valid)
+
+    sw_clean = sw_df[sw_df["absence_length"].between(1, 6)].copy()
+
+    pal = get_palette()
+    color = pal[0]
+
+    sns.regplot(
+        data=sw_clean,
+        x="absence_length",
+        y="diff",
+        ax=ax,
+        scatter=False,
+        line_kws={"color": color, "linewidth": 2.0},
+        ci=95,
+    )
+
+    ax.set_xlabel("Observations in other distribution (absence length)")
+    ax.set_ylabel("Response change diff\n(post-switch − pre-switch)")
+    ax.set_xticks(sorted(sw_clean["absence_length"].unique()))
+    sns.despine(ax=ax, top=True, right=True)
+
+    n_events = len(sw_clean)
+    n_pids = sw_clean["pid"].nunique()
+
+    slope, intercept, r_val, p_ols, se_slope = linregress(
+        sw_clean["absence_length"], sw_clean["diff"]
+    )
+
+    pid_slopes = []
+    for pid, grp in sw_clean.groupby("pid"):
+        if grp["absence_length"].nunique() < 2:
+            continue
+        s, *_ = linregress(grp["absence_length"], grp["diff"])
+        pid_slopes.append(float(s))
+    pid_slopes = np.array(pid_slopes)
+    n_pos = int((pid_slopes > 0).sum())
+    n_pids_fit = len(pid_slopes)
+    try:
+        _, p_wil = wilcoxon(pid_slopes)
+    except Exception:
+        p_wil = float("nan")
+
+    print(
+        f"Panel F — response change diff vs absence length:\n"
+        f"  N events={n_events}, N pids={n_pids}\n"
+        f"  OLS: slope={slope:.4f} (SE={se_slope:.4f}), r={r_val:.3f}, p={p_ols:.4f}\n"
+        f"  Per-pid slopes: mean={pid_slopes.mean():.4f} "
+        f"(SE={pid_slopes.std() / np.sqrt(n_pids_fit):.4f}), "
+        f"positive={n_pos}/{n_pids_fit}, Wilcoxon p={p_wil:.4f}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Behavioral decay figure for Diederen dataset."
@@ -610,10 +719,21 @@ def main() -> None:
     _plot_panel_c(axes[0, 2], long_df)
     _plot_panel_d(axes[0, 3], carry)
     _plot_panel_e(axes[1, 0], long_df)
-    for col in range(1, 4):
+    axes[1, 1].set_visible(True)
+    _plot_panel_f(axes[1, 1], valid)
+    for col in range(2, 4):
         axes[1, col].set_visible(False)
 
-    label_panels([axes[0, 0], axes[0, 1], axes[0, 2], axes[0, 3], axes[1, 0]])
+    label_panels(
+        [
+            axes[0, 0],
+            axes[0, 1],
+            axes[0, 2],
+            axes[0, 3],
+            axes[1, 0],
+            axes[1, 1],
+        ]
+    )
 
     out_dir = Path(args.out_folder) if args.out_folder else FIGURES_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
