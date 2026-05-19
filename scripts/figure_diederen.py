@@ -6,7 +6,7 @@ Panel B: model RMSE boxplot (requires model fits in --run_folder)
 Panel C: response change vs observation (raw vs pre-switch, post-switch)
 Panel D: carryover bias vs observations since context switch
 Panel E: response change by SD condition and drug condition
-Panel F: response change diff (post-switch − pre-switch) vs absence_length
+Panel F: response change diff vs absence_length (oss=1, 2, 3 separate lines)
 Panels G–H: reserved for future panels
 """
 
@@ -557,15 +557,10 @@ def _plot_panel_e(ax, long_df: pd.DataFrame) -> None:
 
 def _compute_switch_alpha_diff(valid: pd.DataFrame) -> pd.DataFrame:
     """
-    For each context switch within a (pid, session), compute:
-      absence_length: number of consecutive other-distribution observations
-                      made while this distribution was inactive
-      diff: delta_post - delta_pre
-        delta_post: |response change| at the first obs after returning
-        delta_pre:  |response change| at the last obs before leaving
-
-    Switch detection uses distrib_index changes within (pid, session).
-    Delta values come from valid (free-response, non-missed rows only).
+    For each context switch, compute diff = delta_oss_N - delta_pre
+    for N = 1, 2, 3, where delta_pre is the last obs before leaving.
+    Returns long-format DataFrame with columns:
+        [pid, absence_length, oss, diff]
     """
     valid = valid.copy().sort_values(["pid", "session", "trial_in_session"])
     valid["delta"] = valid.groupby(["pid", "trial"])["response"].diff().abs()
@@ -580,14 +575,15 @@ def _compute_switch_alpha_diff(valid: pd.DataFrame) -> pd.DataFrame:
         for i in range(1, n):
             if grp.loc[i, "distrib_index"] == grp.loc[i - 1, "distrib_index"]:
                 continue
+
             absence_length = 0
             j = i - 1
             while j >= 0 and grp.loc[j, "distrib_index"] != grp.loc[i, "distrib_index"]:
                 absence_length += 1
                 j -= 1
-            delta_post = grp.loc[i, "delta"]
-            if pd.isna(delta_post):
+            if not (1 <= absence_length <= 6):
                 continue
+
             delta_pre = np.nan
             k = j
             while k >= 0 and grp.loc[k, "distrib_index"] == grp.loc[i, "distrib_index"]:
@@ -597,13 +593,27 @@ def _compute_switch_alpha_diff(valid: pd.DataFrame) -> pd.DataFrame:
                 k -= 1
             if pd.isna(delta_pre):
                 continue
-            records.append(
-                {
-                    "pid": int(pid),
-                    "absence_length": int(absence_length),
-                    "diff": float(delta_post) - float(delta_pre),
-                }
-            )
+
+            post_deltas = {}
+            same_count = 0
+            for m in range(i, min(i + 12, n)):
+                if grp.loc[m, "distrib_index"] != grp.loc[i, "distrib_index"]:
+                    break
+                if not pd.isna(grp.loc[m, "delta"]):
+                    same_count += 1
+                    if same_count <= 3:
+                        post_deltas[same_count] = float(grp.loc[m, "delta"])
+
+            for oss_val, d_post in post_deltas.items():
+                records.append(
+                    {
+                        "pid": int(pid),
+                        "absence_length": int(absence_length),
+                        "oss": int(oss_val),
+                        "diff": d_post - float(delta_pre),
+                    }
+                )
+
     return pd.DataFrame(records)
 
 
@@ -612,55 +622,63 @@ def _plot_panel_f(ax, valid: pd.DataFrame) -> None:
 
     sw_df = _compute_switch_alpha_diff(valid)
 
-    sw_clean = sw_df[sw_df["absence_length"].between(1, 6)].copy()
-
     pal = get_palette()
-    color = pal[0]
+    oss_colors = {1: pal[0], 2: pal[1], 3: pal[2]}
+    oss_labels = {
+        1: "1 obs after switch",
+        2: "2 obs after switch",
+        3: "3 obs after switch",
+    }
 
-    sns.regplot(
-        data=sw_clean,
-        x="absence_length",
-        y="diff",
-        ax=ax,
-        scatter=False,
-        line_kws={"color": color, "linewidth": 2.0},
-        ci=95,
-    )
+    for oss_val in [1, 2, 3]:
+        sub = sw_df[sw_df["oss"] == oss_val].copy()
+        sns.regplot(
+            data=sub,
+            x="absence_length",
+            y="diff",
+            ax=ax,
+            scatter=False,
+            line_kws={"color": oss_colors[oss_val], "linewidth": 2.0},
+            ci=95,
+            color=oss_colors[oss_val],
+            label=oss_labels[oss_val],
+        )
 
+    ax.axhline(0, color="0.5", linewidth=0.8, linestyle="--")
     ax.set_xlabel("Observations in other distribution (absence length)")
     ax.set_ylabel("Response change diff\n(post-switch − pre-switch)")
-    ax.set_xticks(sorted(sw_clean["absence_length"].unique()))
+    ax.set_xticks(sorted(sw_df["absence_length"].unique()))
+    ax.legend(frameon=False, fontsize=7, title="", loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
-    n_events = len(sw_clean)
-    n_pids = sw_clean["pid"].nunique()
-
-    slope, intercept, r_val, p_ols, se_slope = linregress(
-        sw_clean["absence_length"], sw_clean["diff"]
-    )
-
-    pid_slopes = []
-    for pid, grp in sw_clean.groupby("pid"):
-        if grp["absence_length"].nunique() < 2:
-            continue
-        s, *_ = linregress(grp["absence_length"], grp["diff"])
-        pid_slopes.append(float(s))
-    pid_slopes = np.array(pid_slopes)
-    n_pos = int((pid_slopes > 0).sum())
-    n_pids_fit = len(pid_slopes)
-    try:
-        _, p_wil = wilcoxon(pid_slopes)
-    except Exception:
-        p_wil = float("nan")
-
-    print(
-        f"Panel F — response change diff vs absence length:\n"
-        f"  N events={n_events}, N pids={n_pids}\n"
-        f"  OLS: slope={slope:.4f} (SE={se_slope:.4f}), r={r_val:.3f}, p={p_ols:.4f}\n"
-        f"  Per-pid slopes: mean={pid_slopes.mean():.4f} "
-        f"(SE={pid_slopes.std() / np.sqrt(n_pids_fit):.4f}), "
-        f"positive={n_pos}/{n_pids_fit}, Wilcoxon p={p_wil:.4f}"
-    )
+    for oss_val in [1, 2, 3]:
+        sub = sw_df[sw_df["oss"] == oss_val].copy()
+        al = sub["absence_length"].values
+        diff = sub["diff"].values
+        slope, _, r_val, p_ols, se_slope = linregress(al, diff)
+        pid_slopes = []
+        for pid, g in sub.groupby("pid"):
+            if g["absence_length"].nunique() < 2:
+                continue
+            s, *_ = linregress(g["absence_length"].values, g["diff"].values)
+            pid_slopes.append(s)
+        pid_slopes = np.array(pid_slopes)
+        n_pos = int((pid_slopes > 0).sum())
+        try:
+            _, p_wil = wilcoxon(pid_slopes)
+        except Exception:
+            p_wil = float("nan")
+        pid_means = sub.groupby("pid")["diff"].mean().values
+        try:
+            _, p_elev = wilcoxon(pid_means)
+        except Exception:
+            p_elev = float("nan")
+        print(
+            f"Panel F oss={oss_val}: n={len(sub)}, "
+            f"slope={slope:.4f} (p={p_ols:.4f}), "
+            f"per-pid positive={n_pos}/{len(pid_slopes)} (Wilcoxon p={p_wil:.4f}), "
+            f"elevation vs 0: Wilcoxon p={p_elev:.4f}"
+        )
 
 
 def main() -> None:

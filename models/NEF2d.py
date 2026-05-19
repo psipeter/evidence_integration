@@ -47,6 +47,7 @@ SWITCH_THRESHOLD = 0.5
 _NEF2D_EXTRA: dict[str, object] = {
     "n_train_trials": 10,
     "radius_c": 60.0,
+    "count_leak": 0.0,
 }
 PARAM_DEFAULTS: dict = {**_NEF_FIXED, **_NEF2D_EXTRA}
 
@@ -253,10 +254,11 @@ def _build_counting_network_2d(
             function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
             seed=seed,
         )
+        count_leak = float(params.get("count_leak", 0.0))
         nengo.Connection(
             net.count,
             net.count,
-            transform=np.eye(2),
+            transform=(1.0 - count_leak) * np.eye(2),
             synapse=tau_fb,
             seed=seed,
         )
@@ -441,10 +443,11 @@ def _build_main_network(
             function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
             seed=seed,
         )
+        count_leak = float(params.get("count_leak", 0.0))
         nengo.Connection(
             net.count,
             net.count,
-            transform=np.eye(2),
+            transform=(1.0 - count_leak) * np.eye(2),
             synapse=tau_fb,
             seed=seed,
         )
@@ -670,6 +673,7 @@ def _params_from_args(args: argparse.Namespace) -> dict:
         "seed": int(args.seed),
         "run_folder": str(args.run_folder),
         "radius_c": float(args.radius_c),
+        "count_leak": float(args.count_leak),
     }
 
 
@@ -682,6 +686,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--run_folder", type=str, default="response")
     p.add_argument("--radius_c", type=float, default=PARAM_DEFAULTS["radius_c"])
+    p.add_argument(
+        "--count_leak",
+        type=float,
+        default=PARAM_DEFAULTS.get("count_leak", 0.0),
+    )
     p.add_argument("--save", action="store_true", default=False)
     return p.parse_args()
 

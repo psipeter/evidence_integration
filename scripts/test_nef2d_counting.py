@@ -262,6 +262,7 @@ def main() -> None:
     parser.add_argument("--n_neurons_counting", type=int, default=1000)
     parser.add_argument("--radius_c", type=float, default=60.0)
     parser.add_argument("--out_folder", type=str, default="nef2d_sweep")
+    parser.add_argument("--count_leak", type=float, default=0.0)
     args = parser.parse_args()
 
     fixed = dict(MODEL_PARAMS["diederen"]["NEF2d"].get("fixed", {}))
@@ -276,6 +277,7 @@ def main() -> None:
         "n_neurons": args.n_neurons,
         "n_neurons_counting": args.n_neurons_counting,
         "radius_c": args.radius_c,
+        "count_leak": args.count_leak,
     }
 
     human = pd.read_pickle(data_path("diederen.pkl"))
