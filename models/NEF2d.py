@@ -2,8 +2,8 @@
 """
 2D NEF evidence integrator for the Diederen interleaved task.
 
-Tracks two simultaneous reward distributions (dimensions 0 and 1) with a
-shared 2D counting integrator and context-gated learning rates. One simulation
+Tracks two simultaneous reward distributions with independent 1D counting
+circuits (count_A, count_B) and context-gated learning rates. One simulation
 per session over the full ``trial_in_session`` sequence.
 
 Usage:
@@ -38,6 +38,10 @@ for _logger_name in (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.model_params import MODEL_PARAMS, _NEF_FIXED
+from models.counting_integrator import (
+    _ideal_stream as _ideal_stream_1d,
+    decode_outputs as _decode_outputs_1d,
+)
 from utils.paths import RUNS_DIR, data_path
 from utils.run_params import trial_seed as _trial_seed
 
@@ -45,9 +49,10 @@ READOUT_FRACTION = 0.8
 SWITCH_THRESHOLD = 0.5
 
 _NEF2D_EXTRA: dict[str, object] = {
-    "n_train_trials": 10,
-    "radius_c": 60.0,
-    "count_leak": 0.0,
+    "n_neurons_counting": 2000,
+    "radius_c": 50.0,
+    "onset_detector_amp": 0.5,
+    "count_leak": 0.005,
 }
 PARAM_DEFAULTS: dict = {**_NEF_FIXED, **_NEF2D_EXTRA}
 
@@ -161,10 +166,10 @@ def _session_duration(n_steps: int, params: dict) -> float:
     return float(params["t_iti"]) + n_steps * t_step
 
 
-def _validate_count_decoders(decoders: dict, n_neurons_counting: int) -> None:
-    """Decoder weights must match ``count.neurons`` (not onset_detector)."""
+def _validate_1d_decoders(decoders: dict, n_neurons_counting: int) -> None:
+    """Decoder weights must match 1D count ensemble size."""
     expected = (1, n_neurons_counting)
-    for key in ("W_count_A", "W_count_B", "W_alpha_A", "W_alpha_B"):
+    for key in ("W_count", "W_weight"):
         w = decoders[key]
         if tuple(w.shape) != expected:
             raise ValueError(
@@ -173,220 +178,216 @@ def _validate_count_decoders(decoders: dict, n_neurons_counting: int) -> None:
             )
 
 
-def _add_onset_detector_2d(
-    net: nengo.Network,
-    input_node: nengo.Node,
-    params: dict,
-    seed: int,
-) -> None:
-    """
-    Two independent 1D onset detectors, one per distribution.
-    net.onset_A fires on rising edges of input_node[2] (context A).
-    net.onset_B fires on rising edges of input_node[3] (context B).
-    """
-    n_neurons = int(params["n_neurons"])
-    tau_fast = float(params["tau_fast"])
-    tau_slow = float(params["tau_slow"])
+def _make_pulse_input_signs(params: dict, signs: np.ndarray) -> callable:
+    """1D pulse input with explicit per-observation signs (for pretraining)."""
+    n_obs = len(signs)
+    t_obs = float(params["t_obs"])
+    t_iti = float(params["t_iti"])
+    t_step = t_obs + t_iti
 
-    for name, dim in [("onset_A", 2), ("onset_B", 3)]:
-        ens = nengo.Ensemble(
-            n_neurons=n_neurons,
-            dimensions=1,
-            radius=1.5,
-            encoders=nengo.dists.Choice([[1]]),
-            intercepts=nengo.dists.Uniform(0.0, 1.0),
-            label=name,
-            seed=seed,
-        )
-        setattr(net, name, ens)
-        nengo.Connection(
-            input_node[dim],
-            ens,
-            synapse=tau_fast,
-            seed=seed,
-        )
-        nengo.Connection(
-            input_node[dim],
-            ens,
-            synapse=tau_slow,
-            function=lambda x: -x,
-            seed=seed,
-        )
+    def pulse(t: float) -> float:
+        if t < t_iti:
+            return 0.0
+        step = int((t - t_iti) / t_step)
+        phase = (t - t_iti) - step * t_step
+        if step < n_obs and phase < t_obs:
+            return float(signs[step])
+        return 0.0
+
+    return pulse
 
 
-def _build_counting_network_2d(
-    params: dict,
-    train: bool,
-    input_fn: callable,
-    decoders: dict | None = None,
+def _build_1d_counting_train(
+    params: dict, pulse_fn: callable
 ) -> nengo.Network:
-    """2D counting subnetwork (onset detector + shared 2D integrator)."""
-    seed = int(params["seed"])
+    """1D counting train network (no leak), matching counting_integrator.py."""
+    n_neurons = int(params["n_neurons"])
+    n_neurons_counting = int(params["n_neurons_counting"])
+    n_obs = int(params["n_obs"])
+    seed = int(params.get("base_seed", params["seed"]))
     tau_fb = float(params["tau_fb"])
     tau_probe = float(params["tau_probe"])
     amp = float(params["onset_detector_amp"])
-    n_neurons_counting = int(params["n_neurons_counting"])
-    radius_count = float(params["radius_c"])
 
-    with nengo.Network(label="counting_2d", seed=seed) as net:
-        net.input_node = nengo.Node(input_fn, size_out=4, label="input_4d")
+    with nengo.Network(label="counting_1d_train", seed=seed) as net:
+        net.node_input = nengo.Node(pulse_fn, label="node_input")
+        net.ideal = nengo.Node(
+            _ideal_stream_1d(params), size_in=1, size_out=2, label="ideal"
+        )
+        nengo.Connection(net.node_input, net.ideal, synapse=None, seed=seed)
+        net.probe_ideal_raw = nengo.Probe(net.ideal, synapse=None)
 
-        _add_onset_detector_2d(net, net.input_node, params, seed)
-
-        net.count = nengo.Ensemble(
+        net.memory = nengo.Ensemble(
             n_neurons=n_neurons_counting,
-            dimensions=2,
-            radius=float(radius_count),
-            label="count_2d",
+            dimensions=1,
+            radius=n_obs,
+            label="memory",
+            seed=seed,
+        )
+        net.onset_detector = nengo.Ensemble(
+            n_neurons=n_neurons,
+            dimensions=1,
+            encoders=nengo.dists.Choice([[1]]),
+            intercepts=nengo.dists.Uniform(0, 1),
+            seed=seed,
+            label="onset_detector",
+        )
+        nengo.Connection(
+            net.node_input,
+            net.onset_detector,
+            synapse=float(params["tau_fast"]),
+            function=lambda x: np.abs(x),
             seed=seed,
         )
         nengo.Connection(
-            net.onset_A,
-            net.count[0],
-            synapse=tau_fb,
-            function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
+            net.node_input,
+            net.onset_detector,
+            synapse=float(params["tau_slow"]),
+            function=lambda x: -np.abs(x),
             seed=seed,
         )
         nengo.Connection(
-            net.onset_B,
-            net.count[1],
+            net.onset_detector,
+            net.memory,
             synapse=tau_fb,
-            function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
+            function=lambda x, amp=amp: amp,
             seed=seed,
         )
-        count_leak = float(params.get("count_leak", 0.0))
-        nengo.Connection(
-            net.count,
-            net.count,
-            transform=(1.0 - count_leak) * np.eye(2),
-            synapse=tau_fb,
-            seed=seed,
-        )
-
-        # Pretrain activities: count.neurons (n_neurons_counting), not onset_detector.
-        net.probe_count_neurons = nengo.Probe(
-            net.count.neurons,
-            synapse=None,
-            sample_every=float(params["dt"]),
-        )
-
-        if not train:
-            if decoders is None:
-                raise ValueError("decoders required when train=False")
-            _validate_count_decoders(decoders, n_neurons_counting)
-            net.alpha_a_node = nengo.Ensemble(
-                1, 1, neuron_type=nengo.Direct(), label="alpha_a_node", seed=seed
-            )
-            net.alpha_b_node = nengo.Ensemble(
-                1, 1, neuron_type=nengo.Direct(), label="alpha_b_node", seed=seed
-            )
-            nengo.Connection(
-                net.count.neurons,
-                net.alpha_a_node,
-                transform=decoders["W_alpha_A"],
-                synapse=tau_probe,
-                seed=seed,
-            )
-            nengo.Connection(
-                net.count.neurons,
-                net.alpha_b_node,
-                transform=decoders["W_alpha_B"],
-                synapse=tau_probe,
-                seed=seed,
-            )
-            net.probe_alpha_a = nengo.Probe(net.alpha_a_node, synapse=None)
-            net.probe_alpha_b = nengo.Probe(net.alpha_b_node, synapse=None)
+        nengo.Connection(net.memory, net.memory, transform=1.0, synapse=tau_fb, seed=seed)
+        net.probe_memory_raw = nengo.Probe(net.memory.neurons, synapse=None)
 
     return net
 
 
-def _decode_counting_2d(activities: np.ndarray, targets: np.ndarray) -> dict:
-    """Solve joint decoders for 2D count and alpha streams."""
-    solver = nengo.solvers.LstsqL2(reg=1e-3)
-    W_count_A, _ = solver(activities, targets[:, 0:1])
-    W_count_B, _ = solver(activities, targets[:, 1:2])
-    W_alpha_A, _ = solver(activities, targets[:, 2:3])
-    W_alpha_B, _ = solver(activities, targets[:, 3:4])
-    return {
-        "W_count_A": W_count_A.T,
-        "W_count_B": W_count_B.T,
-        "W_alpha_A": W_alpha_A.T,
-        "W_alpha_B": W_alpha_B.T,
-    }
-
-
-def _simulate_counting_session(
-    session_rows: list[dict],
-    distrib_a: int,
-    distrib_b: int,
-    params: dict,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Run counting-only network on one session; return activities and targets."""
-    input_fn = _make_session_input(session_rows, distrib_a, distrib_b, params)
-    net = _build_counting_network_2d(params, train=True, input_fn=input_fn)
-    t_total = _session_duration(len(session_rows), params)
+def _simulate_1d_counting_train(net: nengo.Network, params: dict) -> dict:
+    """Run 1D train network; return ideal and memory activities."""
     dt = float(params["dt"])
-
+    n_obs = int(params["n_obs"])
+    t_step = float(params["t_obs"]) + float(params["t_iti"])
+    t_total = n_obs * t_step
     with nengo.Simulator(
         net, dt=dt, seed=int(params["seed"]), progress_bar=False
     ) as sim:
         sim.run(t_total)
-
-    activities = sim.data[net.probe_count_neurons]
-    n_steps = len(activities)
-    t_arr = np.arange(n_steps) * dt
-    targets = _ideal_targets_at_times(t_arr, session_rows, distrib_a, distrib_b, params)
-    return activities, targets
+    return {
+        "ideal": sim.data[net.probe_ideal_raw],
+        "memory": sim.data[net.probe_memory_raw],
+    }
 
 
-def _pretrain_counting_2d(params: dict, human: pd.DataFrame | None = None) -> dict:
+def _pretrain_counting_1d(params: dict) -> dict:
     """
-    Sample real interleaved sessions and train 2D counting decoders.
+    Train 1D decoders (W_count, W_weight) on a single monotonic pulse sequence.
 
-    Parameters
-    ----------
-    human
-        Optional pre-loaded diederen dataframe (missed rows already removed).
+    A single run from count=0 to count=radius_c covers the full representable
+    range for a 1D integrator. count_leak=0 during training preserves decoder
+    validity. The same decoders are reused for both count_A and count_B.
     """
-    if human is None:
-        human = pd.read_pickle(data_path("diederen.pkl"))
-        human = human[~human["missed"]].copy()
-
-    sessions: list[tuple[int, int]] = []
-    for (pid, session), _ in human.groupby(["pid", "session"], sort=False):
-        sess = human[(human["pid"] == pid) & (human["session"] == session)]
-        try:
-            _session_distrib_map(sess)
-        except ValueError:
-            continue
-        sessions.append((int(pid), int(session)))
-
-    if not sessions:
-        raise ValueError("No valid (pid, session) pairs for 2D counting pretrain")
-
-    n_train = int(params.get("n_train_trials", 10))
-    rng = np.random.default_rng(int(params.get("base_seed", params["seed"])))
-    n_pick = min(n_train, len(sessions))
-    chosen = [sessions[i] for i in rng.choice(len(sessions), size=n_pick, replace=False)]
-
-    act_pieces: list[np.ndarray] = []
-    tgt_pieces: list[np.ndarray] = []
-
-    for pid, session in chosen:
-        sess = human[(human["pid"] == pid) & (human["session"] == session)].copy()
-        rows, distrib_a, distrib_b, _ = _session_input_timeseries(sess, params)
-        activities, targets = _simulate_counting_session(
-            rows, distrib_a, distrib_b, params
-        )
-        act_pieces.append(activities)
-        tgt_pieces.append(targets)
-
-    activities_all = np.vstack(act_pieces)
-    targets_all = np.vstack(tgt_pieces)
-    return _decode_counting_2d(activities_all, targets_all)
+    n_obs = int(params["radius_c"])
+    train_params = {
+        **params,
+        "n_obs": n_obs,
+        "count_leak": 0.0,
+        "seed": int(params.get("base_seed", params["seed"])),
+    }
+    signs = np.ones(n_obs)
+    pulse_fn = _make_pulse_input_signs(train_params, signs)
+    net = _build_1d_counting_train(train_params, pulse_fn)
+    raw = _simulate_1d_counting_train(net, train_params)
+    return _decode_outputs_1d(raw, train_params)
 
 
-def _switch_fn(x: np.ndarray) -> np.ndarray:
+def _build_1d_counting_circuit(
+    net: nengo.Network,
+    name: str,
+    input_dim: int,
+    params: dict,
+    seed: int,
+    decoders: dict,
+) -> None:
+    """
+    Build one complete 1D counting circuit into an existing network.
+    Attaches onset detector and integrator for one distribution.
+    Sets net.onset_{name} and net.count_{name} as attributes.
+    """
+    n_neurons = int(params["n_neurons"])
+    n_neurons_counting = int(params["n_neurons_counting"])
+    radius_c = float(params["radius_c"])
+    tau_fb = float(params["tau_fb"])
+    tau_fast = float(params["tau_fast"])
+    tau_slow = float(params["tau_slow"])
+    tau_probe = float(params["tau_probe"])
+    amp = float(params["onset_detector_amp"])
+    count_leak = float(params.get("count_leak", 0.0))
+
+    onset = nengo.Ensemble(
+        n_neurons=n_neurons,
+        dimensions=1,
+        radius=1.5,
+        encoders=nengo.dists.Choice([[1]]),
+        intercepts=nengo.dists.Uniform(0.0, 1.0),
+        label=f"onset_{name}",
+        seed=seed,
+    )
+    setattr(net, f"onset_{name}", onset)
+
+    nengo.Connection(
+        net.input_node[input_dim], onset, synapse=tau_fast, seed=seed
+    )
+    nengo.Connection(
+        net.input_node[input_dim],
+        onset,
+        synapse=tau_slow,
+        function=lambda x: -x,
+        seed=seed,
+    )
+
+    count = nengo.Ensemble(
+        n_neurons=n_neurons_counting,
+        dimensions=1,
+        radius=radius_c,
+        label=f"count_{name}",
+        seed=seed,
+    )
+    setattr(net, f"count_{name}", count)
+
+    nengo.Connection(
+        onset,
+        count,
+        synapse=tau_fb,
+        function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
+        seed=seed,
+    )
+    nengo.Connection(count, count, transform=1.0, synapse=tau_fb, seed=seed)
+    if count_leak > 0.0:
+        nengo.Connection(count, count, transform=-count_leak, synapse=tau_fb, seed=seed)
+
+    alpha_node = nengo.Ensemble(
+        1,
+        1,
+        neuron_type=nengo.Direct(),
+        label=f"alpha_{name}_node",
+        seed=seed,
+    )
+    setattr(net, f"alpha_{name}_node", alpha_node)
+
+    nengo.Connection(
+        count.neurons,
+        alpha_node,
+        transform=decoders["W_weight"],
+        synapse=tau_probe,
+        seed=seed,
+    )
+
+    setattr(
+        net,
+        f"probe_count_{name}_neurons",
+        nengo.Probe(count.neurons, synapse=None, sample_every=float(params["dt"])),
+    )
+    setattr(net, f"probe_alpha_{name}", nengo.Probe(alpha_node, synapse=None))
+
+
+def _switch_fn(t: float, x: np.ndarray) -> np.ndarray:
     alpha_A, alpha_B, ctx_A, ctx_B = x
     gated_A = alpha_A * (1.0 if ctx_A > SWITCH_THRESHOLD else 0.0)
     gated_B = alpha_B * (1.0 if ctx_B > SWITCH_THRESHOLD else 0.0)
@@ -404,7 +405,7 @@ def _build_main_network(
     input_fn: callable,
 ) -> nengo.Network:
     """Full 2D NEF network for one diederen session."""
-    seed = int(params["seed"])
+    seed = int(params.get("base_seed", params["seed"]))
     tau_fb = float(params["tau_fb"])
     tau_ff = float(params["tau_ff"])
     tau_error = float(params["tau_error"])
@@ -412,45 +413,13 @@ def _build_main_network(
     T_error = float(params["T_error"])
     n_neurons = int(params["n_neurons"])
     n_neurons_counting = int(params["n_neurons_counting"])
-    radius_count = float(params["radius_c"])
-    amp = float(params["onset_detector_amp"])
-    _validate_count_decoders(decoders, n_neurons_counting)
+    _validate_1d_decoders(decoders, n_neurons_counting)
 
     with nengo.Network(label=str(params.get("model_type", "NEF2d")), seed=seed) as net:
         net.input_node = nengo.Node(input_fn, size_out=4, label="input_4d")
 
-        # --- 2D counting (shared with pretrain architecture) ---
-        _add_onset_detector_2d(net, net.input_node, params, seed)
-
-        net.count = nengo.Ensemble(
-            n_neurons=n_neurons_counting,
-            dimensions=2,
-            radius=float(radius_count),
-            label="count_2d",
-            seed=seed,
-        )
-        nengo.Connection(
-            net.onset_A,
-            net.count[0],
-            synapse=tau_fb,
-            function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
-            seed=seed,
-        )
-        nengo.Connection(
-            net.onset_B,
-            net.count[1],
-            synapse=tau_fb,
-            function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
-            seed=seed,
-        )
-        count_leak = float(params.get("count_leak", 0.0))
-        nengo.Connection(
-            net.count,
-            net.count,
-            transform=(1.0 - count_leak) * np.eye(2),
-            synapse=tau_fb,
-            seed=seed,
-        )
+        _build_1d_counting_circuit(net, "A", 2, params, seed, decoders)
+        _build_1d_counting_circuit(net, "B", 3, params, seed + 1, decoders)
 
         # --- switch: decoded alphas + context indicators → gated alphas ---
         net.switch_in = nengo.Ensemble(
@@ -461,16 +430,16 @@ def _build_main_network(
             seed=seed,
         )
         nengo.Connection(
-            net.count.neurons,
+            net.count_A.neurons,
             net.switch_in[0],
-            transform=decoders["W_alpha_A"],
+            transform=decoders["W_weight"],
             synapse=tau_probe,
             seed=seed,
         )
         nengo.Connection(
-            net.count.neurons,
+            net.count_B.neurons,
             net.switch_in[1],
-            transform=decoders["W_alpha_B"],
+            transform=decoders["W_weight"],
             synapse=tau_probe,
             seed=seed,
         )
@@ -626,7 +595,7 @@ def run(params: dict, save: bool = False) -> pd.DataFrame:
     if human_pid.empty:
         raise ValueError(f"No non-missed rows for pid={pid}")
 
-    decoders = _pretrain_counting_2d(pfull, human=human)
+    decoders = _pretrain_counting_1d(pfull)
     all_rows: list[dict] = []
 
     sessions = sorted(human_pid["session"].unique())
@@ -684,7 +653,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lambda_", type=float, default=0.5)
     p.add_argument("--n_seeds", type=int, default=1, help="unused; reserved")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--run_folder", type=str, default="response")
+    p.add_argument("--run_folder", type=str, default="test")
     p.add_argument("--radius_c", type=float, default=PARAM_DEFAULTS["radius_c"])
     p.add_argument(
         "--count_leak",

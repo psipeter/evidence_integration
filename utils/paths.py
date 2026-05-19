@@ -18,25 +18,19 @@ RUNS_DIR: Path = DATA_DIR / "runs"
 FIGURES_DIR: Path = PROJECT_ROOT / "figures"
 
 
-def resolve_run_folder(run_folder: str | Path) -> Path:
+def resolve_run_folder(run_folder: Path | str) -> Path:
     """
-    Return an absolute run-folder path without duplicating ``data/runs``.
+    Return the run-folder path under ``RUNS_DIR`` (or absolute), creating it if needed.
 
-    Relative ``test_local`` → ``RUNS_DIR / test_local``. Relative
-    ``data/runs/test_local`` (from project root) → that directory, not
-    ``RUNS_DIR / data/runs/test_local``.
+    Relative ``test_local`` → ``RUNS_DIR / test_local``.
     """
-    p = Path(run_folder)
-    if p.is_absolute():
-        return p.resolve()
-    anchored = (PROJECT_ROOT / p).resolve()
-    runs_resolved = RUNS_DIR.resolve()
-    try:
-        anchored.relative_to(runs_resolved)
-        return anchored
-    except ValueError:
-        pass
-    return (runs_resolved / p).resolve()
+    path = (
+        RUNS_DIR / run_folder
+        if not Path(run_folder).is_absolute()
+        else Path(run_folder)
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def data_path(filename: str) -> Path:

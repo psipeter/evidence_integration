@@ -27,14 +27,14 @@ def main() -> None:
         rows.append(d)
     rows.sort(key=lambda d: d["mean_rmse_alpha"])
     hdr = (
-        f"{'radius_c':>10} {'n_count':>8} {'n_train':>8} "
+        f"{'radius_c':>10} {'n_count':>8} "
         f"{'rmse_count':>12} {'rmse_alpha':>12} {'train_s':>10} {'sim_s':>8}"
     )
     print(hdr)
     print("-" * len(hdr))
     for d in rows:
         print(
-            f"{d['radius_c']:>10.0f} {d['n_neurons_counting']:>8d} {d['n_train']:>8d} "
+            f"{d['radius_c']:>10.0f} {d['n_neurons_counting']:>8d} "
             f"{d['mean_rmse_count']:>12.4f} {d['mean_rmse_alpha']:>12.4f} "
             f"{d.get('train_time_s', 0):>10.1f} {d.get('sim_time_s', 0):>8.1f}"
         )

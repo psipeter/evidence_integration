@@ -16,6 +16,7 @@ DEFAULT_TIME_LIMITS = {
     "PearceHall": "2:0:0",
     "NEF_recurrent": "72:0:0",
     "NEF_synaptic": "72:0:0",
+    "NEF2d": "72:0:0",
 }
 
 DEFAULT_MEM_LIMITS = {
@@ -28,6 +29,7 @@ DEFAULT_MEM_LIMITS = {
     "PearceHall": "8G",
     "NEF_recurrent": "32G",
     "NEF_synaptic": "32G",
+    "NEF2d": "32G",
 }
 
 def make_job_script(

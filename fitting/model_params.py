@@ -92,11 +92,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NEF2d": {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED,
-            "n_train_trials": 5,
-            "n_neurons_counting": 3000,   # counting ensemble size (sweep optimum)
-            "onset_detector_amp": 0.6,    # onset detector amplitude (tuned manually)
-            "radius_c": 30.0,
-            "count_leak": 0.02},
+            "n_neurons_counting": 2000,
+            "radius_c": 50.0,
+            "onset_detector_amp": 0.5,
+            "count_leak": 0.005},
         },
     },
 }
