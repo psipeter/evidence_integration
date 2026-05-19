@@ -176,10 +176,6 @@ python -m fitting.fit diederen PearceHall 1 500 5 refit 42
 
 If you pass **only five** tokens after the script (`dataset`, `model_type`, `pid`, `n_trials`, `run_folder`), **`k`** defaults to **5**. Passing **`k`** explicitly requires **seven** argv tokens total including the script name (`… pid n_trials k run_folder`).
 
-### Warm-start for NEF
-
-If **`RL_lambda_<dataset>_<pid>_params.pkl`** already exists in the same run folder, **`fitting.fit`** enqueues those **`alpha_0`** / **`lambda_`** values as the first Optuna trial for **NEF** models. Fit **RL_lambda** (or copy equivalent pickles) **before** large **NEF** searches when you want that seed.
-
 ### Local SLURM helpers
 
 Anything run with **`--local`** must print **`JOB_COMPLETE`** as its **last** line so **`scripts/check_jobs.py`** can detect completion.
@@ -236,11 +232,8 @@ python -m fitting.collect refit --type responses
 ### 3. Fit NEF models
 
 NEF fits are saved to **`nef200/`** (200 Optuna trials) then copied to **`refit/`**.
-Fit **RL_lambda** first to provide warm-start seeds for NEF.
 
 ```bash
-# Warm-start: ensure RL_lambda fits exist in refit/ (step 2 above)
-
 # Submit NEF fits to nef200/
 python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef200
 python -m fitting.submit carrabin NEF_synaptic  --n_trials 200 --run_folder nef200

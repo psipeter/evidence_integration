@@ -89,5 +89,9 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "eta": (0.0, 1.0, 0.001),
         },
+        "NEF2d": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "n_train_trials": 10, "radius_c": 30.0},
+        },
     },
 }
