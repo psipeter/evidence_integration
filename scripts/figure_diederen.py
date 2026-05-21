@@ -3,11 +3,11 @@ Diederen dataset figure: 2×4 layout, panels A–E.
 
 Panel A: task diagram (figures/diederen_task.pdf)
 Panel B: model RMSE boxplot (requires model fits in --run_folder)
-Panel C: response change vs observation (raw vs pre-switch, post-switch)
-Panel D: carryover bias vs observations since context switch
+Panel C: mean |Δresponse| vs observation (human + models)
+Panel D: oss=1 bias by pull direction (Human + models)
 Panel E: response change by SD condition and drug condition
-Panel F: response change diff vs absence_length (oss=1, 2, 3 separate lines)
-Panels G–H: reserved for future panels
+Panel F: response change diff vs absence length (oss=1)
+Panels G–H: reserved (hidden)
 """
 
 from __future__ import annotations
@@ -23,8 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.optimize import curve_fit
-from scipy.stats import spearmanr
+from scipy.stats import linregress, wilcoxon
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -34,18 +33,17 @@ from utils.plot_style import (
     apply_style,
     get_palette,
     label_panels,
-    pvalue_to_stars,
 )
 
 # OBS_MAX: panel A raw/clean x-axis and global long_df observation filter.
-OBS_MAX = 10
+OBS_MAX = 15
 OBS_MIN = 2  # obs=1 has no previous response (diff is NaN)
+OSS_MAX = 4  # max observations-since-switch in _compute_switch_bias
 
-PID_LINE_COLOR = "0.75"
-MIN_LAMBDA_PLOT = 0.02  # skip degenerate per-pid power-law fits
 MIN_PIDS_PER_OBS = 15  # minimum pids required to plot a group mean
 
-MODEL_ORDER = ["Mean", "RL", "RL_lambda", "PearceHall", "NEF_recurrent", "NEF_synaptic"]
+MODEL_ORDER = ["Mean", "RL", "RL_lambda", "PearceHall", "NEF2d"]
+CARRYOVER_MODELS = ["Mean", "RL", "PearceHall", "NEF2d"]
 
 
 def _display(model_type: str) -> str:
@@ -98,6 +96,16 @@ def _add_oss_to_long_df(long_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _build_long_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute delta, switched, oss columns from a responses dataframe."""
+    df = df.copy().sort_values(["pid", "session", "trial_in_session"])
+    df["delta"] = df.groupby(["pid", "trial"])["response"].diff().abs()
+    df["tis_gap"] = df.groupby(["pid", "trial"])["trial_in_session"].diff()
+    df["switched"] = df["tis_gap"] > 1
+    df = _add_oss_to_long_df(df)
+    return df
+
+
 def _pre_switch_rows(long_df: pd.DataFrame) -> pd.DataFrame:
     """
     Return only the rows from each (pid, trial) that precede the first
@@ -122,101 +130,84 @@ def _pre_switch_rows(long_df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(pieces, ignore_index=True)
 
 
-def _compute_carryover_metrics(valid: pd.DataFrame) -> pd.DataFrame:
+def _compute_switch_bias(resp_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add carryover-analysis columns to the filtered behavioral dataframe.
+    Compute switch-relative response bias for human or model data.
 
-    oss: observations since last context switch within (pid, trial).
-         1 = first obs after returning; NaN for first obs of a trial.
-         Computed via explicit loop to avoid groupby.apply issues with Int64.
+    resp_df must have columns:
+        pid, session, trial, trial_in_session, observation, response, distrib_index
 
-    running_mean_this: expanding mean of prior rewards in this distribution
-         (shift(1)), i.e. the optimal running estimate.
+    For each return event (oss=1..OSS_MAX), computes:
+        bias     = response(oss) - response_pre_this
+        pull_dir = "Other higher" / "Other lower" based on
+                   sign of (response_pre_other - response_pre_this)
 
-    running_mean_other: most recent running_mean_this of the co-active
-         distribution (other distrib_index in same pid+session) at
-         trial_in_session strictly before the current row.
-
-    pull = running_mean_other - running_mean_this
-    bias = response - running_mean_this
+    Returns long-format DataFrame with columns:
+        [pid, oss, bias, pull_dir]
     """
-    out = valid.copy().sort_values(["pid", "session", "trial_in_session"])
-    out["running_mean_this"] = out.groupby(["pid", "trial"])["value"].transform(
-        lambda x: x.expanding().mean().shift(1)
-    )
-    out["tis_gap"] = out.groupby(["pid", "trial"])["trial_in_session"].diff()
-    out["switched"] = out["tis_gap"] > 1
+    df = resp_df.copy().sort_values(["pid", "session", "trial_in_session"])
+    df["tis_gap"] = df.groupby(["pid", "trial"])["trial_in_session"].diff()
+    df["switched"] = df["tis_gap"] > 1
 
-    # oss via explicit loop (avoids Int64 / groupby.apply issues)
-    oss_arr = np.full(len(out), np.nan)
-    for (_pid, _trial), grp in out.groupby(["pid", "trial"], sort=False):
-        grp_sorted = grp.sort_values("trial_in_session")
-        idx = grp_sorted.index.tolist()
-        switched = grp_sorted["switched"].fillna(False).to_numpy()
-        count = np.nan
-        for i, _s in enumerate(switched):
-            if i == 0:
-                count = np.nan
-            elif _s:
-                count = 1.0
-            else:
-                count = (count + 1.0) if not np.isnan(count) else np.nan
-            oss_arr[out.index.get_loc(idx[i])] = count
-    out["oss"] = oss_arr
-
-    # running_mean_other via lookup within (pid, session)
-    out["running_mean_other"] = np.nan
-    for (_pid, sess), grp in out.groupby(["pid", "session"], sort=False):
-        distribs = grp["distrib_index"].unique()
+    records = []
+    for (pid, session), grp in df.groupby(["pid", "session"], sort=False):
+        grp = grp.sort_values("trial_in_session").reset_index(drop=True)
+        distribs = sorted(grp["distrib_index"].dropna().unique().tolist())
         if len(distribs) != 2:
             continue
-        d1, d2 = sorted(distribs)
-        g1 = grp[grp["distrib_index"] == d1].sort_values("trial_in_session")
-        g2 = grp[grp["distrib_index"] == d2].sort_values("trial_in_session")
-        for g_focal, g_other in [(g1, g2), (g2, g1)]:
-            for _, row in g_focal.iterrows():
-                prev = g_other[g_other["trial_in_session"] < row["trial_in_session"]]
-                if len(prev) > 0:
-                    out.loc[row.name, "running_mean_other"] = prev.iloc[
-                        -1
-                    ]["running_mean_this"]
+        n = len(grp)
 
-    out["pull"] = out["running_mean_other"] - out["running_mean_this"]
-    out["bias"] = out["response"] - out["running_mean_this"]
-    return out
+        for i in range(1, n):
+            if grp.loc[i, "distrib_index"] == grp.loc[i - 1, "distrib_index"]:
+                continue
 
+            this_distrib = grp.loc[i, "distrib_index"]
 
-def _fit_power_law_per_pid(pid_obs: pd.DataFrame) -> pd.DataFrame:
-    """Per-participant ``A · n^{-λ}`` fit on columns [pid, observation, delta]."""
+            j = i - 1
+            response_pre_other = np.nan
+            while j >= 0 and grp.loc[j, "distrib_index"] != this_distrib:
+                if not pd.isna(grp.loc[j, "response"]):
+                    response_pre_other = float(grp.loc[j, "response"])
+                    break
+                j -= 1
 
-    def power_law(n, A, lam):
-        return A * np.power(np.asarray(n, dtype=float), -lam)
+            k = i - 1
+            while k >= 0 and grp.loc[k, "distrib_index"] != this_distrib:
+                k -= 1
+            response_pre_this = np.nan
+            while k >= 0 and grp.loc[k, "distrib_index"] == this_distrib:
+                if not pd.isna(grp.loc[k, "response"]):
+                    response_pre_this = float(grp.loc[k, "response"])
+                    break
+                k -= 1
 
-    rows: list[dict] = []
-    for pid, grp in pid_obs.groupby("pid", sort=False):
-        gg = grp.sort_values("observation")
-        n_obs = gg["observation"].to_numpy(dtype=float)
-        y = gg["delta"].to_numpy(dtype=float)
-        if len(n_obs) < 3 or not (
-            np.all(np.isfinite(n_obs)) and np.all(np.isfinite(y))
-        ):
-            rows.append({"pid": int(pid), "A": np.nan, "lambda_": np.nan})
-            continue
-        try:
-            popt, _ = curve_fit(
-                power_law,
-                n_obs,
-                y,
-                p0=[0.1, 0.5],
-                bounds=([0.0, 0.0], [2.0, 2.0]),
-                maxfev=2000,
+            if pd.isna(response_pre_this) or pd.isna(response_pre_other):
+                continue
+
+            pull_dir = (
+                "Other higher"
+                if response_pre_other > response_pre_this
+                else "Other lower"
             )
-            rows.append(
-                {"pid": int(pid), "A": float(popt[0]), "lambda_": float(popt[1])}
-            )
-        except (RuntimeError, ValueError, TypeError):
-            rows.append({"pid": int(pid), "A": np.nan, "lambda_": np.nan})
-    return pd.DataFrame(rows)
+
+            same_count = 0
+            for m in range(i, min(i + 20, n)):
+                if grp.loc[m, "distrib_index"] != this_distrib:
+                    break
+                if not pd.isna(grp.loc[m, "response"]):
+                    same_count += 1
+                    if same_count <= OSS_MAX:
+                        records.append(
+                            {
+                                "pid": int(pid),
+                                "oss": int(same_count),
+                                "bias": float(grp.loc[m, "response"])
+                                - response_pre_this,
+                                "pull_dir": pull_dir,
+                            }
+                        )
+
+    return pd.DataFrame(records)
 
 
 def _filter_pid_means_by_n(pid_means: pd.DataFrame) -> pd.DataFrame:
@@ -310,162 +301,110 @@ def _plot_panel_b(
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_c(ax, long_df: pd.DataFrame) -> None:
-    palette_colors = get_palette()
-    raw_color = palette_colors[0]
-    clean_color = palette_colors[1]
-    post_color = palette_colors[2]
+def _plot_panel_c(
+    ax,
+    long_df: pd.DataFrame,
+    run_folder: str,
+    palette: dict,
+    model_order: list[str],
+) -> None:
+    run_dir = data_path("runs") / run_folder
 
-    df = long_df.copy()
-    if "switched" not in df.columns:
-        df["tis_gap"] = df.groupby(["pid", "trial"])["trial_in_session"].diff()
-        df["switched"] = df["tis_gap"] > 1
-
-    pre_df = _pre_switch_rows(df)
-    pre_df = pre_df[pre_df["delta"].notna() & (pre_df["observation"] >= OBS_MIN)]
-
-    pre_pid_means = (
-        pre_df.groupby(["pid", "observation"])["delta"].mean().reset_index()
-    )
-    pre_pid_means = _filter_pid_means_by_n(pre_pid_means)
-
-    per_pid_fits = _fit_power_law_per_pid(pre_pid_means)
-    n_grid = np.arange(OBS_MIN, OBS_MAX + 1, dtype=float)
-    excluded_count = 0
-    for _, row in per_pid_fits.iterrows():
-        A, lam = float(row["A"]), float(row["lambda_"])
-        if not (
-            np.isfinite(A)
-            and np.isfinite(lam)
-            and A > 0
-            and lam >= MIN_LAMBDA_PLOT
-        ):
-            excluded_count += 1
+    for mt in model_order:
+        resp_path = run_dir / f"{mt}_diederen_responses.pkl"
+        if not resp_path.exists():
             continue
-        ax.plot(
-            n_grid,
-            A * n_grid ** (-lam),
-            color=PID_LINE_COLOR,
-            alpha=0.28,
-            linewidth=0.9,
-            zorder=1,
-        )
-
-    n_total = len(per_pid_fits)
-    if excluded_count > 0 and n_total > 0:
-        print(
-            f"Panel C: {excluded_count}/{n_total} pids "
-            f"({100 * excluded_count / n_total:.0f}%) excluded from per-pid "
-            f"power-law lines (lambda_ < {MIN_LAMBDA_PLOT} or NaN)."
-        )
-
-    raw_pid_means = (
-        df[df["delta"].notna() & df["observation"].between(OBS_MIN, OBS_MAX)]
-        .groupby(["pid", "observation"])["delta"]
-        .mean()
-        .reset_index()
-    )
-    raw_pid_means = _filter_pid_means_by_n(raw_pid_means)
-
-    post_switch = df[df["oss"].notna() & df["delta"].notna()].copy()
-    post_switch["oss"] = post_switch["oss"].astype(float)
-    pid_oss = (
-        post_switch.groupby(["pid", "oss"])["delta"].mean().reset_index()
-    )
-    pid_oss["observation"] = pid_oss["oss"] + 1  # align: oss=1 -> x=2, oss=2 -> x=3, ...
-    pid_oss = pid_oss.drop(columns=["oss"])
-    pid_oss = _filter_pid_means_by_n(pid_oss)
-
-    if not raw_pid_means.empty:
+        resp = pd.read_pickle(resp_path)
+        resp = resp.sort_values(["pid", "trial", "observation"])
+        resp["delta"] = resp.groupby(["pid", "trial"])["response"].diff().abs()
+        d = resp[
+            resp["delta"].notna() & resp["observation"].between(OBS_MIN, OBS_MAX)
+        ]
+        pid_means = d.groupby(["pid", "observation"])["delta"].mean().reset_index()
+        pid_means = _filter_pid_means_by_n(pid_means)
+        if pid_means.empty:
+            continue
+        col = palette.get(_display(mt), palette.get(mt, "0.5"))
         sns.lineplot(
-            data=raw_pid_means,
+            data=pid_means,
             x="observation",
             y="delta",
-            color=raw_color,
+            color=col,
             linewidth=1.8,
             errorbar="se",
-            label="All observations",
+            label=_display(mt),
             zorder=2,
             ax=ax,
         )
-    if not pid_oss.empty:
+
+    d_h = long_df[
+        long_df["delta"].notna() & long_df["observation"].between(OBS_MIN, OBS_MAX)
+    ]
+    pid_means_h = d_h.groupby(["pid", "observation"])["delta"].mean().reset_index()
+    pid_means_h = _filter_pid_means_by_n(pid_means_h)
+    if not pid_means_h.empty:
         sns.lineplot(
-            data=pid_oss,
+            data=pid_means_h,
             x="observation",
             y="delta",
-            color=post_color,
-            linewidth=1.8,
+            color="black",
+            linewidth=2.2,
             errorbar="se",
-            label="Post-switch",
-            zorder=2,
-            ax=ax,
-        )
-    if not pre_pid_means.empty:
-        sns.lineplot(
-            data=pre_pid_means,
-            x="observation",
-            y="delta",
-            color=clean_color,
-            linewidth=2.0,
-            errorbar="se",
-            label="Pre-first-switch",
+            label="Human",
             zorder=3,
             ax=ax,
         )
 
-    ax.set_xlim(1.5, 10.5)
-    ax.set_xticks(range(2, 11))
-    ax.set_ylim(0.0, 0.5)
-    ax.set_xlabel("Observation  /  obs since switch")
+    ax.set_xlim(OBS_MIN - 0.5, OBS_MAX + 0.5)
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel("Observation")
     ax.set_ylabel("Response change")
-    ax.legend(frameon=False, fontsize=7)
+    ax.legend(frameon=False, fontsize=6)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_d(ax, carry: pd.DataFrame) -> None:
-    pal = get_palette(2)
-    d = carry.dropna(subset=["pull", "bias", "oss"]).copy()
-    d = d[(d["oss"] >= 1) & (d["oss"] <= 5) & (d["pull"] != 0)].copy()
-    d["pull_direction"] = np.where(d["pull"] > 0, "Other higher", "Other lower")
-
-    pid_means = (
-        d.groupby(["pid", "oss", "pull_direction"])["bias"].mean().reset_index()
+def _plot_panel_d(
+    ax,
+    carry: pd.DataFrame,
+    model_sw: dict[str, pd.DataFrame] | None = None,
+) -> None:
+    pal = get_palette()
+    all_sources = ["Human"] + list((model_sw or {}).keys())
+    source_colors = {"Human": "black"}
+    source_colors.update(
+        {mt: pal[i] for i, mt in enumerate((model_sw or {}).keys())}
     )
-    sns.lineplot(
-        data=pid_means,
-        x="oss",
+
+    def _get_oss1(df: pd.DataFrame, source: str) -> pd.DataFrame:
+        sub = df[df["oss"] == 1].copy()
+        pm = sub.groupby(["pid", "pull_dir"])["bias"].mean().reset_index()
+        pm["source"] = source
+        return pm
+
+    pieces = [_get_oss1(carry, "Human")]
+    for mt, mdf in (model_sw or {}).items():
+        pieces.append(_get_oss1(mdf, mt))
+    combined = pd.concat(pieces, ignore_index=True)
+
+    sns.pointplot(
+        data=combined,
+        x="pull_dir",
         y="bias",
-        hue="pull_direction",
-        errorbar="se",
-        linewidth=1.8,
-        markers=True,
-        palette=[pal[0], pal[1]],
-        hue_order=["Other higher", "Other lower"],
+        hue="source",
+        hue_order=all_sources,
+        palette=source_colors,
+        linewidth=2.0,
+        markersize=3,
         ax=ax,
     )
-    ax.axhline(0, color="0.5", linewidth=0.8, linestyle="--")
 
-    for oss_val in range(1, 6):
-        sub = d[d["oss"] == oss_val].dropna(subset=["pull", "bias"])
-        if len(sub) < 10:
-            continue
-        _, p = spearmanr(sub["pull"], sub["bias"])
-        stars = pvalue_to_stars(p)
-        if stars:
-            ax.text(
-                oss_val,
-                ax.get_ylim()[1] * 0.95,
-                stars,
-                ha="center",
-                va="top",
-                fontsize=7,
-            )
-
-    ax.set_xlabel("Observations since context switch")
-    ax.set_ylabel("Response bias\n(response − running mean)")
-    ax.set_xlim(0.5, 5.5)
-    ax.set_xticks(range(1, 6))
-    ax.legend(frameon=False, fontsize=7)
+    ax.set_xlabel("Estimate about the other distribution")
+    ax.set_ylabel("Response bias after return")
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["Other higher than current",
+                        "Other lower than current"])
+    ax.set_xlim(-0.1, 1.1)
+    ax.legend(frameon=False)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -617,45 +556,61 @@ def _compute_switch_alpha_diff(valid: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def _plot_panel_f(ax, valid: pd.DataFrame) -> None:
-    from scipy.stats import linregress, wilcoxon
-
+def _plot_panel_f(
+    ax,
+    valid: pd.DataFrame,
+    model_sw: dict[str, pd.DataFrame] | None = None,
+) -> None:
     sw_df = _compute_switch_alpha_diff(valid)
 
     pal = get_palette()
-    oss_colors = {1: pal[0], 2: pal[1], 3: pal[2]}
-    oss_labels = {
-        1: "1 obs after switch",
-        2: "2 obs after switch",
-        3: "3 obs after switch",
-    }
+    source_colors = {mt: pal[i] for i, mt in enumerate((model_sw or {}).keys())}
 
-    for oss_val in [1, 2, 3]:
-        sub = sw_df[sw_df["oss"] == oss_val].copy()
+    sub = sw_df[sw_df["oss"] == 1].copy()
+    sns.regplot(
+        data=sub,
+        x="absence_length",
+        y="diff",
+        ax=ax,
+        scatter=False,
+        line_kws={"color": "black", "linewidth": 2.0},
+        ci=95,
+        color="black",
+        label="Human",
+    )
+
+    for mt, mdf in (model_sw or {}).items():
+        sub = mdf[mdf["oss"] == 1].copy()
+        if sub.empty:
+            continue
         sns.regplot(
             data=sub,
             x="absence_length",
             y="diff",
             ax=ax,
             scatter=False,
-            line_kws={"color": oss_colors[oss_val], "linewidth": 2.0},
+            line_kws={"color": source_colors[mt], "linewidth": 1.6},
             ci=95,
-            color=oss_colors[oss_val],
-            label=oss_labels[oss_val],
+            color=source_colors[mt],
+            label=mt,
         )
 
     ax.axhline(0, color="0.5", linewidth=0.8, linestyle="--")
     ax.set_xlabel("Observations in other distribution (absence length)")
-    ax.set_ylabel("Response change diff\n(post-switch − pre-switch)")
+    ax.set_ylabel("Response change increase\n(Δr post-switch − Δr pre-switch)")
     ax.set_xticks(sorted(sw_df["absence_length"].unique()))
-    ax.legend(frameon=False, fontsize=7, title="", loc="upper left")
+    ax.legend(frameon=False, fontsize=7, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
-    for oss_val in [1, 2, 3]:
-        sub = sw_df[sw_df["oss"] == oss_val].copy()
-        al = sub["absence_length"].values
-        diff = sub["diff"].values
-        slope, _, r_val, p_ols, se_slope = linregress(al, diff)
+    for source_label, source_df in [("Human", sw_df)] + list(
+        (model_sw or {}).items()
+    ):
+        sub = source_df[source_df["oss"] == 1].copy()
+        if sub.empty:
+            continue
+        slope, _, r_val, p_ols, se_slope = linregress(
+            sub["absence_length"].values, sub["diff"].values
+        )
         pid_slopes = []
         for pid, g in sub.groupby("pid"):
             if g["absence_length"].nunique() < 2:
@@ -674,10 +629,10 @@ def _plot_panel_f(ax, valid: pd.DataFrame) -> None:
         except Exception:
             p_elev = float("nan")
         print(
-            f"Panel F oss={oss_val}: n={len(sub)}, "
+            f"Panel F {source_label} oss=1: n={len(sub)}, "
             f"slope={slope:.4f} (p={p_ols:.4f}), "
-            f"per-pid positive={n_pos}/{len(pid_slopes)} (Wilcoxon p={p_wil:.4f}), "
-            f"elevation vs 0: Wilcoxon p={p_elev:.4f}"
+            f"per-pid +ve={n_pos}/{len(pid_slopes)} (p={p_wil:.4f}), "
+            f"elevation p={p_elev:.4f}"
         )
 
 
@@ -720,25 +675,42 @@ def main() -> None:
         & (human["catch_trial"] == False)
     ].copy()
 
-    long_df = _abs_delta_long(valid)
+    long_df = _build_long_df(valid)
     long_df = long_df[
         long_df["delta"].notna()
         & (long_df["observation"] >= OBS_MIN)
         & (long_df["observation"] <= OBS_MAX)
     ].copy()
 
-    long_df = _add_oss_to_long_df(long_df)
-    carry = _compute_carryover_metrics(valid)
+    carry = _compute_switch_bias(valid)
+
+    meta = valid[
+        ["pid", "trial", "observation", "session", "trial_in_session", "distrib_index"]
+    ].drop_duplicates(subset=["pid", "trial", "observation"])
+
+    model_sw: dict[str, pd.DataFrame] = {}
+    model_alpha: dict[str, pd.DataFrame] = {}
+    run_dir = data_path("runs") / args.run_folder
+    for mt in CARRYOVER_MODELS:
+        resp_path = run_dir / f"{mt}_diederen_responses.pkl"
+        if not resp_path.exists():
+            continue
+        resp = pd.read_pickle(resp_path)
+        resp_full = resp[["pid", "trial", "observation", "response"]].merge(
+            meta, on=["pid", "trial", "observation"], how="left"
+        )
+        model_sw[mt] = _compute_switch_bias(resp_full)
+        model_alpha[mt] = _compute_switch_alpha_diff(resp_full)
 
     fig, axes = plt.subplots(2, 4, figsize=FIGURE_SIZE, constrained_layout=True)
 
     _plot_panel_a(axes[0, 0])
     _plot_panel_b(axes[0, 1], args.run_folder, palette, model_order)
-    _plot_panel_c(axes[0, 2], long_df)
-    _plot_panel_d(axes[0, 3], carry)
+    _plot_panel_c(axes[0, 2], long_df, args.run_folder, palette, model_order)
+    _plot_panel_d(axes[0, 3], carry, model_sw)
     _plot_panel_e(axes[1, 0], long_df)
     axes[1, 1].set_visible(True)
-    _plot_panel_f(axes[1, 1], valid)
+    _plot_panel_f(axes[1, 1], valid, model_alpha)
     for col in range(2, 4):
         axes[1, col].set_visible(False)
 

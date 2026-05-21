@@ -1,82 +1,52 @@
-# NOTE: shape_loss, joint_loss archived in archive/fitting/archive_losses.py
 """
-Loss computation for model fitting across experiments.
+Loss computation for model fitting.
 
-Response-accuracy loss: root mean squared error (RMSE) on carrabin, yoo, and diederen.
-
-This module does not depend on the model implementation layer.
+compute_loss(params, model, human): RMSE between model and human responses.
+Supports datasets: carrabin, yoo, diederen.
+Diederen: catch trials excluded; optionally restricted to first 2 blocks
+per distribution per session (DIEDEREN_FIRST_BLOCKS_ONLY flag).
 """
 
 import numpy as np
 import pandas as pd
 
-POWER_LAW_SMOOTH_WINDOW = 5  # smoothing window for power law fitting in yoo figures / diagnostics
-QID_MIN_TRIALS = 10  # minimum trials per qid to include in carrabin qid-std diagnostic (figures)
+# Diederen: restrict loss to first 2 blocks per distribution per session.
+# Set to False to use all observations.
+DIEDEREN_FIRST_BLOCKS_ONLY: bool = True
 
 
-def _mean_qid_std(df: pd.DataFrame, qid_min_trials: int = QID_MIN_TRIALS) -> float:
+def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame:
     """
-    Compute mean per-qid response std for carrabin, using only qids with
-    at least qid_min_trials trials. Returns nan if no valid qids.
+    Keep only the first `n_blocks` consecutive blocks per distribution
+    within each (pid, session). A block is a consecutive run of observations
+    from one distribution (distrib_index).
     """
-    counts = df.groupby("qid")["trial"].nunique()
-    valid_qids = counts[counts >= qid_min_trials].index
-    if len(valid_qids) == 0:
-        return float("nan")
-    stds = df[df["qid"].isin(valid_qids)].groupby("qid")["response"].std()
-    return float(stds.mean())
-
-
-def _smooth_curve(arr: np.ndarray, window: int) -> np.ndarray:
-    """Apply centered rolling average of given window size to 1D array."""
-    if window <= 1:
-        return arr
-    result = arr.astype(float).copy()
-    half = window // 2
-    for i in range(len(arr)):
-        lo = max(0, i - half)
-        hi = min(len(arr), i + half + 1)
-        result[i] = float(arr[lo:hi].mean())
-    return result
-
-
-def _fit_power_law_params(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Fit a power law A * n^(-lambda) to each pid's smoothed mean |delta response|
-    curve. Returns DataFrame with columns: pid, A, lambda_.
-    """
-    from scipy.stats import linregress
-
-    rows = []
-    for pid, grp in df.groupby("pid"):
-        pieces = []
-        for _, tgrp in grp.groupby("trial"):
-            g = tgrp.sort_values("observation").copy()
-            g["delta"] = g["response"].diff().abs()
-            pieces.append(g)
-        delta = pd.concat(pieces, ignore_index=True)
-        curve = delta.groupby("observation")["delta"].mean().dropna()
-        curve = curve[curve.index >= 2]
-        if len(curve) < 3:
+    out = []
+    for (pid, session), grp in human.groupby(["pid", "session"], sort=False):
+        g = grp.sort_values("trial_in_session").reset_index(drop=True)
+        distribs = sorted(g["distrib_index"].dropna().unique().tolist())
+        if len(distribs) != 2:
+            out.append(g)
             continue
-        d = _smooth_curve(curve.values, POWER_LAW_SMOOTH_WINDOW)
-        if np.any(d <= 0):
-            continue
-        n = curve.index.values.astype(float)
-        slope, intercept, _, _, _ = linregress(np.log(n), np.log(d))
-        rows.append({"pid": pid, "A": float(np.exp(intercept)), "lambda_": float(-slope)})
-    return pd.DataFrame(rows)
+        block_count = {d: 0 for d in distribs}
+        prev = None
+        keep = []
+        for i in range(len(g)):
+            curr = int(g.at[i, "distrib_index"])
+            if prev is not None and curr != prev:
+                block_count[prev] += 1
+            if block_count[curr] < n_blocks:
+                keep.append(i)
+            prev = curr
+        if keep:
+            out.append(g.iloc[keep])
+    return pd.concat(out, ignore_index=True) if out else human.iloc[0:0]
 
 
-def response_loss(
-    params: dict,
-    model: pd.DataFrame,
-    human: pd.DataFrame,
+def compute_loss(
+    params: dict, model: pd.DataFrame, human: pd.DataFrame
 ) -> float:
-    """
-    Response-accuracy loss for carrabin, yoo, and diederen: root mean squared error
-    (RMSE) between model and human responses.
-    """
+    """RMSE between model and human responses (carrabin, yoo, diederen)."""
     dataset = params["dataset"]
     if dataset not in ("carrabin", "yoo", "diederen"):
         raise ValueError(
@@ -85,6 +55,13 @@ def response_loss(
 
     if dataset == "diederen":
         human = human[~human["catch_trial"].astype(bool)]
+        if DIEDEREN_FIRST_BLOCKS_ONLY:
+            human = _filter_first_blocks(human)
+            model = model[
+                model.set_index(["pid", "trial", "observation"]).index.isin(
+                    human.set_index(["pid", "trial", "observation"]).index
+                )
+            ]
 
     sq_errors: list[float] = []
     pairs = (
@@ -112,9 +89,5 @@ def response_loss(
 
     out = float(np.sqrt(np.mean(sq_errors)))
     if not np.isfinite(out):
-        raise ValueError(f"response_loss is not finite: {out}")
+        raise ValueError(f"compute_loss is not finite: {out}")
     return out
-
-
-def compute_loss(params: dict, model: pd.DataFrame, human: pd.DataFrame) -> float:
-    return response_loss(params, model, human)

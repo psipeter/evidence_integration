@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Yoo summary figure: 2×4 layout, panels A–H."""
+"""Yoo LR figure: 2×4 layout, panels A–H (learning rate instead of |Δresponse|)."""
 
 from __future__ import annotations
 
@@ -187,20 +187,51 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _yoo_abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:
-    """Long-format per-trial |Δresponse|."""
-    pieces = []
-    for (pid, trial), tgrp in human.groupby(["pid", "trial"], sort=False):
-        g = tgrp.sort_values("observation").copy()
-        g["delta"] = g["response"].diff().abs()
-        pieces.append(g)
-    if not pieces:
-        return pd.DataFrame(columns=["pid", "trial", "observation", "delta"])
-    return pd.concat(pieces, ignore_index=True)
+def _compute_lr(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Add LR column to a responses dataframe.
+    LR = |response(n) - response(n-1)| / max(|response(n-1)|, 0.05)
+    Computed within (pid, trial).
+    """
+    df = df.copy().sort_values(["pid", "trial", "observation"])
+    df["resp_prev"] = df.groupby(["pid", "trial"])["response"].shift(1)
+    df["delta"] = (df["response"] - df["resp_prev"]).abs()
+    df["lr"] = df["delta"] / df["resp_prev"].abs().clip(lower=0.05)
+    df = df[df["lr"] < 20].copy()
+    return df
+
+
+def _fit_power_law_params_lr(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-pid power law fit to mean LR vs observation."""
+    lr_df = _compute_lr(df)
+    lr_df = lr_df[
+        lr_df["lr"].notna() & (lr_df["observation"] >= 2) & (lr_df["lr"] > 0)
+    ]
+    rows = []
+    for pid, grp in lr_df.groupby("pid"):
+        curve = grp.groupby("observation")["lr"].mean().dropna()
+        curve = curve[curve > 0]
+        if len(curve) < 3:
+            continue
+        n = curve.index.values.astype(float)
+        y = curve.values
+        try:
+            popt, _ = curve_fit(
+                lambda n, A, lam: A * n ** (-lam),
+                n,
+                y,
+                p0=[0.3, 0.5],
+                bounds=([0.0, 0.0], (5.0, 3.0)),
+                maxfev=2000,
+            )
+            rows.append({"pid": pid, "A": float(popt[0]), "lambda_": float(popt[1])})
+        except Exception:
+            continue
+    return pd.DataFrame(rows)
 
 
 def _fit_power_law_to_mean_curve(curve: pd.Series) -> tuple[float, float] | None:
-    """Fit A·n^(−λ) to a mean |Δ| curve (smoothing + log-log regression, as in losses.py)."""
+    """Fit A·n^(−λ) to a mean LR curve (smoothing + log-log regression, as in losses.py)."""
     curve = curve[curve.index >= 2]
     if len(curve) < 3:
         return None
@@ -214,8 +245,8 @@ def _fit_power_law_to_mean_curve(curve: pd.Series) -> tuple[float, float] | None
 
 def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
     """
-    Per-pid human power-law curves, model mean |Δresponse| (lineplot + CI) with dashed
-    population power-law overlays, human mean |Δresponse| (lineplot + CI), and dashed
+    Per-pid human power-law curves, model mean LR (lineplot + CI) with dashed
+    population power-law overlays, human mean LR (lineplot + CI), and dashed
     human population power-law overlay.
     """
     human_path = data_path("yoo.pkl")
@@ -224,17 +255,17 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
         return
 
     human = pd.read_pickle(human_path)
-    long_df = _yoo_abs_delta_long(human)
-    long_df = long_df[long_df["delta"].notna() & (long_df["observation"] >= 2)].copy()
+    long_df = _compute_lr(human)
+    long_df = long_df[long_df["lr"].notna() & (long_df["observation"] >= 2)].copy()
     if long_df.empty:
         _placeholder(ax, "No human data")
         return
 
-    curve_mean = long_df.groupby("observation")["delta"].mean()
+    curve_mean = long_df.groupby("observation")["lr"].mean()
     group_fit = _fit_power_law_to_mean_curve(curve_mean)
 
     try:
-        per_pid = fit_power_law_params(human)
+        per_pid = _fit_power_law_params_lr(human)
     except Exception:
         per_pid = pd.DataFrame(columns=["pid", "A", "lambda_"])
 
@@ -262,8 +293,8 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
         if not resp_path.exists():
             continue
         resp = pd.read_pickle(resp_path)
-        long_m = _yoo_abs_delta_long(resp)
-        long_m = long_m[long_m["delta"].notna() & (long_m["observation"] >= 2)].copy()
+        long_m = _compute_lr(resp)
+        long_m = long_m[long_m["lr"].notna() & (long_m["observation"] >= 2)].copy()
         if long_m.empty:
             continue
         disp = _display(mt)
@@ -271,7 +302,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
         sns.lineplot(
             data=long_m,
             x="observation",
-            y="delta",
+            y="lr",
             color=col,
             linewidth=1.5,
             errorbar="ci",
@@ -279,7 +310,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
             zorder=2,
             label=disp,
         )
-        curve_m = long_m.groupby("observation")["delta"].mean()
+        curve_m = long_m.groupby("observation")["lr"].mean()
         fit_m = _fit_power_law_to_mean_curve(curve_m)
         if fit_m is not None:
             amp_m, lam_m = fit_m
@@ -299,7 +330,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     sns.lineplot(
         data=long_df,
         x="observation",
-        y="delta",
+        y="lr",
         color=PANEL_C_MEAN_LINE_COLOR,
         linewidth=2.0,
         errorbar="ci",
@@ -327,7 +358,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     ax.set_ylim(0.0, max(ymax, 1e-9))
 
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Response change")
+    ax.set_ylabel("Learning rate (LR)")
 
     legend_order = ["Human"] + [_display(m) for m in model_order]
     h_in, lab_in = ax.get_legend_handles_labels()
@@ -349,20 +380,19 @@ def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _panel_d_mean_abs_delta_per_pid_obs(df: pd.DataFrame) -> pd.DataFrame:
-    """Mean |Δresponse| per (pid, observation) across trials (observation ≥ 2)."""
-    g = df[df["delta"].notna() & (df["observation"] >= 2)].copy()
+def _panel_d_mean_lr_per_pid_obs(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean LR per (pid, observation) across trials (observation >= 2)."""
+    lr_df = _compute_lr(df)
+    g = lr_df[
+        lr_df["lr"].notna() & (lr_df["observation"] >= 2) & (lr_df["lr"] > 0)
+    ].copy()
     if g.empty:
-        return pd.DataFrame(columns=["pid", "observation", "delta"])
-    return (
-        g.groupby(["pid", "observation"], sort=False)["delta"]
-        .mean()
-        .reset_index()
-    )
+        return pd.DataFrame(columns=["pid", "observation", "lr"])
+    return g.groupby(["pid", "observation"], sort=False)["lr"].mean().reset_index()
 
 
 def _panel_d_fit_lambda_per_pid(pid_obs: pd.DataFrame) -> pd.Series:
-    """Per-pid decay exponent λ from ``curve_fit`` to A·n^(-λ) on mean |Δ| vs observation."""
+    """Per-pid decay exponent λ from ``curve_fit`` to A·n^(-λ) on mean LR vs observation."""
 
     def power_law(n: np.ndarray, A: float, lam: float) -> np.ndarray:
         return A * np.power(np.asarray(n, dtype=float), -lam)
@@ -371,7 +401,7 @@ def _panel_d_fit_lambda_per_pid(pid_obs: pd.DataFrame) -> pd.Series:
     for pid, grp in pid_obs.groupby("pid", sort=False):
         gg = grp.sort_values("observation")
         n_obs = gg["observation"].to_numpy(dtype=float)
-        y = gg["delta"].to_numpy(dtype=float)
+        y = gg["lr"].to_numpy(dtype=float)
         if len(n_obs) < 3:
             out[int(pid)] = float("nan")
             continue
@@ -394,15 +424,14 @@ def _panel_d_fit_lambda_per_pid(pid_obs: pd.DataFrame) -> pd.Series:
 
 
 def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
-    """Per-pid |λ_model − λ_human| boxplot (λ from power-law fit to mean |Δresponse| vs observation)."""
+    """Per-pid |λ_model − λ_human| boxplot (λ from power-law fit to mean LR vs observation)."""
     human_path = data_path("yoo.pkl")
     if not human_path.exists():
         _placeholder(ax, "No human data")
         return
 
     human = pd.read_pickle(human_path)
-    long_h = _yoo_abs_delta_long(human)
-    human_pid_obs = _panel_d_mean_abs_delta_per_pid_obs(long_h)
+    human_pid_obs = _panel_d_mean_lr_per_pid_obs(human)
     if human_pid_obs.empty:
         _placeholder(ax, "No human data")
         return
@@ -421,8 +450,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) ->
         if not resp_path.exists():
             continue
         resp = pd.read_pickle(resp_path)
-        long_m = _yoo_abs_delta_long(resp)
-        pid_obs_m = _panel_d_mean_abs_delta_per_pid_obs(long_m)
+        pid_obs_m = _panel_d_mean_lr_per_pid_obs(resp)
         lam_model = _panel_d_fit_lambda_per_pid(pid_obs_m)
         for pid, lm in lam_model.items():
             if int(pid) not in lam_human.index:
@@ -462,7 +490,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) ->
         ax=ax,
     )
     ax.set_xlabel("")
-    ax.set_ylabel("Decay rate error (|Δλ|)")
+    ax.set_ylabel("LR decay rate error (|Δλ|)")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -868,16 +896,124 @@ def _panel_g_prepare_data(
     return pid_results, mean_activity, mean_delta
 
 
+def _panel_f_prepare_data_lr(
+    run_dir: Path,
+) -> tuple[list[dict], np.ndarray, np.ndarray] | None:
+    """
+    Correlation prep for panel F: mean error activity vs mean LR per observation.
+    Returns (pid_results, mean_activity, mean_lr) or None if inputs missing.
+    """
+    acts_all_p = run_dir / f"activities_error_{PANEL_G_DATASET}.pkl"
+    encs_all_p = run_dir / f"encoders_error_{PANEL_G_DATASET}.pkl"
+    human_p = data_path(f"{PANEL_G_DATASET}.pkl")
+    if not acts_all_p.exists() or not encs_all_p.exists() or not human_p.exists():
+        return None
+
+    acts_all = pd.read_pickle(acts_all_p)
+    encs_all = pd.read_pickle(encs_all_p)
+    human = pd.read_pickle(human_p)
+
+    nef_params_path = run_dir / f"{PANEL_G_MODEL_TYPE}_{PANEL_G_DATASET}_params.pkl"
+    if nef_params_path.exists():
+        nef_params = pd.read_pickle(nef_params_path).set_index("pid")
+    else:
+        nef_params = None
+
+    neuron_cols = [c for c in acts_all.columns if c.startswith("n")]
+    obs_range = np.arange(PANEL_G_OBS_MIN, PANEL_G_OBS_MAX + 1, dtype=int)
+
+    pid_results: list[dict] = []
+    activity_rows: list[np.ndarray] = []
+    lr_rows: list[np.ndarray] = []
+
+    pids = sorted(human["pid"].unique())
+
+    for pid in pids:
+        enc_pid = encs_all[encs_all["pid"] == pid]
+        on_idx = enc_pid[enc_pid["enc_dim_0"] > PANEL_G_ENCODER_THRESHOLD][
+            "neuron_idx"
+        ].values
+        cols = [f"n{i}" for i in on_idx if f"n{i}" in neuron_cols]
+        if not cols:
+            continue
+
+        acts_pid = acts_all[acts_all["pid"] == pid].copy()
+        acts_pid["mean_weight_on"] = acts_pid[cols].mean(axis=1)
+
+        hum_pid = human[human["pid"] == pid].sort_values(["trial", "observation"])
+        hum_pid = hum_pid.copy()
+        hum_pid["resp_prev"] = hum_pid.groupby("trial")["response"].shift(1)
+        hum_pid["response_change_abs"] = (
+            hum_pid.groupby("trial")["response"].diff().abs()
+        )
+        hum_pid["lr"] = hum_pid["response_change_abs"] / hum_pid[
+            "resp_prev"
+        ].abs().clip(lower=0.05)
+        hum_pid = hum_pid[hum_pid["lr"] < 20]
+
+        merged = acts_pid.merge(
+            hum_pid[["trial", "observation", "lr"]],
+            on=["trial", "observation"],
+            how="inner",
+        )
+
+        g_act = merged.groupby("observation")["mean_weight_on"].mean()
+        g_lr = merged.groupby("observation")["lr"].mean()
+
+        activity = np.array(
+            [float(g_act[o]) if o in g_act.index else np.nan for o in obs_range]
+        )
+        lr = np.array([float(g_lr[o]) if o in g_lr.index else np.nan for o in obs_range])
+
+        mask = np.isfinite(activity) & np.isfinite(lr)
+        if int(mask.sum()) < 3:
+            continue
+
+        slope, _intercept, r_val, pval, _stderr = linregress(
+            activity[mask], lr[mask]
+        )
+        slope = float(slope)
+        r_val = float(r_val)
+        pval = float(pval)
+
+        if nef_params is not None and pid in nef_params.index:
+            lambda_val = float(nef_params.loc[pid, "lambda_"])
+        else:
+            lambda_val = float("nan")
+
+        pid_results.append(
+            {
+                "pid": int(pid),
+                "delta": lr,
+                "activity": activity,
+                "slope": slope,
+                "r": r_val,
+                "pval": pval,
+                "lambda_": lambda_val,
+            }
+        )
+
+        activity_rows.append(activity)
+        lr_rows.append(lr)
+
+    if not pid_results:
+        return None
+
+    mean_activity = np.nanmean(activity_rows, axis=0)
+    mean_lr = np.nanmean(lr_rows, axis=0)
+    return pid_results, mean_activity, mean_lr
+
+
 def _plot_panel_f(
     ax, run_folder: str, panel_g_show_significance: bool = False
 ) -> None:
-    """Single plot from former scripts/response_change_vs_weight_activity.py."""
+    """Mean error neuron activity vs mean LR (panel F)."""
     run_dir = data_path("runs") / run_folder
-    prep = _panel_g_prepare_data(run_dir)
+    prep = _panel_f_prepare_data_lr(run_dir)
     if prep is None:
         _placeholder(ax, "No activity data")
         return
-    pid_results, mean_activity, mean_delta = prep
+    pid_results, mean_activity, mean_lr = prep
     if not pid_results:
         _placeholder(ax, "No activity data")
         return
@@ -888,7 +1024,7 @@ def _plot_panel_f(
             ax,
             pid_results,
             mean_activity,
-            mean_delta,
+            mean_lr,
             pal[0],
             pal[1],
             title="",
@@ -896,13 +1032,13 @@ def _plot_panel_f(
         )
         return
 
-    mean_df = pd.DataFrame({"activity": mean_activity, "delta": mean_delta})
-    fin = np.isfinite(mean_df["activity"].values) & np.isfinite(mean_df["delta"].values)
+    mean_df = pd.DataFrame({"activity": mean_activity, "lr": mean_lr})
+    fin = np.isfinite(mean_df["activity"].values) & np.isfinite(mean_df["lr"].values)
     if fin.sum() >= 2:
         sns.regplot(
             data=mean_df,
             x="activity",
-            y="delta",
+            y="lr",
             scatter=True,
             line_kws={"color": pal[0], "linewidth": 2.5},
             scatter_kws={"alpha": 0.6, "s": 20, "color": pal[0]},
@@ -911,7 +1047,7 @@ def _plot_panel_f(
             ax=ax,
         )
     ax.set_xlabel("Mean error neuron activity (Hz)")
-    ax.set_ylabel("Mean response change")
+    ax.set_ylabel("Mean LR")
     ax.set_title("")
     leg = ax.get_legend()
     if leg is not None:
@@ -1219,7 +1355,7 @@ def _plot_panel_g(ax, run_folder: str) -> None:
 
 
 def _plot_panel_h(ax, noise_folder: str) -> None:
-    """Panel H: early vs late binned response-change/noise correlation."""
+    """Panel H: early vs late binned LR/noise correlation."""
     noise_run_dir = data_path("runs") / noise_folder
     noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
     if not noise_path.exists():
@@ -1233,9 +1369,12 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
         return
 
     df = df.sort_values(["pid", "seed", "trial", "observation"]).copy()
+    df["resp_prev"] = df.groupby(["pid", "seed", "trial"])["response"].shift(1)
     df["response_change_abs"] = (
         df.groupby(["pid", "seed", "trial"])["response"].diff().abs()
     )
+    df["lr"] = df["response_change_abs"] / df["resp_prev"].abs().clip(lower=0.05)
+    df = df[df["lr"] < 20].copy()
     per_qid_noise = (
         df.groupby(["pid", "trial", "observation"], as_index=False)["response"]
         .std()
@@ -1252,10 +1391,10 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
     for label, obs_lo, obs_hi, color in bins:
         ch = (
             df[df["observation"].between(obs_lo, obs_hi)]
-            .dropna(subset=["response_change_abs"])
-            .groupby("pid", as_index=False)["response_change_abs"]
+            .dropna(subset=["lr"])
+            .groupby("pid", as_index=False)["lr"]
             .mean()
-            .rename(columns={"response_change_abs": "mean_response_change"})
+            .rename(columns={"lr": "mean_lr"})
         )
         nz = (
             per_qid_noise[per_qid_noise["observation"].between(obs_lo, obs_hi)]
@@ -1269,7 +1408,7 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
 
         sns.regplot(
             data=plot_df,
-            x="mean_response_change",
+            x="mean_lr",
             y="mean_response_noise",
             scatter=True,
             truncate=True,
@@ -1279,7 +1418,7 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
             ax=ax,
         )
         r_val, p_val = pearsonr(
-            plot_df["mean_response_change"].to_numpy(dtype=float),
+            plot_df["mean_lr"].to_numpy(dtype=float),
             plot_df["mean_response_noise"].to_numpy(dtype=float),
         )
         stats[label] = (float(r_val), float(p_val))
@@ -1291,10 +1430,10 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
     for label, obs_lo, obs_hi, color in bins:
         ch = (
             df[df["observation"].between(obs_lo, obs_hi)]
-            .dropna(subset=["response_change_abs"])
-            .groupby("pid", as_index=False)["response_change_abs"]
+            .dropna(subset=["lr"])
+            .groupby("pid", as_index=False)["lr"]
             .mean()
-            .rename(columns={"response_change_abs": "mean_response_change"})
+            .rename(columns={"lr": "mean_lr"})
         )
         nz = (
             per_qid_noise[per_qid_noise["observation"].between(obs_lo, obs_hi)]
@@ -1307,7 +1446,7 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
             continue
         sns.regplot(
             data=plot_df,
-            x="mean_response_change",
+            x="mean_lr",
             y="mean_response_noise",
             scatter=True,
             truncate=True,
@@ -1316,7 +1455,7 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
             line_kws={"color": color, "linewidth": 2.0},
             ax=ax,
         )
-    ax.set_xlabel("Mean response change")
+    ax.set_xlabel("Mean LR")
     ax.set_ylabel("Mean response noise")
     r_early, p_early = stats.get("Obs 1–5", (float("nan"), float("nan")))
     r_late, p_late = stats.get("Obs 6–30", (float("nan"), float("nan")))
@@ -1382,10 +1521,11 @@ def main() -> None:
     label_panels(axes)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    plt.savefig(FIGURES_DIR / "figure_yoo.png", dpi=300)
-    plt.savefig(FIGURES_DIR / "figure_yoo.pdf")
-    plt.savefig(FIGURES_DIR / "figure_yoo.svg")
-    print("Saved figures/figure_yoo.{png,pdf,svg}")
+    out_stem = "figure_yoo_LR"
+    plt.savefig(FIGURES_DIR / f"{out_stem}.png", dpi=300)
+    plt.savefig(FIGURES_DIR / f"{out_stem}.pdf")
+    plt.savefig(FIGURES_DIR / f"{out_stem}.svg")
+    print(f"Saved figures/{out_stem}.{{png,pdf,svg}}")
 
 
 if __name__ == "__main__":

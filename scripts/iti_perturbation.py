@@ -80,10 +80,10 @@ def _load_base_params(pid: int, run_folder: Path) -> dict:
 
 def _compute_metrics(resp: pd.DataFrame, qid_map: pd.DataFrame) -> dict:
     """Compute response_noise and rmse for a responses DataFrame."""
-    from fitting.losses import _mean_qid_std
+    from utils.plot_style import mean_qid_std
 
     grp = resp.merge(qid_map, on=["pid", "trial", "observation"], how="left")
-    noise = _mean_qid_std(grp)
+    noise = mean_qid_std(grp)
     qid_mean = qid_map.groupby("qid")["value"].mean()
     grp = grp.assign(true_mean=grp["qid"].map(qid_mean))
     rmse = float(np.sqrt(((grp["response"] - grp["true_mean"]) ** 2).mean()))

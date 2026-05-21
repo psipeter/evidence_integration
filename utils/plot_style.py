@@ -47,6 +47,62 @@ def apply_style() -> None:
 # -- shared figure constants ---------------------------------------------------
 
 FIGURE_SIZE = (14, 7)
+POWER_LAW_SMOOTH_WINDOW = 5  # smoothing window for power-law fits in yoo figures
+QID_MIN_TRIALS = 10  # minimum trials per qid in carrabin qid-std diagnostic
+
+
+def mean_qid_std(df: pd.DataFrame, qid_min_trials: int = QID_MIN_TRIALS) -> float:
+    """
+    Mean per-qid response std for carrabin diagnostics, using only qids with
+    at least qid_min_trials trials. Returns nan if no valid qids.
+    """
+    counts = df.groupby("qid")["trial"].nunique()
+    valid_qids = counts[counts >= qid_min_trials].index
+    if len(valid_qids) == 0:
+        return float("nan")
+    stds = df[df["qid"].isin(valid_qids)].groupby("qid")["response"].std()
+    return float(stds.mean())
+
+
+def smooth_curve(arr: np.ndarray, window: int) -> np.ndarray:
+    """Apply centered rolling average of given window size to 1D array."""
+    if window <= 1:
+        return arr
+    result = arr.astype(float).copy()
+    half = window // 2
+    for i in range(len(arr)):
+        lo = max(0, i - half)
+        hi = min(len(arr), i + half + 1)
+        result[i] = float(arr[lo:hi].mean())
+    return result
+
+
+def fit_power_law_params(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fit a power law A * n^(-lambda) to each pid's smoothed mean |delta response|
+    curve. Returns DataFrame with columns: pid, A, lambda_.
+    """
+    from scipy.stats import linregress
+
+    rows = []
+    for pid, grp in df.groupby("pid"):
+        pieces = []
+        for _, tgrp in grp.groupby("trial"):
+            g = tgrp.sort_values("observation").copy()
+            g["delta"] = g["response"].diff().abs()
+            pieces.append(g)
+        delta = pd.concat(pieces, ignore_index=True)
+        curve = delta.groupby("observation")["delta"].mean().dropna()
+        curve = curve[curve.index >= 2]
+        if len(curve) < 3:
+            continue
+        d = smooth_curve(curve.values, POWER_LAW_SMOOTH_WINDOW)
+        if np.any(d <= 0):
+            continue
+        n = curve.index.values.astype(float)
+        slope, intercept, _, _, _ = linregress(np.log(n), np.log(d))
+        rows.append({"pid": pid, "A": float(np.exp(intercept)), "lambda_": float(-slope)})
+    return pd.DataFrame(rows)
 
 
 def label_panels(axes, labels=None, **kwargs) -> None:

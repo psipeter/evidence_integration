@@ -236,7 +236,7 @@ def _resubmit(
             if mt not in ("NEF_recurrent", "NEF_synaptic"):
                 continue
             if timing == "once_per_dt" and ds != "carrabin":
-                continue  # only carrabin uses once_per_dt windowed activities by default
+                continue  # windowed once_per_dt activities only implemented for carrabin
             out_dir = run_folder
             ens_missing = False
             for ens in ensembles:

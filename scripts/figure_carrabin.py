@@ -196,7 +196,7 @@ def _load_loss_long(
     Load per-pid qid-std shape metric for each model.
     Returns DataFrame with columns: pid, model_type, loss.
     """
-    from fitting.losses import _mean_qid_std
+    from utils.plot_style import mean_qid_std
 
     rows = []
     human_full = pd.read_pickle(data_path(f"{dataset}.pkl"))
@@ -213,7 +213,7 @@ def _load_loss_long(
             model_with_qid = model_pid.merge(
                 qid_map, on=["pid", "trial", "observation"], how="left"
             )
-            loss = abs(_mean_qid_std(human_pid) - _mean_qid_std(model_with_qid))
+            loss = abs(mean_qid_std(human_pid) - mean_qid_std(model_with_qid))
             rows.append({"pid": int(pid), "model_type": mt, "loss": loss})
 
     return pd.DataFrame(rows)
@@ -260,7 +260,7 @@ def _load_probe_metrics(pids, probes_list, human, nef_resp, nef_params, qid_map)
     """
     from collections import defaultdict
 
-    from fitting.losses import _mean_qid_std
+    from utils.plot_style import mean_qid_std
 
     rows = []
     for pid in pids:
@@ -325,7 +325,7 @@ def _load_probe_metrics(pids, probes_list, human, nef_resp, nef_params, qid_map)
         param_rows = nef_params[nef_params["pid"] == pid]
         if grp.empty or param_rows.empty:
             continue
-        noise = _mean_qid_std(grp_qid)
+        noise = mean_qid_std(grp_qid)
         p = param_rows.iloc[0]
         rows.append(
             {
@@ -580,7 +580,7 @@ def _plot_panel_h(ax, scan_per_qid, pred_error_df, scan_pid, color_0, color_1):
 
 def _save_panel_c_kde(human: pd.DataFrame) -> None:
     """Bottom-left KDE panel from ``scripts/response_noise_carrabin.py`` (verbatim)."""
-    from fitting.losses import _mean_qid_std
+    from utils.plot_style import mean_qid_std
 
     apply_style()
     PALETTE = {"Human": HUMAN_NEUTRAL_COLOR}
@@ -589,7 +589,7 @@ def _save_panel_c_kde(human: pd.DataFrame) -> None:
 
     pid_stds: list[float] = []
     for _pid, grp in human.groupby("pid"):
-        pid_stds.append(_mean_qid_std(grp))
+        pid_stds.append(mean_qid_std(grp))
 
     pid_stds_vals = [s for s in pid_stds if np.isfinite(s)]
     fig, ax_kde = plt.subplots(figsize=(3, 3))
@@ -599,7 +599,7 @@ def _save_panel_c_kde(human: pd.DataFrame) -> None:
         )
         kde_fn = gaussian_kde(pid_stds_vals)
         for i, (_, pid) in enumerate(SAMPLE_PIDS.items()):
-            std_val = _mean_qid_std(human[human["pid"] == pid])
+            std_val = mean_qid_std(human[human["pid"] == pid])
             if not np.isfinite(std_val):
                 continue
             kde_height = float(kde_fn(np.array([std_val]))[0])
@@ -629,7 +629,7 @@ def _save_panel_c_kde(human: pd.DataFrame) -> None:
 
 def _save_qid_kde(human: pd.DataFrame) -> None:
     """Per-PID KDE of trial responses demeaned within each valid qid, then pooled."""
-    from fitting.losses import QID_MIN_TRIALS
+    from utils.plot_style import QID_MIN_TRIALS
 
     apply_style()
     PALETTE = {"Human": HUMAN_NEUTRAL_COLOR}

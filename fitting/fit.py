@@ -1,25 +1,15 @@
 """
-Model-fitting orchestration layer for participant-level parameter estimation.
+Participant-level model fitting via Optuna (TPE) and k-fold CV.
 
-Coordinates Optuna search with k-fold cross-validation (RMSE), writing
-participant-specific outputs under a run folder (see ``run_folder``).
-Filenames are ``{model_type}_{dataset}_{pid}_params.pkl``, ``_performance.pkl``,
-and ``_folds.pkl``.
+Objective: RMSE from ``fitting.losses.compute_loss`` (diederen uses catch-trial
+exclusion and optional first-2-blocks-per-distribution filtering).
 
-Entry point:
-``python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [k] [run_folder] [optuna_seed]``
+Entry point::
 
-Optional 4th token ``n_trials`` (default 100). With seven or more tokens after the
-program name, the 5th is ``k`` (CV folds), the 6th is ``run_folder``, and an
-optional 7th is ``optuna_seed``. With exactly six tokens, the 5th is
-``run_folder`` and ``k`` defaults to 5.
+    python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [k] [run_folder] [optuna_seed]
 
-**Carrabin:** ``Bayes`` / ``NoisyCounting`` — no fitted params. ``RL`` — ``alpha``.
-
-**Yoo:** ``Mean`` — no params. ``RL`` — ``alpha``. ``ADM`` — ``phi``, ``rho``, ``nu``.
-
-Cluster parallelism: shared MySQL Optuna storage; complete ``make_storage()``
-before cluster use.
+Writes ``{model_type}_{dataset}_{pid}_params.pkl``, ``_performance.pkl``, and
+``_folds.pkl`` under ``run_folder``. SLURM jobs are submitted via ``fitting.submit``.
 """
 
 import logging
@@ -40,17 +30,6 @@ from utils.paths import RUNS_DIR, data_path, resolve_run_folder
 from utils.save_responses import save as save_responses
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
-
-
-def make_storage(host: str, user: str, password: str, study_name: str) -> str:
-    """
-    Construct a MySQL storage URL for use with Optuna on the cluster.
-    Credentials should be passed via environment variables, not hardcoded.
-    Returns a connection string suitable for the `storage` argument of fit().
-
-    # TODO: fill in MySQL connection details for Dartmouth Discovery HPC
-    """
-    raise NotImplementedError
 
 
 def _log_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
@@ -95,11 +74,6 @@ def _suggest_params(
         else:
             params[param] = trial.suggest_float(param, low, high, step=step)
     return params
-
-
-def _run_nef_all_trials(params: dict, human: pd.DataFrame) -> pd.DataFrame:
-    """Run NEF simulation once for all trials, return responses dataframe."""
-    return NEF.run(params)
 
 
 def _cross_validate(
@@ -172,7 +146,7 @@ def fit(
 
         trial_wall_start = time.time()
         if model_type in ("NEF_recurrent", "NEF_synaptic"):
-            model_responses_full = _run_nef_all_trials(params, human)
+            model_responses_full = NEF.run(params)
         elif model_type == "NEF2d":
             model_responses_full = NEF2d.run(params)
         else:
@@ -272,7 +246,7 @@ if __name__ == "__main__":
         k = int(sys.argv[5])
         run_folder = sys.argv[6]
         optuna_seed = int(sys.argv[7])
-    elif len(sys.argv) >= 7:
+    elif len(sys.argv) == 7:
         k = int(sys.argv[5])
         run_folder = sys.argv[6]
         optuna_seed = 42
