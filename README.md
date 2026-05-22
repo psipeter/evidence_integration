@@ -30,6 +30,12 @@ python scripts/build_diederen.py --data_dir data/Diederen
 
 Groups: **CTRL** (n=28), **PCB** / **SUL** / **BRO** (n=19 each).
 
+**Diederen exclusion criterion:** 15 participants are excluded whose
+prediction RMSE vs the true EV was ≥ their RMSE vs 0 (the optimal
+no-information baseline), indicating responses dominated by noise
+rather than task learning. Excluded PIDs are listed in
+`EXCLUDE_PIDS` in `scripts/figure_diederen.py`.
+
 ---
 
 ## Models
@@ -52,12 +58,19 @@ Groups: **CTRL** (n=28), **PCB** / **SUL** / **BRO** (n=19 each).
 | **diederen** | RL | Delta rule | `alpha` |
 | **diederen** | RL_lambda | Delta rule with power-law \(\alpha(t)\) | `alpha_0`, `lambda_` |
 | **diederen** | PearceHall | Surprise-driven adaptive \(\alpha\) (Pearce & Hall 1980; Diederen & Schultz 2015) | `alpha_0`, `eta` |
-| **diederen** | NEF_recurrent | Spiking NEF evidence integrator | `alpha_0`, `lambda_` |
-| **diederen** | NEF_synaptic | Spiking NEF (synaptic-learning variant) | `alpha_0`, `lambda_` |
+| **diederen** | NEF2d | Spiking NEF with 2-distribution counting circuit | `alpha_0`, `lambda_` |
 
 **NEF (recurrent / synaptic):** A recurrent spiking network implements a running estimate (**value** ensemble), prediction-error-driven updates (**error** ensemble), and observation counting so effective learning rate tracks \(\alpha(t)\) (**counting** subnetwork—integrator or LMU). Per-participant **`alpha_0`** and **`lambda_`** are fit with Optuna; architecture and timing live in **`_NEF_FIXED`** / **`PARAM_DEFAULTS`** (see `fitting/model_params.py` and `models/NEF.py`).
 
 **PearceHall (diederen):** \(\alpha(t+1) = \eta \cdot |\delta(t)| + (1 - \eta) \cdot \alpha(t)\), with \(\alpha\) clipped to \([0, 2]\). **`eta=0`** recovers fixed-alpha RL.
+
+**NEF2d (diederen):** Two independent 1D counting integrators (one per
+distribution), each with an onset detector driven by context indicators.
+A leaky recurrent connection (`count_leak`) causes counts to decay toward
+zero during absence, producing elevated learning rates on return — modelling
+the carryover bias observed after context switches. Architecture parameters
+live in `MODEL_PARAMS["diederen"]["NEF2d"]["fixed"]`; `alpha_0` and
+`lambda_` are fitted per participant.
 
 **Diederen catch trials:** catch trials are included in the value sequence for simulation (reward is shown) but **excluded from RMSE loss**. Only **`missed`** rows are excluded from simulation.
 
@@ -73,11 +86,13 @@ evidence_integration/
     diederen.pkl           # behavioral data (built by build_diederen.py)
     runs/                  # fit outputs (gitignored / not version-controlled)
       refit/               # primary run folder for all final fits
+      diederen_short/      # diederen fits (2+2 block filter); copied to refit after collection
       nef200/              # NEF fits (200 Optuna trials); copied to refit after collection
   archive/                 # archived code & data — see archive/archive_readme.md
   models/
     math_models.py         # mathematical models (carrabin, yoo, diederen)
     NEF.py                 # NEF recurrent & synaptic spiking models
+    NEF2d.py               # 2-distribution NEF spiking model (diederen)
     counting_integrator.py
     counting_lmu.py
   fitting/
@@ -97,7 +112,8 @@ evidence_integration/
   scripts/
     figure_carrabin.py     # carrabin figure (2×4, panels A–H)
     figure_yoo.py          # yoo figure (2×4, panels A–H)
-    figure_diederen.py     # diederen figure (2×4, panels A–H)
+    figure_diederen.py     # diederen figure (2×4, panels A–F visible)
+    test_nef2d_counting.py # diagnostic test for NEF2d counting circuit
     extras_carrabin.py     # NEF probe data for figure_carrabin bottom panels
     extras_yoo.py          # NEF response-noise simulations for figure_yoo panel H
     build_diederen.py      # build data/diederen.pkl from raw MATLAB files
@@ -118,23 +134,31 @@ evidence_integration/
 Typical loop: **submit jobs → each job runs `fitting.fit` → collect aggregates → figures**.
 
 1. **`fitting.submit`** enumerates `(dataset, model_type, pid)` from **`MODEL_PARAMS`** (optionally filtered), writes **`run_config.json`** under `data/runs/<run_folder>/`, and either submits SLURM scripts or runs **`fitting.fit`** locally (`--local`).
-2. **`fitting.fit`** runs Optuna with **k-fold cross-validation**. The objective is **RMSE** between model and human responses (`fitting.losses.response_loss`). Math models are re-simulated per trial; **NEF** runs one full simulation per Optuna trial and CV is evaluated on cached responses.
+2. **`fitting.fit`** runs Optuna with **k-fold cross-validation**. The objective is **RMSE** between model and human responses (`fitting.losses.compute_loss`). Math models are re-simulated per trial; **NEF** runs one full simulation per Optuna trial and CV is evaluated on cached responses.
+
+   **Diederen:** fitting is restricted to the first 2 consecutive blocks per
+   distribution per session (`DIEDEREN_FIRST_BLOCKS_ONLY = True` in
+   `fitting/losses.py`). Responses are still generated for the full trial
+   after fitting. Set the flag to `False` to use all observations.
+
 3. **`fitting.collect`** reads **`run_config.json`** and concatenates per-participant **`_params.pkl`**, **`_performance.pkl`**, **`_folds.pkl`**, **`_responses.pkl`**, or activity files into run-level aggregates.
 4. **Figure scripts** read from `data/runs/<run_folder>/` (and optional side folders such as **`yoo_response_noise/`** for yoo panel H).
 
 ### Run folder conventions
 
-- **`refit`**: primary run folder for all final math model and NEF fits. All figure scripts default to **`--run_folder refit`**.
+- **`refit`**: primary run folder for all final math model and NEF fits. Carrabin and yoo figure scripts default to **`--run_folder refit`**.
+- **`diederen_short`**: diederen fits using the 2+2 block filter. After
+  collection, copy combined pickles to **`refit/`**.
 - **`nef200`**: intermediate folder for NEF fits run with **200** Optuna trials. After collection, copy combined NEF pickles from **`nef200/`** to **`refit/`** (see regeneration guide below).
 
-Prefer a **short folder name** (e.g. `refit`, `nef200`). **`RUNS_DIR / run_folder`** is `data/runs/<name>`. The codebase also normalizes mistaken relative paths such as `data/runs/foo` via **`utils.paths.resolve_run_folder`**—short names remain the clearest convention.
+Prefer a **short folder name** (e.g. `refit`, `diederen_short`, `nef200`). **`RUNS_DIR / run_folder`** is `data/runs/<name>`. The codebase also normalizes mistaken relative paths such as `data/runs/foo` via **`utils.paths.resolve_run_folder`**—short names remain the clearest convention.
 
 ### Commands (cluster)
 
 ```bash
 python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef200
 python -m fitting.submit yoo NEF_recurrent --n_trials 200 --run_folder nef200
-python -m fitting.submit diederen NEF_recurrent --n_trials 200 --run_folder nef200
+python -m fitting.submit diederen NEF2d --n_trials 200 --run_folder diederen_short
 ```
 
 ### Local single-participant example
@@ -213,14 +237,23 @@ python -m fitting.submit yoo RL         --n_trials 500 --run_folder refit
 python -m fitting.submit yoo RL_lambda  --n_trials 500 --run_folder refit
 python -m fitting.submit yoo ADM        --n_trials 500 --run_folder refit
 
-# diederen
-python -m fitting.submit diederen Mean       --n_trials 200 --run_folder refit
-python -m fitting.submit diederen RL         --n_trials 500 --run_folder refit
-python -m fitting.submit diederen RL_lambda  --n_trials 500 --run_folder refit
-python -m fitting.submit diederen PearceHall --n_trials 500 --run_folder refit
+# diederen (2+2 block filter active in losses.py)
+python -m fitting.submit diederen Mean       --n_trials 200 --run_folder diederen_short
+python -m fitting.submit diederen RL         --n_trials 500 --run_folder diederen_short
+python -m fitting.submit diederen RL_lambda  --n_trials 500 --run_folder diederen_short
+python -m fitting.submit diederen PearceHall --n_trials 500 --run_folder diederen_short
+python -m fitting.submit diederen NEF2d      --n_trials 200 --run_folder diederen_short
 ```
 
-Collect after all jobs complete:
+Collect and copy:
+
+```bash
+python -m fitting.collect diederen_short --type params
+python -m fitting.collect diederen_short --type responses
+cp data/runs/diederen_short/*_diederen_*.pkl data/runs/refit/
+```
+
+Collect carrabin and yoo after all jobs complete:
 
 ```bash
 python -m fitting.collect refit --type params
@@ -239,8 +272,6 @@ python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef2
 python -m fitting.submit carrabin NEF_synaptic  --n_trials 200 --run_folder nef200
 python -m fitting.submit yoo      NEF_recurrent --n_trials 200 --run_folder nef200
 python -m fitting.submit yoo      NEF_synaptic  --n_trials 200 --run_folder nef200
-python -m fitting.submit diederen NEF_recurrent --n_trials 200 --run_folder nef200
-python -m fitting.submit diederen NEF_synaptic  --n_trials 200 --run_folder nef200
 ```
 
 Collect from **nef200**, then copy to **refit**:
@@ -253,8 +284,6 @@ cp data/runs/nef200/NEF_recurrent_carrabin_*.pkl data/runs/refit/
 cp data/runs/nef200/NEF_synaptic_carrabin_*.pkl  data/runs/refit/
 cp data/runs/nef200/NEF_recurrent_yoo_*.pkl      data/runs/refit/
 cp data/runs/nef200/NEF_synaptic_yoo_*.pkl       data/runs/refit/
-cp data/runs/nef200/NEF_recurrent_diederen_*.pkl data/runs/refit/
-cp data/runs/nef200/NEF_synaptic_diederen_*.pkl  data/runs/refit/
 ```
 
 ---
@@ -311,6 +340,10 @@ python scripts/figure_yoo.py --run_folder refit \
 python scripts/figure_diederen.py --run_folder refit
 ```
 
+Note: diederen figure uses `refit/` which contains responses from
+`diederen_short/` fits (2+2 block filter). Performance files reflect
+2+2 block RMSE.
+
 To include **RL_lambda** in top-row model panels:
 
 ```bash
@@ -351,6 +384,10 @@ python scripts/figure_carrabin.py --run_folder refit
 python scripts/figure_yoo.py      --run_folder refit --noise_folder yoo_response_noise
 python scripts/figure_diederen.py --run_folder refit
 ```
+
+Note: diederen figure uses `refit/` which contains responses from
+`diederen_short/` fits (2+2 block filter). Performance files reflect
+2+2 block RMSE.
 
 Other figure scripts:
 
