@@ -37,6 +37,25 @@ from utils.plot_style import (
 
 MIN_DATAPOINTS_PANEL_C = 20  # min pid-observations to plot a point in panel C
 
+# Participants excluded: RMSE vs EV >= RMSE vs 0 (no better than prior mean)
+EXCLUDE_PIDS: list[int] = [
+    1011,
+    1023,
+    1027,
+    1028,
+    1032,
+    2001,
+    2029,
+    2036,
+    2038,
+    2047,
+    2048,
+    2064,
+    2083,
+    2092,
+    2099,
+]
+
 MODEL_ORDER = ["Mean", "RL", "RL_lambda", "PearceHall", "NEF2d"]
 CARRYOVER_MODELS = ["Mean", "RL", "PearceHall", "NEF2d"]
 
@@ -250,21 +269,25 @@ def _plot_panel_c(
     palette: dict,
     model_order: list[str],
     valid_2b: pd.DataFrame,
+    human_valid_raw: pd.DataFrame,
 ) -> None:
     run_dir = data_path("runs") / run_folder
-    meta = valid_2b[
+    meta_full = human_valid_raw[
         ["pid", "trial", "observation", "session", "trial_in_session", "distrib_index"]
     ].drop_duplicates(subset=["pid", "trial", "observation"])
+    tis_keep = valid_2b[["pid", "session", "trial_in_session"]].drop_duplicates()
 
     for mt in model_order:
         resp_path = run_dir / f"{mt}_diederen_responses.pkl"
         if not resp_path.exists():
             continue
         resp = pd.read_pickle(resp_path)
-        resp = resp.merge(meta, on=["pid", "trial", "observation"], how="inner")
+        resp = resp[~resp["pid"].isin(EXCLUDE_PIDS)].copy()
+        resp = resp.merge(meta_full, on=["pid", "trial", "observation"], how="inner")
         resp = resp.sort_values(["pid", "trial", "observation"])
         resp["delta"] = resp.groupby(["pid", "trial"])["response"].diff().abs()
-        d = resp[resp["delta"].notna()]
+        resp = resp.merge(tis_keep, on=["pid", "session", "trial_in_session"], how="inner")
+        d = resp[resp["delta"].notna()].copy()
         pid_means = d.groupby(["pid", "observation"])["delta"].mean().reset_index()
         obs_counts = pid_means.groupby("observation")["pid"].count()
         valid_obs = obs_counts[obs_counts >= MIN_DATAPOINTS_PANEL_C].index
@@ -546,6 +569,7 @@ def main() -> None:
             palette[disp] = palette[mt]
 
     human = pd.read_pickle(data_path("diederen.pkl"))
+    human = human[~human["pid"].isin(EXCLUDE_PIDS)].copy()
     valid_all = human[
         ~human["missed"]
         & human["response"].notna()
@@ -577,6 +601,7 @@ def main() -> None:
         if not resp_path.exists():
             continue
         resp = pd.read_pickle(resp_path)
+        resp = resp[~resp["pid"].isin(EXCLUDE_PIDS)].copy()
         resp_sw = resp[["pid", "trial", "observation", "response"]].merge(
             meta, on=["pid", "trial", "observation"], how="left"
         )
@@ -591,7 +616,13 @@ def main() -> None:
     _plot_panel_a(axes[0, 0])
     _plot_panel_b(axes[0, 1], args.run_folder, palette, model_order)
     _plot_panel_c(
-        axes[0, 2], valid_2b, args.run_folder, palette, model_order, valid_2b
+        axes[0, 2],
+        valid_2b,
+        args.run_folder,
+        palette,
+        model_order,
+        valid_2b,
+        human_valid_raw,
     )
     axes[0, 3].set_visible(False)
     _plot_panel_e(axes[1, 0], carry, model_sw)
