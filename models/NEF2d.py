@@ -46,8 +46,8 @@ READOUT_FRACTION = 0.8
 SWITCH_THRESHOLD = 0.5
 
 _NEF2D_EXTRA: dict[str, object] = {
-    "n_neurons":          2000,
-    "n_neurons_counting": 2000,
+    "n_neurons":          1000,
+    "n_neurons_counting": 1000,
     "radius_c": 50.0,
     "onset_detector_amp": 0.5,
 }

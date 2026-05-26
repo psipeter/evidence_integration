@@ -12,7 +12,7 @@ import pandas as pd
 
 # Diederen: restrict loss to first 2 blocks per distribution per session.
 # Set to False to use all observations.
-DIEDEREN_FIRST_BLOCKS_ONLY: bool = True
+DIEDEREN_FIRST_BLOCKS_ONLY: bool = False
 
 
 def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame:
