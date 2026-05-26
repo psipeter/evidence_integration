@@ -442,13 +442,14 @@ def _plot_bias_panel(
     for si, src in enumerate(all_sources):
         y_star = y_top - si * star_row_height
         for ci, cond in enumerate(condition_order):
-            sub = plot_df[
+            sub_df = plot_df[
                 (plot_df["condition"] == cond) & (plot_df["source"] == src)
-            ]["bias"].values
-            if len(sub) < 5:
+            ]
+            per_pid = sub_df.groupby("pid")["bias"].mean().values
+            if len(per_pid) < 5:
                 continue
             try:
-                _, p = wilcoxon(sub)
+                _, p = wilcoxon(per_pid)
             except Exception:
                 p = 1.0
             stars = _pvalue_to_stars(p)
@@ -514,8 +515,8 @@ def _plot_panel_d(
             ]
         ].drop_duplicates(subset=["pid", "trial", "observation"])
         nef_resp = pd.read_pickle(resp_path)
-        if DATA_FILTERS.get("exclude_bad_pids"):
-            nef_resp = nef_resp[~nef_resp["pid"].isin(EXCLUDE_PIDS)].copy()
+        # Do NOT filter by EXCLUDE_PIDS — exclusion criterion is behavioral,
+        # not applicable to model responses
         nef_full = nef_resp.merge(
             meta, on=["pid", "trial", "observation"], how="left"
         )
@@ -539,7 +540,7 @@ def _compute_switch_aligned_delta(df: pd.DataFrame) -> pd.DataFrame:
     """
     For each (pid, session), find the first A->B switch and compute
     within-distribution |Δresponse| at positions relative to the switch:
-      rel_pos = -4,-3,-2,-1 : last 4 obs of A block  (|a[n]-a[n-1]|)
+      rel_pos = -4,-3,-2,-1 : first 4 within-A deltas (|a[n]-a[n-1]|)
       rel_pos = +2,+3,+4    : obs 2,3,4 of B block   (|b[n]-b[n-1]|)
     rel_pos=+1 is excluded — |b1-a_last| crosses distributions.
 
@@ -581,12 +582,9 @@ def _compute_switch_aligned_delta(df: pd.DataFrame) -> pd.DataFrame:
             b_rows.append(k)
             k += 1
 
-        for pos_idx, row in enumerate(reversed(a_rows[-4:])):
-            rel_pos = -(pos_idx + 1)
-            row_idx = a_rows.index(row)
-            if row_idx < 1:
-                continue
-            row_prev = a_rows[row_idx - 1]
+        for pos_idx in range(1, min(5, len(a_rows))):
+            row = a_rows[pos_idx]
+            row_prev = a_rows[pos_idx - 1]
             resp = g.at[row, "response"]
             resp_prev = g.at[row_prev, "response"]
             if pd.isna(resp) or pd.isna(resp_prev):
@@ -594,7 +592,7 @@ def _compute_switch_aligned_delta(df: pd.DataFrame) -> pd.DataFrame:
             records.append(
                 {
                     "pid": int(pid),
-                    "rel_pos": int(rel_pos),
+                    "rel_pos": int(-(5 - pos_idx)),
                     "delta": abs(float(resp) - float(resp_prev)),
                     "block": "A",
                 }
@@ -627,11 +625,10 @@ def _plot_panel_e(
 ) -> None:
     """
     Panel E: mean |Δresponse| aligned to first A→B switch.
-    rel_pos -4...-1: last observations of A (within-A deltas).
+    rel_pos -4...-1: first observations of A (within-A deltas).
     rel_pos +2...+4: first observations of B (within-B deltas).
     rel_pos +1 excluded (cross-distribution delta).
     Human=black, NEF2d=palette[3].
-    Significance star above B oss+2 vs A oss-1.
     """
     nef_color = get_palette()[3]
     run_dir = data_path("runs") / run_folder
@@ -655,6 +652,12 @@ def _plot_panel_e(
         nef_full = nef_resp.merge(
             meta, on=["pid", "trial", "observation"], how="left"
         )
+        nef_full = nef_full.dropna(
+            subset=["distrib_index", "session", "trial_in_session"]
+        ).copy()
+        nef_full = nef_full.sort_values(
+            ["pid", "session", "trial_in_session"]
+        ).reset_index(drop=True)
         nef_df = _compute_switch_aligned_delta(nef_full)
 
     x_order = [-4, -3, -2, -1, 2, 3, 4]
@@ -688,45 +691,7 @@ def _plot_panel_e(
             label=label,
         )
 
-    pm_neg1 = human_df[human_df["rel_pos"] == -1].groupby("pid")["delta"].mean()
-    pm_pos2 = human_df[human_df["rel_pos"] == 2].groupby("pid")["delta"].mean()
-    c = pm_neg1.index.intersection(pm_pos2.index)
-    try:
-        _, p = wilcoxon((pm_pos2[c] - pm_neg1[c]).values)
-    except Exception:
-        p = 1.0
-    stars = _pvalue_to_stars(p)
-    if stars:
-        y_max = ax.get_ylim()[1]
-        x_neg1 = x_plot[x_order.index(-1)]
-        x_pos2 = x_plot[x_order.index(2)]
-        y_bracket = y_max * 0.95
-        ax.annotate(
-            "",
-            xy=(x_pos2, y_bracket),
-            xytext=(x_neg1, y_bracket),
-            arrowprops=dict(arrowstyle="-", color="black", lw=1.0),
-        )
-        ax.text(
-            (x_neg1 + x_pos2) / 2,
-            y_bracket,
-            stars,
-            ha="center",
-            va="bottom",
-            fontsize=9,
-            color="black",
-        )
-
     ax.axvline(x=-0.25, color="0.6", linewidth=1.0, linestyle="--")
-    ax.text(
-        -0.25,
-        ax.get_ylim()[1] * 0.98,
-        "switch",
-        ha="center",
-        va="top",
-        fontsize=6,
-        color="0.5",
-    )
 
     ax.set_xticks(x_plot)
     ax.set_xticklabels(x_labels, fontsize=7)
