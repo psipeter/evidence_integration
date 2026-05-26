@@ -38,10 +38,7 @@ for _logger_name in (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.model_params import MODEL_PARAMS, _NEF_FIXED
-from models.counting_integrator import (
-    _ideal_stream as _ideal_stream_1d,
-    decode_outputs as _decode_outputs_1d,
-)
+from models.NEF import _pretrain as _pretrain_counting
 from utils.paths import RUNS_DIR, data_path
 from utils.run_params import trial_seed as _trial_seed
 
@@ -49,10 +46,10 @@ READOUT_FRACTION = 0.8
 SWITCH_THRESHOLD = 0.5
 
 _NEF2D_EXTRA: dict[str, object] = {
+    "n_neurons":          2000,
     "n_neurons_counting": 2000,
     "radius_c": 50.0,
     "onset_detector_amp": 0.5,
-    "count_leak": 0.005,
 }
 PARAM_DEFAULTS: dict = {**_NEF_FIXED, **_NEF2D_EXTRA}
 
@@ -166,225 +163,15 @@ def _session_duration(n_steps: int, params: dict) -> float:
     return float(params["t_iti"]) + n_steps * t_step
 
 
-def _validate_1d_decoders(decoders: dict, n_neurons_counting: int) -> None:
-    """Decoder weights must match 1D count ensemble size."""
-    expected = (1, n_neurons_counting)
-    for key in ("W_count", "W_weight"):
-        w = decoders[key]
-        if tuple(w.shape) != expected:
-            raise ValueError(
-                f"Decoder {key!r} shape {w.shape} != {expected} "
-                f"(count uses n_neurons_counting={n_neurons_counting})"
-            )
-
-
-def _make_pulse_input_signs(params: dict, signs: np.ndarray) -> callable:
-    """1D pulse input with explicit per-observation signs (for pretraining)."""
-    n_obs = len(signs)
-    t_obs = float(params["t_obs"])
-    t_iti = float(params["t_iti"])
-    t_step = t_obs + t_iti
-
-    def pulse(t: float) -> float:
-        if t < t_iti:
-            return 0.0
-        step = int((t - t_iti) / t_step)
-        phase = (t - t_iti) - step * t_step
-        if step < n_obs and phase < t_obs:
-            return float(signs[step])
-        return 0.0
-
-    return pulse
-
-
-def _build_1d_counting_train(
-    params: dict, pulse_fn: callable
-) -> nengo.Network:
-    """1D counting train network (no leak), matching counting_integrator.py."""
-    n_neurons = int(params["n_neurons"])
-    n_neurons_counting = int(params["n_neurons_counting"])
-    n_obs = int(params["n_obs"])
-    seed = int(params.get("base_seed", params["seed"]))
-    tau_fb = float(params["tau_fb"])
-    tau_probe = float(params["tau_probe"])
-    amp = float(params["onset_detector_amp"])
-
-    with nengo.Network(label="counting_1d_train", seed=seed) as net:
-        net.node_input = nengo.Node(pulse_fn, label="node_input")
-        net.ideal = nengo.Node(
-            _ideal_stream_1d(params), size_in=1, size_out=2, label="ideal"
-        )
-        nengo.Connection(net.node_input, net.ideal, synapse=None, seed=seed)
-        net.probe_ideal_raw = nengo.Probe(net.ideal, synapse=None)
-
-        net.memory = nengo.Ensemble(
-            n_neurons=n_neurons_counting,
-            dimensions=1,
-            radius=n_obs,
-            label="memory",
-            seed=seed,
-        )
-        net.onset_detector = nengo.Ensemble(
-            n_neurons=n_neurons,
-            dimensions=1,
-            encoders=nengo.dists.Choice([[1]]),
-            intercepts=nengo.dists.Uniform(0, 1),
-            seed=seed,
-            label="onset_detector",
-        )
-        nengo.Connection(
-            net.node_input,
-            net.onset_detector,
-            synapse=float(params["tau_fast"]),
-            function=lambda x: np.abs(x),
-            seed=seed,
-        )
-        nengo.Connection(
-            net.node_input,
-            net.onset_detector,
-            synapse=float(params["tau_slow"]),
-            function=lambda x: -np.abs(x),
-            seed=seed,
-        )
-        nengo.Connection(
-            net.onset_detector,
-            net.memory,
-            synapse=tau_fb,
-            function=lambda x, amp=amp: amp,
-            seed=seed,
-        )
-        nengo.Connection(net.memory, net.memory, transform=1.0, synapse=tau_fb, seed=seed)
-        net.probe_memory_raw = nengo.Probe(net.memory.neurons, synapse=None)
-
-    return net
-
-
-def _simulate_1d_counting_train(net: nengo.Network, params: dict) -> dict:
-    """Run 1D train network; return ideal and memory activities."""
-    dt = float(params["dt"])
-    n_obs = int(params["n_obs"])
-    t_step = float(params["t_obs"]) + float(params["t_iti"])
-    t_total = n_obs * t_step
-    with nengo.Simulator(
-        net, dt=dt, seed=int(params["seed"]), progress_bar=False
-    ) as sim:
-        sim.run(t_total)
-    return {
-        "ideal": sim.data[net.probe_ideal_raw],
-        "memory": sim.data[net.probe_memory_raw],
-    }
-
-
 def _pretrain_counting_1d(params: dict) -> dict:
-    """
-    Train 1D decoders (W_count, W_weight) on a single monotonic pulse sequence.
-
-    A single run from count=0 to count=radius_c covers the full representable
-    range for a 1D integrator. count_leak=0 during training preserves decoder
-    validity. The same decoders are reused for both count_A and count_B.
-    """
-    n_obs = int(params["radius_c"])
-    train_params = {
+    """Pretrain 1D count decoders (W_count, W_weight) via NEF._pretrain."""
+    p = {
         **params,
-        "n_obs": n_obs,
-        "count_leak": 0.0,
-        "seed": int(params.get("base_seed", params["seed"])),
+        "counting": "integrator",
+        "lmu_n_obs_max": int(params["radius_c"]),
+        "base_seed": int(params.get("base_seed", params["seed"])),
     }
-    signs = np.ones(n_obs)
-    pulse_fn = _make_pulse_input_signs(train_params, signs)
-    net = _build_1d_counting_train(train_params, pulse_fn)
-    raw = _simulate_1d_counting_train(net, train_params)
-    return _decode_outputs_1d(raw, train_params)
-
-
-def _build_1d_counting_circuit(
-    net: nengo.Network,
-    name: str,
-    input_dim: int,
-    params: dict,
-    seed: int,
-    decoders: dict,
-) -> None:
-    """
-    Build one complete 1D counting circuit into an existing network.
-    Attaches onset detector and integrator for one distribution.
-    Sets net.onset_{name} and net.count_{name} as attributes.
-    """
-    n_neurons = int(params["n_neurons"])
-    n_neurons_counting = int(params["n_neurons_counting"])
-    radius_c = float(params["radius_c"])
-    tau_fb = float(params["tau_fb"])
-    tau_fast = float(params["tau_fast"])
-    tau_slow = float(params["tau_slow"])
-    tau_probe = float(params["tau_probe"])
-    amp = float(params["onset_detector_amp"])
-    count_leak = float(params.get("count_leak", 0.0))
-
-    onset = nengo.Ensemble(
-        n_neurons=n_neurons,
-        dimensions=1,
-        radius=1.5,
-        encoders=nengo.dists.Choice([[1]]),
-        intercepts=nengo.dists.Uniform(0.0, 1.0),
-        label=f"onset_{name}",
-        seed=seed,
-    )
-    setattr(net, f"onset_{name}", onset)
-
-    nengo.Connection(
-        net.input_node[input_dim], onset, synapse=tau_fast, seed=seed
-    )
-    nengo.Connection(
-        net.input_node[input_dim],
-        onset,
-        synapse=tau_slow,
-        function=lambda x: -x,
-        seed=seed,
-    )
-
-    count = nengo.Ensemble(
-        n_neurons=n_neurons_counting,
-        dimensions=1,
-        radius=radius_c,
-        label=f"count_{name}",
-        seed=seed,
-    )
-    setattr(net, f"count_{name}", count)
-
-    nengo.Connection(
-        onset,
-        count,
-        synapse=tau_fb,
-        function=lambda x, amp=amp: [amp] if x > 0 else [0.0],
-        seed=seed,
-    )
-    nengo.Connection(count, count, transform=1.0, synapse=tau_fb, seed=seed)
-    if count_leak > 0.0:
-        nengo.Connection(count, count, transform=-count_leak, synapse=tau_fb, seed=seed)
-
-    alpha_node = nengo.Ensemble(
-        1,
-        1,
-        neuron_type=nengo.Direct(),
-        label=f"alpha_{name}_node",
-        seed=seed,
-    )
-    setattr(net, f"alpha_{name}_node", alpha_node)
-
-    nengo.Connection(
-        count.neurons,
-        alpha_node,
-        transform=decoders["W_weight"],
-        synapse=tau_probe,
-        seed=seed,
-    )
-
-    setattr(
-        net,
-        f"probe_count_{name}_neurons",
-        nengo.Probe(count.neurons, synapse=None, sample_every=float(params["dt"])),
-    )
-    setattr(net, f"probe_alpha_{name}", nengo.Probe(alpha_node, synapse=None))
+    return _pretrain_counting(p)
 
 
 def _switch_fn(t: float, x: np.ndarray) -> np.ndarray:
@@ -397,6 +184,91 @@ def _switch_fn(t: float, x: np.ndarray) -> np.ndarray:
 def _error_to_value(x: np.ndarray) -> np.ndarray:
     delta_A, delta_B, alpha_A, alpha_B = x
     return np.array([delta_A * alpha_A, delta_B * alpha_B], dtype=float)
+
+
+def _build_counting_circuit(
+    net: nengo.Network,
+    name: str,
+    input_signal,
+    params: dict,
+    count_seed: int,
+    onset_seed: int,
+    decoders: dict,
+) -> None:
+    """
+    Build one 1D counting circuit into an existing network.
+    Drives onset detector directly from input_signal.
+    Sets net.onset_{name}, net.count_{name}, net.alpha_{name}_node.
+    """
+    n_neurons = int(params["n_neurons"])
+    n_neurons_counting = int(params["n_neurons_counting"])
+    radius_c = float(params["radius_c"])
+    tau_fb = float(params["tau_fb"])
+    tau_fast = float(params["tau_fast"])
+    tau_slow = float(params["tau_slow"])
+    tau_probe = float(params["tau_probe"])
+    amp = float(params["onset_detector_amp"])
+
+    onset = nengo.Ensemble(
+        n_neurons=n_neurons,
+        dimensions=1,
+        radius=1.5,
+        encoders=nengo.dists.Choice([[1]]),
+        intercepts=nengo.dists.Uniform(0.0, 1.0),
+        label=f"onset_{name}",
+        seed=onset_seed,
+    )
+    setattr(net, f"onset_{name}", onset)
+
+    nengo.Connection(
+        input_signal,
+        onset,
+        synapse=tau_fast,
+        function=lambda x: abs(x),
+        seed=onset_seed,
+    )
+    nengo.Connection(
+        input_signal,
+        onset,
+        synapse=tau_slow,
+        function=lambda x: -abs(x),
+        seed=onset_seed,
+    )
+
+    count = nengo.Ensemble(
+        n_neurons=n_neurons_counting,
+        dimensions=1,
+        radius=radius_c,
+        label=f"count_{name}",
+        seed=count_seed,
+    )
+    setattr(net, f"count_{name}", count)
+
+    nengo.Connection(
+        onset,
+        count,
+        synapse=tau_fb,
+        function=lambda x, a=amp: a if x > 0 else 0.0,
+        seed=onset_seed,
+    )
+    nengo.Connection(count, count, transform=1.0, synapse=tau_fb, seed=count_seed)
+
+    alpha_node = nengo.Ensemble(
+        1,
+        1,
+        neuron_type=nengo.Direct(),
+        label=f"alpha_{name}_node",
+        seed=count_seed,
+    )
+    setattr(net, f"alpha_{name}_node", alpha_node)
+
+    nengo.Connection(
+        count.neurons,
+        alpha_node,
+        transform=decoders["W_weight"],
+        synapse=tau_probe,
+        seed=count_seed,
+    )
 
 
 def _build_main_network(
@@ -412,14 +284,28 @@ def _build_main_network(
     tau_probe = float(params["tau_probe"])
     T_error = float(params["T_error"])
     n_neurons = int(params["n_neurons"])
-    n_neurons_counting = int(params["n_neurons_counting"])
-    _validate_1d_decoders(decoders, n_neurons_counting)
 
     with nengo.Network(label=str(params.get("model_type", "NEF2d")), seed=seed) as net:
         net.input_node = nengo.Node(input_fn, size_out=4, label="input_4d")
 
-        _build_1d_counting_circuit(net, "A", 2, params, seed, decoders)
-        _build_1d_counting_circuit(net, "B", 3, params, seed + 1, decoders)
+        _build_counting_circuit(
+            net,
+            "A",
+            net.input_node[2],
+            params,
+            count_seed=seed,
+            onset_seed=seed,
+            decoders=decoders,
+        )
+        _build_counting_circuit(
+            net,
+            "B",
+            net.input_node[3],
+            params,
+            count_seed=seed,
+            onset_seed=seed + 1,
+            decoders=decoders,
+        )
 
         # --- switch: decoded alphas + context indicators → gated alphas ---
         net.switch_in = nengo.Ensemble(
@@ -468,6 +354,7 @@ def _build_main_network(
         # --- error (4D) ---
         net.error = nengo.Ensemble(
             n_neurons=n_neurons,
+            # neuron_type=nengo.Direct(),
             dimensions=4,
             radius=float(params["radius_e"]),
             label="error_4d",
@@ -631,9 +518,8 @@ def run(params: dict, save: bool = False) -> pd.DataFrame:
 
 
 def _params_from_args(args: argparse.Namespace) -> dict:
-    fixed = dict(MODEL_PARAMS["diederen"]["NEF2d"]["fixed"])
     return {
-        **fixed,
+        **PARAM_DEFAULTS,
         "model_type": "NEF2d",
         "dataset": "diederen",
         "pid": int(args.pid),
@@ -641,8 +527,6 @@ def _params_from_args(args: argparse.Namespace) -> dict:
         "lambda_": float(args.lambda_),
         "seed": int(args.seed),
         "run_folder": str(args.run_folder),
-        "radius_c": float(args.radius_c),
-        "count_leak": float(args.count_leak),
     }
 
 
@@ -654,12 +538,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n_seeds", type=int, default=1, help="unused; reserved")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--run_folder", type=str, default="test")
-    p.add_argument("--radius_c", type=float, default=PARAM_DEFAULTS["radius_c"])
-    p.add_argument(
-        "--count_leak",
-        type=float,
-        default=PARAM_DEFAULTS.get("count_leak", 0.0),
-    )
     p.add_argument("--save", action="store_true", default=False)
     return p.parse_args()
 

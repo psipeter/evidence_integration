@@ -31,7 +31,7 @@ _NEF_FIXED: dict[str, object] = {
     "radius_v": 1.0,
     "counting": "integrator",
     "n_neurons": 200,
-    "n_neurons_counting": 1000,
+    "n_neurons_counting": 2000,
     "n_seeds": 1,
     "seed": 0,
     "pes_learning_rate": 1e-4,
@@ -91,11 +91,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF2d": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED,
-            "n_neurons_counting": 2000,
-            "radius_c": 50.0,
-            "onset_detector_amp": 0.5,
-            "count_leak": 0.005},
         },
     },
 }

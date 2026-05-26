@@ -58,7 +58,7 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
-    if dataset == "diederen":
+    if dataset in ("diederen", "diederen_group"):
         # Include catch trials in simulation: reward is shown on catch trials
         # and updates the running estimate. Filter only missed rows.
         human_pid = human_pid[~human_pid["missed"]]
@@ -97,7 +97,7 @@ def _validate_model_dataset(model_type: str, dataset: str) -> None:
         allowed = _CARRABIN_MODELS
     elif dataset == "yoo":
         allowed = _YOO_MODELS
-    elif dataset == "diederen":
+    elif dataset in ("diederen", "diederen_group"):
         allowed = _DIEDEREN_MODELS
     else:
         raise ValueError(
@@ -117,7 +117,7 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_carrabin(params, human_pid, trial, step)
     if dataset == "yoo":
         return _run_yoo(params, human_pid, trial, step)
-    if dataset == "diederen":
+    if dataset in ("diederen", "diederen_group"):
         return _run_diederen(params, human_pid, trial, step)
     raise AssertionError("unreachable")
 
