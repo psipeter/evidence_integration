@@ -10,6 +10,7 @@ Computational and neural modeling of **sequential evidence integration** with a 
 
 - **`carrabin`** — Prat-Carrabin & Woodford-style slider integration; **`qid`** links observations to question identity.
 - **`yoo`** — Yoo et al.-style slider task; rich trial × observation trajectories for update dynamics.
+# Diederen / NEF2d: archived. See archive/misc/cursorrules_diederen.md
 
 **Jiang**, **usher**, and related experiment code are **archived under `archive/`**. Do **not** add dataset branches for them to active modules (`fitting/`, `models/`, `utils/`, `scripts/` outside archive). Do **not** `import` from **`archive/`** in production code paths.
 
@@ -114,7 +115,7 @@ Functions invoked under **`fitting.submit --local`** must print **`JOB_COMPLETE`
 
 ---
 
-## Adding a new dataset (e.g. Diederen)
+## Adding a new dataset
 
 1. Add **`data/<dataset>.pkl`** with columns compatible with **`fitting.fit`** queries (at minimum **`pid`**, **`trial`**, **`observation`**, **`value`**, **`response`**).
 2. Extend **`MODEL_PARAMS[<dataset>]`** in **`fitting/model_params.py`**.

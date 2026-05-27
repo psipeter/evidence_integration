@@ -9,7 +9,7 @@ and collected into a single tabular format with model ``response`` values.
 
 - **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive)
 - **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
-- **diederen:** ``Mean`` (optimal), ``RL`` (naive), ``RL_lambda``, ``PearceHall``
+- diederen models archived in ``archive/misc/math_models_diederen.py``
 
 **Unified interface**
 
@@ -17,7 +17,7 @@ Every model is run via ``run(params, save=False, trials=None)``. Required keys i
 ``params`` for all models:
 
 - ``"model_type"`` (``str``): one of the strings above for the chosen dataset
-- ``"dataset"`` (``str``): ``"carrabin"``, ``"yoo"``, or ``"diederen"``
+- ``"dataset"`` (``str``): ``"carrabin"`` or ``"yoo"``
 - ``"pid"`` (``int``): participant id
 
 Additional keys are model-specific (learning rates, noise scales, etc.). The
@@ -35,9 +35,6 @@ _CARRABIN_MODELS = frozenset(
     {"Bayes", "NoisyCounting", "RL", "RL_lambda"}
 )
 _YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
-_DIEDEREN_MODELS = frozenset(
-    {"Mean", "RL", "RL_lambda", "PearceHall"}
-)
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -58,12 +55,7 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
-    if dataset in ("diederen", "diederen_group"):
-        # Include catch trials in simulation: reward is shown on catch trials
-        # and updates the running estimate. Filter only missed rows.
-        human_pid = human_pid[~human_pid["missed"]]
-    else:
-        human_pid = human_pid[human_pid["response"].notna()]
+    human_pid = human_pid[human_pid["response"].notna()]
 
     rows: list[dict] = []
     pairs = (
@@ -97,11 +89,9 @@ def _validate_model_dataset(model_type: str, dataset: str) -> None:
         allowed = _CARRABIN_MODELS
     elif dataset == "yoo":
         allowed = _YOO_MODELS
-    elif dataset in ("diederen", "diederen_group"):
-        allowed = _DIEDEREN_MODELS
     else:
         raise ValueError(
-            f"Unknown dataset {dataset!r}; expected 'carrabin', 'yoo', or 'diederen'"
+            f"Unknown dataset {dataset!r}; expected 'carrabin' or 'yoo'"
         )
     if model_type not in allowed:
         raise ValueError(
@@ -117,8 +107,6 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_carrabin(params, human_pid, trial, step)
     if dataset == "yoo":
         return _run_yoo(params, human_pid, trial, step)
-    if dataset in ("diederen", "diederen_group"):
-        return _run_diederen(params, human_pid, trial, step)
     raise AssertionError("unreachable")
 
 
@@ -221,49 +209,3 @@ def _run_yoo(
     raise AssertionError("unreachable")
 
 
-def _run_diederen(
-    params: dict,
-    human_pid: pd.DataFrame,
-    trial: int,
-    observation: int,
-) -> float:
-    model_type = params["model_type"]
-    subdata = human_pid.query("trial == @trial & observation <= @observation")
-    values = subdata["value"].to_numpy()
-
-    if model_type == "Mean":
-        if len(values) == 0:
-            return 0.0
-        return float(np.mean(values))
-
-    if model_type == "RL":
-        alpha = float(params["alpha"])
-        expectation = 0.0
-        for value in values:
-            expectation += alpha * (value - expectation)
-            expectation = float(np.clip(expectation, -1.0, 1.0))
-        return expectation
-
-    if model_type == "RL_lambda":
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        expectation = 0.0
-        for n, value in enumerate(values, start=1):
-            alpha = alpha_0 / (n ** lambda_)
-            expectation += alpha * (value - expectation)
-            expectation = float(np.clip(expectation, -1.0, 1.0))
-        return expectation
-
-    if model_type == "PearceHall":
-        alpha_0 = float(params["alpha_0"])
-        eta = float(params["eta"])
-        expectation = 0.0
-        alpha = alpha_0
-        for value in values:
-            delta = value - expectation
-            expectation += alpha * delta
-            expectation = float(np.clip(expectation, -1.0, 1.0))
-            alpha = float(np.clip(eta * abs(delta) + (1.0 - eta) * alpha, 0.0, 2.0))
-        return expectation
-
-    raise AssertionError(f"unreachable model_type={model_type!r}")

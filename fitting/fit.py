@@ -1,8 +1,7 @@
 """
 Participant-level model fitting via Optuna (TPE) and k-fold CV.
 
-Objective: RMSE from ``fitting.losses.compute_loss`` (diederen uses catch-trial
-exclusion and optional first-2-blocks-per-distribution filtering).
+Objective: RMSE from ``fitting.losses.compute_loss``.
 
 Entry point::
 
@@ -24,7 +23,6 @@ import pandas as pd
 import fitting.losses as losses
 import models.math_models as math_models
 from models import NEF
-from models import NEF2d
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path, resolve_run_folder
 from utils.save_responses import save as save_responses
@@ -147,8 +145,6 @@ def fit(
         trial_wall_start = time.time()
         if model_type in ("NEF_recurrent", "NEF_synaptic"):
             model_responses_full = NEF.run(params)
-        elif model_type == "NEF2d":
-            model_responses_full = NEF2d.run(params)
         else:
             model_responses_full = math_models.run(params)
 
@@ -224,10 +220,6 @@ def fit(
 
     if model_type in ("NEF_recurrent", "NEF_synaptic"):
         save_responses(pid, dataset, run_folder, model_type)
-    elif model_type == "NEF2d":
-        best_params_full = {**best_params}
-        df = NEF2d.run(best_params_full)
-        df.to_pickle(run_folder / f"NEF2d_{dataset}_{pid}_responses.pkl")
     else:
         best_params_full = {**best_params}
         best_params_full["seed"] = best_params["seed"]

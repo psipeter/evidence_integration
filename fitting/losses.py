@@ -2,18 +2,11 @@
 Loss computation for model fitting.
 
 compute_loss(params, model, human): RMSE between model and human responses.
-Supports datasets: carrabin, yoo, diederen.
-Diederen: catch trials excluded; optionally restricted to first 2 blocks
-per distribution per session (DIEDEREN_FIRST_BLOCKS_ONLY flag).
+Supports datasets: carrabin, yoo.
 """
 
 import numpy as np
 import pandas as pd
-
-# Diederen: restrict loss to first 2 blocks per distribution per session.
-# Set to False to use all observations.
-DIEDEREN_FIRST_BLOCKS_ONLY: bool = False
-
 
 def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame:
     """
@@ -46,22 +39,10 @@ def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame
 def compute_loss(
     params: dict, model: pd.DataFrame, human: pd.DataFrame
 ) -> float:
-    """RMSE between model and human responses (carrabin, yoo, diederen)."""
+    """RMSE between model and human responses (carrabin, yoo)."""
     dataset = params["dataset"]
-    if dataset not in ("carrabin", "yoo", "diederen"):
-        raise ValueError(
-            "params['dataset'] must be one of 'carrabin', 'yoo', 'diederen'"
-        )
-
-    if dataset == "diederen":
-        human = human[~human["catch_trial"].astype(bool)]
-        if DIEDEREN_FIRST_BLOCKS_ONLY:
-            human = _filter_first_blocks(human)
-            model = model[
-                model.set_index(["pid", "trial", "observation"]).index.isin(
-                    human.set_index(["pid", "trial", "observation"]).index
-                )
-            ]
+    if dataset not in ("carrabin", "yoo"):
+        raise ValueError("params['dataset'] must be one of 'carrabin', 'yoo'")
 
     sq_errors: list[float] = []
     pairs = (

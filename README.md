@@ -22,19 +22,8 @@ where \(t\) is observation index within a trial. Participants vary in how much w
 
 Behavioral pickles live under `data/` (e.g. `carrabin.pkl`, `yoo.pkl`, `diederen.pkl`). Columns always include at least `pid`, `trial`, `observation`, `value`, and `response`; **carrabin** additionally uses `qid`.
 
-**Diederen data:** built from raw MATLAB files with:
-
-```bash
-python scripts/build_diederen.py --data_dir data/Diederen
-```
-
-Groups: **CTRL** (n=28), **PCB** / **SUL** / **BRO** (n=19 each).
-
-**Diederen exclusion criterion:** 15 participants are excluded whose
-prediction RMSE vs the true EV was ≥ their RMSE vs 0 (the optimal
-no-information baseline), indicating responses dominated by noise
-rather than task learning. Excluded PIDs are listed in
-`EXCLUDE_PIDS` in `scripts/figure_diederen.py`.
+## Diederen dataset
+Archived. See archive/misc/README_diederen.md.
 
 ---
 
@@ -58,19 +47,12 @@ rather than task learning. Excluded PIDs are listed in
 | **diederen** | RL | Delta rule | `alpha` |
 | **diederen** | RL_lambda | Delta rule with power-law \(\alpha(t)\) | `alpha_0`, `lambda_` |
 | **diederen** | PearceHall | Surprise-driven adaptive \(\alpha\) (Pearce & Hall 1980; Diederen & Schultz 2015) | `alpha_0`, `eta` |
-| **diederen** | NEF2d | Spiking NEF with 2-distribution counting circuit | `alpha_0`, `lambda_` |
 
 **NEF (recurrent / synaptic):** A recurrent spiking network implements a running estimate (**value** ensemble), prediction-error-driven updates (**error** ensemble), and observation counting so effective learning rate tracks \(\alpha(t)\) (**counting** subnetwork—integrator or LMU). Per-participant **`alpha_0`** and **`lambda_`** are fit with Optuna; architecture and timing live in **`_NEF_FIXED`** / **`PARAM_DEFAULTS`** (see `fitting/model_params.py` and `models/NEF.py`).
 
 **PearceHall (diederen):** \(\alpha(t+1) = \eta \cdot |\delta(t)| + (1 - \eta) \cdot \alpha(t)\), with \(\alpha\) clipped to \([0, 2]\). **`eta=0`** recovers fixed-alpha RL.
 
-**NEF2d (diederen):** Two independent 1D counting integrators (one per
-distribution), each with an onset detector driven by context indicators.
-A leaky recurrent connection (`count_leak`) causes counts to decay toward
-zero during absence, producing elevated learning rates on return — modelling
-the carryover bias observed after context switches. Architecture parameters
-live in `MODEL_PARAMS["diederen"]["NEF2d"]["fixed"]`; `alpha_0` and
-`lambda_` are fitted per participant.
+**Diederen / NEF2d:** archived (see `archive/misc/README_diederen.md`).
 
 **Diederen catch trials:** catch trials are included in the value sequence for simulation (reward is shown) but **excluded from RMSE loss**. Only **`missed`** rows are excluded from simulation.
 
@@ -92,7 +74,6 @@ evidence_integration/
   models/
     math_models.py         # mathematical models (carrabin, yoo, diederen)
     NEF.py                 # NEF recurrent & synaptic spiking models
-    NEF2d.py               # 2-distribution NEF spiking model (diederen)
     counting_integrator.py
     counting_lmu.py
   fitting/
@@ -113,7 +94,6 @@ evidence_integration/
     figure_carrabin.py     # carrabin figure (2×4, panels A–H)
     figure_yoo.py          # yoo figure (2×4, panels A–H)
     figure_diederen.py     # diederen figure (2×4, panels A–F visible)
-    test_nef2d_counting.py # diagnostic test for NEF2d counting circuit
     extras_carrabin.py     # NEF probe data for figure_carrabin bottom panels
     extras_yoo.py          # NEF response-noise simulations for figure_yoo panel H
     build_diederen.py      # build data/diederen.pkl from raw MATLAB files
@@ -158,7 +138,6 @@ Prefer a **short folder name** (e.g. `refit`, `diederen_short`, `nef200`). **`RU
 ```bash
 python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef200
 python -m fitting.submit yoo NEF_recurrent --n_trials 200 --run_folder nef200
-python -m fitting.submit diederen NEF2d --n_trials 200 --run_folder diederen_short
 ```
 
 ### Local single-participant example
@@ -242,7 +221,6 @@ python -m fitting.submit diederen Mean       --n_trials 200 --run_folder diedere
 python -m fitting.submit diederen RL         --n_trials 500 --run_folder diederen_short
 python -m fitting.submit diederen RL_lambda  --n_trials 500 --run_folder diederen_short
 python -m fitting.submit diederen PearceHall --n_trials 500 --run_folder diederen_short
-python -m fitting.submit diederen NEF2d      --n_trials 200 --run_folder diederen_short
 ```
 
 Collect and copy:

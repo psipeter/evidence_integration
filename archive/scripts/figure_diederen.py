@@ -6,7 +6,8 @@ Panel B: model RMSE boxplot (requires model fits in --run_folder)
 Panel C: mean |Δresponse| vs observation (filter via PANEL_C_FILTER; human + models)
 Panel D: forward carryover bias A→B (Human + NEF2d)
 Panel E: response change around first A→B switch (Human + NEF2d)
-Columns 1–3 on row 2: hidden
+Panel F: NEF2d value_A / value_B timeseries in first A block (probe data)
+Columns 2–3 on row 2: hidden
 """
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy.stats import wilcoxon
+
+import logging
+logging.getLogger("nengo").setLevel(logging.ERROR)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -74,6 +78,9 @@ PANEL_C_FILTER: dict[str, bool] = {
     "pre_first_return": False,  # first block of A and first block of B per session
     "pre_switch": False,  # distribution A only, pre-first-switch
 }
+
+MAX_OBS_PANEL_F = 5
+PROBE_FOLDER = "refit"
 
 
 def _display(model_type: str) -> str:
@@ -702,6 +709,172 @@ def _plot_panel_e(
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _load_panel_f_data(
+    run_folder: str,
+    show_b_obs1: bool = False,
+) -> pd.DataFrame | None:
+    """
+    Load probe data and return long-format timeseries for panel F.
+
+    For each (pid, session), extract the continuous value_A and value_B
+    timeseries spanning the first MAX_OBS_PANEL_F observations of the
+    first A block. Time is re-zeroed to the start of the first A
+    observation (t=0 at start of obs=1 of A block).
+
+    Returns long-format DataFrame with columns:
+      [pid, session, t_rel, value_A, value_B, ev_A_sign, in_B]
+    where t_rel is time relative to start of first A observation.
+    """
+    probe_path = data_path("runs") / run_folder / "probe_pids_diederen.pkl"
+    if not probe_path.exists():
+        return None
+
+    probes = pd.read_pickle(probe_path)
+    human = pd.read_pickle(data_path("diederen.pkl"))
+
+    records = []
+    for sess_data in probes:
+        pid = int(sess_data["pid"])
+        session = int(sess_data["session"])
+        params = sess_data["params"]
+        t = np.asarray(sess_data["t"])
+        value = np.asarray(sess_data["value"])
+        distrib_a = int(sess_data["distrib_a"])
+
+        t_obs = float(params["t_obs"])
+        t_iti = float(params["t_iti"])
+        t_step = t_obs + t_iti
+
+        h_sess = human[
+            (human["pid"] == pid)
+            & (human["session"] == session)
+            & ~human["missed"]
+        ]
+        ev_A_rows = h_sess[h_sess["distrib_index"] == distrib_a]["ev"]
+        if ev_A_rows.empty:
+            continue
+        ev_A = float(ev_A_rows.iloc[0])
+        ev_sign = "EV_A > 0" if ev_A > 0 else "EV_A < 0"
+
+        h_sorted = h_sess.sort_values("trial_in_session").reset_index(drop=True)
+        a_tis = []
+        for _, row in h_sorted.iterrows():
+            if int(row["distrib_index"]) == distrib_a:
+                a_tis.append(int(row["trial_in_session"]))
+            else:
+                break
+        a_tis = a_tis[:MAX_OBS_PANEL_F]
+        if not a_tis:
+            continue
+
+        t_start_A = t_iti + (a_tis[0] - 1) * t_step
+        t_end_A = t_iti + (a_tis[-1] - 1) * t_step + t_obs
+
+        mask_A = (t >= t_start_A) & (t <= t_end_A)
+        t_window = t[mask_A] - t_start_A
+        v_A_win = value[mask_A, 0]
+        v_B_win = value[mask_A, 1]
+        in_B_flags = np.zeros(len(t_window), dtype=bool)
+
+        if show_b_obs1:
+            b_tis_rows = h_sorted[h_sorted["distrib_index"] != distrib_a][
+                "trial_in_session"
+            ]
+            if not b_tis_rows.empty:
+                b_tis_1 = int(b_tis_rows.iloc[0])
+                t_start_B = t_iti + (b_tis_1 - 1) * t_step
+                t_end_B = t_start_B + t_obs
+                mask_B = (t >= t_start_B) & (t <= t_end_B)
+
+                t_A_end_normalized = t_window[-1] if len(t_window) > 0 else 0.0
+                dt_sample = float(t[1] - t[0]) if len(t) > 1 else 0.01
+                t_B_window = t[mask_B] - t_start_B + t_A_end_normalized + dt_sample
+
+                t_window = np.concatenate([t_window, t_B_window])
+                v_A_win = np.concatenate([v_A_win, value[mask_B, 0]])
+                v_B_win = np.concatenate([v_B_win, value[mask_B, 1]])
+                in_B_flags = np.concatenate(
+                    [in_B_flags, np.ones(np.count_nonzero(mask_B), dtype=bool)]
+                )
+
+        for ti, va, vb, in_b in zip(t_window, v_A_win, v_B_win, in_B_flags):
+            records.append(
+                {
+                    "pid": pid,
+                    "session": session,
+                    "t_rel": float(ti),
+                    "value_A": float(va),
+                    "value_B": float(vb),
+                    "ev_A_sign": ev_sign,
+                    "in_B": bool(in_b),
+                }
+            )
+
+    if not records:
+        return None
+    out = pd.DataFrame(records)
+    if probes:
+        p0 = probes[0]["params"]
+        out.attrs["t_obs"] = float(p0["t_obs"])
+        out.attrs["t_iti"] = float(p0["t_iti"])
+    return out
+
+
+def _plot_panel_f(ax, run_folder: str, show_b_obs1: bool = False) -> None:
+    """
+    Panel F: NEF2d value_A and value_B continuous timeseries during
+    the first MAX_OBS_PANEL_F observations of the first A block.
+    Split by EV_A sign (solid = EV_A > 0, dashed = EV_A < 0).
+    Mean ± 95% CI across pids/sessions via seaborn lineplot.
+    """
+    df = _load_panel_f_data(run_folder, show_b_obs1=show_b_obs1)
+    if df is None or df.empty:
+        _placeholder(ax, "probe_pids_diederen.pkl\nnot found")
+        return
+
+    pal = get_palette()
+    color_A = pal[0]
+    color_B = pal[1]
+
+    for ev_sign, ls in [("EV_A > 0", "-"), ("EV_A < 0", "--")]:
+        sub = df[df["ev_A_sign"] == ev_sign]
+        if sub.empty:
+            continue
+        sns.lineplot(
+            data=sub,
+            x="t_rel",
+            y="value_A",
+            color=color_A,
+            linestyle=ls,
+            linewidth=1.8,
+            errorbar=("ci", 95),
+            label=f"Value_A ({ev_sign})",
+            ax=ax,
+        )
+        sns.lineplot(
+            data=sub,
+            x="t_rel",
+            y="value_B",
+            color=color_B,
+            linestyle=ls,
+            linewidth=1.8,
+            errorbar=("ci", 95),
+            label=f"Value_B ({ev_sign})",
+            ax=ax,
+        )
+
+    ax.axhline(0, color="0.7", linewidth=0.6, linestyle=":")
+    if show_b_obs1 and "in_B" in df.columns:
+        b_rows = df[df["in_B"]]
+        if not b_rows.empty:
+            t_switch = float(b_rows["t_rel"].min())
+            ax.axvline(x=t_switch, color="0.5", linewidth=1.0, linestyle="--", zorder=1)
+    ax.set_xlabel("Time (s) from first A observation")
+    ax.set_ylabel("Decoded value")
+    ax.legend(frameon=False, fontsize=6, ncol=2)
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Behavioral decay figure for Diederen dataset."
@@ -718,6 +891,12 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Include RL_lambda in panel B (excluded by default).",
+    )
+    parser.add_argument(
+        "--show_b_obs1",
+        action="store_true",
+        default=False,
+        help="Extend panel F to include first B observation after A block.",
     )
     args = parser.parse_args()
 
@@ -770,7 +949,8 @@ def main() -> None:
     )
     _plot_panel_d(axes[0, 3], valid_all, args.run_folder, palette)
     _plot_panel_e(axes[1, 0], valid_all, args.run_folder, palette)
-    for col in range(1, 4):
+    _plot_panel_f(axes[1, 1], args.run_folder, show_b_obs1=args.show_b_obs1)
+    for col in range(2, 4):
         axes[1, col].set_visible(False)
 
     label_panels(
@@ -780,6 +960,7 @@ def main() -> None:
             axes[0, 2],
             axes[0, 3],
             axes[1, 0],
+            axes[1, 1],
         ]
     )
 

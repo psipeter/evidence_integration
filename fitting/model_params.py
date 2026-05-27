@@ -76,21 +76,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NEF_recurrent": {**_NEF_RANGES, "fixed": _NEF_FIXED},
         "NEF_synaptic": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },
-    "diederen": {
-        "Mean": {},
-        "RL": {
-            "alpha": (0.01, 1.0, 0.001),
-        },
-        "RL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-        },
-        "PearceHall": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "eta": (0.0, 1.0, 0.001),
-        },
-        "NEF2d": {
-            **_NEF_RANGES,
-        },
-    },
 }
+
+# diederen model params archived in archive/misc/

@@ -1,7 +1,7 @@
 """
 Submit, resubmit, or locally run model fitting jobs.
 
-Jobs are enumerated from ``MODEL_PARAMS`` (datasets: carrabin, yoo, diederen); NEF models
+Jobs are enumerated from ``MODEL_PARAMS`` (datasets: carrabin, yoo); NEF models
 use the same SLURM templates as other datasets.
 """
 
