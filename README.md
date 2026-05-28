@@ -1,60 +1,89 @@
-# Evidence integration
+# Evidence Integration
 
-## Research overview
+## Scientific overview
 
-This project studies **individual differences in how people integrate sequential noisy evidence**. Updates follow a **power-law learning rate**:
+This project studies **individual differences in how people integrate sequential
+noisy evidence**, using a combination of mathematical cognitive models and a
+biophysical spiking neural network to identify the computational and neural
+mechanisms underlying that process.
 
-\[
-\alpha(t) = \alpha_0 \,/\, t^{\lambda}
-\]
+The central scientific argument proceeds in four steps:
 
-where \(t\) is observation index within a trial. Participants vary in how much weight they put on early versus recent observations (**primacy vs. recency**). The codebase combines **mathematical cognitive models** with a **biophysical spiking network** built in **Nengo** using the **Neural Engineering Framework (NEF)** ([Eliasmith & Anderson, 2003](https://mitpress.mit.edu/9780262250430/neural-engineering/)) so fitted mechanisms can be expressed both as equations and as recurrent spiking dynamics.
+1. **Realistic comparative benchmarking.** The NEF model is evaluated against
+   a full spectrum — optimal baselines, simple RL, task-specific cognitive
+   models, and (for the new task) a black-box RNN/LLM ceiling. The NEF is not
+   expected to win on trial-wise RMSE, but must be competitive with cognitive
+   models and consistently better than simple baselines.
+
+2. **Cross-task generalisability.** The same NEF architecture is applied to
+   multiple tasks (carrabin, yoo, new task). If it achieves reasonable
+   performance across tasks where task-specific models cannot generalise, this
+   supports the claim that the NEF captures a *general* cognitive strategy
+   rather than a task-specific fit.
+
+3. **Breadth of predictions.** Beyond RMSE, the NEF must capture secondary
+   behavioural signatures it was not trained to reproduce — power-law update
+   decay, response noise, individual differences in λ — and generate neural
+   predictions (ensemble activity, spiking noise) that can be compared to data.
+
+4. **Novel testable predictions.** The NEF generates predictions about how
+   response noise scales with learning rate, how neural populations correspond
+   to anatomical areas, and how λ correlates across task conditions — all
+   testable in future experiments.
+
+### Central model: power-law learning rate
+
+    α(t) = α₀ / t^λ
+
+`t` is observation index within a trial. High λ → primacy bias; low λ →
+recency bias. This is a free individual-difference parameter. In the NEF it
+emerges from a counting subnetwork modulating the error ensemble rather than
+being hardcoded — making α(t) an emergent property of the spiking dynamics.
 
 ---
 
 ## Tasks
 
-| Name | Reference | N | Response structure | Key behavioral measure |
-|------|-----------|---|--------------------|-------------------------|
-| **carrabin** | Prat-Carrabin & Woodford (2024) | 21 | Continuous slider after each observation | Per-question (**qid**) response variability |
-| **yoo** | Yoo et al. (2025) | 38 | Continuous slider after each observation (30 obs/trial × 30 trials/participant) | Power-law decay of update magnitude across observations |
-| **diederen** | Diederen & Schultz (2015, 2017) | 85 | Continuous slider after each observation (interleaved distributions, 6 trials/participant) | Learning-rate decay across observations; context-switch carryover bias |
+| Name | Reference | N | Response structure | Key measure |
+|------|-----------|---|--------------------|-------------|
+| **carrabin** | Prat-Carrabin & Woodford (2024) | 21 | Slider after each obs; sequences repeat (qid) | Per-qid response variability (noise) |
+| **yoo** | Yoo et al. (2025) | 38 | Slider after each obs (30 obs × 30 trials) | Power-law decay of update magnitude |
+| **new task** | (planned) | 60–80 | Slider; binary + Gaussian conditions | Cross-task λ correlation; λ reliability |
 
-Behavioral pickles live under `data/` (e.g. `carrabin.pkl`, `yoo.pkl`, `diederen.pkl`). Columns always include at least `pid`, `trial`, `observation`, `value`, and `response`; **carrabin** additionally uses `qid`.
+Behavioral pickles: `data/carrabin.pkl`, `data/yoo.pkl`.
+Columns: `pid`, `trial`, `observation`, `value`, `response`; carrabin adds `qid`.
 
-## Diederen dataset
-Archived. See archive/misc/README_diederen.md.
+**Archived** (diederen, jiang, usher): see `archive/`. Diederen was archived
+due to insufficient trials per participant (only ~6) and context-switch
+carryover contaminating the learning rate signal. Usher/jiang were archived
+because responses were only collected at trial end, providing no within-trial
+learning trajectory.
 
 ---
 
 ## Models
 
-| Dataset | Model | Role | Free parameters |
-|---------|--------|------|-----------------|
-| **carrabin** | Bayes | Optimal Bayesian integration | *(none)* |
-| **carrabin** | NoisyCounting | Human-matching process model (Prat-Carrabin & Woodford 2024) | `mu`, `sigma_c`, `nu` |
-| **carrabin** | RL | Rescorla–Wagner / delta rule | `alpha` |
-| **carrabin** | RL_lambda | Delta rule with power-law \(\alpha(t)\) | `alpha_0`, `lambda_` |
-| **carrabin** | NEF_recurrent | Spiking NEF evidence integrator | `alpha_0`, `lambda_` |
-| **carrabin** | NEF_synaptic | Spiking NEF (synaptic-learning variant) | `alpha_0`, `lambda_` |
-| **yoo** | Mean | Optimal running mean | *(none)* |
-| **yoo** | RL | Delta rule | `alpha` |
-| **yoo** | RL_lambda | Delta rule with power-law \(\alpha(t)\) | `alpha_0`, `lambda_` |
-| **yoo** | ADM | Adaptive decision-making (Yoo et al. 2025) | `phi`, `rho` |
-| **yoo** | NEF_recurrent | Spiking NEF evidence integrator | `alpha_0`, `lambda_` |
-| **yoo** | NEF_synaptic | Spiking NEF (synaptic-learning variant) | `alpha_0`, `lambda_` |
-| **diederen** | Mean | Optimal running mean (flat prior) | *(none)* |
-| **diederen** | RL | Delta rule | `alpha` |
-| **diederen** | RL_lambda | Delta rule with power-law \(\alpha(t)\) | `alpha_0`, `lambda_` |
-| **diederen** | PearceHall | Surprise-driven adaptive \(\alpha\) (Pearce & Hall 1980; Diederen & Schultz 2015) | `alpha_0`, `eta` |
+| Dataset | Model | Role | Free params |
+|---------|-------|------|-------------|
+| carrabin | Bayes | Optimal Bayesian | — |
+| carrabin | NoisyCounting | Task-specific (Prat-Carrabin) | `mu`, `sigma_c`, `nu` |
+| carrabin | RL | Simple baseline | `alpha` |
+| carrabin | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
+| carrabin | NEF_recurrent | Spiking NEF integrator | `alpha_0`, `lambda_` |
+| carrabin | NEF_synaptic | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
+| yoo | Mean | Optimal running mean | — |
+| yoo | RL | Simple baseline | `alpha` |
+| yoo | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
+| yoo | ADM | Task-specific (Yoo et al.) | `phi`, `rho` |
+| yoo | NEF_recurrent | Spiking NEF integrator | `alpha_0`, `lambda_` |
+| yoo | NEF_synaptic | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
 
-**NEF (recurrent / synaptic):** A recurrent spiking network implements a running estimate (**value** ensemble), prediction-error-driven updates (**error** ensemble), and observation counting so effective learning rate tracks \(\alpha(t)\) (**counting** subnetwork—integrator or LMU). Per-participant **`alpha_0`** and **`lambda_`** are fit with Optuna; architecture and timing live in **`_NEF_FIXED`** / **`PARAM_DEFAULTS`** (see `fitting/model_params.py` and `models/NEF.py`).
-
-**PearceHall (diederen):** \(\alpha(t+1) = \eta \cdot |\delta(t)| + (1 - \eta) \cdot \alpha(t)\), with \(\alpha\) clipped to \([0, 2]\). **`eta=0`** recovers fixed-alpha RL.
-
-**Diederen / NEF2d:** archived (see `archive/misc/README_diederen.md`).
-
-**Diederen catch trials:** catch trials are included in the value sequence for simulation (reward is shown) but **excluded from RMSE loss**. Only **`missed`** rows are excluded from simulation.
+**NEF architecture:** A recurrent spiking network implements a running
+estimate (**value** ensemble), prediction-error-driven updates (**error**
+ensemble), and observation counting so the effective learning rate tracks
+α(t) (**counting** subnetwork — integrator or LMU). Per-participant `alpha_0`
+and `lambda_` are fit with Optuna; architecture and timing live in `_NEF_FIXED`
+/ `PARAM_DEFAULTS` in `fitting/model_params.py` and `models/NEF.py`.
 
 ---
 
@@ -63,75 +92,75 @@ Archived. See archive/misc/README_diederen.md.
 ```
 evidence_integration/
   data/
-    carrabin.pkl           # behavioral data
-    yoo.pkl                # behavioral data
-    diederen.pkl           # behavioral data (built by build_diederen.py)
-    runs/                  # fit outputs (gitignored / not version-controlled)
-      refit/               # primary run folder for all final fits
-      diederen_short/      # diederen fits (2+2 block filter); copied to refit after collection
-      nef200/              # NEF fits (200 Optuna trials); copied to refit after collection
-  archive/                 # archived code & data — see archive/archive_readme.md
+    carrabin.pkl
+    yoo.pkl
+    runs/                    # fit outputs (gitignored)
+      refit/                 # primary run folder for all final fits
+      nef200/                # NEF fits; copy to refit after collecting
+  archive/                   # do not import from here
   models/
-    math_models.py         # mathematical models (carrabin, yoo, diederen)
-    NEF.py                 # NEF recurrent & synaptic spiking models
+    math_models.py           # mathematical models (carrabin, yoo)
+    NEF.py                   # NEF recurrent & synaptic spiking models
     counting_integrator.py
     counting_lmu.py
   fitting/
-    losses.py              # RMSE loss + figure/diagnostic helpers
-    fit.py                 # Optuna + k-fold CV
-    model_params.py        # MODEL_PARAMS, _NEF_FIXED
-    submit.py              # SLURM submission, resubmit, local runs
-    collect.py             # aggregate per-participant pickles
+    losses.py                # RMSE loss
+    fit.py                   # Optuna + k-fold CV
+    model_params.py          # MODEL_PARAMS, _NEF_FIXED, _NEF_RANGES
+    submit.py                # SLURM submission and --local runner
+    collect.py               # aggregate per-participant pickles
   utils/
-    paths.py               # PROJECT_ROOT, DATA_DIR, RUNS_DIR, resolve_run_folder, …
-    plot_style.py          # matplotlib/seaborn defaults, palettes
-    slurm.py               # job scripts, default time/mem tables
-    run_params.py          # load_run_params, trial_seed
-    save_responses.py      # regenerate NEF responses from best params
-    plot_spikes.py         # spike raster helpers (used where needed)
-    save_activities.py     # per-neuron activities & encoders (NEF)
-  scripts/
-    figure_carrabin.py     # carrabin figure (2×4, panels A–H)
-    figure_yoo.py          # yoo figure (2×4, panels A–H)
-    figure_diederen.py     # diederen figure (2×4, panels A–F visible)
-    extras_carrabin.py     # NEF probe data for figure_carrabin bottom panels
-    extras_yoo.py          # NEF response-noise simulations for figure_yoo panel H
-    build_diederen.py      # build data/diederen.pkl from raw MATLAB files
-    dynamics_NEF.py        # single-trial NEF dynamics figure
-    iti_perturbation.py    # ITI noise injection experiments
-    check_jobs.py          # SLURM job cleanup / status helper
-    counting_accuracy.py   # auxiliary counting diagnostics
+    paths.py
+    plot_style.py
+    slurm.py
+    run_params.py
+    save_responses.py
+    save_activities.py
+    plot_spikes.py
+  scripts/                   # ALL analysis and figure scripts
+    figure_carrabin.py       # 2×4 main figure
+    figure_yoo.py            # 2×4 main figure
+    extras_carrabin.py       # NEF probe data for figure_carrabin bottom panels
+    extras_yoo.py            # NEF response-noise simulations
+    dynamics_NEF.py          # single-trial NEF dynamics
+    iti_perturbation.py      # ITI noise injection experiments
+    noise_reliability.py     # response noise estimation reliability (carrabin)
+    noise_metric_comparison.py  # model-residual vs qid noise correlation
+    trial_obs_reliability_figure.py  # λ reliability vs trials/obs (yoo)
+    check_jobs.py
+    counting_accuracy.py
   jobs/
-    submit_probe_pids.sh       # submit extras_carrabin probe_pids experiment
-    submit_neurons_scan.sh     # submit extras_carrabin n_neurons_scan experiment
-    submit_yoo_noise.sh        # submit extras_yoo response-noise simulations
+    submit_probe_pids.sh
+    submit_neurons_scan.sh
+    submit_yoo_noise.sh
 ```
 
 ---
 
 ## Fitting pipeline
 
-Typical loop: **submit jobs → each job runs `fitting.fit` → collect aggregates → figures**.
+```
+submit jobs → fit.py (Optuna k-fold CV) → collect → figures
+```
 
-1. **`fitting.submit`** enumerates `(dataset, model_type, pid)` from **`MODEL_PARAMS`** (optionally filtered), writes **`run_config.json`** under `data/runs/<run_folder>/`, and either submits SLURM scripts or runs **`fitting.fit`** locally (`--local`).
-2. **`fitting.fit`** runs Optuna with **k-fold cross-validation**. The objective is **RMSE** between model and human responses (`fitting.losses.compute_loss`). Math models are re-simulated per trial; **NEF** runs one full simulation per Optuna trial and CV is evaluated on cached responses.
+1. **`fitting.submit`** enumerates `(dataset, model_type, pid)` from
+   `MODEL_PARAMS`, writes `run_config.json`, and submits SLURM scripts or
+   runs locally with `--local`.
 
-   **Diederen:** fitting is restricted to the first 2 consecutive blocks per
-   distribution per session (`DIEDEREN_FIRST_BLOCKS_ONLY = True` in
-   `fitting/losses.py`). Responses are still generated for the full trial
-   after fitting. Set the flag to `False` to use all observations.
+2. **`fitting.fit`** runs Optuna TPE with k-fold cross-validation. Objective
+   is RMSE between model and human responses. NEF runs one full simulation per
+   Optuna trial; CV is evaluated on cached responses.
 
-3. **`fitting.collect`** reads **`run_config.json`** and concatenates per-participant **`_params.pkl`**, **`_performance.pkl`**, **`_folds.pkl`**, **`_responses.pkl`**, or activity files into run-level aggregates.
-4. **Figure scripts** read from `data/runs/<run_folder>/` (and optional side folders such as **`yoo_response_noise/`** for yoo panel H).
+3. **`fitting.collect`** concatenates per-participant pickles into run-level
+   aggregates.
+
+4. **Figure scripts** read from `data/runs/<run_folder>/`.
 
 ### Run folder conventions
 
-- **`refit`**: primary run folder for all final math model and NEF fits. Carrabin and yoo figure scripts default to **`--run_folder refit`**.
-- **`diederen_short`**: diederen fits using the 2+2 block filter. After
-  collection, copy combined pickles to **`refit/`**.
-- **`nef200`**: intermediate folder for NEF fits run with **200** Optuna trials. After collection, copy combined NEF pickles from **`nef200/`** to **`refit/`** (see regeneration guide below).
-
-Prefer a **short folder name** (e.g. `refit`, `diederen_short`, `nef200`). **`RUNS_DIR / run_folder`** is `data/runs/<name>`. The codebase also normalizes mistaken relative paths such as `data/runs/foo` via **`utils.paths.resolve_run_folder`**—short names remain the clearest convention.
+- **`refit`**: primary folder for all final math model and NEF fits.
+- **`nef200`**: intermediate folder for NEF fits (200 Optuna trials). Copy to
+  `refit/` after collecting.
 
 ### Commands (cluster)
 
@@ -140,10 +169,17 @@ python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef2
 python -m fitting.submit yoo NEF_recurrent --n_trials 200 --run_folder nef200
 ```
 
-### Local single-participant example
+### Local single-participant
 
 ```bash
 python -m fitting.submit carrabin RL_lambda --n_trials 500 --run_folder refit --pid 1 --local
+```
+
+### Direct fit.py entrypoint
+
+```bash
+python -m fitting.fit <dataset> <model_type> <pid> <n_trials> <k> <run_folder> [seed]
+python -m fitting.fit carrabin RL_lambda 1 500 5 refit 42
 ```
 
 ### Collect
@@ -153,7 +189,7 @@ python -m fitting.collect refit --type params
 python -m fitting.collect refit --type responses
 ```
 
-### Resubmit missing artifacts
+### Resubmit missing
 
 ```bash
 python -m fitting.submit --resubmit params --run_folder refit
@@ -161,233 +197,68 @@ python -m fitting.submit --resubmit responses --run_folder refit
 python -m fitting.submit --resubmit activities --run_folder refit --ensembles error
 ```
 
-### Direct `fitting.fit` entrypoint (positional arguments)
+---
 
-There is **no** `--n_trials` flag on the module CLI. Order:
+## Planned new task
 
-```bash
-python -m fitting.fit <dataset> <model_type> <pid> <n_trials> <k> <run_folder> [optuna_seed]
-```
+**Platform:** jsPsych + MindProbe + Prolific
+**Design:** binary (Bernoulli) + continuous (Gaussian) conditions, within-subject,
+counterbalanced order. ~30 trials × 15 observations × 4s ≈ 30 min per condition,
+targeting ~60 min total session.
 
-Examples:
+**Scientific goals:**
+- Cross-task λ correlation (primary): show λ is a stable trait across input modalities
+- λ reliability: bootstrap on yoo confirms 30 trials × 15 obs → Spearman r ≈ 0.94
+- Response noise: binary condition supports natural prefix collision analysis
+- RNN/LLM benchmarking: 60–80 participants × 30 trials enables group-level fits
 
-```bash
-python -m fitting.fit carrabin RL_lambda 1 500 5 refit 42
-python -m fitting.fit yoo NEF_recurrent 14 200 5 refit 42
-python -m fitting.fit diederen PearceHall 1 500 5 refit 42
-```
-
-If you pass **only five** tokens after the script (`dataset`, `model_type`, `pid`, `n_trials`, `run_folder`), **`k`** defaults to **5**. Passing **`k`** explicitly requires **seven** argv tokens total including the script name (`… pid n_trials k run_folder`).
-
-### Local SLURM helpers
-
-Anything run with **`--local`** must print **`JOB_COMPLETE`** as its **last** line so **`scripts/check_jobs.py`** can detect completion.
+**Why this design:**
+- 15 obs/trial: captures full visible decay without short-window λ bias
+  (power-law fit quality flattens after obs 10–12; bias drops sharply at 12+)
+- 30 trials: reliability r ≈ 0.94 vs ground truth; additional trials give
+  diminishing returns
+- Binary + continuous within-subject: tests whether λ is a stable individual
+  trait independent of input type, directly extending carrabin to a new population
+  and extending the cross-task generalisability argument
 
 ---
 
-## Complete figure data regeneration
+## Analysis scripts
 
-Commands to regenerate all data required by the three figures, in order.
-Run each block after the previous one completes. All commands assume the
-working directory is the project root.
-
----
-
-### 1. Build diederen dataset (if not already built)
+Key analysis scripts in `scripts/`:
 
 ```bash
-python scripts/build_diederen.py --data_dir data/Diederen
-```
+# λ reliability scan (yoo data)
+venv/bin/python scripts/trial_obs_reliability_figure.py
 
----
+# Response noise reliability analysis (carrabin data)
+venv/bin/python scripts/noise_reliability.py
 
-### 2. Fit math models (all datasets)
+# Model-residual vs qid noise comparison (carrabin)
+venv/bin/python scripts/noise_metric_comparison.py
 
-```bash
-# carrabin
-python -m fitting.submit carrabin Bayes         --n_trials 200 --run_folder refit
-python -m fitting.submit carrabin RL            --n_trials 500 --run_folder refit
-python -m fitting.submit carrabin RL_lambda     --n_trials 500 --run_folder refit
-python -m fitting.submit carrabin NoisyCounting --n_trials 500 --run_folder refit
-
-# yoo
-python -m fitting.submit yoo Mean       --n_trials 200 --run_folder refit
-python -m fitting.submit yoo RL         --n_trials 500 --run_folder refit
-python -m fitting.submit yoo RL_lambda  --n_trials 500 --run_folder refit
-python -m fitting.submit yoo ADM        --n_trials 500 --run_folder refit
-
-# diederen (2+2 block filter active in losses.py)
-python -m fitting.submit diederen Mean       --n_trials 200 --run_folder diederen_short
-python -m fitting.submit diederen RL         --n_trials 500 --run_folder diederen_short
-python -m fitting.submit diederen RL_lambda  --n_trials 500 --run_folder diederen_short
-python -m fitting.submit diederen PearceHall --n_trials 500 --run_folder diederen_short
-```
-
-Collect and copy:
-
-```bash
-python -m fitting.collect diederen_short --type params
-python -m fitting.collect diederen_short --type responses
-cp data/runs/diederen_short/*_diederen_*.pkl data/runs/refit/
-```
-
-Collect carrabin and yoo after all jobs complete:
-
-```bash
-python -m fitting.collect refit --type params
-python -m fitting.collect refit --type responses
-```
-
----
-
-### 3. Fit NEF models
-
-NEF fits are saved to **`nef200/`** (200 Optuna trials) then copied to **`refit/`**.
-
-```bash
-# Submit NEF fits to nef200/
-python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef200
-python -m fitting.submit carrabin NEF_synaptic  --n_trials 200 --run_folder nef200
-python -m fitting.submit yoo      NEF_recurrent --n_trials 200 --run_folder nef200
-python -m fitting.submit yoo      NEF_synaptic  --n_trials 200 --run_folder nef200
-```
-
-Collect from **nef200**, then copy to **refit**:
-
-```bash
-python -m fitting.collect nef200 --type params
-python -m fitting.collect nef200 --type responses
-
-cp data/runs/nef200/NEF_recurrent_carrabin_*.pkl data/runs/refit/
-cp data/runs/nef200/NEF_synaptic_carrabin_*.pkl  data/runs/refit/
-cp data/runs/nef200/NEF_recurrent_yoo_*.pkl      data/runs/refit/
-cp data/runs/nef200/NEF_synaptic_yoo_*.pkl       data/runs/refit/
-```
-
----
-
-### 4. Save NEF activities (for figure_carrabin and figure_yoo neural panels)
-
-```bash
-python -m fitting.submit --resubmit activities --run_folder refit \
-    --ensembles error --timing once_per_obs
-python -m fitting.collect refit --type activities --ensembles error
-```
-
----
-
-### 5. Generate extras_carrabin probe data (for figure_carrabin bottom panels)
-
-```bash
-# Submit (one job per pid):
-bash jobs/submit_probe_pids.sh
-
-# Collect after all jobs complete:
-python scripts/extras_carrabin.py --experiment probe_pids \
-    --mode collect --out_folder refit
-
-# Submit n_neurons scan:
-bash jobs/submit_neurons_scan.sh
-
-# Collect after all jobs complete:
-python scripts/extras_carrabin.py --experiment n_neurons_scan \
-    --mode collect --out_folder refit
-```
-
----
-
-### 6. Generate extras_yoo response-noise data (for figure_yoo panel H)
-
-```bash
-# Submit (one job per pid × seed):
-bash jobs/submit_yoo_noise.sh
-
-# Collect after all jobs complete:
-python scripts/extras_yoo.py --mode collect --n_seeds 10 \
-    --run_folder yoo_response_noise
-```
-
----
-
-### 7. Generate figures
-
-```bash
+# Main figures
 python scripts/figure_carrabin.py --run_folder refit
-python scripts/figure_yoo.py --run_folder refit \
-    --noise_folder yoo_response_noise
-python scripts/figure_diederen.py --run_folder refit
+python scripts/figure_yoo.py --run_folder refit --noise_folder yoo_response_noise
 ```
-
-Note: diederen figure uses `refit/` which contains responses from
-`diederen_short/` fits (2+2 block filter). Performance files reflect
-2+2 block RMSE.
-
-To include **RL_lambda** in top-row model panels:
-
-```bash
-python scripts/figure_carrabin.py --run_folder refit --include_rl_lambda
-python scripts/figure_yoo.py      --run_folder refit --include_rl_lambda \
-    --noise_folder yoo_response_noise
-python scripts/figure_diederen.py --run_folder refit --include_rl_lambda
-```
-
----
-
-## Activities (NEF)
-
-Save or resubmit ensemble traces after fits:
-
-```bash
-python -m fitting.submit --resubmit activities --run_folder refit \
-    --ensembles error --timing once_per_obs
-python -m fitting.collect refit --type activities --ensembles error
-```
-
-Single-participant CLI:
-
-```bash
-python -m utils.save_activities carrabin NEF_recurrent 1 refit error once_per_obs
-```
-
----
-
-## Figures
-
-Main summary figures (2×4 layouts). **Carrabin** bottom row (panels E–H) requires
-**extras_carrabin** probe/scan data (see regeneration guide). **Yoo** panel H
-requires **extras_yoo** response-noise data in **`yoo_response_noise/`**.
-
-```bash
-python scripts/figure_carrabin.py --run_folder refit
-python scripts/figure_yoo.py      --run_folder refit --noise_folder yoo_response_noise
-python scripts/figure_diederen.py --run_folder refit
-```
-
-Note: diederen figure uses `refit/` which contains responses from
-`diederen_short/` fits (2+2 block filter). Performance files reflect
-2+2 block RMSE.
-
-Other figure scripts:
-
-```bash
-python scripts/dynamics_NEF.py --dataset carrabin --pid 1 --run_folder refit
-```
-
-Outputs go to **`figures/`** (PNG/PDF; some scripts also write SVG).
 
 ---
 
 ## Environment
 
 ```bash
-conda activate PY311    # or your Python 3.11 scientific env
-source venv/bin/activate   # project venv on top (recommended)
+# Always use project venv
+/home/psipeter/evidence_integration/venv/bin/python
+
+# Fallback only if venv unavailable
+/home/psipeter/miniconda3/envs/PY311/bin/python
 ```
 
-Dependencies include **numpy**, **pandas**, **matplotlib**, **seaborn**, **optuna**, **nengo**, **scipy**, etc. (see `requirements.txt` / env docs if present).
+Dependencies: numpy, pandas, matplotlib, seaborn, optuna, nengo, scipy.
 
 ---
 
 ## Archive
 
-Older **jiang** / **usher** task code, models, losses, and data live under **`archive/`**. Do not rely on those paths for active analyses. See **`archive/archive_readme.md`** for layout and how to restore material if needed.
+Older models and data for diederen, jiang, and usher live under `archive/`.
+See `archive/archive_readme.md`. Do not rely on those paths for active analyses.
