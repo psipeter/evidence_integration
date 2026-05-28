@@ -35,6 +35,18 @@ data/runs/
 figures/*
 !figures/*.py
 
+# Archive figures (generated; code and docs in archive/ remain tracked)
+archive/**/*.png
+archive/**/*.pdf
+archive/**/*.svg
+archive/**/*.jpg
+archive/**/*.jpeg
+archive/**/*.gif
+archive/**/*.eps
+archive/**/*.tif
+archive/**/*.tiff
+archive/**/*.webp
+
 # =============================================================================
 # Model Fitting Outputs
 # =============================================================================
