@@ -144,20 +144,13 @@ def pvalue_to_stars(p: float) -> str:
     return "ns"
 
 
-def draw_bracket(ax, x1, x2, y_bot, dy_step, text, linewidth=0.8, fontsize=7):
-    """Draw a significance bracket between x1 and x2 at height y_bot."""
-    y = y_bot + dy_step
-    ax.plot(
-        [x1, x1, x2, x2],
-        [y_bot, y, y, y_bot],
-        color="black",
-        linewidth=linewidth,
-        clip_on=False,
-    )
+def draw_sig_line(ax, x1, x2, y, stars, linewidth=0.9, fontsize=7):
+    """Draw a flat horizontal significance line (no end ticks) with stars above."""
+    ax.plot([x1, x2], [y, y], color="black", linewidth=linewidth, clip_on=False)
     ax.text(
         (x1 + x2) / 2,
         y,
-        text,
+        stars,
         ha="center",
         va="bottom",
         fontsize=fontsize,
@@ -165,59 +158,74 @@ def draw_bracket(ax, x1, x2, y_bot, dy_step, text, linewidth=0.8, fontsize=7):
     )
 
 
-def annotate_violins(
+def annotate_nef_comparisons(
     ax,
     data: pd.DataFrame,
     x_col: str,
     y_col: str,
     order: list,
-    dy_fraction: float = 0.03,
+    nef_label: str = "NEF",
+    dy_fraction: float = 0.04,
 ) -> None:
     """
-    Run paired Wilcoxon tests for all combinations of `order` and draw
-    significance brackets above the distribution plot on `ax`.
+    Run paired Wilcoxon tests between NEF and every other model, and draw
+    horizontal significance lines (no end ticks) above the boxplot.
+
+    Only comparisons involving `nef_label` are shown.
+    Non-significant pairs (p > 0.05) are omitted.
 
     Parameters
     ----------
-    ax         : matplotlib Axes
-    data       : DataFrame with columns [pid, x_col, y_col]
-    x_col      : column name for model/group (x-axis categories)
-    y_col      : column name for the metric (y-axis values)
-    order      : list of category names in x-axis order
-    dy_fraction: bracket spacing as fraction of current y-axis range
+    ax          : matplotlib Axes
+    data        : DataFrame with columns [pid, x_col, y_col]
+    x_col       : column with model/group labels (x-axis categories)
+    y_col       : column with the metric values
+    order       : list of category names in x-axis order (sets x positions)
+    nef_label   : display name of the NEF model in x_col
+    dy_fraction : line-spacing as fraction of current y-axis range
     """
-    pairs = list(combinations(order, 2))
     x_positions = {model: i for i, model in enumerate(order)}
-    y_top = ax.get_ylim()[1]
-    dy_step = (ax.get_ylim()[1] - ax.get_ylim()[0]) * dy_fraction
+    if nef_label not in x_positions:
+        return
 
-    bracket_stars = []
-    for m1, m2 in pairs:
-        p1 = data.loc[data[x_col] == m1, ["pid", y_col]]
-        p2 = data.loc[data[x_col] == m2, ["pid", y_col]]
+    y_lo, y_hi = ax.get_ylim()
+    dy_step = (y_hi - y_lo) * dy_fraction
+
+    # collect only NEF vs other pairs, sorted by x distance for clean stacking
+    pairs = sorted(
+        [(m, nef_label) for m in order if m != nef_label],
+        key=lambda p: abs(x_positions[p[0]] - x_positions[p[1]]),
+    )
+
+    sig_lines = []
+    for m_other, m_nef in pairs:
+        p1 = data.loc[data[x_col] == m_other, ["pid", y_col]]
+        p2 = data.loc[data[x_col] == m_nef,   ["pid", y_col]]
         merged = p1.merge(p2, on="pid", suffixes=("_1", "_2"))
-        if len(merged) < 2:
+        if len(merged) < 4:
             continue
         d1 = merged[f"{y_col}_1"].to_numpy(dtype=float)
         d2 = merged[f"{y_col}_2"].to_numpy(dtype=float)
-        diff = np.array(d1) - np.array(d2)
-        if len(diff) == 0 or np.all(diff == 0) or np.nanstd(diff) == 0:
+        diff = d1 - d2
+        if np.all(diff == 0) or np.nanstd(diff) == 0:
             continue
         try:
             res = wilcoxon(d1, d2)
         except ValueError:
             continue
         p = float(res.pvalue) if hasattr(res, "pvalue") else float(res[1])
-        bracket_stars.append((m1, m2, pvalue_to_stars(p)))
+        stars = pvalue_to_stars(p)
+        if stars == "ns":
+            continue  # omit non-significant
+        sig_lines.append((x_positions[m_other], x_positions[m_nef], stars))
 
-    y_current = y_top
-    for m1, m2, stars in bracket_stars:
-        draw_bracket(
-            ax, x_positions[m1], x_positions[m2], y_current, dy_step, stars
-        )
-        star_y = y_current + dy_step
-        mid_x = (x_positions[m1] + x_positions[m2]) / 2
-        y_current += dy_step * 2
+    # stack lines from lowest span to highest
+    sig_lines.sort(key=lambda t: abs(t[1] - t[0]))
+    y_current = y_hi + dy_step * 0.5
+    for x1, x2, stars in sig_lines:
+        draw_sig_line(ax, x1, x2, y_current, stars)
+        y_current += dy_step * 2.0
 
-    ax.set_ylim(top=y_current + dy_step)
-    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=5, prune="upper"))
+    if sig_lines:
+        ax.set_ylim(top=y_current + dy_step)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=5, prune="upper"))

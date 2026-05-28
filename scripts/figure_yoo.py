@@ -25,6 +25,7 @@ from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import (
     FIGURE_SIZE,
     POWER_LAW_SMOOTH_WINDOW,
+    annotate_nef_comparisons,
     apply_style,
     fit_power_law_params,
     get_palette,
@@ -36,7 +37,7 @@ from utils.plot_style import (
 # if future panels need a shared aspect or different spine visibility.
 
 # Model display order determines color assignment from get_palette()
-MODEL_ORDER = ["Mean", "RL", "RL_lambda", "ADM", "NEF"]
+MODEL_ORDER = ["Mean", "LeakyIntegrator", "RL_lambda", "PrimacyRecency", "NEF"]
 
 OBS_MAX = 30
 # Panel C: line / fit styling
@@ -185,6 +186,9 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     ax.set_xlabel("")
     ax.set_ylabel("Response error (trial-wise RMSE)")
     sns.despine(ax=ax, top=True, right=True)
+    nef_disp = _display("NEF")
+    if nef_disp in available:
+        annotate_nef_comparisons(ax, df, "model_disp", "plot_loss", available, nef_label=nef_disp)
 
 
 def _yoo_abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:

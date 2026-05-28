@@ -19,11 +19,11 @@ from scipy.stats import gaussian_kde
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
-from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
+from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, annotate_nef_comparisons
 
-MODEL_ORDER = ["Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF"]
+MODEL_ORDER = ["Bayes", "LeakyIntegrator", "RL_lambda", "NoisyCounting", "NEF"]
 MODEL_ORDER_B = MODEL_ORDER
-MODEL_ORDER_D = ["Human", "Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF"]
+MODEL_ORDER_D = ["Human", "Bayes", "LeakyIntegrator", "RL_lambda", "NoisyCounting", "NEF"]
 
 HUMAN_NEUTRAL_COLOR = "0.3"
 
@@ -147,6 +147,9 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     ax.set_xlabel("")
     ax.set_ylabel("Response error (trial-wise RMSE)")
     sns.despine(ax=ax, top=True, right=True)
+    nef_disp = _display("NEF")
+    if nef_disp in available:
+        annotate_nef_comparisons(ax, df, "model_disp", "plot_loss", available, nef_label=nef_disp)
 
 
 def _plot_panel_c(ax) -> None:

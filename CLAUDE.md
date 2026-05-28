@@ -105,10 +105,11 @@ Carrabin additionally uses `qid`.
 | carrabin | RL | Simple baseline | `alpha` |
 | carrabin | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
 | carrabin | NEF | Spiking NEF integrator | `alpha_0`, `lambda_` |
+| carrabin | PrimacyRecency | Flexible temporal weighting (Pooley 2011, Galdo 2022) | `eps_p`, `eps_r`, `sigma_w` |
 | yoo | Mean | Optimal running mean | — |
 | yoo | RL | Simple baseline | `alpha` |
 | yoo | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
-| yoo | ADM | Task-specific (Yoo et al.) | `phi`, `rho` |
+| yoo | PrimacyRecency | Flexible temporal weighting (Pooley 2011, Galdo 2022) | `eps_p`, `eps_r`, `sigma_w` |
 | yoo | NEF | Spiking NEF integrator | `alpha_0`, `lambda_` |
 | new task | all above + RNN/LLM | Full benchmark spectrum | TBD |
 
@@ -285,5 +286,6 @@ python scripts/figure_yoo.py --run_folder refit --noise_folder yoo_response_nois
 - Do not read `cv_loss_mean` directly — use `_get_loss`
 - Do not create scripts outside `scripts/`
 - Do not add NEF_synaptic back — it is removed; only NEF (recurrent) exists
+- PrimacyRecency replaces ADM throughout — do not use ADM name anywhere
 - Do not commit secrets or edit `archive/` unless explicitly asked
 - Do not push to git without being asked

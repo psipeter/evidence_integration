@@ -50,6 +50,14 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "sigma_c": (0.001, 2.0, 0.001),
             "nu": (0.001, 2.0, 0.001),
         },
+        "LeakyIntegrator": {
+            "gamma": (0.001, 0.999, 0.001),
+        },
+        "PrimacyRecency": {
+            "eps_p":   (0.001, 1.0, 0.001),
+            "eps_r":   (0.001, 1.0, 0.001),
+            "sigma_w": (0.001, 1.0, 0.001),
+        },
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
         },
@@ -61,6 +69,9 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
     "yoo": {
         "Mean": {},
+        "LeakyIntegrator": {
+            "gamma": (0.001, 0.999, 0.001),
+        },
         "RL": {
             "alpha": (0.001, 1.0, 0.001),
         },
@@ -68,9 +79,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
-        "ADM": {
-            "phi": (0.001, 1.0, 0.001),
-            "rho": (0.001, 1.0, 0.001),
+        "PrimacyRecency": {
+            "eps_p":   (0.001, 1.0, 0.001),
+            "eps_r":   (0.001, 1.0, 0.001),
+            "sigma_w": (0.001, 1.0, 0.001),
         },
         "NEF": {**_NEF_RANGES, "fixed": _NEF_FIXED},
     },

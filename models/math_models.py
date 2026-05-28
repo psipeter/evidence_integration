@@ -7,8 +7,8 @@ and collected into a single tabular format with model ``response`` values.
 
 **Datasets and model types**
 
-- **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive)
-- **yoo:** ``Mean`` (optimal), ``ADM`` (human-matching), ``RL`` (naive)
+- **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive), ``PrimacyRecency`` (flexible temporal weighting)
+- **yoo:** ``Mean`` (optimal), ``PrimacyRecency`` (flexible temporal weighting), ``RL`` (naive)
 - diederen models archived in ``archive/misc/math_models_diederen.py``
 
 **Unified interface**
@@ -32,9 +32,9 @@ from utils.run_params import trial_seed as _trial_seed
 
 
 _CARRABIN_MODELS = frozenset(
-    {"Bayes", "NoisyCounting", "RL", "RL_lambda"}
+    {"Bayes", "NoisyCounting", "RL", "RL_lambda", "LeakyIntegrator", "PrimacyRecency"}
 )
-_YOO_MODELS = frozenset({"Mean", "ADM", "RL", "RL_lambda"})
+_YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_lambda"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -110,6 +110,40 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
     raise AssertionError("unreachable")
 
 
+def _run_primacy_recency(
+    params: dict, values: np.ndarray, observation: int, trial: int
+) -> float:
+    """Pooley et al. (2011) / Galdo et al. (2022) temporal weighting function.
+
+    w(o, t) = [1 - (1 - eps_p^o)(1 - eps_r^(t-o+1))] * (1-eta) + eta
+    where o is 1-indexed position, t = current observation count.
+
+    Free parameters: eps_p (primacy), eps_r (recency), sigma_w (response noise).
+    eta fixed at 0.01 (Yoo et al. 2025).
+    """
+    eps_p   = float(params["eps_p"])
+    eps_r   = float(params["eps_r"])
+    sigma_w = float(params["sigma_w"])
+    eta     = float(params.get("eta", 0.01))
+    n = len(values)
+    t = n  # current observation count = length of sequence seen so far
+    weights = np.array(
+        [
+            (1.0 - (1.0 - eps_p ** (o + 1)) * (1.0 - eps_r ** (t - o)))
+            * (1.0 - eta)
+            + eta
+            for o in range(n)
+        ],
+        dtype=float,
+    )
+    mu = float(np.dot(weights, values) / np.sum(weights))
+    if sigma_w > 0.0:
+        seed = _trial_seed(int(params.get("seed", 0)), int(trial))
+        rng = np.random.RandomState(seed)
+        mu = float(np.clip(rng.normal(mu, sigma_w), -1.0, 1.0))
+    return mu
+
+
 def _run_carrabin(
     params: dict, human_pid: pd.DataFrame, trial: int, observation: int
 ) -> float:
@@ -159,6 +193,20 @@ def _run_carrabin(
             expectation += alpha * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
+    if model_type == "LeakyIntegrator":
+        gamma = float(params["gamma"])
+        v = 0.0
+        for x in values:
+            v = gamma * v + (1.0 - gamma) * float(x)
+        return float(np.clip(v, -1.0, 1.0))
+    if model_type == "LeakyIntegrator":
+        gamma = float(params["gamma"])
+        v = 0.0
+        for x in values:
+            v = gamma * v + (1.0 - gamma) * float(x)
+        return float(np.clip(v, -1.0, 1.0))
+    if model_type == "PrimacyRecency":
+        return _run_primacy_recency(params, values, observation, trial)
     raise AssertionError("unreachable")
 
 
@@ -191,21 +239,14 @@ def _run_yoo(
             expectation += alpha * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
-    if model_type == "ADM":
-        phi = params["phi"]
-        rho = params["rho"]
-        nu = params.get("nu", 0.01)  # fixed per Yoo et al.; not a free parameter
-        n = len(values)
-        weights = np.array(
-            [
-                (1.0 - (1.0 - phi ** (o + 1)) * (1.0 - rho ** (observation - o)))
-                * (1.0 - nu)
-                + nu
-                for o in range(n)
-            ],
-            dtype=float,
-        )
-        return float(np.dot(weights, values) / np.sum(weights))
+    if model_type == "LeakyIntegrator":
+        gamma = float(params["gamma"])
+        v = 0.0
+        for x in values:
+            v = gamma * v + (1.0 - gamma) * float(x)
+        return float(np.clip(v, -1.0, 1.0))
+    if model_type == "PrimacyRecency":
+        return _run_primacy_recency(params, values, observation, trial)
     raise AssertionError("unreachable")
 
 
