@@ -69,14 +69,14 @@ learning trajectory.
 | carrabin | NoisyCounting | Task-specific (Prat-Carrabin) | `mu`, `sigma_c`, `nu` |
 | carrabin | RL | Simple baseline | `alpha` |
 | carrabin | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
-| carrabin | NEF_recurrent | Spiking NEF integrator | `alpha_0`, `lambda_` |
-| carrabin | NEF_synaptic | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
+| carrabin | NEF | Spiking NEF integrator | `alpha_0`, `lambda_` |
+| carrabin | NEF | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
 | yoo | Mean | Optimal running mean | — |
 | yoo | RL | Simple baseline | `alpha` |
 | yoo | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
 | yoo | ADM | Task-specific (Yoo et al.) | `phi`, `rho` |
-| yoo | NEF_recurrent | Spiking NEF integrator | `alpha_0`, `lambda_` |
-| yoo | NEF_synaptic | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
+| yoo | NEF | Spiking NEF integrator | `alpha_0`, `lambda_` |
+| yoo | NEF | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
 
 **NEF architecture:** A recurrent spiking network implements a running
 estimate (**value** ensemble), prediction-error-driven updates (**error**
@@ -165,8 +165,8 @@ submit jobs → fit.py (Optuna k-fold CV) → collect → figures
 ### Commands (cluster)
 
 ```bash
-python -m fitting.submit carrabin NEF_recurrent --n_trials 200 --run_folder nef200
-python -m fitting.submit yoo NEF_recurrent --n_trials 200 --run_folder nef200
+python -m fitting.submit carrabin NEF --n_trials 200 --run_folder nef200
+python -m fitting.submit yoo NEF --n_trials 200 --run_folder nef200
 ```
 
 ### Local single-participant

@@ -3,7 +3,7 @@
 Plot NEF population dynamics by simulating one trial in memory.
 
 Usage:
-    python scripts/dynamics_NEF.py --dataset carrabin --pid 1 --model_type NEF_recurrent
+    python scripts/dynamics_NEF.py --dataset carrabin --pid 1 --model_type NEF
     python scripts/dynamics_NEF.py --dataset carrabin --pid 1 --trial 2 --run_folder response
 """
 
@@ -803,8 +803,8 @@ def main() -> None:
     p.add_argument(
         "--model_type",
         type=str,
-        default="NEF_recurrent",
-        help="e.g. NEF_recurrent or NEF_synaptic",
+        default="NEF",
+        help="model_type, should be NEF",
     )
     p.add_argument(
         "--run_folder",

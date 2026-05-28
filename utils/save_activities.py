@@ -195,7 +195,7 @@ def run(
     run_folder: str,
     timing: str,
     dt_sample: float = 0.01,
-    model_type: str = "NEF_recurrent",
+    model_type: str = "NEF",
 ) -> None:
     from utils.run_params import load_run_params
 

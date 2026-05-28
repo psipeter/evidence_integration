@@ -233,7 +233,7 @@ def _resubmit(
         elif resubmit_type == "activities":
             if not params_path.exists():
                 continue
-            if mt not in ("NEF_recurrent", "NEF_synaptic"):
+            if mt not in ("NEF", "NEF"):
                 continue
             if timing == "once_per_dt" and ds != "carrabin":
                 continue  # windowed once_per_dt activities only implemented for carrabin

@@ -8,7 +8,7 @@ collect per-pid outputs into combined pickle files before plotting via
 ``scripts/figure_carrabin.py``.
 
 The script is carrabin-specific: it reads ``data/carrabin.pkl``, uses the
-``qid`` column, and loads NEF_recurrent_carrabin params from the run folder.
+``qid`` column, and loads NEF_carrabin params from the run folder.
 
 =============================================================================
 CLUSTER USAGE — run each .sh file as a single command, then collect
@@ -47,7 +47,7 @@ OUTPUT FILES  (written to data/runs/<out_folder>/)
 Per-pid files (from ``--mode run``):
 
 probe_pids experiment:
-  probe_NEF_recurrent_carrabin_<pid>.pkl   — raw NEF probe timeseries per pid
+  probe_NEF_carrabin_<pid>.pkl   — raw NEF probe timeseries per pid
 
 n_neurons_scan experiment:
   scan_compact_carrabin_<pid>_n<N>.pkl     — readout response + abs_pred_error per obs
@@ -91,20 +91,20 @@ def _run_probe_pids_simulate(
 
     for pid in pids:
         params = pd.read_pickle(
-            run_folder / f"NEF_recurrent_carrabin_{pid}_params.pkl"
+            run_folder / f"NEF_carrabin_{pid}_params.pkl"
         ).iloc[0].to_dict()
-        fixed = MODEL_PARAMS["carrabin"]["NEF_recurrent"].get("fixed", {})
+        fixed = MODEL_PARAMS["carrabin"]["NEF"].get("fixed", {})
         params = {**PARAM_DEFAULTS, **fixed, **params}
         params["nef_type"] = "recurrent"
         params["dataset"] = "carrabin"
-        params["model_type"] = "NEF_recurrent"
+        params["model_type"] = "NEF"
         print(
             f"Running pid={pid} (alpha_0={params['alpha_0']:.3f}, "
             f"lambda_={params['lambda_']:.3f})..."
         )
         nef_run(params, save_probes=True)
-        src = data_path(f"probe_NEF_recurrent_carrabin_{pid}.pkl")
-        dst = out_dir / f"probe_NEF_recurrent_carrabin_{pid}.pkl"
+        src = data_path(f"probe_NEF_carrabin_{pid}.pkl")
+        dst = out_dir / f"probe_NEF_carrabin_{pid}.pkl"
         if src.exists():
             Path(src).rename(dst)
             print(f"  Saved to {dst}")
@@ -126,13 +126,13 @@ def _run_n_neurons_scan_simulate(
 
     for pid in scan_pids:
         base_params = pd.read_pickle(
-            run_folder / f"NEF_recurrent_carrabin_{pid}_params.pkl"
+            run_folder / f"NEF_carrabin_{pid}_params.pkl"
         ).iloc[0].to_dict()
-        fixed = MODEL_PARAMS["carrabin"]["NEF_recurrent"].get("fixed", {})
+        fixed = MODEL_PARAMS["carrabin"]["NEF"].get("fixed", {})
         base_params = {**PARAM_DEFAULTS, **fixed, **base_params}
         base_params["nef_type"] = "recurrent"
         base_params["dataset"] = "carrabin"
-        base_params["model_type"] = "NEF_recurrent"
+        base_params["model_type"] = "NEF"
         base_params["pid"] = int(pid)
         human_pid = human.query("pid == @pid")
 
@@ -180,7 +180,7 @@ def _run_n_neurons_scan_simulate(
 
 
 def _collect_probe_pids(out_dir: Path) -> None:
-    probe_files = sorted(out_dir.glob("probe_NEF_recurrent_carrabin_*.pkl"))
+    probe_files = sorted(out_dir.glob("probe_NEF_carrabin_*.pkl"))
     combined: list[dict] = []
     for path in probe_files:
         pid = int(path.stem.split("_")[-1])

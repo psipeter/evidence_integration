@@ -2,7 +2,7 @@
 """
 Generate supplementary NEF response-noise simulations for figure_yoo.py.
 
-Runs NEF_recurrent with multiple random seeds per participant to estimate
+Runs NEF with multiple random seeds per participant to estimate
 response variability. Output is used by panel H of figure_yoo (mean response
 noise vs mean response change). Must be run before figure_yoo.py.
 
@@ -21,8 +21,8 @@ CLUSTER USAGE
 OUTPUT FILES  (written to data/runs/nef200/)
 =============================================================================
 
-  NEF_recurrent_yoo_<pid>_seed<N>_responses.pkl  — per-pid per-seed responses
-  NEF_recurrent_yoo_all_responses.pkl             — combined file (after collect)
+  NEF_yoo_<pid>_seed<N>_responses.pkl  — per-pid per-seed responses
+  NEF_yoo_all_responses.pkl             — combined file (after collect)
 
 The combined file is read by figure_yoo.py --noise_folder nef200.
 =============================================================================
@@ -43,7 +43,7 @@ from fitting.model_params import MODEL_PARAMS
 from models import NEF
 from utils.paths import RUNS_DIR, data_path
 
-MODEL_TYPE = "NEF_recurrent"
+MODEL_TYPE = "NEF"
 DATASET = "yoo"
 RESP_RE = re.compile(rf"^{MODEL_TYPE}_{DATASET}_(\d+)_seed(\d+)_responses\.pkl$")
 

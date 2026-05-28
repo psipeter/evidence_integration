@@ -143,7 +143,7 @@ def fit(
         params["base_seed"] = params["seed"]
 
         trial_wall_start = time.time()
-        if model_type in ("NEF_recurrent", "NEF_synaptic"):
+        if model_type == "NEF":
             model_responses_full = NEF.run(params)
         else:
             model_responses_full = math_models.run(params)
@@ -218,7 +218,7 @@ def fit(
         run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
     )
 
-    if model_type in ("NEF_recurrent", "NEF_synaptic"):
+    if model_type == "NEF":
         save_responses(pid, dataset, run_folder, model_type)
     else:
         best_params_full = {**best_params}

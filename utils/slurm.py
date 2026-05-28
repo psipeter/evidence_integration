@@ -14,8 +14,8 @@ DEFAULT_TIME_LIMITS = {
     "Mean": "0:30:0",
     "ADM": "2:0:0",
     "PearceHall": "2:0:0",
-    "NEF_recurrent": "72:0:0",
-    "NEF_synaptic": "72:0:0",
+    "NEF": "72:0:0",
+    "NEF": "72:0:0",
 }
 
 DEFAULT_MEM_LIMITS = {
@@ -26,8 +26,8 @@ DEFAULT_MEM_LIMITS = {
     "Mean": "8G",
     "ADM": "8G",
     "PearceHall": "8G",
-    "NEF_recurrent": "32G",
-    "NEF_synaptic": "32G",
+    "NEF": "32G",
+    "NEF": "32G",
 }
 
 def make_job_script(

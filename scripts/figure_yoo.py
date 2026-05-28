@@ -36,7 +36,7 @@ from utils.plot_style import (
 # if future panels need a shared aspect or different spine visibility.
 
 # Model display order determines color assignment from get_palette()
-MODEL_ORDER = ["Mean", "RL", "RL_lambda", "ADM", "NEF_recurrent", "NEF_synaptic"]
+MODEL_ORDER = ["Mean", "RL", "RL_lambda", "ADM", "NEF"]
 
 OBS_MAX = 30
 # Panel C: line / fit styling
@@ -48,12 +48,12 @@ PANEL_C_PID_LINE_COLOR = "0.75"
 PANEL_G_ENCODER_THRESHOLD = 0.5  # minimum enc_dim_0 to be classified as on-weight neuron
 PANEL_G_OBS_MIN = 2
 PANEL_G_OBS_MAX = 30
-PANEL_G_MODEL_TYPE = "NEF_recurrent"
+PANEL_G_MODEL_TYPE = "NEF"
 PANEL_G_DATASET = "yoo"
 
-# --- Panel E (logic inlined from former scripts/plot_activities.py panels 2 & 3, yoo / NEF_recurrent only)
+# --- Panel E (logic inlined from former scripts/plot_activities.py panels 2 & 3, yoo / NEF only)
 PANEL_E_ENCODER_THRESHOLD = 0.5
-PANEL_E_MODEL_TYPE = "NEF_recurrent"
+PANEL_E_MODEL_TYPE = "NEF"
 PANEL_E_PE_COL = "prediction_error_raw"
 PANEL_E_OBS_RANGE_YOO = (2, 30)
 PANEL_E_COUNTING_OBS_RANGE_YOO = (1, 30)
@@ -1053,9 +1053,9 @@ def _plot_panel_g(ax, run_folder: str) -> None:
     value_map = human[["pid", "trial", "observation", "value"]].drop_duplicates()
     model_rows_task: list[dict] = []
     model_rows_delta: list[dict] = []
-    responses_path = run_dir / "NEF_recurrent_yoo_responses.pkl"
+    responses_path = run_dir / "NEF_yoo_responses.pkl"
     if not responses_path.exists():
-        _placeholder(ax, "NEF_recurrent_yoo_responses.pkl not found")
+        _placeholder(ax, "NEF_yoo_responses.pkl not found")
         return
     mdf_all = pd.read_pickle(responses_path)
     if mdf_all.empty or not {"pid", "trial", "observation", "response"}.issubset(
@@ -1138,7 +1138,7 @@ def _plot_panel_g(ax, run_folder: str) -> None:
     human_lam_u = lam_by_pid.reindex(list(set(human_u_pids))).dropna()
     human_lam_dec = lam_by_pid.reindex(list(set(human_dec_pids))).dropna()
 
-    nef_params_path = run_dir / "NEF_recurrent_yoo_params.pkl"
+    nef_params_path = run_dir / "NEF_yoo_params.pkl"
     if not nef_params_path.exists():
         _empty_row_panel(ax)
         return
@@ -1221,7 +1221,7 @@ def _plot_panel_g(ax, run_folder: str) -> None:
 def _plot_panel_h(ax, noise_folder: str) -> None:
     """Panel H: early vs late binned response-change/noise correlation."""
     noise_run_dir = data_path("runs") / noise_folder
-    noise_path = noise_run_dir / "NEF_recurrent_yoo_all_responses.pkl"
+    noise_path = noise_run_dir / "NEF_yoo_all_responses.pkl"
     if not noise_path.exists():
         _empty_row_panel(ax)
         return

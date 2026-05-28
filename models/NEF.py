@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NEF model of evidence integration (recurrent or synaptic value dynamics).
+NEF model of evidence integration.
 
 Supports **carrabin** and **yoo**: sequential scalar ``value`` inputs per
 observation.
@@ -12,9 +12,8 @@ Architecture (per trial):
     node_input[1] → error.neurons  (ITI inhibition)
     value → error[dim 1]      (transform=-1, subtracts v)
 
-``nef_type`` (from ``model_type``): ``recurrent`` uses multiplicative
-error→value and recurrent self-connection on ``value``; ``synaptic`` uses a
-``spikes`` population and PES learning onto ``value``.
+Recurrent value dynamics: multiplicative error→value connection and recurrent
+self-connection on ``value``.
 
 Usage:
     from models.NEF import run
@@ -212,51 +211,20 @@ def build_network(
             seed=seed,
         )
 
-        if params["nef_type"] == "recurrent":
-            nengo.Connection(
-                net.error,
-                net.value,
-                function=lambda x: x[0] * x[1],
-                transform=T_error,
-                synapse=tau_fb,
-                seed=seed,
-            )
-            nengo.Connection(
-                net.value,
-                net.value,
-                synapse=tau_fb,
-                seed=seed,
-            )
-
-        elif params["nef_type"] == "synaptic":
-            net.spikes = nengo.Ensemble(
-                n_neurons=int(params["n_neurons"]),
-                dimensions=1,
-                seed=seed,
-                label="spikes",
-            )
-            conn_value = nengo.Connection(
-                net.spikes,
-                net.value,
-                synapse=tau_fb,
-                learning_rule_type=nengo.PES(
-                    learning_rate=float(params["pes_learning_rate"])
-                ),
-                function=lambda x: 0.0,
-                seed=seed,
-            )
-            nengo.Connection(
-                net.error,
-                conn_value.learning_rule,
-                function=lambda x: x[0] * x[1],
-                transform=-1,
-                synapse=tau_fb,
-                seed=seed,
-            )
-        else:
-            raise ValueError(
-                f"nef_type must be 'recurrent' or 'synaptic', got {params['nef_type']!r}"
-            )
+        nengo.Connection(
+            net.error,
+            net.value,
+            function=lambda x: x[0] * x[1],
+            transform=T_error,
+            synapse=tau_fb,
+            seed=seed,
+        )
+        nengo.Connection(
+            net.value,
+            net.value,
+            synapse=tau_fb,
+            seed=seed,
+        )
 
         net.probe_value = nengo.Probe(
             net.value,
@@ -348,9 +316,7 @@ def run(
 ) -> pd.DataFrame:
     """Run the NEF model for a single participant."""
     pfull = {**PARAM_DEFAULTS, **params}
-    pfull["nef_type"] = (
-        "synaptic" if "synaptic" in pfull["model_type"] else "recurrent"
-    )
+    pfull["nef_type"] = "recurrent"
     pfull["base_seed"] = int(pfull["seed"])
 
     required = (
@@ -416,7 +382,7 @@ def run(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="NEF evidence integration (recurrent / synaptic)")
+    p = argparse.ArgumentParser(description="NEF evidence integration")
     p.add_argument(
         "--dataset",
         type=str,
@@ -424,7 +390,7 @@ def parse_args() -> argparse.Namespace:
         choices=("carrabin", "yoo"),
     )
     p.add_argument("--pid", type=int, default=1)
-    p.add_argument("--model_type", type=str, default="NEF_recurrent")
+    p.add_argument("--model_type", type=str, default="NEF")
     p.add_argument("--counting", type=str, default=PARAM_DEFAULTS["counting"], choices=("lmu", "integrator"))
     p.add_argument("--n_seeds", type=int, default=PARAM_DEFAULTS["n_seeds"])
     p.add_argument("--n_obs", type=int, default=PARAM_DEFAULTS["n_obs"])

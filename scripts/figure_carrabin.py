@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
 
-MODEL_ORDER = ["Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF_recurrent"]
+MODEL_ORDER = ["Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF"]
 MODEL_ORDER_B = MODEL_ORDER
-MODEL_ORDER_D = ["Human", "Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF_recurrent"]
+MODEL_ORDER_D = ["Human", "Bayes", "RL", "RL_lambda", "NoisyCounting", "NEF"]
 
 HUMAN_NEUTRAL_COLOR = "0.3"
 
@@ -355,8 +355,8 @@ def _load_noisy_representations_figure_data(
     human = pd.read_pickle(data_path("carrabin.pkl"))
     qid_map = human[["pid", "trial", "observation", "qid"]].drop_duplicates()
 
-    nef_params_path = run_folder / "NEF_recurrent_carrabin_params.pkl"
-    nef_resp_path = run_folder / "NEF_recurrent_carrabin_responses.pkl"
+    nef_params_path = run_folder / "NEF_carrabin_params.pkl"
+    nef_resp_path = run_folder / "NEF_carrabin_responses.pkl"
     if not nef_params_path.exists() or not nef_resp_path.exists():
         return pd.DataFrame(), human, pd.DataFrame(), pd.DataFrame()
 

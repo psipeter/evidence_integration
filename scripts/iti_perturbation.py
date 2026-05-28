@@ -75,7 +75,7 @@ def _nef_run_with_iti_noise(
 def _load_base_params(pid: int, run_folder: Path) -> dict:
     from utils.run_params import load_run_params
 
-    return load_run_params(pid, "carrabin", "NEF_recurrent", run_folder)
+    return load_run_params(pid, "carrabin", "NEF", run_folder)
 
 
 def _compute_metrics(resp: pd.DataFrame, qid_map: pd.DataFrame) -> dict:
@@ -136,7 +136,7 @@ def _run_probe_conditions(
             p["iti_noise_freq"] = freq
         print(f"  Running probe {label} (amp={amp}, t_iti={float(base['t_iti'])})...")
         _nef_run_with_iti_noise(p, save_probes=True)
-        src = data_path(f"probe_NEF_recurrent_carrabin_{pid}.pkl")
+        src = data_path(f"probe_NEF_carrabin_{pid}.pkl")
         dst = out_path
         if src.exists():
             src.rename(dst)

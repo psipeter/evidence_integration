@@ -104,14 +104,12 @@ Carrabin additionally uses `qid`.
 | carrabin | NoisyCounting | Task-specific (Prat-Carrabin) | `mu`, `sigma_c`, `nu` |
 | carrabin | RL | Simple baseline | `alpha` |
 | carrabin | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
-| carrabin | NEF_recurrent | Spiking NEF integrator | `alpha_0`, `lambda_` |
-| carrabin | NEF_synaptic | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
+| carrabin | NEF | Spiking NEF integrator | `alpha_0`, `lambda_` |
 | yoo | Mean | Optimal running mean | — |
 | yoo | RL | Simple baseline | `alpha` |
 | yoo | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
 | yoo | ADM | Task-specific (Yoo et al.) | `phi`, `rho` |
-| yoo | NEF_recurrent | Spiking NEF integrator | `alpha_0`, `lambda_` |
-| yoo | NEF_synaptic | Spiking NEF (PES variant) | `alpha_0`, `lambda_` |
+| yoo | NEF | Spiking NEF integrator | `alpha_0`, `lambda_` |
 | new task | all above + RNN/LLM | Full benchmark spectrum | TBD |
 
 ---
@@ -270,6 +268,8 @@ python scripts/figure_yoo.py --run_folder refit --noise_folder yoo_response_nois
 ## NEF implementation notes
 
 - Build: `build_network(obs_values, params, decoders)` after `_pretrain(params)`
+- Architecture: recurrent value dynamics — multiplicative error→value connection
+  plus recurrent self-connection on the value ensemble
 - `counting` in `_NEF_FIXED`: `"integrator"` (default) or `"lmu"`
 - `base_seed` stabilises counting pretrain; `trial_seed` separates per-trial variability
 - Default: `n_neurons=200`, `n_neurons_counting=2000`, `lmu_n_obs_max=30`
@@ -284,5 +284,6 @@ python scripts/figure_yoo.py --run_folder refit --noise_folder yoo_response_nois
 - Do not redefine `_trial_seed` locally
 - Do not read `cv_loss_mean` directly — use `_get_loss`
 - Do not create scripts outside `scripts/`
+- Do not add NEF_synaptic back — it is removed; only NEF (recurrent) exists
 - Do not commit secrets or edit `archive/` unless explicitly asked
 - Do not push to git without being asked
