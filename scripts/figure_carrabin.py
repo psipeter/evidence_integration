@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, annotate_nef_comparisons
 
-MODEL_ORDER = ["Bayes", "LeakyIntegrator", "RL_lambda", "NoisyCounting", "NEF"]
+MODEL_ORDER = ["Mean", "LeakyIntegrator", "RL_lambda", "NoisyCounting", "NEF"]
 MODEL_ORDER_B = MODEL_ORDER
-MODEL_ORDER_D = ["Human", "Bayes", "LeakyIntegrator", "RL_lambda", "NoisyCounting", "NEF"]
+MODEL_ORDER_D = ["Human", "Mean", "LeakyIntegrator", "RL_lambda", "NoisyCounting", "NEF"]
 
 HUMAN_NEUTRAL_COLOR = "0.3"
 

@@ -7,7 +7,7 @@ and collected into a single tabular format with model ``response`` values.
 
 **Datasets and model types**
 
-- **carrabin:** ``Bayes`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive), ``PrimacyRecency`` (flexible temporal weighting)
+- **carrabin:** ``Mean`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive), ``PrimacyRecency`` (flexible temporal weighting)
 - **yoo:** ``Mean`` (optimal), ``PrimacyRecency`` (flexible temporal weighting), ``RL`` (naive)
 - diederen models archived in ``archive/misc/math_models_diederen.py``
 
@@ -28,11 +28,12 @@ import numpy as np
 import pandas as pd
 
 from utils.paths import data_path
+from utils.carrabin_transform import apply_carrabin_transform
 from utils.run_params import trial_seed as _trial_seed
 
 
 _CARRABIN_MODELS = frozenset(
-    {"Bayes", "NoisyCounting", "RL", "RL_lambda", "LeakyIntegrator", "PrimacyRecency"}
+    {"Mean", "NoisyCounting", "RL", "RL_lambda", "LeakyIntegrator", "PrimacyRecency"}
 )
 _YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_lambda"})
 
@@ -77,7 +78,7 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
             }
         )
 
-    out = pd.DataFrame(rows)
+    out = apply_carrabin_transform(pd.DataFrame(rows), dataset)
     if save:
         fname = f"{model_type}_{dataset}_{pid}_responses.pkl"
         out.to_pickle(data_path(fname))
@@ -118,30 +119,26 @@ def _run_primacy_recency(
     w(o, t) = [1 - (1 - eps_p^o)(1 - eps_r^(t-o+1))] * (1-eta) + eta
     where o is 1-indexed position, t = current observation count.
 
-    Free parameters: eps_p (primacy), eps_r (recency), sigma_w (response noise).
+    Free parameters: eps_p (primacy), eps_r (recency).
     eta fixed at 0.01 (Yoo et al. 2025).
+    sigma_w from the original ADM paper is not used here: it captured
+    continuous 30 Hz joystick trajectory noise under likelihood fitting,
+    which has no equivalent in our single-response-per-observation RMSE setup.
     """
-    eps_p   = float(params["eps_p"])
-    eps_r   = float(params["eps_r"])
-    sigma_w = float(params["sigma_w"])
-    eta     = float(params.get("eta", 0.01))
+    eps_p = float(params["eps_p"])
+    eps_r = float(params["eps_r"])
+    eta   = float(params.get("eta", 0.01))
     n = len(values)
-    t = n  # current observation count = length of sequence seen so far
     weights = np.array(
         [
-            (1.0 - (1.0 - eps_p ** (o + 1)) * (1.0 - eps_r ** (t - o)))
+            (1.0 - (1.0 - eps_p ** (o + 1)) * (1.0 - eps_r ** (n - o)))
             * (1.0 - eta)
             + eta
             for o in range(n)
         ],
         dtype=float,
     )
-    mu = float(np.dot(weights, values) / np.sum(weights))
-    if sigma_w > 0.0:
-        seed = _trial_seed(int(params.get("seed", 0)), int(trial))
-        rng = np.random.RandomState(seed)
-        mu = float(np.clip(rng.normal(mu, sigma_w), -1.0, 1.0))
-    return mu
+    return float(np.dot(weights, values) / np.sum(weights))
 
 
 def _run_carrabin(
@@ -153,10 +150,8 @@ def _run_carrabin(
     t = len(values)
     n_R = np.sum((values + 1) / 2)
 
-    if model_type == "Bayes":
-        p_star = (n_R + 1) / (t + 2)
-        expectation = 2 * p_star - 1
-        return float(expectation)
+    if model_type == "Mean":
+        return float(np.mean(values))
     if model_type == "NoisyCounting":
         # Prat-Carrabin & Woodford (2024), Table 5 Line 12: Eq. 31 (cognitive
         # state) and Eq. 34 (response), on [-1, 1].
@@ -193,12 +188,6 @@ def _run_carrabin(
             expectation += alpha * error
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
-    if model_type == "LeakyIntegrator":
-        gamma = float(params["gamma"])
-        v = 0.0
-        for x in values:
-            v = gamma * v + (1.0 - gamma) * float(x)
-        return float(np.clip(v, -1.0, 1.0))
     if model_type == "LeakyIntegrator":
         gamma = float(params["gamma"])
         v = 0.0

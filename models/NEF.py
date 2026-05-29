@@ -60,6 +60,7 @@ from utils.paths import data_path
 from utils.run_params import trial_seed as _trial_seed
 
 from fitting.model_params import _NEF_FIXED
+from utils.carrabin_transform import apply_carrabin_transform
 
 PARAM_DEFAULTS: dict = {
     **_NEF_FIXED,
@@ -371,7 +372,7 @@ def run(
             }
             rows.append(entry)
 
-    out = pd.DataFrame(rows)
+    out = apply_carrabin_transform(pd.DataFrame(rows), dataset)
     if save_probes and all_probe_data:
         fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
         pd.to_pickle(all_probe_data, data_path(fname))

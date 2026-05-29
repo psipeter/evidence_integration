@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from models import NEF
+from utils.carrabin_transform import apply_carrabin_transform
 from utils.paths import resolve_run_folder
 from utils.run_params import load_run_params
 
@@ -15,6 +16,7 @@ def save(pid: int, dataset: str, run_folder: str | Path, model_type: str) -> Non
     run_folder = resolve_run_folder(run_folder)
     params = load_run_params(pid, dataset, model_type, run_folder)
     responses = NEF.run(params)
+    responses = apply_carrabin_transform(responses, dataset)
     responses.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl")
     print(f"Saved responses for {dataset} {model_type} pid={pid}")
 

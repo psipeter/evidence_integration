@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 DEFAULT_TIME_LIMITS = {
-    "Bayes": "0:30:0",
+    "Mean": "0:30:0",
     "NoisyCounting": "24:0:0",
     "RL": "2:0:0",
     "RL_lambda": "2:0:0",
@@ -20,7 +20,7 @@ DEFAULT_TIME_LIMITS = {
 }
 
 DEFAULT_MEM_LIMITS = {
-    "Bayes": "8G",
+    "Mean": "8G",
     "NoisyCounting": "16G",
     "RL": "8G",
     "RL_lambda": "8G",

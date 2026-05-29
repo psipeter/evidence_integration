@@ -39,7 +39,13 @@ def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame
 def compute_loss(
     params: dict, model: pd.DataFrame, human: pd.DataFrame
 ) -> float:
-    """RMSE between model and human responses (carrabin, yoo)."""
+    """RMSE between model and human responses (carrabin, yoo).
+
+    For carrabin, model responses are expected to already have the Laplace
+    smoothing transform applied (response = response_raw * t / (t+2)), as
+    produced by utils.carrabin_transform.apply_carrabin_transform(). The
+    `response` column is used directly; `response_raw` is ignored here.
+    """
     dataset = params["dataset"]
     if dataset not in ("carrabin", "yoo"):
         raise ValueError("params['dataset'] must be one of 'carrabin', 'yoo'")

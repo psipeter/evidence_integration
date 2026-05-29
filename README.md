@@ -65,7 +65,7 @@ learning trajectory.
 
 | Dataset | Model | Role | Free params |
 |---------|-------|------|-------------|
-| carrabin | Bayes | Optimal Bayesian | — |
+| carrabin | Mean | Optimal running mean | — |
 | carrabin | NoisyCounting | Task-specific (Prat-Carrabin) | `mu`, `sigma_c`, `nu` |
 | carrabin | RL | Simple baseline | `alpha` |
 | carrabin | RL_lambda | Power-law baseline | `alpha_0`, `lambda_` |
