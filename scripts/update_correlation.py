@@ -6,7 +6,7 @@ human signed updates (response(t) - response(t-1)) across all (trial, obs)
 pairs, skipping obs=1.
 
 Datasets:
-  carrabin: Mean, NoisyCounting, NEF vs human
+  carrabin: Mean, LeakyIntegrator, PrimacyRecency, NEF vs human
   yoo:      Mean, PrimacyRecency, NEF vs human
 
 Run from project root: venv/bin/python scripts/update_correlation.py
@@ -149,5 +149,5 @@ def report(dataset: str, models: list[str]) -> dict:
 
 
 if __name__ == "__main__":
-    report("carrabin", ["Mean", "NoisyCounting", "NEF"])
+    report("carrabin", ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"])
     report("yoo",      ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"])

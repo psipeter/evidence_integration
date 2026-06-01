@@ -139,9 +139,6 @@ def fit(
 
     def objective(trial: optuna.trial.Trial) -> float:
         params = _suggest_params(trial, model_type, dataset, pid)
-        params["seed"] = abs(hash((int(params["pid"]), trial.number))) % (2**31)
-        params["base_seed"] = params["seed"]
-
         trial_wall_start = time.time()
         if model_type == "NEF":
             model_responses_full = NEF.run(params)
@@ -171,8 +168,6 @@ def fit(
                     "model_type",
                     "dataset",
                     "pid",
-                    "seed",
-                    "base_seed",
                 ):
                     if param_name not in record:
                         record[param_name] = (
@@ -193,8 +188,6 @@ def fit(
             "pid": int(pid),
         }
     )
-    best_params["seed"] = abs(hash((int(pid), best_trial.number))) % (2**31)
-    best_params["base_seed"] = best_params["seed"]
 
     params_df = pd.DataFrame([best_params])
     performance_df = pd.DataFrame(
@@ -222,7 +215,6 @@ def fit(
         save_responses(pid, dataset, run_folder, model_type)
     else:
         best_params_full = {**best_params}
-        best_params_full["seed"] = best_params["seed"]
         df = math_models.run(best_params_full)
         df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl")
 

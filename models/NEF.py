@@ -49,15 +49,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from models.counting_integrator import (
     build_network as build_counting_integrator,
     decode_outputs as decode_counting_integrator,
+    fast_decode as fast_decode_counting,
+    load_activities as load_counting_activities,
+    load_decoders as load_counting_decoders,
     simulate_network as simulate_counting_integrator,
 )
-from models.counting_lmu import (
-    build_network as build_counting_lmu,
-    decode_outputs as decode_counting_lmu,
-    simulate_network as simulate_counting_lmu,
-)
 from utils.paths import data_path
-from utils.run_params import trial_seed as _trial_seed
 
 from fitting.model_params import _NEF_FIXED
 from utils.carrabin_transform import apply_carrabin_transform
@@ -67,7 +64,7 @@ PARAM_DEFAULTS: dict = {
     "n_obs": 30,
     "lambda_": 0.5,
     "alpha_0": 1,
-    "T_error": 0.5,  # transform on error→value connection; defaults to tau_fb for backward compatibility
+    "T_error": 0.5,
     "tau_error": 0.1,
 }
 
@@ -111,13 +108,9 @@ def _extract_responses(
 
 
 def _pretrain(params: dict) -> dict:
-    """Run counting pretraining using lmu_n_obs_max observations."""
-    seed = int(params.get("base_seed", params["seed"]))
-    p = {**params, "n_obs": params["lmu_n_obs_max"], "seed": seed}
-    if p["counting"] == "lmu":
-        net = build_counting_lmu(p, train=True)
-        raw = simulate_counting_lmu(net, p, train=True)
-        return decode_counting_lmu(raw, p)
+    """Run counting pretraining for the integrator subnetwork."""
+    seed = int(params.get("seed", 0))
+    p = {**params, "n_obs": params["radius_c"], "seed": seed}
     net = build_counting_integrator(p, train=True)
     raw = simulate_counting_integrator(net, p, train=True)
     return decode_counting_integrator(raw, p)
@@ -132,22 +125,18 @@ def build_network(
     tau_fb = float(params["tau_fb"])
     T_error = float(params["T_error"])
 
-    if params["counting"] == "lmu":
-        _build_c = build_counting_lmu
-    else:
-        _build_c = build_counting_integrator
+    _build_c = build_counting_integrator
 
     with nengo.Network(label=str(params["model_type"]), seed=seed) as net:
         net.node_input = nengo.Node(
             _make_input(obs_values, params), size_out=2, label="node_input"
         )
 
-        # Counting uses n_neurons_counting for memory / lmu_ea and n_neurons for
+        # Counting uses n_neurons_counting for memory and n_neurons for
         # onset_detector (error and value use this n_neurons only).
         c_params = {
             **params,
-            "n_obs": params["lmu_n_obs_max"],
-            "seed": int(params["base_seed"]),
+            "n_obs": int(params["radius_c"]),
         }
         net.counting = _build_c(c_params, train=False, decoders=decoders)
         # probe counting weight and count decoded outputs
@@ -169,16 +158,7 @@ def build_network(
             seed=seed,
             label="error",
         )
-        if params["counting"] == "lmu":
-            nengo.Connection(
-                net.counting.lmu_ea.output,
-                net.error[0],
-                transform=decoders["W_weight_neural"],
-                synapse=float(params["lmu_tau"]),
-                seed=seed,
-            )
-        else:
-            nengo.Connection(
+        nengo.Connection(
                 net.counting.memory.neurons,
                 net.error[0],
                 transform=decoders["W_weight"],
@@ -318,7 +298,6 @@ def run(
     """Run the NEF model for a single participant."""
     pfull = {**PARAM_DEFAULTS, **params}
     pfull["nef_type"] = "recurrent"
-    pfull["base_seed"] = int(pfull["seed"])
 
     required = (
         "model_type",
@@ -341,7 +320,19 @@ def run(
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
-    decoders = _pretrain(pfull)
+    # Load precomputed counting network activities (Gram matrices).
+    # If available, W_weight is recomputed per-trial via fast_decode using
+    # the current (alpha_0, lambda_) — 300x faster than re-running Nengo.
+    # Falls back to _pretrain if the activity file is not found.
+    _activity_map: dict | None = None
+    try:
+        _activity_map = load_counting_activities(
+            n_neurons=int(pfull["n_neurons"]),
+            n_neurons_counting=int(pfull["n_neurons_counting"]),
+        )
+    except FileNotFoundError:
+        decoders = _pretrain(pfull)
+
     rows = []
     all_probe_data: list[dict] = []
 
@@ -349,8 +340,18 @@ def run(
         t_trial = time.time()
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        trial_seed = _trial_seed(int(pfull["seed"]), int(trial))
-        p = {**pfull, "seed": trial_seed}
+        # seed = trial number directly
+        p = {**pfull, "seed": int(trial)}
+        if _activity_map is not None:
+            activity = _activity_map.get(int(trial))
+            if activity is not None:
+                decoders = fast_decode_counting(
+                    activity,
+                    alpha_0=float(pfull["alpha_0"]),
+                    lambda_=float(pfull["lambda_"]),
+                )
+            else:
+                decoders = _pretrain({**p, "base_seed": int(trial)})
         if save_probes:
             responses, probe_data = _simulate_trial(
                 obs_values, p, decoders, return_probes=True
@@ -392,8 +393,6 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--pid", type=int, default=1)
     p.add_argument("--model_type", type=str, default="NEF")
-    p.add_argument("--counting", type=str, default=PARAM_DEFAULTS["counting"], choices=("lmu", "integrator"))
-    p.add_argument("--n_seeds", type=int, default=PARAM_DEFAULTS["n_seeds"])
     p.add_argument("--n_obs", type=int, default=PARAM_DEFAULTS["n_obs"])
     p.add_argument("--n_neurons", type=int, default=PARAM_DEFAULTS["n_neurons"])
     p.add_argument(
@@ -402,10 +401,6 @@ def parse_args() -> argparse.Namespace:
         default=PARAM_DEFAULTS["n_neurons_counting"],
     )
     p.add_argument("--lambda_", type=float, default=PARAM_DEFAULTS["lambda_"])
-    p.add_argument("--lmu_order", type=int, default=PARAM_DEFAULTS["lmu_order"])
-    p.add_argument("--lmu_tau", type=float, default=PARAM_DEFAULTS["lmu_tau"])
-    p.add_argument("--lmu_n_obs_max", type=int, default=PARAM_DEFAULTS["lmu_n_obs_max"])
-    p.add_argument("--lmu_theta_mult", type=float, default=PARAM_DEFAULTS["lmu_theta_mult"])
     p.add_argument("--tau_ff", type=float, default=PARAM_DEFAULTS["tau_ff"])
     p.add_argument("--tau_fb", type=float, default=PARAM_DEFAULTS["tau_fb"])
     p.add_argument("--T_error", type=float, default=PARAM_DEFAULTS["T_error"])

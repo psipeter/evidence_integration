@@ -9,6 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import nengo
 import numpy as np
+import pandas as pd
 
 import sys
 
@@ -70,10 +71,14 @@ def build_network(params: dict, train: bool, decoders: dict | None = None) -> ne
         nengo.Connection(net.node_input, net.ideal, synapse=None, seed=seed)
         net.probe_ideal_raw = nengo.Probe(net.ideal, synapse=None)
 
+        # radius_c: representational range of counting memory ensemble.
+        # Set per-dataset (carrabin=5, yoo=30) so neurons are tuned
+        # to the exact count range needed.
+        radius_memory = float(params.get("radius_c", n_obs))
         net.memory = nengo.Ensemble(
             n_neurons=n_neurons_counting,
             dimensions=1,
-            radius=n_obs,
+            radius=radius_memory,
             label="memory",
             seed=seed,
         )
@@ -356,9 +361,388 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dt", type=float, default=_NEF_FIXED["dt"])
     p.add_argument("--t_obs", type=float, default=_NEF_FIXED["t_obs"])
     p.add_argument("--t_iti", type=float, default=_NEF_FIXED["t_iti"])
+    p.add_argument("--precompute", action="store_true",
+                   help="Precompute and save decoder sets for N trial seeds")
+    p.add_argument("--precompute_activities", action="store_true",
+                   help="Precompute and save counting network activity Gram matrices")
+    p.add_argument("--plot_activities", action="store_true",
+                   help="Load saved activities, decode, and plot ideal vs decoded")
+    p.add_argument("--dataset", type=str, default=None,
+                   choices=("carrabin", "yoo"),
+                   help="Task dataset — sets radius_c automatically "
+                        "(carrabin=5, yoo=30). Overrides _NEF_FIXED default.")
+    p.add_argument("--n_trials", type=int, default=200,
+                   help="Number of trial seeds to precompute (default 200)")
+    p.add_argument("--base_seed", type=int, default=0,
+                   help="Base seed for generating trial seeds (default 0)")
     return p.parse_args()
+
+
+def precompute_decoders(
+    seeds: list[tuple[int, int]],  # list of (trial_number, seed) pairs
+    params: dict,
+    verbose: bool = True,
+) -> dict[int, dict]:
+    """Pretrain counting decoders for a list of seeds.
+
+    Each seed produces an independent set of decoders (W_count, W_weight)
+    that can be loaded per-trial in NEF.run() instead of retraining per trial
+    or using a single shared base_seed.
+
+    Parameters
+    ----------
+    seeds  : list of integer seeds (one per trial)
+    params : base params dict (must include timing, n_neurons, n_neurons_counting)
+
+    Returns
+    -------
+    dict mapping seed -> {"W_count": ..., "W_weight": ...}
+    """
+    import time
+    decoder_map = {}
+    n = len(seeds)
+    for i, (trial, seed) in enumerate(seeds):
+        p = {**params, "seed": seed, "n_obs": int(params["radius_c"])}
+        t0  = time.time()
+        net = build_network(p, train=True)
+        raw = simulate_network(net, p, train=True)
+        dec = decode_outputs(raw, p)
+        decoder_map[trial] = dec   # keyed by trial number
+        if verbose and (i % 20 == 0 or i == n - 1):
+            print(f"  [{i+1}/{n}] trial={trial} seed={seed}  {time.time()-t0:.1f}s",
+                  flush=True)
+    return decoder_map
+
+
+def save_decoders(
+    seeds: list[int],
+    params: dict,
+    out_path: str | Path | None = None,
+    verbose: bool = True,
+) -> Path:
+    """Precompute and save decoder map to disk.
+
+    File is named counting_decoders_n{n_neurons}_nc{n_neurons_counting}.pkl
+    and saved to data/ by default.
+    """
+    import pickle
+    from utils.paths import data_path
+
+    n  = int(params["n_neurons"])
+    nc = int(params["n_neurons_counting"])
+    if out_path is None:
+        out_path = data_path(f"counting_decoders_n{n}_nc{nc}.pkl")
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if verbose:
+        print(f"Precomputing {len(seeds)} decoder sets  "
+              f"(n_neurons={n}, n_neurons_counting={nc})")
+    decoder_map = precompute_decoders(seeds, params, verbose=verbose)
+    with open(out_path, "wb") as f:
+        pickle.dump(decoder_map, f, protocol=4)
+    print(f"Saved {len(decoder_map)} decoder sets -> {out_path}")
+    return out_path
+
+
+def load_decoders(
+    n_neurons: int | None = None,
+    n_neurons_counting: int | None = None,
+    path: str | Path | None = None,
+) -> dict[int, dict]:
+    """Load precomputed decoder map from disk."""
+    import pickle
+    from utils.paths import data_path
+
+    if path is None:
+        n  = n_neurons  or _NEF_FIXED["n_neurons"]
+        nc = n_neurons_counting or _NEF_FIXED["n_neurons_counting"]
+        path = data_path(f"counting_decoders_n{n}_nc{nc}.pkl")
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def precompute_activities(
+    n_trials: int,
+    params: dict,
+    out_path: str | Path | None = None,
+    verbose: bool = True,
+) -> Path:
+    """Simulate counting network for each trial seed and save Gram matrices.
+
+    Saves per-trial: MtM (Gram matrix), Mty_count, ideal_count_filt.
+    These are sufficient to recompute W_count and W_weight for any
+    (alpha_0, lambda_) without re-running the Nengo simulation.
+
+    File: data/counting_activities_n{n}_nc{nc}.pkl
+    Key:  trial number (1..n_trials)
+    """
+    import pickle
+    import time
+    from utils.paths import data_path
+
+    n  = int(params["n_neurons"])
+    nc = int(params["n_neurons_counting"])
+    if out_path is None:
+        out_path = data_path(f"counting_activities_n{n}_nc{nc}.pkl")
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    radius_c = int(params["radius_c"])
+    p_base = {**params, "n_obs": radius_c}
+    n  = int(params["n_neurons"])
+    nc = int(params["n_neurons_counting"])
+
+    if verbose:
+        print(f"Precomputing {n_trials} counting activity sets  "
+              f"(n_neurons={n}, n_neurons_counting={nc}, radius_c={radius_c})")
+
+    activities = {}
+    t_total = time.time()
+    for trial in range(1, n_trials + 1):
+        p = {**p_base, "seed": trial}
+        t0  = time.time()
+        net = build_network(p, train=True)
+        raw = simulate_network(net, p, train=True)
+
+        dt        = float(p["dt"])
+        tau_probe = float(p["tau_probe"])
+        syn       = nengo.Lowpass(tau_probe)
+
+        mem_filt  = syn.filt(raw["memory"], dt=dt)           # (T, n_neurons)
+        ic_filt   = syn.filt(raw["ideal"][:, 0:1], dt=dt).ravel()  # (T,) count
+
+        MtM       = mem_filt.T @ mem_filt                    # (n, n)
+        Mty_count = mem_filt.T @ ic_filt                     # (n,)
+
+        activities[trial] = {
+            "MtM":              MtM,
+            "Mty_count":        Mty_count,
+            "ideal_count_filt": ic_filt,
+            "mem_filt_T":       mem_filt.T,      # (n, T) — for fast_decode
+        }
+        if verbose:
+            t_trial = time.time() - t0
+            elapsed_total = time.time() - t_total
+            avg = elapsed_total / trial
+            eta = avg * (n_trials - trial)
+            pct = 100 * trial / n_trials
+            bar_len = 30
+            filled = int(bar_len * trial / n_trials)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            print(f"  [{bar}] {pct:5.1f}%  trial {trial:3d}/{n_trials}"
+                  f"  {t_trial:.1f}s  avg={avg:.1f}s  ETA={eta/60:.1f}min",
+                  end="\r", flush=True)
+
+    if verbose:
+        print()  # newline after progress bar
+
+    with open(out_path, "wb") as f:
+        pickle.dump(activities, f, protocol=4)
+
+    elapsed = time.time() - t_total
+    size_mb = out_path.stat().st_size / 1024**2
+    print(f"Saved {n_trials} activity sets -> {out_path}  "
+          f"({size_mb:.1f} MB, {elapsed/60:.1f}min)")
+    return out_path
+
+
+def fast_decode(
+    activity: dict,
+    alpha_0: float,
+    lambda_: float,
+    reg: float = 1e-3,
+) -> dict:
+    """Compute W_count and W_weight from precomputed Gram matrix.
+
+    Uses the saved MtM and mem_filt_T to solve for decoders without
+    re-running the Nengo simulation.
+
+    Parameters
+    ----------
+    activity : dict with keys MtM, Mty_count, ideal_count_filt, mem_filt_T
+    alpha_0, lambda_ : cognitive parameters for this Optuna trial
+    reg : regularisation fraction (matches nengo LstsqL2 default)
+
+    Returns
+    -------
+    dict with W_count and W_weight (same format as decode_outputs)
+    """
+    MtM        = activity["MtM"]
+    Mty_count  = activity["Mty_count"]
+    ic_filt    = activity["ideal_count_filt"]
+    mem_filt_T = activity["mem_filt_T"]         # (n, T)
+
+    n      = MtM.shape[0]
+    lam    = reg * np.trace(MtM) / n
+    A      = MtM + lam * np.eye(n)              # regularised Gram matrix
+
+    # W_count — independent of alpha_0 / lambda_
+    W_count = np.linalg.solve(A, Mty_count)[np.newaxis, :]
+
+    # ideal_weight = alpha_0 / max(count, 1)^lambda_  (analytical)
+    ic_for_weight = ic_filt
+    iw_filt    = alpha_0 / np.maximum(ic_for_weight, 1.0) ** lambda_
+    Mty_weight = mem_filt_T @ iw_filt
+    W_weight   = np.linalg.solve(A, Mty_weight)[np.newaxis, :]
+
+    return {"W_count": W_count, "W_weight": W_weight}
+
+
+def load_activities(
+    n_neurons: int | None = None,
+    n_neurons_counting: int | None = None,
+    path: str | Path | None = None,
+) -> dict[int, dict]:
+    """Load precomputed activity data from disk."""
+    import pickle
+    from utils.paths import data_path
+
+    if path is None:
+        n  = n_neurons          or _NEF_FIXED["n_neurons"]
+        nc = n_neurons_counting or _NEF_FIXED["n_neurons_counting"]
+        path = data_path(f"counting_activities_n{n}_nc{nc}.pkl")
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def plot_from_activities(
+    activities: dict,
+    alpha_0: float,
+    lambda_: float,
+    params: dict,
+    out_path: Path | None = None,
+) -> None:
+    """Load precomputed activities, decode per trial, plot ideal vs decoded.
+
+    Uses fast_decode to compute W_count and W_weight for each trial using
+    the given (alpha_0, lambda_), then decodes count and weight signals and
+    plots mean ± CI across trials using seaborn lineplot.
+    """
+    import seaborn as sns
+    from utils.plot_style import apply_style, get_palette
+    from utils.paths import FIGURES_DIR
+
+    apply_style()
+    pal = get_palette(6)
+    nef_color  = pal[3]
+    ideal_color = "0.4"
+
+    n_obs     = int(params["radius_c"])
+    dt        = float(params["dt"])
+    t_obs_    = float(params["t_obs"])
+    t_iti_    = float(params["t_iti"])
+    t_step    = t_obs_ + t_iti_
+    t_total   = n_obs * t_step
+    T         = int(round(t_total / dt))
+    t_arr     = np.arange(T) * dt
+
+    # ── Decode count and weight for each trial ────────────────────────────────
+    rows_count, rows_weight = [], []
+    ideal_count_all, ideal_weight_all = [], []
+
+    tau_probe = float(params["tau_probe"])
+    syn       = nengo.Lowpass(tau_probe)
+
+    for trial, act in sorted(activities.items()):
+        dec = fast_decode(act, alpha_0=alpha_0, lambda_=lambda_)
+        W_count  = dec["W_count"]   # (1, n)
+        W_weight = dec["W_weight"]  # (1, n)
+
+        # Reconstruct decoded signals from mem_filt_T
+        mem_filt_T = act["mem_filt_T"]  # (n, T)
+        count_dec  = (W_count  @ mem_filt_T).ravel()   # (T,)
+        weight_dec = (W_weight @ mem_filt_T).ravel()   # (T,)
+
+        # Ideal signals: count is stored; weight recomputed analytically
+        ic = act["ideal_count_filt"]
+        iw = alpha_0 / np.maximum(ic, 1.0) ** lambda_
+
+        # Sample at observation midpoints
+        idx = _eval_idx(params, T)
+        for i, obs in enumerate(range(1, n_obs + 1)):
+            if i >= len(idx): continue
+            k = idx[i]
+            rows_count.append({"trial": trial, "observation": obs,
+                                "decoded": float(count_dec[k]),
+                                "ideal":   float(ic[k])})
+            rows_weight.append({"trial": trial, "observation": obs,
+                                 "decoded": float(weight_dec[k]),
+                                 "ideal":   float(iw[k])})
+
+    df_c = pd.DataFrame(rows_count)
+    df_w = pd.DataFrame(rows_weight)
+    n_trials = len(activities)
+
+    # ── Figure ────────────────────────────────────────────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.5), constrained_layout=True)
+    fig.suptitle(
+        f"Counting circuit: ideal vs decoded  "
+        f"(α₀={alpha_0:.2f}, λ={lambda_:.2f}, "
+        f"n={int(params['n_neurons'])}, nc={int(params['n_neurons_counting'])}, "
+        f"n_trials={n_trials})",
+        fontsize=9,
+    )
+
+    for ax, df, ylabel, title in [
+        (axes[0], df_c, "count", "Observation count"),
+        (axes[1], df_w, "weight  α(t) = α₀/t^λ", "Learning-rate weight"),
+    ]:
+        # ideal line (same across trials)
+        ideal_vals = df.groupby("observation")["ideal"].first()
+        ax.plot(ideal_vals.index, ideal_vals.values,
+                "--", color=ideal_color, lw=1.5, label="ideal", zorder=3)
+
+        # decoded: lineplot with 95% CI across trials
+        sns.lineplot(
+            data=df, x="observation", y="decoded",
+            color=nef_color, ax=ax,
+            errorbar=("ci", 95), err_style="band",
+            label="decoded (mean ± 95% CI)",
+        )
+        ax.set_xlabel("Observation")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=7, frameon=False)
+        sns.despine(ax=ax, top=True, right=True)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    if out_path is None:
+        n  = int(params["n_neurons"])
+        nc = int(params["n_neurons_counting"])
+        out_path = FIGURES_DIR / f"counting_accuracy_n{n}_nc{nc}.png"
+    plt.savefig(out_path, dpi=300)
+    plt.savefig(str(out_path).replace(".png", ".pdf"))
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
+
+# Map dataset name to radius_c
+_DATASET_RADIUS_C = {"carrabin": 5, "yoo": 30}
 
 
 if __name__ == "__main__":
     args = parse_args()
-    run(vars(args))
+    params_base = {**_NEF_FIXED, **vars(args)}
+    # Derive radius_c from dataset if specified
+    if args.dataset is not None:
+        params_base["radius_c"] = _DATASET_RADIUS_C[args.dataset]
+    if args.precompute:
+        seeds = [(t, t) for t in range(1, args.n_trials + 1)]
+        save_decoders(seeds, params_base)
+    elif args.precompute_activities:
+        precompute_activities(args.n_trials, params_base)
+    elif args.plot_activities:
+        acts = load_activities(
+            n_neurons=args.n_neurons,
+            n_neurons_counting=args.n_neurons_counting,
+        )
+        plot_from_activities(
+            acts,
+            alpha_0=args.alpha_0,
+            lambda_=args.lambda_,
+            params=params_base,
+        )
+    else:
+        run(vars(args))

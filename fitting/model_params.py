@@ -7,6 +7,11 @@ Single source of truth for all model parameters.
 and fixed parameter dicts. Structure:
     dataset → model_type → param_name → (min, max, step)  [for fitted params]
                          → "fixed"    → dict               [for fixed params]
+
+``radius_c``: representational radius of the counting memory ensemble.
+Set per-dataset: carrabin=5 (5 obs/trial), yoo=30 (30 obs/trial).
+The counting simulation runs for radius_c observations, so neurons are
+tuned to the exact count range needed for each task.
 """
 
 from __future__ import annotations
@@ -22,16 +27,12 @@ _NEF_FIXED: dict[str, object] = {
     "T_error": 0.3,
     "tau_fast": 0.01,
     "tau_slow": 0.2,
-    "lmu_order": 24,
-    "lmu_tau": 0.2,
-    "lmu_n_obs_max": 30,
-    "lmu_theta_mult": 1.1,
     "onset_detector_amp": 0.3,
     "radius_e": 1.5,
     "radius_v": 1.0,
-    "counting": "integrator",
-    "n_neurons": 200,
-    "n_neurons_counting": 2000,
+    "radius_c": 30,   # default; overridden per dataset below
+    "n_neurons": 100,
+    "n_neurons_counting": 100,
     "n_seeds": 1,
     "seed": 0,
     "pes_learning_rate": 1e-4,
@@ -64,7 +65,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
-        "NEF": {**_NEF_RANGES, "fixed": _NEF_FIXED},
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 5},  # 5 obs/trial
+        },
     },
     "yoo": {
         "Mean": {},
@@ -82,7 +86,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "eps_p": (0.001, 1.0, 0.001),
             "eps_r": (0.001, 1.0, 0.001),
         },
-        "NEF": {**_NEF_RANGES, "fixed": _NEF_FIXED},
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 30},  # 30 obs/trial
+        },
     },
 }
 

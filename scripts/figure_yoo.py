@@ -37,7 +37,7 @@ from utils.plot_style import (
 # if future panels need a shared aspect or different spine visibility.
 
 # Model display order determines color assignment from get_palette()
-MODEL_ORDER = ["Mean", "LeakyIntegrator", "RL_lambda", "PrimacyRecency", "NEF"]
+MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]
 
 OBS_MAX = 30
 # Panel C: line / fit styling
@@ -1346,20 +1346,18 @@ def _plot_panel_h(ax, noise_folder: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_folder", type=str, default="refit")
-    parser.add_argument("--noise_folder", type=str, default="refit")
+    parser.add_argument("--run_folder", type=str, default="yoo")
+    parser.add_argument("--noise_folder", type=str, default="yoo")
     parser.add_argument("--panel_g_show_significance", action="store_true", default=False)
     parser.add_argument(
-        "--include_rl_lambda",
-        action="store_true",
-        default=False,
-        help="Include RL_lambda model in top-row panels (excluded by default).",
+        "--extra_models",
+        nargs="*",
+        default=[],
+        help="Additional models to include in top-row panels (e.g. RL_lambda ADM)",
     )
     args = parser.parse_args()
 
-    model_order = [
-        m for m in MODEL_ORDER if args.include_rl_lambda or m != "RL_lambda"
-    ]
+    model_order = MODEL_ORDER + [m for m in args.extra_models if m not in MODEL_ORDER]
 
     apply_style()
     _pal = get_palette(len(model_order))
