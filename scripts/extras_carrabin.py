@@ -29,16 +29,18 @@ One SLURM job per pid.
       python scripts/extras_carrabin.py --experiment probe_pids --mode collect --out_folder refit
 
 ----------------------------------------------------------------------
-2. n_neurons_scan  →  bash jobs/submit_neurons_scan.sh
+2. n_neurons_scan  (panel H)
 ----------------------------------------------------------------------
-Runs the NEF for selected pids across neuron counts 50–500.
-One SLURM job per (pid, n_neurons) combination.
+Scans n_neurons for a representative (alpha_0, lambda_) and pid.
+For each n_neurons value, n_neurons_counting is set to the same value.
+Precomputes counting activities if needed, simulates all trials,
+fits an RNN, and saves sigma and std(PE) to a single pkl file.
 
-  Submit all jobs:
-      bash jobs/submit_neurons_scan.sh
+  Run (locally, sequential):
+      python scripts/extras_carrabin.py --experiment n_neurons_scan \
+          --run_folder carrabin --out_folder carrabin
 
-  Collect (after all jobs complete):
-      python scripts/extras_carrabin.py --experiment n_neurons_scan --mode collect --out_folder refit
+  Output: data/runs/<out_folder>/n_neurons_scan.pkl
 
 ----------------------------------------------------------------------
 3. pe_readout  (panels F, G)
@@ -82,7 +84,7 @@ probe_pids experiment:
   probe_NEF_carrabin_<pid>.pkl          — raw NEF probe timeseries per pid
 
 n_neurons_scan experiment:
-  scan_compact_carrabin_<pid>_n<N>.pkl  — readout response + abs_pred_error per obs
+  n_neurons_scan.pkl  — sigma and std(PE) per n_neurons value
 
 pe_readout experiment:
   pe_readout_NEF_carrabin_<pid>.pkl     — per-pid: pid, trial, observation, qid, pe_at_readout
@@ -112,7 +114,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import RUNS_DIR, data_path
 
-N_NEURONS_LIST = [50, 75, 100, 150, 200, 300, 500]
+N_NEURONS_LIST = [25, 50, 100, 200, 400]
 READOUT_OFFSET = 0.5  # seconds into observation window for readout
 
 
@@ -148,73 +150,193 @@ def _run_probe_pids_simulate(
             print(f"  Saved to {dst}")
 
 
-def _run_n_neurons_scan_simulate(
-    scan_pids: list[int],
+def _run_n_neurons_scan(
+    pid: int,
+    alpha_0: float,
+    lambda_: float,
     n_neurons_list: list[int],
     run_folder: Path,
     out_folder: str,
 ) -> None:
-    from fitting.model_params import MODEL_PARAMS
+    """Scan n_neurons for panel H.
+
+    For each n_neurons value (n_neurons_counting set to same value):
+    - Precompute counting activities if not already cached
+    - Simulate all trials for the given pid/alpha_0/lambda_
+    - Compute std(PE at readout) within (obs, qid) groups
+    - Fit RNN to responses and compute sigma_NEF
+    - Save results to n_neurons_scan.pkl
+
+    Output columns: n_neurons, sigma, pe_std, cv_rmse, elapsed_s
+    """
+    import pickle
+    import time as _time
+    from fitting.model_params import _NEF_FIXED
     from models.NEF import PARAM_DEFAULTS, _pretrain, _simulate_trial
-    from utils.run_params import trial_seed as _trial_seed
+    from models.RNN import fit as rnn_fit
+    from models.counting_integrator import (
+        fast_decode, precompute_activities,
+    )
+    from utils.carrabin_transform import apply_carrabin_transform
 
-    out_dir = RUNS_DIR / out_folder
+    out_dir  = RUNS_DIR / out_folder
     out_dir.mkdir(parents=True, exist_ok=True)
-    human = pd.read_pickle(data_path("carrabin.pkl"))
+    out_path = out_dir / f"n_neurons_scan_{pid}.pkl"
+    if out_path.exists():
+        print(f"Already exists: {out_path.name} — skipping (delete to rerun)")
+        return
 
-    for pid in scan_pids:
-        base_params = pd.read_pickle(
-            run_folder / f"NEF_carrabin_{pid}_params.pkl"
-        ).iloc[0].to_dict()
-        fixed = MODEL_PARAMS["carrabin"]["NEF"].get("fixed", {})
-        base_params = {**PARAM_DEFAULTS, **fixed, **base_params}
-        base_params["nef_type"] = "recurrent"
-        base_params["dataset"] = "carrabin"
-        base_params["model_type"] = "NEF"
-        base_params["pid"] = int(pid)
-        human_pid = human.query("pid == @pid")
+    human   = pd.read_pickle(data_path("carrabin.pkl"))
+    h_pid   = human[human["pid"] == pid]
+    qid_map = (
+        h_pid[["trial", "observation", "qid"]]
+        .drop_duplicates()
+        .set_index(["trial", "observation"])["qid"]
+    )
+    n_trials = h_pid["trial"].nunique()
+    n_obs    = int(h_pid["observation"].max())
 
-        for n_neurons in n_neurons_list:
-            print(f"Simulating pid={pid}, n_neurons={n_neurons}...")
-            p = {**base_params, "n_neurons": n_neurons}
-            decoders = _pretrain(p)
-            compact_rows: list[dict] = []
+    print(f"n_neurons scan  pid={pid}  alpha_0={alpha_0:.3f}  lambda_={lambda_:.3f}")
+    print(f"n_neurons values: {n_neurons_list}\n")
 
-            for trial, trial_data in human_pid.groupby("trial"):
-                trial_data = trial_data.sort_values("observation")
-                obs_values = trial_data["value"].to_numpy(dtype=float)
-                trial_seed = _trial_seed(int(p["seed"]), int(trial))
-                p_trial = {**p, "seed": trial_seed}
-                _, probe_data = _simulate_trial(
-                    obs_values, p_trial, decoders, return_probes=True
+    results = []
+
+    for n_neurons in n_neurons_list:
+        print(f"=== n_neurons={n_neurons} ===", flush=True)
+
+        params = {
+            **PARAM_DEFAULTS,
+            **_NEF_FIXED,
+            "model_type":         "NEF",
+            "dataset":            "carrabin",
+            "pid":                pid,
+            "alpha_0":            alpha_0,
+            "lambda_":            lambda_,
+            "n_neurons":          n_neurons,
+            "n_neurons_counting": n_neurons,
+            "radius_c":           5,
+        }
+
+        # Load or precompute counting activities
+        act_path = data_path(f"counting_activities_n{n_neurons}_nc{n_neurons}.pkl")
+        if act_path.exists():
+            with open(act_path, "rb") as f:
+                activity_map = pickle.load(f)
+            print(f"  Loaded activities: {act_path.name}")
+        else:
+            print(f"  Precomputing activities (n={n_neurons}, nc={n_neurons})...", flush=True)
+            t0 = _time.time()
+            precompute_activities(n_trials=200, params=params, out_path=act_path)
+            print(f"  Done in {_time.time()-t0:.0f}s")
+            with open(act_path, "rb") as f:
+                activity_map = pickle.load(f)
+
+        # Simulate
+        t0 = _time.time()
+        rows_resp, rows_pe = [], []
+
+        for ti, (trial, trial_data) in enumerate(h_pid.groupby("trial"), 1):
+            trial_data = trial_data.sort_values("observation")
+            obs_values = trial_data["value"].to_numpy(dtype=float)
+            p          = {**params, "seed": int(trial)}
+
+            activity = activity_map.get(int(trial))
+            if activity is not None:
+                decoders = fast_decode(activity, alpha_0=alpha_0, lambda_=lambda_)
+            else:
+                decoders = _pretrain({**p, "base_seed": int(trial)})
+
+            try:
+                responses, probe = _simulate_trial(
+                    obs_values, p, decoders, return_probes=True
                 )
-                t = probe_data["t"]
-                value_decoded = np.asarray(probe_data["value"]).squeeze()
-                error = probe_data["error"]
-                error1 = error[:, 1] if error.ndim > 1 else error
-                t_iti = float(p_trial["t_iti"])
-                t_obs = float(p_trial["t_obs"])
-                t_step = t_obs + t_iti
-                n_obs = len(obs_values)
+            except Exception as e:
+                print(f"\n  Warning: trial {trial} failed ({e}), skipping")
+                continue
 
-                for obs in range(1, n_obs + 1):
-                    t_readout = t_iti + (obs - 1) * t_step + READOUT_OFFSET
-                    idx = int(np.argmin(np.abs(t - t_readout)))
-                    compact_rows.append(
-                        {
-                            "pid": pid,
-                            "n_neurons": n_neurons,
-                            "trial": int(trial),
-                            "observation": obs,
-                            "response": float(value_decoded[idx]),
-                            "abs_pred_error": float(np.abs(error1[idx])),
-                        }
-                    )
+            t_arr    = probe["t"]
+            error    = probe["error"]
+            pe_trace = error[:, 1] if error.ndim > 1 else error.ravel()
+            t_iti_   = float(p["t_iti"])
+            t_obs_   = float(p["t_obs"])
+            t_step   = t_obs_ + t_iti_
 
-            compact_df = pd.DataFrame(compact_rows)
-            out_path = out_dir / f"scan_compact_carrabin_{pid}_n{n_neurons}.pkl"
-            compact_df.to_pickle(out_path)
-            print(f"  Saved {len(compact_df)} rows to {out_path}")
+            for obs in range(1, n_obs + 1):
+                t_readout = t_iti_ + (obs - 1) * t_step + READOUT_OFFSET
+                idx = int(np.argmin(np.abs(t_arr - t_readout)))
+                qid = qid_map.get((trial, obs), np.nan)
+                rows_resp.append({
+                    "n_neurons":   n_neurons,
+                    "trial":       int(trial),
+                    "observation": obs,
+                    "qid":         qid,
+                    "response":    float(responses[obs - 1]),
+                })
+                rows_pe.append({
+                    "n_neurons":   n_neurons,
+                    "trial":       int(trial),
+                    "observation": obs,
+                    "qid":         qid,
+                    "pe":          float(pe_trace[idx]),
+                })
+
+            sys.stdout.write(
+                f"\r  trial {ti:3d}/{n_trials}  elapsed={_time.time()-t0:.0f}s"
+            )
+            sys.stdout.flush()
+
+        print()
+        elapsed = _time.time() - t0
+
+        # std(PE) within (obs, qid) groups
+        pe_df  = pd.DataFrame(rows_pe)
+        pe_std = float(
+            pe_df.groupby(["observation", "qid"])["pe"]
+            .apply(lambda x: x.std() if len(x) >= 3 else np.nan)
+            .dropna()
+            .mean()
+        )
+
+        # Apply carrabin transform and fit RNN
+        resp_for_rnn = apply_carrabin_transform(
+            pd.DataFrame([{
+                "model_type": "NEF", "pid": pid,
+                "trial": r["trial"], "observation": r["observation"],
+                "response": r["response"],
+            } for r in rows_resp]),
+            "carrabin",
+        )
+        source   = f"NEF_scan_n{n_neurons}"
+        resp_src = out_dir / f"{source}_carrabin_responses.pkl"
+        resp_for_rnn.to_pickle(resp_src)
+
+        print(f"  Fitting RNN (source={source})...", flush=True)
+        rnn_result = rnn_fit(
+            pid=pid,
+            source=source,
+            run_folder=out_folder,
+            max_epochs=5000,
+            patience=300,
+            verbose=False,
+        )
+        sigma   = float(rnn_result["sigma"]["sigma"].iloc[0])
+        cv_rmse = float(rnn_result["params"]["cv_rmse"].iloc[0])
+
+        print(f"  sigma={sigma:.4f}  pe_std={pe_std:.4f}  "
+              f"cv_rmse={cv_rmse:.4f}  t={elapsed:.0f}s")
+        results.append({
+            "pid":       pid,
+            "n_neurons": n_neurons,
+            "sigma":     sigma,
+            "pe_std":    pe_std,
+            "cv_rmse":   cv_rmse,
+            "elapsed_s": elapsed,
+        })
+
+    df = pd.DataFrame(results)
+    df.to_pickle(out_path)
+    print(f"\nSaved -> {out_path}")
+    print(df[["n_neurons", "sigma", "pe_std", "cv_rmse"]].to_string(index=False))
 
 
 def _collect_probe_pids(out_dir: Path) -> None:
@@ -237,15 +359,18 @@ def _collect_probe_pids(out_dir: Path) -> None:
     )
 
 
-def _collect_n_neurons_scan(out_dir: Path, _n_neurons_list: list[int]) -> None:
-    compact_files = sorted(out_dir.glob("scan_compact_carrabin_*_n*.pkl"))
-    if not compact_files:
-        print("No compact scan files found.")
+
+def _collect_n_neurons_scan(out_dir: Path) -> None:
+    """Collect per-pid n_neurons_scan files into a single combined pkl."""
+    files = sorted(out_dir.glob("n_neurons_scan_[0-9]*.pkl"))
+    if not files:
+        print("No n_neurons_scan per-pid files found.")
         return
-    df = pd.concat([pd.read_pickle(f) for f in compact_files], ignore_index=True)
-    out = out_dir / "scan_responses_carrabin.pkl"
+    df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
+    out = out_dir / "n_neurons_scan.pkl"
     df.to_pickle(out)
-    print(f"Collected {len(compact_files)} files -> {out} ({df.shape})")
+    print(f"Collected {len(files)} files -> {out.name}")
+    print(df.groupby("n_neurons")[["sigma","pe_std"]].mean().round(4).to_string())
 
 
 
@@ -330,7 +455,11 @@ def _run_pe_readout(
         else:
             decoders = _pretrain({**p, "base_seed": int(trial)})
 
-        _, probe = _simulate_trial(obs_values, p, decoders, return_probes=True)
+        try:
+            _, probe = _simulate_trial(obs_values, p, decoders, return_probes=True)
+        except Exception as e:
+            print(f"\n  Warning: trial {trial} failed ({e}), skipping")
+            continue
 
         t_arr    = probe["t"]
         error    = probe["error"]                       # (T, 2)
@@ -536,20 +665,7 @@ def main() -> None:
         "--pid",
         type=int,
         default=None,
-        help="Single PID for probe_timeseries experiment",
-    )
-    parser.add_argument(
-        "--scan_pid",
-        type=int,
-        default=None,
-        help="Single PID alias for --scan_pids",
-    )
-    parser.add_argument(
-        "--scan_pids",
-        type=int,
-        nargs="+",
-        default=[14],
-        help="PIDs to use for n_neurons_scan (default: [14])",
+        help="Single PID for pe_readout / probe_timeseries / n_neurons_scan",
     )
     parser.add_argument(
         "--n_neurons_list",
@@ -557,16 +673,44 @@ def main() -> None:
         nargs="+",
         default=list(N_NEURONS_LIST),
     )
+    parser.add_argument("--alpha_0", type=float, default=None,
+                        help="alpha_0 for n_neurons_scan (default: load from fitted params)")
+    parser.add_argument("--lambda_", type=float, default=None,
+                        help="lambda_ for n_neurons_scan (default: load from fitted params)")
+    parser.add_argument("--scan_pid", type=int, default=18,
+                        help="pid for n_neurons_scan (default: 18)")
     args = parser.parse_args()
 
     out_folder = args.out_folder
-    if args.scan_pid is not None:
-        args.scan_pids = [args.scan_pid]
-
     run_folder = RUNS_DIR / args.run_folder
 
+    # n_neurons_scan: per-pid run or collect
+    if args.experiment == "n_neurons_scan":
+        if args.mode == "collect":
+            _collect_n_neurons_scan(RUNS_DIR / out_folder)
+        else:
+            # Load fitted params for this pid if alpha_0/lambda_ not overridden
+            pid = args.scan_pid
+            alpha_0 = args.alpha_0
+            lambda_ = args.lambda_
+            if alpha_0 is None or lambda_ is None:
+                combined = run_folder / "NEF_carrabin_params.pkl"
+                if combined.exists():
+                    p = pd.read_pickle(combined)
+                    row = p[p["pid"]==pid]
+                    if not row.empty:
+                        alpha_0 = float(row["alpha_0"].iloc[0])
+                        lambda_ = float(row["lambda_"].iloc[0])
+            _run_n_neurons_scan(
+                pid=pid,
+                alpha_0=alpha_0,
+                lambda_=lambda_,
+                n_neurons_list=args.n_neurons_list,
+                run_folder=run_folder,
+                out_folder=out_folder,
+            )
     # pe_readout: single-pid run or collect
-    if args.experiment == "pe_readout":
+    elif args.experiment == "pe_readout":
         if args.mode == "collect":
             _collect_pe_readout(RUNS_DIR / out_folder)
         else:
@@ -581,16 +725,10 @@ def main() -> None:
     elif args.mode == "run":
         if args.experiment == "probe_pids":
             _run_probe_pids_simulate(args.pids, run_folder, out_folder)
-        elif args.experiment == "n_neurons_scan":
-            _run_n_neurons_scan_simulate(
-                args.scan_pids, args.n_neurons_list, run_folder, out_folder
-            )
     elif args.mode == "collect":
         out_dir = RUNS_DIR / out_folder
         if args.experiment == "probe_pids":
             _collect_probe_pids(out_dir)
-        elif args.experiment == "n_neurons_scan":
-            _collect_n_neurons_scan(out_dir, args.n_neurons_list)
     else:
         parser.error("--mode run or --mode collect required for this experiment")
 

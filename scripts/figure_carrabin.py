@@ -400,14 +400,31 @@ def _plot_panel_g(ax, run_folder: str, palette: dict) -> None:
     pe_path = run_dir / "pe_readout_NEF_carrabin.pkl"
     if pe_path.exists():
         pe_df = pd.read_pickle(pe_path)
-        pe_std = (
-            pe_df.groupby("pid")["pe_at_readout"]
-            .apply(lambda x: np.abs(x).std())
+        # Compute std within (obs, qid) groups, then average across groups.
+        # This controls for observation number and stimulus sequence,
+        # isolating pure trial-to-trial noise (same method as old panel G).
+        grp_std = (
+            pe_df.groupby(["pid", "observation", "qid"])["pe_at_readout"]
+            .std()
             .reset_index()
             .rename(columns={"pe_at_readout": "pe_std"})
         )
+        # Require at least 3 trials per group to get a reliable std estimate
+        grp_counts = (
+            pe_df.groupby(["pid", "observation", "qid"])["pe_at_readout"]
+            .count()
+            .reset_index()
+            .rename(columns={"pe_at_readout": "n"})
+        )
+        grp_std = grp_std.merge(grp_counts, on=["pid", "observation", "qid"])
+        grp_std = grp_std[grp_std["n"] >= 3]
+        pe_std = (
+            grp_std.groupby("pid")["pe_std"]
+            .mean()
+            .reset_index()
+        )
         df = pe_std.merge(nef_sigma, on="pid").dropna()
-        x_col, x_label = "pe_std", "Std of decoded PE at readout"
+        x_col, x_label = "pe_std", "Mean std of decoded PE at readout"
     else:
         # Fall back to lambda_ vs response_noise
         df = nef_sigma.merge(params, on="pid").dropna()
@@ -435,9 +452,55 @@ def _plot_panel_g(ax, run_folder: str, palette: dict) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_h(ax, *args, **kwargs) -> None:
-    """Placeholder — archived, pending new noise analysis."""
-    _placeholder(ax, "Panel H\n(archived)")
+def _plot_panel_h(ax, run_folder: str, palette: dict) -> None:
+    """Panel H: sigma_NEF and std(PE) vs n_neurons.
+
+    Shows that both response noise and PE noise scale with network size,
+    with the human sigma reference line for comparison.
+    """
+    from scipy.stats import pearsonr
+
+    run_dir  = data_path("runs") / run_folder
+    scan_path = run_dir / "n_neurons_scan.pkl"
+    if not scan_path.exists():
+        _placeholder(ax, "No n_neurons scan data\n(run extras_carrabin.py)")
+        return
+
+    df = pd.read_pickle(scan_path)
+    sigma_df    = pd.read_pickle(run_dir / "RNN_sigma_carrabin_sigma.pkl")
+    human_sigma = float(
+        sigma_df[sigma_df["source"]=="human"]["sigma"].mean()
+    )
+
+    color_sigma = list(palette.values())[0]
+    color_pe    = list(palette.values())[1]
+    n_vals      = sorted(df["n_neurons"].unique())
+
+    if "pid" in df.columns and df["pid"].nunique() > 1:
+        # Multiple pids — use lineplot with SD
+        sns.lineplot(data=df, x="n_neurons", y="sigma",
+                     color=color_sigma, marker="o", markersize=5, lw=1.8,
+                     errorbar="sd", err_style="band",
+                     label="Response noise (σ)", ax=ax)
+        sns.lineplot(data=df, x="n_neurons", y="pe_std",
+                     color=color_pe, marker="s", markersize=5, lw=1.8,
+                     linestyle="--", errorbar="sd", err_style="band",
+                     label="Std PE at readout", ax=ax)
+    else:
+        ax.plot(n_vals, df.set_index("n_neurons")["sigma"][n_vals].values,
+                "o-", color=color_sigma, lw=1.8, ms=5, label="Response noise (σ)")
+        ax.plot(n_vals, df.set_index("n_neurons")["pe_std"][n_vals].values,
+                "s--", color=color_pe, lw=1.8, ms=5, label="Std PE at readout")
+
+    ax.axhline(human_sigma, color=color_sigma, lw=1.0,
+               linestyle=":", alpha=0.7, label="Mean human σ")
+
+    ax.set_xlabel("Number of neurons")
+    ax.set_ylabel("Noise")
+    ax.set_xticks(n_vals)
+    ax.set_xticklabels([str(n) for n in n_vals])
+    ax.legend(fontsize=6, frameon=False, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
 
 
 
@@ -503,7 +566,7 @@ def main() -> None:
     _plot_panel_e(row1[0], run_folder=args.run_folder, palette=palette)
     _plot_panel_f(row1[1], run_folder=args.run_folder, palette=palette)
     _plot_panel_g(row1[2], run_folder=args.run_folder, palette=palette)
-    _plot_panel_h(row1[3])
+    _plot_panel_h(row1[3], run_folder=args.run_folder, palette=palette)
 
     label_panels(axes)
 
