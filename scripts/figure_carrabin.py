@@ -150,7 +150,8 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     sns.despine(ax=ax, top=True, right=True)
     nef_disp = _display("NEF")
     if nef_disp in available:
-        annotate_nef_comparisons(ax, df, "model_disp", "plot_loss", available, nef_label=nef_disp)
+        annotate_nef_comparisons(ax, df, "model_disp", "plot_loss", available, nef_label=nef_disp,
+                          compare_only=["Mean", "LeakyIntegrator", "PrimacyRecency"])
 
 
 def _plot_panel_c(ax) -> None:
@@ -224,33 +225,32 @@ def _load_loss_long(
 
 
 def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
-    """Panel D: KDE of per-participant sigma (RNN residual noise) for each source.
+    """Panel D: Normalised KDE of per-participant sigma (RNN residual noise).
 
-    Human data shown as a filled KDE.
-    Stochastic models (NoisyCounting, NEF) shown as KDEs.
+    Human, NEF, and NoisyCounting shown as filled KDEs normalised to peak=1,
+    so shapes can be compared regardless of sample size.
     Deterministic models shown as vertical lines at their mean sigma.
-    Sources not present in the noise file are silently skipped.
+    All stochastic sources use the same visual style (filled + outline).
     """
-    from scipy.stats import gaussian_kde
-
-    run_dir  = data_path("runs") / run_folder
-    noise_f  = run_dir / "RNN_sigma_carrabin_sigma.pkl"
+    run_dir = data_path("runs") / run_folder
+    noise_f = run_dir / "RNN_sigma_carrabin_sigma.pkl"
     if not noise_f.exists():
         _placeholder(ax, "No RNN noise data (run models/RNN.py --all_sources)")
         return
 
     sigma_df = pd.read_pickle(noise_f)
-
-    # Sources treated as distributions (KDE) vs point estimates (vertical line)
     STOCHASTIC = {"human", "NoisyCounting", "NEF"}
 
-    # Display order: human first, then models in model_order
     sources_in_order = ["human"] + [
         m for m in model_order if m in sigma_df["source"].unique()
     ]
+    # Also include NoisyCounting if in extra_models but not model_order
+    for extra in sigma_df["source"].unique():
+        if extra in STOCHASTIC and extra not in sources_in_order:
+            sources_in_order.append(extra)
 
-    x_max = sigma_df["sigma"].quantile(0.98) * 1.1
-    x     = np.linspace(0, x_max, 300)
+    x_max = sigma_df["sigma"].quantile(0.99) * 1.1
+    x     = np.linspace(0, x_max, 400)
 
     for src in sources_in_order:
         sub = sigma_df[sigma_df["source"] == src]["sigma"].dropna()
@@ -261,41 +261,178 @@ def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) ->
         label = "Human" if src == "human" else _display(src)
 
         if src in STOCHASTIC and len(sub) >= 4:
-            # KDE
-            kde = gaussian_kde(sub, bw_method="scott")
+            kde     = gaussian_kde(sub, bw_method="scott")
             density = kde(x)
-            if src == "human":
-                ax.fill_between(x, density, alpha=0.25, color=color)
-                ax.plot(x, density, lw=2, color=color, label=label)
-            else:
-                ax.plot(x, density, lw=1.5, color=color,
-                        linestyle="--", label=label)
+            density = density / density.max()   # normalise to peak = 1
+            ax.fill_between(x, density, alpha=0.20, color=color)
+            ax.plot(x, density, lw=1.8, color=color, label=label)
         else:
-            # Vertical line at mean sigma
             mean_sigma = float(sub.mean())
             ax.axvline(mean_sigma, color=color, lw=1.5,
-                       linestyle=":", label=f"{label} (det.)")
+                       linestyle=":", label=f"{label}")
 
-    ax.set_xlabel("σ (response noise)")
-    ax.set_ylabel("Density")
+    ax.set_xlabel("Response noise")
+    ax.set_ylabel("Normalised density")
     ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
     ax.legend(fontsize=7, framealpha=0.8)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_e(ax, *args, **kwargs) -> None:
-    """Placeholder — archived, pending new noise analysis."""
-    _placeholder(ax, "Panel E\n(archived)")
+def _plot_panel_e(ax, run_folder: str, palette: dict) -> None:
+    """Panel E: decoded PE timecourse — obs=1, first value +1, mean ± 95% CI.
+
+    Uses sns.lineplot with errorbar=("ci", 95) across trials.
+    Filtered to observation=1, qid starting with "1" (first obs was +1).
+    Downsampled to every 20ms for a clean smooth trace.
+    """
+    run_dir    = data_path("runs") / run_folder
+    PIDS       = [6, 7]
+    READOUT_T  = 0.5
+    DOWNSAMPLE = 20    # keep every Nth row (dt=0.001 -> every 20ms)
+    MIN_TRIALS = 5
+
+    params_all = pd.read_pickle(run_dir / "NEF_carrabin_params.pkl")
+    pal_list   = list(palette.values())
+    colors     = [pal_list[3], pal_list[0]] if len(pal_list) >= 4 else ["C0", "C1"]
+
+    dfs = []
+    for pid, color in zip(PIDS, colors):
+        path = run_dir / f"probe_timeseries_NEF_carrabin_{pid}.pkl"
+        if not path.exists():
+            continue
+        df = pd.read_pickle(path)
+        df = df[
+            (df["observation"] == 1) &
+            (df["qid"].astype(str).str.startswith("1"))
+        ].copy()
+        if df["trial"].nunique() < MIN_TRIALS:
+            continue
+        # Downsample: keep every DOWNSAMPLE-th timestep
+        df = df[df["t_within_obs"].apply(
+            lambda t: int(round(t * 1000)) % DOWNSAMPLE == 0
+        )].copy()
+        df["abs_pe"] = np.abs(df["decoded_pe"])
+        row = params_all[params_all["pid"] == pid].iloc[0]
+        df["pid_label"] = f"pid={pid}  α₀={row['alpha_0']:.2f}  λ={row['lambda_']:.2f}"
+        dfs.append((df, color))
+
+    if not dfs:
+        _placeholder(ax, "No probe timeseries data\n(run extras_carrabin.py)")
+        return
+
+    combined = pd.concat([d for d, _ in dfs], ignore_index=True)
+    order = combined[["pid","pid_label"]].drop_duplicates().sort_values("pid")["pid_label"].tolist()
+    pal = {label: color for (d, color), label in zip(dfs, order)}
+
+    sns.lineplot(
+        data=combined,
+        x="t_within_obs",
+        y="abs_pe",
+        hue="pid_label",
+        hue_order=order,
+        palette=pal,
+        errorbar="sd",
+        err_style="band",
+        ax=ax,
+    )
+    ax.set_xlabel("Time within observation (s)")
+    ax.set_ylabel("Decoded prediction error")
+    ax.set_xlim(0, 1.5)
+    ax.set_ylim(bottom=0)
+    ax.legend(fontsize=7, frameon=False, title=None)
+    sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_f(ax, *args, **kwargs) -> None:
-    """Placeholder — archived, pending new noise analysis."""
-    _placeholder(ax, "Panel F\n(archived)")
+def _plot_panel_f(ax, run_folder: str, palette: dict) -> None:
+    """Panel F: alpha_0 vs response noise (sigma_NEF) across participants.
+
+    Scatter + regression showing that higher learning rate -> more response noise.
+    """
+    from scipy.stats import pearsonr
+
+    run_dir = data_path("runs") / run_folder
+    sigma_df = pd.read_pickle(run_dir / "RNN_sigma_carrabin_sigma.pkl")
+    nef_sigma = sigma_df[sigma_df["source"]=="NEF"][["pid","sigma"]].rename(
+        columns={"sigma": "response_noise"})
+    params = pd.read_pickle(run_dir / "NEF_carrabin_params.pkl")[["pid","alpha_0","lambda_"]]
+
+    df = nef_sigma.merge(params, on="pid").dropna()
+    if df.empty:
+        _placeholder(ax, "No NEF sigma data")
+        return
+
+    color = list(palette.values())[0]
+    sns.regplot(
+        data=df,
+        x="alpha_0",
+        y="response_noise",
+        scatter_kws={"color": color, "s": 25, "alpha": 0.8},
+        line_kws={"color": color, "lw": 1.5},
+        ci=95,
+        ax=ax,
+    )
+    r, p = pearsonr(df["alpha_0"], df["response_noise"])
+    stars = "****" if p < 1e-4 else "***" if p < 1e-3 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+    ax.text(0.97, 0.05, f"r={r:.2f} {stars}",
+            ha="right", va="bottom", transform=ax.transAxes, fontsize=7)
+    ax.set_xlabel("Fitted α₀")
+    ax.set_ylabel("Response noise")
+    sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_panel_g(ax, *args, **kwargs) -> None:
-    """Placeholder — archived, pending new noise analysis."""
-    _placeholder(ax, "Panel G\n(archived)")
+def _plot_panel_g(ax, run_folder: str, palette: dict) -> None:
+    """Panel G: decoded PE std at readout vs response noise (sigma_NEF).
+
+    Requires probe_timeseries data for all pids. Falls back to lambda_ vs
+    sigma_NEF if only a subset of pids have probe data.
+    """
+    from scipy.stats import pearsonr
+
+    run_dir = data_path("runs") / run_folder
+    sigma_df = pd.read_pickle(run_dir / "RNN_sigma_carrabin_sigma.pkl")
+    nef_sigma = sigma_df[sigma_df["source"]=="NEF"][["pid","sigma"]].rename(
+        columns={"sigma": "response_noise"})
+    params = pd.read_pickle(run_dir / "NEF_carrabin_params.pkl")[["pid","alpha_0","lambda_"]]
+    color = list(palette.values())[0]
+
+    # Load pe_readout data if collected; fall back to lambda_ otherwise
+    pe_path = run_dir / "pe_readout_NEF_carrabin.pkl"
+    if pe_path.exists():
+        pe_df = pd.read_pickle(pe_path)
+        pe_std = (
+            pe_df.groupby("pid")["pe_at_readout"]
+            .apply(lambda x: np.abs(x).std())
+            .reset_index()
+            .rename(columns={"pe_at_readout": "pe_std"})
+        )
+        df = pe_std.merge(nef_sigma, on="pid").dropna()
+        x_col, x_label = "pe_std", "Std of decoded PE at readout"
+    else:
+        # Fall back to lambda_ vs response_noise
+        df = nef_sigma.merge(params, on="pid").dropna()
+        x_col, x_label = "lambda_", "Fitted λ"
+
+    if df.empty:
+        _placeholder(ax, "No data for panel G")
+        return
+
+    sns.regplot(
+        data=df,
+        x=x_col,
+        y="response_noise",
+        scatter_kws={"color": color, "s": 25, "alpha": 0.8},
+        line_kws={"color": color, "lw": 1.5},
+        ci=95,
+        ax=ax,
+    )
+    r, p = pearsonr(df[x_col], df["response_noise"])
+    stars = "****" if p < 1e-4 else "***" if p < 1e-3 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+    ax.text(0.97, 0.05, f"r={r:.2f} {stars}",
+            ha="right", va="bottom", transform=ax.transAxes, fontsize=7)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Response noise")
+    sns.despine(ax=ax, top=True, right=True)
 
 
 def _plot_panel_h(ax, *args, **kwargs) -> None:
@@ -363,9 +500,9 @@ def main() -> None:
     _plot_panel_d(row0[3], args.run_folder, palette, model_order)
 
     # ── bottom row: E–H archived, pending new noise analysis ─────────────────
-    _plot_panel_e(row1[0])
-    _plot_panel_f(row1[1])
-    _plot_panel_g(row1[2])
+    _plot_panel_e(row1[0], run_folder=args.run_folder, palette=palette)
+    _plot_panel_f(row1[1], run_folder=args.run_folder, palette=palette)
+    _plot_panel_g(row1[2], run_folder=args.run_folder, palette=palette)
     _plot_panel_h(row1[3])
 
     label_panels(axes)

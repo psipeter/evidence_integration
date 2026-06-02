@@ -166,9 +166,10 @@ def annotate_nef_comparisons(
     order: list,
     nef_label: str = "NEF",
     dy_fraction: float = 0.04,
+    compare_only: list | None = None,
 ) -> None:
     """
-    Run paired Wilcoxon tests between NEF and every other model, and draw
+    Run paired Wilcoxon tests between NEF and other models, and draw
     horizontal significance lines (no end ticks) above the boxplot.
 
     Only comparisons involving `nef_label` are shown.
@@ -176,13 +177,14 @@ def annotate_nef_comparisons(
 
     Parameters
     ----------
-    ax          : matplotlib Axes
-    data        : DataFrame with columns [pid, x_col, y_col]
-    x_col       : column with model/group labels (x-axis categories)
-    y_col       : column with the metric values
-    order       : list of category names in x-axis order (sets x positions)
-    nef_label   : display name of the NEF model in x_col
-    dy_fraction : line-spacing as fraction of current y-axis range
+    ax           : matplotlib Axes
+    data         : DataFrame with columns [pid, x_col, y_col]
+    x_col        : column with model/group labels (x-axis categories)
+    y_col        : column with the metric values
+    order        : list of category names in x-axis order (sets x positions)
+    nef_label    : display name of the NEF model in x_col
+    dy_fraction  : line-spacing as fraction of current y-axis range
+    compare_only : if given, only compare NEF against these models
     """
     x_positions = {model: i for i, model in enumerate(order)}
     if nef_label not in x_positions:
@@ -191,9 +193,12 @@ def annotate_nef_comparisons(
     y_lo, y_hi = ax.get_ylim()
     dy_step = (y_hi - y_lo) * dy_fraction
 
-    # collect only NEF vs other pairs, sorted by x distance for clean stacking
+    # collect NEF vs other pairs, restricted to compare_only if given
+    candidates = [m for m in order if m != nef_label]
+    if compare_only is not None:
+        candidates = [m for m in candidates if m in compare_only]
     pairs = sorted(
-        [(m, nef_label) for m in order if m != nef_label],
+        [(m, nef_label) for m in candidates],
         key=lambda p: abs(x_positions[p[0]] - x_positions[p[1]]),
     )
 
