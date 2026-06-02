@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, annotate_nef_comparisons
 
-MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]
+MODEL_ORDER = ["Mean", "PrimacyRecency", "LeakyIntegrator", "NEF"]
 MODEL_ORDER_B = MODEL_ORDER
 MODEL_ORDER_D = ["Human", "Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]
 
@@ -154,42 +154,54 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) ->
                           compare_only=["Mean", "LeakyIntegrator", "PrimacyRecency"])
 
 
-def _plot_panel_c(ax) -> None:
-    """Render first page of figures/response_noise_schematic.pdf into panel C."""
-    pdf_path = FIGURES_DIR / "response_noise_schematic.pdf"
-    if not pdf_path.exists():
-        _empty_pdf_panel(ax)
+def _plot_panel_c(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
+    """Panel C: Normalised KDE of per-participant sigma (RNN residual noise).
+
+    Human, NEF, and NoisyCounting shown as filled KDEs normalised to peak=1.
+    Deterministic models shown as vertical lines at their mean sigma.
+    """
+    run_dir = data_path("runs") / run_folder
+    noise_f = run_dir / "RNN_sigma_carrabin_sigma.pkl"
+    if not noise_f.exists():
+        _placeholder(ax, "No RNN noise data (run models/RNN.py --all_sources)")
         return
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        out_prefix = Path(tmpdir) / "response_noise_schematic"
-        cmd = [
-            "pdftoppm",
-            "-png",
-            "-singlefile",
-            str(pdf_path),
-            str(out_prefix),
-        ]
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            _empty_pdf_panel(ax)
-            return
-        img_path = out_prefix.with_suffix(".png")
-        if not img_path.exists():
-            _empty_pdf_panel(ax)
-            return
-        img = mpimg.imread(img_path)
+    sigma_df = pd.read_pickle(noise_f)
+    STOCHASTIC = {"human", "NoisyCounting", "NEF"}
 
-    ax.imshow(img, interpolation="nearest")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.set_aspect("equal")
-    ax.set_anchor("C")
+    sources_in_order = ["human"] + [
+        m for m in model_order if m in sigma_df["source"].unique()
+    ]
+    for extra in sigma_df["source"].unique():
+        if extra in STOCHASTIC and extra not in sources_in_order:
+            sources_in_order.append(extra)
+
+    x_max = sigma_df["sigma"].quantile(0.99) * 1.1
+    x     = np.linspace(0, x_max, 400)
+
+    for src in sources_in_order:
+        sub = sigma_df[sigma_df["source"] == src]["sigma"].dropna()
+        if len(sub) == 0:
+            continue
+        color = palette.get(src, palette.get(_display(src), "0.5"))
+        label = "Human" if src == "human" else _display(src)
+        if src in STOCHASTIC and len(sub) >= 4:
+            kde     = gaussian_kde(sub, bw_method="scott")
+            density = kde(x)
+            density = density / density.max()
+            ax.fill_between(x, density, alpha=0.20, color=color)
+            ax.plot(x, density, lw=1.8, color=color, label=label)
+        else:
+            mean_sigma = float(sub.mean())
+            ax.axvline(mean_sigma, color=color, lw=1.5,
+                       linestyle=":", label=f"{label}")
+
+    ax.set_xlabel("Response noise")
+    ax.set_ylabel("Normalised density")
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
+    sns.despine(ax=ax, top=True, right=True)
 
 
 def _load_loss_long(
@@ -224,59 +236,69 @@ def _load_loss_long(
     return pd.DataFrame(rows)
 
 
-def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str]) -> None:
-    """Panel D: Normalised KDE of per-participant sigma (RNN residual noise).
+PANEL_D_MODELS = MODEL_ORDER + ["NoisyCounting"]
 
-    Human, NEF, and NoisyCounting shown as filled KDEs normalised to peak=1,
-    so shapes can be compared regardless of sample size.
-    Deterministic models shown as vertical lines at their mean sigma.
-    All stochastic sources use the same visual style (filled + outline).
+
+def _plot_panel_d(ax, run_folder: str, palette: dict, model_order: list[str], base_model_order: list[str] = None) -> None:
+    """Panel D: Human sigma vs model RMSE for each model.
+
+    Shows that response noise (human sigma) is a strong predictor of model
+    difficulty across all model types — evidence that irreducible noise is
+    a primary driver of performance differences between participants.
+    Each model gets its own regression line; all share the same x-axis.
     """
-    run_dir = data_path("runs") / run_folder
-    noise_f = run_dir / "RNN_sigma_carrabin_sigma.pkl"
-    if not noise_f.exists():
-        _placeholder(ax, "No RNN noise data (run models/RNN.py --all_sources)")
+    from scipy.stats import pearsonr
+
+    if base_model_order is None:
+        base_model_order = PANEL_D_MODELS
+    run_dir  = data_path("runs") / run_folder
+    sigma_df = pd.read_pickle(run_dir / "RNN_sigma_carrabin_sigma.pkl")
+    human_s  = sigma_df[sigma_df["source"]=="human"][["pid","sigma"]].rename(
+        columns={"sigma":"human_sigma"})
+
+    rows = []
+    for mt in base_model_order:  # always use base MODEL_ORDER, not extras
+        f = run_dir / f"{mt}_carrabin_performance.pkl"
+        if not f.exists():
+            continue
+        perf = pd.read_pickle(f)[["pid","loss"]].rename(columns={"loss":"rmse"})
+        merged = human_s.merge(perf, on="pid").dropna()
+        merged["model"] = _display(mt)
+        rows.append(merged)
+
+    if not rows:
+        _placeholder(ax, "No performance data")
         return
 
-    sigma_df = pd.read_pickle(noise_f)
-    STOCHASTIC = {"human", "NoisyCounting", "NEF"}
+    df = pd.concat(rows, ignore_index=True)
+    order = [_display(m) for m in base_model_order
+             if _display(m) in df["model"].unique()]
+    pal = {_display(m): palette.get(_display(m), palette.get(m, "0.5"))
+           for m in base_model_order}
 
-    sources_in_order = ["human"] + [
-        m for m in model_order if m in sigma_df["source"].unique()
-    ]
-    # Also include NoisyCounting if in extra_models but not model_order
-    for extra in sigma_df["source"].unique():
-        if extra in STOCHASTIC and extra not in sources_in_order:
-            sources_in_order.append(extra)
+    for model in order:
+        sub   = df[df["model"]==model].copy()
+        color = pal.get(model, "0.5")
+        r, p  = pearsonr(sub["human_sigma"], sub["rmse"])
+        stars = ("****" if p<1e-4 else "***" if p<1e-3 else "**" if p<0.01
+                 else "*" if p<0.05 else "ns")
+        sns.regplot(
+            data=sub,
+            x="human_sigma",
+            y="rmse",
+            ax=ax,
+            color=color,
+            ci=95,
+            scatter=False,
+            line_kws={"lw": 1.5},
+            label=f"{model} (r={r:.2f}{stars})",
+        )
 
-    x_max = sigma_df["sigma"].quantile(0.99) * 1.1
-    x     = np.linspace(0, x_max, 400)
-
-    for src in sources_in_order:
-        sub = sigma_df[sigma_df["source"] == src]["sigma"].dropna()
-        if len(sub) == 0:
-            continue
-
-        color = palette.get(src, palette.get(_display(src), "0.5"))
-        label = "Human" if src == "human" else _display(src)
-
-        if src in STOCHASTIC and len(sub) >= 4:
-            kde     = gaussian_kde(sub, bw_method="scott")
-            density = kde(x)
-            density = density / density.max()   # normalise to peak = 1
-            ax.fill_between(x, density, alpha=0.20, color=color)
-            ax.plot(x, density, lw=1.8, color=color, label=label)
-        else:
-            mean_sigma = float(sub.mean())
-            ax.axvline(mean_sigma, color=color, lw=1.5,
-                       linestyle=":", label=f"{label}")
-
-    ax.set_xlabel("Response noise")
-    ax.set_ylabel("Normalised density")
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
-    ax.legend(fontsize=7, framealpha=0.8)
+    ax.set_xlabel("Human response noise (σ)")
+    ax.set_ylabel("Model RMSE")
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
+
 
 
 def _plot_panel_e(ax, run_folder: str, palette: dict) -> None:
@@ -340,7 +362,7 @@ def _plot_panel_e(ax, run_folder: str, palette: dict) -> None:
     ax.set_ylabel("Decoded prediction error")
     ax.set_xlim(0, 1.5)
     ax.set_ylim(bottom=0)
-    ax.legend(fontsize=7, frameon=False, title=None)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, title=None)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -363,6 +385,8 @@ def _plot_panel_f(ax, run_folder: str, palette: dict) -> None:
         return
 
     color = list(palette.values())[0]
+    r, p  = pearsonr(df["alpha_0"], df["response_noise"])
+    stars = "****" if p < 1e-4 else "***" if p < 1e-3 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
     sns.regplot(
         data=df,
         x="alpha_0",
@@ -371,13 +395,15 @@ def _plot_panel_f(ax, run_folder: str, palette: dict) -> None:
         line_kws={"color": color, "lw": 1.5},
         ci=95,
         ax=ax,
+        label=f"r={r:.2f} {stars}",
     )
-    r, p = pearsonr(df["alpha_0"], df["response_noise"])
-    stars = "****" if p < 1e-4 else "***" if p < 1e-3 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
-    ax.text(0.97, 0.05, f"r={r:.2f} {stars}",
-            ha="right", va="bottom", transform=ax.transAxes, fontsize=7)
     ax.set_xlabel("Fitted α₀")
     ax.set_ylabel("Response noise")
+    from matplotlib.lines import Line2D
+    handles, labels = ax.get_legend_handles_labels()
+    # Replace default scatter handle with a solid line
+    handles = [Line2D([0],[0], color=color, lw=1.5)]
+    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -434,6 +460,8 @@ def _plot_panel_g(ax, run_folder: str, palette: dict) -> None:
         _placeholder(ax, "No data for panel G")
         return
 
+    r, p  = pearsonr(df[x_col], df["response_noise"])
+    stars = "****" if p < 1e-4 else "***" if p < 1e-3 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
     sns.regplot(
         data=df,
         x=x_col,
@@ -442,13 +470,14 @@ def _plot_panel_g(ax, run_folder: str, palette: dict) -> None:
         line_kws={"color": color, "lw": 1.5},
         ci=95,
         ax=ax,
+        label=f"r={r:.2f} {stars}",
     )
-    r, p = pearsonr(df[x_col], df["response_noise"])
-    stars = "****" if p < 1e-4 else "***" if p < 1e-3 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
-    ax.text(0.97, 0.05, f"r={r:.2f} {stars}",
-            ha="right", va="bottom", transform=ax.transAxes, fontsize=7)
     ax.set_xlabel(x_label)
     ax.set_ylabel("Response noise")
+    from matplotlib.lines import Line2D
+    handles, labels = ax.get_legend_handles_labels()
+    handles = [Line2D([0],[0], color=color, lw=1.5)]
+    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -484,18 +513,18 @@ def _plot_panel_h(ax, run_folder: str, palette: dict) -> None:
     if "pid" in df.columns and df["pid"].nunique() > 1:
         # Multiple pids — use lineplot with SD
         sns.lineplot(data=df, x="n_neurons", y="sigma",
-                     color=color_sigma, marker="o", markersize=5, lw=1.8,
+                     color=color_sigma, lw=1.8,
                      errorbar="sd", err_style="band",
                      label="Response noise (σ)", ax=ax)
         sns.lineplot(data=df, x="n_neurons", y="pe_std",
-                     color=color_pe, marker="s", markersize=5, lw=1.8,
+                     color=color_pe, lw=1.8,
                      linestyle="--", errorbar="sd", err_style="band",
                      label="Std PE at readout", ax=ax)
     else:
         ax.plot(n_vals, df.set_index("n_neurons")["sigma"][n_vals].values,
-                "o-", color=color_sigma, lw=1.8, ms=5, label="Response noise (σ)")
+                "-", color=color_sigma, lw=1.8, label="Response noise (σ)")
         ax.plot(n_vals, df.set_index("n_neurons")["pe_std"][n_vals].values,
-                "s--", color=color_pe, lw=1.8, ms=5, label="Std PE at readout")
+                "--", color=color_pe, lw=1.8, label="Std PE at readout")
 
 
 
@@ -508,8 +537,7 @@ def _plot_panel_h(ax, run_folder: str, palette: dict) -> None:
     handles, labels = ax.get_legend_handles_labels()
     handles.append(Line2D([0], [0], color="0.78", lw=0.8))
     labels.append("Human response noise")
-    ax.legend(handles, labels, fontsize=6, frameon=True,
-              framealpha=0.9, loc="upper right")
+    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -545,7 +573,7 @@ def main() -> None:
     parser.add_argument(
         "--extra_models",
         nargs="*",
-        default=["RNN"],
+        default=["NoisyCounting", "RNN"],
         help="Additional models to include in top-row panels (default: ['RNN'])",
     )
     args = parser.parse_args()
@@ -569,7 +597,7 @@ def main() -> None:
 
     _plot_panel_a(row0[0])
     _plot_panel_b(row0[1], args.run_folder, palette, model_order)
-    _plot_panel_c(row0[2])
+    _plot_panel_c(row0[2], args.run_folder, palette, model_order)
     _plot_panel_d(row0[3], args.run_folder, palette, model_order)
 
     # ── bottom row: E–H archived, pending new noise analysis ─────────────────
