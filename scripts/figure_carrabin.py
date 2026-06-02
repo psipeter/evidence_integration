@@ -476,6 +476,11 @@ def _plot_panel_h(ax, run_folder: str, palette: dict) -> None:
     color_pe    = list(palette.values())[1]
     n_vals      = sorted(df["n_neurons"].unique())
 
+    # Thin grey lines — drawn first so they sit behind model curves
+    human_sigmas = sigma_df[sigma_df["source"]=="human"]["sigma"].values
+    for hs in human_sigmas:
+        ax.axhline(hs, color="0.78", lw=0.3, zorder=0)
+
     if "pid" in df.columns and df["pid"].nunique() > 1:
         # Multiple pids — use lineplot with SD
         sns.lineplot(data=df, x="n_neurons", y="sigma",
@@ -492,14 +497,19 @@ def _plot_panel_h(ax, run_folder: str, palette: dict) -> None:
         ax.plot(n_vals, df.set_index("n_neurons")["pe_std"][n_vals].values,
                 "s--", color=color_pe, lw=1.8, ms=5, label="Std PE at readout")
 
-    ax.axhline(human_sigma, color=color_sigma, lw=1.0,
-               linestyle=":", alpha=0.7, label="Mean human σ")
+
 
     ax.set_xlabel("Number of neurons")
     ax.set_ylabel("Noise")
     ax.set_xticks(n_vals)
     ax.set_xticklabels([str(n) for n in n_vals])
-    ax.legend(fontsize=6, frameon=False, loc="upper right")
+    # Append human reference line as last legend entry
+    from matplotlib.lines import Line2D
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(Line2D([0], [0], color="0.78", lw=0.8))
+    labels.append("Human response noise")
+    ax.legend(handles, labels, fontsize=6, frameon=True,
+              framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
