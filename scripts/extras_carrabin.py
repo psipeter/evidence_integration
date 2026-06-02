@@ -219,17 +219,25 @@ def _run_n_neurons_scan(
 
         # Load or precompute counting activities
         act_path = data_path(f"counting_activities_n{n_neurons}_nc{n_neurons}.pkl")
-        if act_path.exists():
-            with open(act_path, "rb") as f:
-                activity_map = pickle.load(f)
-            print(f"  Loaded activities: {act_path.name}")
-        else:
+        # Load or precompute; detect truncated files from concurrent writes
+        def _load_or_precompute():
+            if act_path.exists():
+                try:
+                    with open(act_path, "rb") as f:
+                        m = pickle.load(f)
+                    print(f"  Loaded activities: {act_path.name}")
+                    return m
+                except (EOFError, Exception) as e:
+                    print(f"  Corrupt activity file ({e}), regenerating...", flush=True)
+                    act_path.unlink(missing_ok=True)
             print(f"  Precomputing activities (n={n_neurons}, nc={n_neurons})...", flush=True)
             t0 = _time.time()
             precompute_activities(n_trials=200, params=params, out_path=act_path)
             print(f"  Done in {_time.time()-t0:.0f}s")
             with open(act_path, "rb") as f:
-                activity_map = pickle.load(f)
+                return pickle.load(f)
+
+        activity_map = _load_or_precompute()
 
         # Simulate
         t0 = _time.time()

@@ -537,8 +537,12 @@ def precompute_activities(
     if verbose:
         print()  # newline after progress bar
 
-    with open(out_path, "wb") as f:
+    # Write to a temp file then atomically rename to avoid corruption
+    # from concurrent jobs writing to the same path.
+    tmp_path = out_path.with_suffix(".tmp")
+    with open(tmp_path, "wb") as f:
         pickle.dump(activities, f, protocol=4)
+    tmp_path.rename(out_path)
 
     elapsed = time.time() - t_total
     size_mb = out_path.stat().st_size / 1024**2
