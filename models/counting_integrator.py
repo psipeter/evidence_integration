@@ -16,6 +16,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.model_params import _NEF_FIXED
+
+# Number of trials per dataset — precompute one activity set per trial seed
+_DATASET_N_TRIALS = {"carrabin": 200, "yoo": 30}
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -371,8 +374,6 @@ def parse_args() -> argparse.Namespace:
                    choices=("carrabin", "yoo"),
                    help="Task dataset — sets radius_c automatically "
                         "(carrabin=5, yoo=30). Overrides _NEF_FIXED default.")
-    p.add_argument("--n_trials", type=int, default=200,
-                   help="Number of trial seeds to precompute (default 200)")
     p.add_argument("--base_seed", type=int, default=0,
                    help="Base seed for generating trial seeds (default 0)")
     return p.parse_args()
@@ -463,7 +464,7 @@ def load_decoders(
 
 
 def precompute_activities(
-    n_trials: int,
+    n_trials: int | None,
     params: dict,
     out_path: str | Path | None = None,
     verbose: bool = True,
@@ -481,10 +482,17 @@ def precompute_activities(
     import time
     from utils.paths import data_path
 
+    dataset = str(params.get("dataset", "")).lower()
+    if n_trials is None:
+        n_trials = _DATASET_N_TRIALS.get(dataset)
+        if n_trials is None:
+            raise ValueError(f"n_trials not provided and dataset {dataset!r} not in _DATASET_N_TRIALS")
+
     n  = int(params["n_neurons"])
     nc = int(params["n_neurons_counting"])
+    dataset  = str(params.get("dataset", "")).lower() or "unknown"
     if out_path is None:
-        out_path = data_path(f"counting_activities_n{n}_nc{nc}.pkl")
+        out_path = data_path(f"counting_activities_n{n}_nc{nc}_{dataset}.pkl")
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -515,11 +523,31 @@ def precompute_activities(
         MtM       = mem_filt.T @ mem_filt                    # (n, n)
         Mty_count = mem_filt.T @ ic_filt                     # (n,)
 
+        # Compact basis representation: instead of storing the full
+        # (n, T) activity matrix, store (n, radius_c+1) basis vectors
+        # Mty_basis[k] = mem_filt.T @ (ic_filt == k).
+        # At inference: Mty_weight = sum_k w(k) * Mty_basis[k]
+        # where w(k) = alpha_0 / max(k,1)^lambda_ — no information lost.
+        radius_c_int = int(p.get("radius_c", p["n_obs"]))
+        Mty_basis = np.zeros((mem_filt.shape[1], radius_c_int + 1))
+        for k in range(radius_c_int + 1):
+            mask = (np.round(ic_filt).astype(int) == k)
+            if mask.any():
+                Mty_basis[:, k] = mem_filt.T @ mask.astype(float)
+
+        # Store activity at readout timepoints only: (n_neurons, n_obs)
+        # Used for plotting decoded count/weight per observation.
+        idx_readout = _eval_idx(p, len(ic_filt))
+        mem_readout = mem_filt[idx_readout, :].T    # (n, n_obs)
+        ic_readout  = ic_filt[idx_readout]          # (n_obs,)
+
         activities[trial] = {
             "MtM":              MtM,
             "Mty_count":        Mty_count,
             "ideal_count_filt": ic_filt,
-            "mem_filt_T":       mem_filt.T,      # (n, T) — for fast_decode
+            "Mty_basis":        Mty_basis,       # (n, radius_c+1) — for fast_decode
+            "mem_readout":      mem_readout,     # (n, n_obs) — for plotting
+            "ic_readout":       ic_readout,      # (n_obs,) — ideal count at readout
         }
         if verbose:
             t_trial = time.time() - t0
@@ -572,30 +600,38 @@ def fast_decode(
     -------
     dict with W_count and W_weight (same format as decode_outputs)
     """
-    MtM        = activity["MtM"]
-    Mty_count  = activity["Mty_count"]
-    ic_filt    = activity["ideal_count_filt"]
-    mem_filt_T = activity["mem_filt_T"]         # (n, T)
+    MtM       = activity["MtM"]
+    Mty_count = activity["Mty_count"]
+    ic_filt   = activity["ideal_count_filt"]
 
-    n      = MtM.shape[0]
-    lam    = reg * np.trace(MtM) / n
-    A      = MtM + lam * np.eye(n)              # regularised Gram matrix
+    n   = MtM.shape[0]
+    lam = reg * np.trace(MtM) / n
+    A   = MtM + lam * np.eye(n)
 
     # W_count — independent of alpha_0 / lambda_
     W_count = np.linalg.solve(A, Mty_count)[np.newaxis, :]
 
-    # ideal_weight = alpha_0 / max(count, 1)^lambda_  (analytical)
-    ic_for_weight = ic_filt
-    iw_filt    = alpha_0 / np.maximum(ic_for_weight, 1.0) ** lambda_
-    Mty_weight = mem_filt_T @ iw_filt
-    W_weight   = np.linalg.solve(A, Mty_weight)[np.newaxis, :]
+    # Reconstruct Mty_weight from compact basis (no mem_filt_T needed)
+    if "Mty_basis" in activity:
+        Mty_basis  = activity["Mty_basis"]          # (n, radius_c+1)
+        radius_c   = Mty_basis.shape[1] - 1
+        k_vals     = np.arange(radius_c + 1, dtype=float)
+        w_vals     = alpha_0 / np.maximum(k_vals, 1.0) ** lambda_   # (radius_c+1,)
+        Mty_weight = Mty_basis @ w_vals                              # (n,)
+    else:
+        # Legacy files with mem_filt_T
+        mem_filt_T = activity["mem_filt_T"]
+        iw_filt    = alpha_0 / np.maximum(ic_filt, 1.0) ** lambda_
+        Mty_weight = mem_filt_T @ iw_filt
 
+    W_weight = np.linalg.solve(A, Mty_weight)[np.newaxis, :]
     return {"W_count": W_count, "W_weight": W_weight}
 
 
 def load_activities(
     n_neurons: int | None = None,
     n_neurons_counting: int | None = None,
+    dataset: str = "carrabin",
     path: str | Path | None = None,
 ) -> dict[int, dict]:
     """Load precomputed activity data from disk."""
@@ -605,7 +641,7 @@ def load_activities(
     if path is None:
         n  = n_neurons          or _NEF_FIXED["n_neurons"]
         nc = n_neurons_counting or _NEF_FIXED["n_neurons_counting"]
-        path = data_path(f"counting_activities_n{n}_nc{nc}.pkl")
+        path = data_path(f"counting_activities_n{n}_nc{nc}_{dataset}.pkl")
     with open(path, "rb") as f:
         return pickle.load(f)
 
@@ -653,26 +689,42 @@ def plot_from_activities(
         W_count  = dec["W_count"]   # (1, n)
         W_weight = dec["W_weight"]  # (1, n)
 
-        # Reconstruct decoded signals from mem_filt_T
-        mem_filt_T = act["mem_filt_T"]  # (n, T)
-        count_dec  = (W_count  @ mem_filt_T).ravel()   # (T,)
-        weight_dec = (W_weight @ mem_filt_T).ravel()   # (T,)
-
-        # Ideal signals: count is stored; weight recomputed analytically
+        # Ideal signals
         ic = act["ideal_count_filt"]
         iw = alpha_0 / np.maximum(ic, 1.0) ** lambda_
 
         # Sample at observation midpoints
-        idx = _eval_idx(params, T)
-        for i, obs in enumerate(range(1, n_obs + 1)):
-            if i >= len(idx): continue
-            k = idx[i]
-            rows_count.append({"trial": trial, "observation": obs,
-                                "decoded": float(count_dec[k]),
-                                "ideal":   float(ic[k])})
-            rows_weight.append({"trial": trial, "observation": obs,
-                                 "decoded": float(weight_dec[k]),
-                                 "ideal":   float(iw[k])})
+        idx = _eval_idx(params, len(ic))
+
+        if "mem_filt_T" in act:
+            # Legacy: full timeseries available
+            mem_filt_T = act["mem_filt_T"]
+            count_dec  = (W_count  @ mem_filt_T).ravel()
+            weight_dec = (W_weight @ mem_filt_T).ravel()
+            for i, obs in enumerate(range(1, n_obs + 1)):
+                if i >= len(idx): continue
+                k = idx[i]
+                rows_count.append({"trial": trial, "observation": obs,
+                                    "decoded": float(count_dec[k]),
+                                    "ideal":   float(ic[k])})
+                rows_weight.append({"trial": trial, "observation": obs,
+                                     "decoded": float(weight_dec[k]),
+                                     "ideal":   float(iw[k])})
+        else:
+            # New format: use mem_readout (n, n_obs) — exact activity at readout
+            mem_ro = act["mem_readout"]   # (n, n_obs)
+            ic_ro  = act["ic_readout"]    # (n_obs,) ideal count at readout
+            iw_ro  = alpha_0 / np.maximum(ic_ro, 1.0) ** lambda_
+            count_dec_ro  = (W_count  @ mem_ro).ravel()  # (n_obs,)
+            weight_dec_ro = (W_weight @ mem_ro).ravel()  # (n_obs,)
+            for i, obs in enumerate(range(1, n_obs + 1)):
+                if i >= len(count_dec_ro): continue
+                rows_count.append({"trial": trial, "observation": obs,
+                                    "decoded": float(count_dec_ro[i]),
+                                    "ideal":   float(ic_ro[i])})
+                rows_weight.append({"trial": trial, "observation": obs,
+                                     "decoded": float(weight_dec_ro[i]),
+                                     "ideal":   float(iw_ro[i])})
 
     df_c = pd.DataFrame(rows_count)
     df_w = pd.DataFrame(rows_weight)
@@ -714,7 +766,8 @@ def plot_from_activities(
     if out_path is None:
         n  = int(params["n_neurons"])
         nc = int(params["n_neurons_counting"])
-        out_path = FIGURES_DIR / f"counting_accuracy_n{n}_nc{nc}.png"
+        dataset_str = str(params.get("dataset","")).lower() or "unknown"
+        out_path = FIGURES_DIR / f"counting_accuracy_n{n}_nc{nc}_{dataset_str}.png"
     plt.savefig(out_path, dpi=300)
     plt.savefig(str(out_path).replace(".png", ".pdf"))
     plt.close(fig)
@@ -733,14 +786,17 @@ if __name__ == "__main__":
     if args.dataset is not None:
         params_base["radius_c"] = _DATASET_RADIUS_C[args.dataset]
     if args.precompute:
-        seeds = [(t, t) for t in range(1, args.n_trials + 1)]
+        n_t = _DATASET_N_TRIALS.get(str(getattr(args,"dataset","") or ""), 200)
+        seeds = [(t, t) for t in range(1, n_t + 1)]
         save_decoders(seeds, params_base)
     elif args.precompute_activities:
-        precompute_activities(args.n_trials, params_base)
+        params_base["dataset"] = args.dataset or "unknown"
+        precompute_activities(None, params_base)
     elif args.plot_activities:
         acts = load_activities(
             n_neurons=args.n_neurons,
             n_neurons_counting=args.n_neurons_counting,
+            dataset=args.dataset or "carrabin",
         )
         plot_from_activities(
             acts,

@@ -37,7 +37,7 @@ from utils.plot_style import (
 # if future panels need a shared aspect or different spine visibility.
 
 # Model display order determines color assignment from get_palette()
-MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]
+MODEL_ORDER = ["Mean", "PrimacyRecency", "LeakyIntegrator", "NEF"]
 
 OBS_MAX = 30
 # Panel C: line / fit styling
@@ -185,10 +185,13 @@ def _plot_panel_b(ax, run_folder: str, palette: dict, model_order: list[str]) ->
     )
     ax.set_xlabel("")
     ax.set_ylabel("Response error (trial-wise RMSE)")
+    ax.tick_params(axis="x", rotation=45)
     sns.despine(ax=ax, top=True, right=True)
     nef_disp = _display("NEF")
     if nef_disp in available:
-        annotate_nef_comparisons(ax, df, "model_disp", "plot_loss", available, nef_label=nef_disp)
+        annotate_nef_comparisons(ax, df, "model_disp", "plot_loss", available,
+                                 nef_label=nef_disp,
+                                 compare_only=["Mean", "LeakyIntegrator", "PrimacyRecency"])
 
 
 def _yoo_abs_delta_long(human: pd.DataFrame) -> pd.DataFrame:

@@ -51,7 +51,7 @@ else:
     print(f"Simulating {LABEL}  (n=100, nc=100, radius_c=5, precomputed activities)...")
 
     try:
-        activity_map = load_activities(n_neurons=100, n_neurons_counting=100)
+        activity_map = load_activities(n_neurons=100, n_neurons_counting=100, dataset="carrabin")
         print(f"  Loaded {len(activity_map)} precomputed activity sets")
     except FileNotFoundError:
         print("  ERROR: counting_activities_n100_nc100.pkl not found")

@@ -232,7 +232,7 @@ def _run_n_neurons_scan(
                     act_path.unlink(missing_ok=True)
             print(f"  Precomputing activities (n={n_neurons}, nc={n_neurons})...", flush=True)
             t0 = _time.time()
-            precompute_activities(n_trials=200, params=params, out_path=act_path)
+            precompute_activities(n_trials=None, params=params, out_path=act_path)
             print(f"  Done in {_time.time()-t0:.0f}s")
             with open(act_path, "rb") as f:
                 return pickle.load(f)
@@ -435,6 +435,7 @@ def _run_pe_readout(
         activity_map = load_activities(
             n_neurons=int(params["n_neurons"]),
             n_neurons_counting=int(params["n_neurons_counting"]),
+            dataset=str(params.get("dataset","carrabin")),
         )
     except FileNotFoundError:
         activity_map = None
@@ -565,6 +566,7 @@ def _run_probe_timeseries(
         activity_map = load_activities(
             n_neurons=int(params["n_neurons"]),
             n_neurons_counting=int(params["n_neurons_counting"]),
+            dataset=str(params.get("dataset","carrabin")),
         )
     except FileNotFoundError:
         activity_map = None

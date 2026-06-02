@@ -329,6 +329,7 @@ def run(
         _activity_map = load_counting_activities(
             n_neurons=int(pfull["n_neurons"]),
             n_neurons_counting=int(pfull["n_neurons_counting"]),
+            dataset=str(pfull.get("dataset", "carrabin")),
         )
     except FileNotFoundError:
         decoders = _pretrain(pfull)

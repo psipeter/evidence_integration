@@ -88,7 +88,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 30},  # 30 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons_counting": 200},  # 30 obs/trial
         },
     },
 }
