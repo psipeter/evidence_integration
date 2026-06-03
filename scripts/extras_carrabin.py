@@ -181,10 +181,6 @@ def _run_n_neurons_scan(
 
     out_dir  = RUNS_DIR / out_folder
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"n_neurons_scan_{pid}.pkl"
-    if out_path.exists():
-        print(f"Already exists: {out_path.name} — skipping (delete to rerun)")
-        return
 
     human   = pd.read_pickle(data_path("carrabin.pkl"))
     h_pid   = human[human["pid"] == pid]
@@ -202,6 +198,10 @@ def _run_n_neurons_scan(
     results = []
 
     for n_neurons in n_neurons_list:
+        single_path = out_dir / f"n_neurons_scan_{pid}_{n_neurons}.pkl"
+        if single_path.exists():
+            print(f"Already exists: {single_path.name} — skipping")
+            continue
         print(f"=== n_neurons={n_neurons} ===", flush=True)
 
         params = {
@@ -296,55 +296,17 @@ def _run_n_neurons_scan(
         print()
         elapsed = _time.time() - t0
 
-        # std(PE) within (obs, qid) groups
-        pe_df  = pd.DataFrame(rows_pe)
-        pe_std = float(
-            pe_df.groupby(["observation", "qid"])["pe"]
-            .apply(lambda x: x.std() if len(x) >= 3 else np.nan)
-            .dropna()
-            .mean()
-        )
-
-        # Apply carrabin transform and fit RNN
-        resp_for_rnn = apply_carrabin_transform(
-            pd.DataFrame([{
-                "model_type": "NEF", "pid": pid,
-                "trial": r["trial"], "observation": r["observation"],
-                "response": r["response"],
-            } for r in rows_resp]),
-            "carrabin",
-        )
-        source   = f"NEF_scan_n{n_neurons}"
-        resp_src = out_dir / f"{source}_carrabin_responses.pkl"
-        resp_for_rnn.to_pickle(resp_src)
-
-        print(f"  Fitting RNN (source={source})...", flush=True)
-        rnn_result = rnn_fit(
-            pid=pid,
-            source=source,
-            run_folder=out_folder,
-            max_epochs=5000,
-            patience=300,
-            verbose=False,
-        )
-        sigma   = float(rnn_result["sigma"]["sigma"].iloc[0])
-        cv_rmse = float(rnn_result["params"]["cv_rmse"].iloc[0])
-
-        print(f"  sigma={sigma:.4f}  pe_std={pe_std:.4f}  "
-              f"cv_rmse={cv_rmse:.4f}  t={elapsed:.0f}s")
-        results.append({
-            "pid":       pid,
-            "n_neurons": n_neurons,
-            "sigma":     sigma,
-            "pe_std":    pe_std,
-            "cv_rmse":   cv_rmse,
-            "elapsed_s": elapsed,
-        })
-
-    df = pd.DataFrame(results)
-    df.to_pickle(out_path)
-    print(f"\nSaved -> {out_path}")
-    print(df[["n_neurons", "sigma", "pe_std", "cv_rmse"]].to_string(index=False))
+        out = {
+            "pid":        pid,
+            "n_neurons":  n_neurons,
+            "elapsed_s":  elapsed,
+            "responses":  pd.DataFrame(rows_resp),    # cols: n_neurons, trial, observation, qid, response
+            "pe_readout": pd.DataFrame(rows_pe),      # cols: n_neurons, trial, observation, qid, pe
+        }
+        # One file per (pid, n_neurons)
+        single_path = out_dir / f"n_neurons_scan_{pid}_{n_neurons}.pkl"
+        pd.to_pickle(out, single_path)
+        print(f"  Saved -> {single_path.name}  (t={elapsed:.0f}s)")
 
 
 def _collect_probe_pids(out_dir: Path) -> None:
@@ -369,16 +331,60 @@ def _collect_probe_pids(out_dir: Path) -> None:
 
 
 def _collect_n_neurons_scan(out_dir: Path) -> None:
-    """Collect per-pid n_neurons_scan files into a single combined pkl."""
-    files = sorted(out_dir.glob("n_neurons_scan_[0-9]*.pkl"))
+    """Collect per-(pid, n_neurons) scan files into a single combined pkl.
+
+    Input files: n_neurons_scan_{pid}_{n_neurons}.pkl
+    Each contains: {"pid", "n_neurons", "elapsed_s", "responses", "pe_readout"}
+
+    Output: n_neurons_scan.pkl
+    Format: {n_neurons: {"responses": DataFrame, "pe_readout": DataFrame}}
+    where DataFrames have columns: pid, trial, observation, qid, response/pe
+    Metrics (resp_std, pe_std) are computed at plot time in figure_carrabin.py.
+    """
+    # Match both new format n_neurons_scan_{pid}_{n_neurons}.pkl
+    # and old format n_neurons_scan_{pid}.pkl for backwards compat
+    files = sorted(out_dir.glob("n_neurons_scan_[0-9]*_[0-9]*.pkl"))
     if not files:
-        print("No n_neurons_scan per-pid files found.")
+        print("No n_neurons_scan per-(pid,n_neurons) files found.")
+        print("Looking for old format...")
+        files = sorted(out_dir.glob("n_neurons_scan_[0-9]*.pkl"))
+        if not files:
+            print("No scan files found at all.")
+            return
+
+    raw_resp: dict[int, list] = {}
+    raw_pe:   dict[int, list] = {}
+
+    for f in files:
+        data = pd.read_pickle(f)
+        if not isinstance(data, dict) or "responses" not in data:
+            print(f"  Skipping {f.name} (old format)")
+            continue
+        n  = int(data["n_neurons"])
+        pid = int(data["pid"])
+        resp = data["responses"].copy()
+        resp["pid"] = pid
+        pe   = data["pe_readout"].copy()
+        pe["pid"] = pid
+        raw_resp.setdefault(n, []).append(resp)
+        raw_pe.setdefault(n, []).append(pe)
+
+    if not raw_resp:
+        print("No valid scan data found.")
         return
-    df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
+
+    combined = {
+        n: {
+            "responses":  pd.concat(raw_resp[n],  ignore_index=True),
+            "pe_readout": pd.concat(raw_pe[n],    ignore_index=True),
+        }
+        for n in sorted(raw_resp.keys())
+    }
+
     out = out_dir / "n_neurons_scan.pkl"
-    df.to_pickle(out)
-    print(f"Collected {len(files)} files -> {out.name}")
-    print(df.groupby("n_neurons")[["sigma","pe_std"]].mean().round(4).to_string())
+    pd.to_pickle(combined, out)
+    n_pids = len(set(combined[list(combined.keys())[0]]["responses"]["pid"]))
+    print(f"Collected {len(files)} files  ({n_pids} pids x {len(combined)} n_neurons) -> {out.name}")
 
 
 
@@ -689,6 +695,8 @@ def main() -> None:
                         help="lambda_ for n_neurons_scan (default: load from fitted params)")
     parser.add_argument("--scan_pid", type=int, default=18,
                         help="pid for n_neurons_scan (default: 18)")
+    parser.add_argument("--n_neurons", type=int, default=None,
+                        help="Single n_neurons value for n_neurons_scan (overrides --n_neurons_list)")
     args = parser.parse_args()
 
     out_folder = args.out_folder
@@ -711,11 +719,12 @@ def main() -> None:
                     if not row.empty:
                         alpha_0 = float(row["alpha_0"].iloc[0])
                         lambda_ = float(row["lambda_"].iloc[0])
+            n_neurons_list = [args.n_neurons] if args.n_neurons is not None else args.n_neurons_list
             _run_n_neurons_scan(
                 pid=pid,
                 alpha_0=alpha_0,
                 lambda_=lambda_,
-                n_neurons_list=args.n_neurons_list,
+                n_neurons_list=n_neurons_list,
                 run_folder=run_folder,
                 out_folder=out_folder,
             )
