@@ -218,7 +218,7 @@ def _run_n_neurons_scan(
         }
 
         # Load or precompute counting activities
-        act_path = data_path(f"counting_activities_n{n_neurons}_nc{n_neurons}.pkl")
+        act_path = data_path(f"counting_activities_n{n_neurons}_nc{n_neurons}_carrabin.pkl")
         # Load or precompute; detect truncated files from concurrent writes
         def _load_or_precompute():
             if act_path.exists():

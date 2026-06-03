@@ -6,12 +6,18 @@ This module is the single source of truth for those paths. Any code that
 reads or writes files should import constants and helpers from here instead
 of building ``Path`` objects or string paths locally, so layout stays
 consistent and easy to change in one place.
+
+The project root can be overridden via the ``EVIDENCE_INTEGRATION_ROOT``
+environment variable — useful on HPC clusters where symlinks may cause
+``Path(__file__).resolve()`` to return a different path than ``pwd``.
 """
 
+import os
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT: Path = _THIS_DIR.parent
+_ENV_ROOT = os.environ.get("EVIDENCE_INTEGRATION_ROOT")
+PROJECT_ROOT: Path = Path(_ENV_ROOT).resolve() if _ENV_ROOT else _THIS_DIR.parent
 
 DATA_DIR: Path = PROJECT_ROOT / "data"
 RUNS_DIR: Path = DATA_DIR / "runs"
