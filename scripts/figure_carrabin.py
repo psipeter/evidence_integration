@@ -547,10 +547,8 @@ def main() -> None:
     label_panels(axes)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    plt.savefig(FIGURES_DIR / "figure_carrabin.png", dpi=300)
     plt.savefig(FIGURES_DIR / "figure_carrabin.pdf")
-    plt.savefig(FIGURES_DIR / "figure_carrabin.svg")
-    print("Saved figures/figure_carrabin.{png,pdf,svg}")
+    print("Saved figures/figure_carrabin.pdf")
 
 
 if __name__ == "__main__":

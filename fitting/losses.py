@@ -89,68 +89,68 @@ def compute_sim_db_loss(
     human_pid: pd.DataFrame,
     db_dir: "Path | str",
 ) -> float:
-    """Marginal log-likelihood from simulation database.
+    """Group-level log-likelihood from simulation database.
 
-    For each trial a pid ran, looks up the (n_seeds, n_obs) response
-    trajectory matrix for that input sequence, fits a Gaussian per
-    observation, and evaluates the log-likelihood of the observed response.
-    Returns negative mean log-likelihood (lower = better, like RMSE).
+    For each (sequence, obs) cell, evaluates the likelihood of the full set of
+    observed responses under the model's predicted Gaussian. This penalises both
+    mean mismatch and variance mismatch — a model with correct mean but wrong
+    variance, or correct variance but wrong mean, both score poorly.
 
-    The per-observation Gaussian: μ = mean(sim_responses), σ = std(sim_responses).
-    For deterministic models σ is floored at 1e-3 so likelihood is defined.
+    The group log-likelihood of n observed responses under N(mu_sim, sigma_sim^2):
+        sum_i log N(r_i | mu_sim, sigma_sim^2)
+        = -n/2 log(2*pi*sigma^2) - n/(2*sigma^2) * [var_obs + (mean_obs-mu_sim)^2]
+    The sigma^2 term penalises over-dispersion; the squared-mean-error term
+    penalises mean mismatch. Both must be small for high likelihood.
 
-    Parameters
-    ----------
-    model_type : str
-    params : dict  — model parameters (used only for hashing to find db file)
-    human_pid : pd.DataFrame  — one pid's rows from carrabin.pkl
-        Must have columns: trial, observation, value, response
-    db_dir : Path  — root of simulation database (contains {model_type}/ subdir)
-
-    Returns
-    -------
-    float : negative mean log-likelihood across all (trial, obs) pairs
+    Returns negative mean log-likelihood per observation (lower = better).
     """
     import hashlib, json
+    from collections import defaultdict
     from pathlib import Path
     from scipy.stats import norm
 
-    db_dir = Path(db_dir)
-    SKIP   = {"pid", "model_type", "dataset", "seed", "base_seed"}
-    free   = {k: v for k, v in params.items() if k not in SKIP}
-    key    = json.dumps({"model": model_type, "params": free}, sort_keys=True)
-    ph     = hashlib.md5(key.encode()).hexdigest()[:12]
+    db_dir  = Path(db_dir)
+    SKIP    = {"pid", "model_type", "dataset", "seed", "base_seed"}
+    free    = {k: v for k, v in params.items() if k not in SKIP}
+    key     = json.dumps({"model": model_type, "params": free}, sort_keys=True)
+    ph      = hashlib.md5(key.encode()).hexdigest()[:12]
     db_path = db_dir / model_type / f"{model_type}_{ph}.pkl"
 
     if not db_path.exists():
         raise FileNotFoundError(
             f"Simulation database not found: {db_path}\n"
             f"Run: python scripts/build_sim_db.py --model {model_type} "
-            f"--params_json '{json.dumps(free)}'"
+            f"--params_json \'{json.dumps(free)}\'"
         )
 
-    db      = pd.read_pickle(db_path)["data"]   # {seq_tuple: (n_seeds, n_obs)}
-    log_liks = []
+    db = pd.read_pickle(db_path)["data"]   # {seq_tuple: (n_sims, n_obs)}
 
-    for trial, trial_df in human_pid.groupby("trial"):
-        trial_df = trial_df.sort_values("observation")
-        # Full input sequence for this trial
-        seq = tuple(trial_df["value"].values)
+    # Group all observed responses by (seq, obs_idx)
+    cell_obs: dict[tuple, list] = defaultdict(list)
+    for _, tdf in human_pid.groupby("trial"):
+        tdf = tdf.sort_values("observation")
+        seq = tuple(tdf["value"].values)
+        for obs_idx, r in enumerate(tdf["response"].values):
+            cell_obs[(seq, obs_idx)].append(float(r))
+
+    total_ll  = 0.0
+    n_obs_total = 0
+
+    for (seq, obs_idx), r_list in cell_obs.items():
         if seq not in db:
             continue
-        sim_trajs = db[seq]          # (n_seeds, n_obs)
+        sim_trajs = db[seq]
         if sim_trajs.shape[0] < 2:
             continue
+        sim_col  = sim_trajs[:, obs_idx]
+        mu_sim   = float(sim_col.mean())
+        sig_sim  = max(float(sim_col.std()), 1e-3)
+        r_arr    = np.array(r_list)
+        total_ll += float(np.sum(norm.logpdf(r_arr, loc=mu_sim, scale=sig_sim)))
+        n_obs_total += len(r_arr)
 
-        obs_responses = trial_df["response"].values   # (n_obs,)
-        for obs_idx, r_obs in enumerate(obs_responses):
-            sim_col = sim_trajs[:, obs_idx]            # n_seeds values
-            mu  = float(sim_col.mean())
-            sig = float(sim_col.std())
-            sig = max(sig, 1e-3)                       # floor for deterministic
-            log_liks.append(norm.logpdf(r_obs, loc=mu, scale=sig))
+    if n_obs_total == 0:
+        raise ValueError("No valid (seq, obs) cells found in database for this pid")
 
-    if not log_liks:
-        raise ValueError("No valid (trial, obs) pairs found in database for this pid")
+    return float(-total_ll / n_obs_total)
 
-    return float(-np.mean(log_liks))

@@ -93,4 +93,24 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
 }
 
+# Parameter ranges for MLE fitting (sim_db / fit_mle.py).
+# Narrower and more realistic than MODEL_PARAMS ranges, since MLE is
+# sensitive to extreme params (likelihood blows up for very wide distributions).
+# Informed by RMSE-fitted distributions plus expected state-noise range.
+MLE_PARAMS: dict[str, dict[str, dict[str, object]]] = {
+    "carrabin": {
+        "NoisyCounting": {
+            "mu":      (0.05,  0.40,  0.002),   # expanded upper; finer step
+            "sigma_c": (0.001, 0.30,  0.002),   # RMSE collapses to ~0; MLE recovers ~0.03-0.08
+            "nu":      (0.001, 0.35,  0.002),   # expanded upper; pid1 nu=0.21 near old bound
+            "fixed": {},
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 5},
+        },
+    },
+}
+
+
 # diederen model params archived in archive/misc/
