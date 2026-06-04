@@ -1,7 +1,7 @@
 """
 models/RNN.py
 
-Tiny GRU (2-5 hidden units) fitted per participant to carrabin behavioral data.
+Tiny GRU (2-5 hidden units) fitted per participant to behavioral data.
 
 Used for two purposes:
   1. Fit to HUMAN data -> best empirical predictor of each participant's
@@ -14,15 +14,17 @@ Following Ger, Shahar & Shahar (2024, eLife).
 Architecture
 ------------
 Input at each observation t: [x_t, t]
-  - x_t : binary input value {-1, +1}  (from carrabin.pkl, same for all sources)
+  - x_t : input value (binary {-1,+1} for carrabin; continuous for yoo)
   - t   : observation index (1-indexed float)
 GRU hidden layer (n_hidden units, default 4)
 Linear readout -> scalar predicted response
 
 Training
 --------
-- Loss   : MSE between RNN transformed output and source response
-- Output : RNN raw prediction clipped to [-1,1], then * t/(t+2) (Laplace)
+- Loss   : MSE between predicted and source response
+- Output : RNN raw prediction clipped to [-1,1];
+           for carrabin: also multiplied by t/(t+2) (Laplace shrinkage)
+           for yoo: no shrinkage (responses are already on [-1,1])
 - Optimiser: Adam (lr=1e-3)
 - Early stopping on held-out validation fold (patience=300)
 - CV     : k-fold over trials; reports mean held-out RMSE
@@ -33,27 +35,32 @@ All saved to data/runs/<run_folder>/ with a `source` column identifying
 what the RNN was fitted to ("human", "RL_lambda", "NEF", etc.).
 
 Per-pid intermediate files (deleted after collection):
-  RNN_{source}_carrabin_{pid}.pkl  : dict with keys
+  RNN_sigma_{source}_{dataset}_{pid}.pkl  : dict with keys
       params, performance, sigma, rnn_responses
 
-Combined files (written by --collect or fit_all_sources):
-  RNN_carrabin_params.pkl       : all sources x all pids
-  RNN_carrabin_performance.pkl  : all sources x all pids
-  RNN_carrabin_sigma.pkl        : per-pid sigma (std of source - RNN)
+Combined files (written by --collect):
+  RNN_{dataset}_params.pkl       : human-only
+  RNN_{dataset}_performance.pkl  : human-only
+  RNN_{dataset}_responses.pkl    : human-only
+  RNN_sigma_{dataset}_params.pkl     : all sources x all pids
+  RNN_sigma_{dataset}_performance.pkl: all sources x all pids
+  RNN_sigma_{dataset}_sigma.pkl      : per-pid sigma (std of source - RNN)
 
 Usage
 -----
     # Fit to human data
-    venv/bin/python models/RNN.py --source human --all_pids --run_folder carrabin
+    venv/bin/python models/RNN.py --source human --all_pids \\
+        --dataset carrabin --run_folder carrabin
+
+    venv/bin/python models/RNN.py --source human --all_pids \\
+        --dataset yoo --run_folder yoo
 
     # Fit to a specific model's responses
-    venv/bin/python models/RNN.py --source RL_lambda --all_pids --run_folder carrabin
-
-    # Fit all sources (human + all available models) in one pass
-    venv/bin/python models/RNN.py --all_sources --run_folder carrabin
+    venv/bin/python models/RNN.py --source NEF --all_pids \\
+        --dataset yoo --run_folder yoo
 
     # Collect per-pid files into combined outputs
-    venv/bin/python models/RNN.py --collect --run_folder carrabin
+    venv/bin/python models/RNN.py --collect --dataset yoo --run_folder yoo
 """
 
 from __future__ import annotations
@@ -73,11 +80,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import data_path, resolve_run_folder
 from utils.carrabin_transform import apply_carrabin_transform
 
-DATASET = "carrabin"
-DEVICE  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Models whose response files are expected in the run folder.
-# "human" is special-cased to read from carrabin.pkl directly.
+# Datasets that require Laplace shrinkage on RNN output
+SHRINKAGE_DATASETS = {"carrabin"}
+
+# Models whose response files may appear in a run folder.
+# "human" is special-cased to read from {dataset}.pkl directly.
 ALL_SOURCES = [
     "human",
     "Mean",
@@ -89,7 +98,7 @@ ALL_SOURCES = [
 ]
 
 
-# ── Model ────────────────────────────────────────────────────────────────────
+# ── Model ─────────────────────────────────────────────────────────────────────
 
 class TinyGRU(nn.Module):
     """Single-layer GRU with linear readout.
@@ -122,20 +131,21 @@ def load_pid_data(
     pid: int,
     source: str,
     run_folder: Path,
+    dataset: str = "carrabin",
 ) -> pd.DataFrame:
-    """Return a DataFrame with columns [pid, trial, observation, value, response].
+    """Return DataFrame with columns [pid, trial, observation, value, response].
 
-    For source="human": reads from carrabin.pkl.
+    For source="human": reads from {dataset}.pkl.
     For source=<model>: reads model responses from run_folder, merges value
-    column from carrabin.pkl (input sequences are the same for all sources).
+    column from {dataset}.pkl (input sequences are the same for all sources).
     """
-    human = pd.read_pickle(data_path(f"{DATASET}.pkl"))
+    human     = pd.read_pickle(data_path(f"{dataset}.pkl"))
     human_pid = human[human["pid"] == pid].copy()
 
     if source == "human":
         return human_pid
 
-    resp_path = run_folder / f"{source}_{DATASET}_responses.pkl"
+    resp_path = run_folder / f"{source}_{dataset}_responses.pkl"
     if not resp_path.exists():
         raise FileNotFoundError(f"Response file not found: {resp_path}")
 
@@ -148,7 +158,6 @@ def load_pid_data(
         raise ValueError(
             f"No responses for pid={pid} in {resp_path.name}"
         )
-    # Merge value (input) from human data — same sequences for all sources
     merged = model_resp.merge(
         human_pid[["trial", "observation", "value"]],
         on=["trial", "observation"],
@@ -196,12 +205,17 @@ def train_model(
     val_inputs: torch.Tensor,
     val_targets: torch.Tensor,
     lr: float = 1e-3,
-    max_epochs: int = 5000,
+    max_epochs: int = 3000,
     patience: int = 300,
-    min_delta: float = 1e-5,
+    min_delta: float = 1e-4,
     device: torch.device | None = None,
+    use_shrinkage: bool = True,
 ) -> tuple[TinyGRU, int, float]:
-    """Train with early stopping; returns model, best_epoch, best_val_loss."""
+    """Train with early stopping; returns model, best_epoch, best_val_loss.
+
+    use_shrinkage: if True, applies Laplace t/(t+2) transform to predictions
+    (carrabin only). For yoo, set False.
+    """
     if device is None:
         device = DEVICE
     model       = model.to(device)
@@ -210,9 +224,12 @@ def train_model(
     val_inputs  = val_inputs.to(device)
     val_targets = val_targets.to(device)
 
-    # Laplace shrinkage: clamp(pred) * t/(t+2)
-    shrink     = inputs[:, :, 1]     / (inputs[:, :, 1]     + 2.0)
-    shrink_val = val_inputs[:, :, 1] / (val_inputs[:, :, 1] + 2.0)
+    if use_shrinkage:
+        shrink     = inputs[:, :, 1]     / (inputs[:, :, 1]     + 2.0)
+        shrink_val = val_inputs[:, :, 1] / (val_inputs[:, :, 1] + 2.0)
+    else:
+        shrink     = torch.ones_like(inputs[:, :, 1])
+        shrink_val = torch.ones_like(val_inputs[:, :, 1])
 
     optimiser = Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
@@ -258,9 +275,10 @@ def cross_validate(
     n_hidden: int = 4,
     lr: float = 1e-3,
     k: int = 5,
-    max_epochs: int = 5000,
+    max_epochs: int = 3000,
     patience: int = 300,
     seed: int = 42,
+    use_shrinkage: bool = True,
 ) -> tuple[float, float, int]:
     """K-fold CV over trials; returns (mean_rmse, std_rmse, mean_best_epoch)."""
     rng    = np.random.RandomState(seed)
@@ -277,6 +295,7 @@ def cross_validate(
         m, n_ep, val_loss = train_model(
             TinyGRU(n_hidden), tr_inp, tr_tgt, va_inp, va_tgt,
             lr=lr, max_epochs=max_epochs, patience=patience,
+            use_shrinkage=use_shrinkage,
         )
         fold_losses.append(np.sqrt(val_loss))
         fold_epochs.append(n_ep)
@@ -293,8 +312,12 @@ def cross_validate(
 def generate_rnn_responses(
     model: TinyGRU,
     pid_data: pd.DataFrame,
+    dataset: str = "carrabin",
 ) -> pd.DataFrame:
-    """Run final model; return DataFrame with transformed RNN predictions."""
+    """Run final model; return DataFrame with RNN predictions.
+
+    Applies Laplace shrinkage for carrabin; plain clip for yoo.
+    """
     model.eval()
     model = model.cpu()
     trials = sorted(pid_data["trial"].unique())
@@ -314,7 +337,9 @@ def generate_rnn_responses(
                 "response":    float(np.clip(preds_np[ti, oi], -1.0, 1.0)),
             })
     df = pd.DataFrame(rows)
-    return apply_carrabin_transform(df, DATASET)
+    if dataset in SHRINKAGE_DATASETS:
+        df = apply_carrabin_transform(df, dataset)
+    return df
 
 
 def compute_sigma(
@@ -336,6 +361,7 @@ def fit(
     pid: int,
     source: str,
     run_folder: str | Path,
+    dataset: str = "carrabin",
     n_hidden: int = 4,
     lr: float = 1e-3,
     k: int = 5,
@@ -349,23 +375,26 @@ def fit(
     Returns dict with keys: params, performance, sigma, rnn_responses.
     Also saves an intermediate pkl to run_folder.
     """
-    run_dir  = resolve_run_folder(run_folder)
-    pid_data = load_pid_data(pid, source, run_dir)
+    run_dir       = resolve_run_folder(run_folder)
+    pid_data      = load_pid_data(pid, source, run_dir, dataset=dataset)
+    use_shrinkage = dataset in SHRINKAGE_DATASETS
 
     if pid_data.empty:
         raise ValueError(f"No data for pid={pid} source={source!r}")
 
     if verbose:
         print(f"  source={source:<18} pid={pid}: "
-              f"{pid_data['trial'].nunique()} trials")
+              f"{pid_data['trial'].nunique()} trials  dataset={dataset}")
 
     # ── CV ────────────────────────────────────────────────────────────────────
     cv_rmse, cv_std, mean_epochs = cross_validate(
         pid_data, n_hidden=n_hidden, lr=lr, k=k,
         max_epochs=max_epochs, patience=patience, seed=seed,
+        use_shrinkage=use_shrinkage,
     )
 
     # ── Final model ───────────────────────────────────────────────────────────
+    final_max_epochs = max_epochs
     rng      = np.random.RandomState(seed)
     trials   = sorted(pid_data["trial"].unique())
     shuffled = rng.permutation(trials)
@@ -378,11 +407,12 @@ def fit(
     torch.manual_seed(seed)
     final_model, final_epochs, final_val_loss = train_model(
         TinyGRU(n_hidden), tr_inp, tr_tgt, va_inp, va_tgt,
-        lr=lr, max_epochs=max_epochs, patience=patience,
+        lr=lr, max_epochs=final_max_epochs, patience=patience,
+        use_shrinkage=use_shrinkage,
     )
 
     # ── Responses + sigma ─────────────────────────────────────────────────────
-    rnn_resp = generate_rnn_responses(final_model, pid_data)
+    rnn_resp = generate_rnn_responses(final_model, pid_data, dataset=dataset)
     sigma    = compute_sigma(pid_data, rnn_resp)
 
     if verbose:
@@ -392,6 +422,7 @@ def fit(
     params_df = pd.DataFrame([{
         "source":         source,
         "pid":            pid,
+        "dataset":        dataset,
         "n_hidden":       n_hidden,
         "lr":             lr,
         "k":              k,
@@ -404,38 +435,39 @@ def fit(
     perf_df = pd.DataFrame([{
         "source":   source,
         "pid":      pid,
+        "dataset":  dataset,
         "loss":     cv_rmse,
         "n_hidden": n_hidden,
         "n_epochs": mean_epochs,
     }])
     sigma_df = pd.DataFrame([{
-        "source": source,
-        "pid":    pid,
-        "sigma":  sigma,
+        "source":  source,
+        "pid":     pid,
+        "dataset": dataset,
+        "sigma":   sigma,
     }])
 
     result = {
-        "params":       params_df,
-        "performance":  perf_df,
-        "sigma":        sigma_df,
+        "params":        params_df,
+        "performance":   perf_df,
+        "sigma":         sigma_df,
         "rnn_responses": rnn_resp,
     }
 
-    # Save intermediate per-(source, pid) file
-    out_path = run_dir / f"RNN_sigma_{source}_{DATASET}_{pid}.pkl"
+    out_path = run_dir / f"RNN_sigma_{source}_{dataset}_{pid}.pkl"
     pd.to_pickle(result, out_path)
     return result
 
 
 # ── Collection ────────────────────────────────────────────────────────────────
 
-def collect(run_folder: str | Path) -> None:
-    """Concatenate per-(source,pid) pkl files into three combined files."""
+def collect(run_folder: str | Path, dataset: str = "carrabin") -> None:
+    """Concatenate per-(source,pid) pkl files into combined files."""
     run_dir = resolve_run_folder(run_folder)
-    files   = sorted(run_dir.glob(f"RNN_sigma_*_{DATASET}_*.pkl"))
+    files   = sorted(run_dir.glob(f"RNN_sigma_*_{dataset}_*.pkl"))
 
     if not files:
-        print("No RNN_* files found.")
+        print(f"No RNN_sigma_*_{dataset}_*.pkl files found in {run_dir}")
         return
 
     params_parts, perf_parts, sigma_parts = [], [], []
@@ -451,15 +483,14 @@ def collect(run_folder: str | Path) -> None:
         ("sigma",       sigma_parts),
     ]:
         combined = pd.concat(parts, ignore_index=True)
-        out = run_dir / f"RNN_sigma_{DATASET}_{name}.pkl"
+        out = run_dir / f"RNN_sigma_{dataset}_{name}.pkl"
         combined.to_pickle(out)
         n_src = combined["source"].nunique()
         n_pid = combined["pid"].nunique()
         print(f"Saved {out.name}  "
               f"({n_src} sources × {n_pid} pids = {len(combined)} rows)")
 
-    # Also rebuild human-only performance/params/responses for figure compatibility.
-    # These files must reflect only the human-source RNN fits (not all sources).
+    # Rebuild human-only files for figure compatibility
     for name, parts in [
         ("params",      params_parts),
         ("performance", perf_parts),
@@ -472,18 +503,17 @@ def collect(run_folder: str | Path) -> None:
         human_df = pd.concat(human_parts, ignore_index=True).copy()
         human_df["model_type"] = "RNN"
         human_df = human_df.drop(columns=["source"], errors="ignore")
-        out = run_dir / f"RNN_{DATASET}_{name}.pkl"
+        out = run_dir / f"RNN_{dataset}_{name}.pkl"
         human_df.to_pickle(out)
         print(f"Saved {out.name}  (human-only, {len(human_df)} pids)")
 
-    # Rebuild human-only responses
-    human_resp_files = sorted(run_dir.glob(f"RNN_sigma_human_{DATASET}_*.pkl"))
+    human_resp_files = sorted(run_dir.glob(f"RNN_sigma_human_{dataset}_*.pkl"))
     if human_resp_files:
-        resp_parts_human = [
+        resp_parts = [
             pd.read_pickle(f)["rnn_responses"] for f in human_resp_files
         ]
-        resp_combined = pd.concat(resp_parts_human, ignore_index=True)
-        out = run_dir / f"RNN_{DATASET}_responses.pkl"
+        resp_combined = pd.concat(resp_parts, ignore_index=True)
+        out = run_dir / f"RNN_{dataset}_responses.pkl"
         resp_combined.to_pickle(out)
         print(f"Saved {out.name}  (human-only, {len(resp_combined)} rows)")
 
@@ -492,12 +522,11 @@ def collect(run_folder: str | Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Tiny GRU noise estimation for carrabin (human + models)"
+        description="Tiny GRU noise estimation for behavioral data"
     )
     parser.add_argument(
         "--source", type=str, default="human",
-        help=f"Data source to fit RNN to: 'human' or a model name. "
-             f"Available: {ALL_SOURCES}",
+        help=f"Data source to fit RNN to. Available: {ALL_SOURCES}",
     )
     parser.add_argument(
         "--all_sources", action="store_true",
@@ -506,19 +535,23 @@ def main() -> None:
     parser.add_argument("--pid",        type=int,  default=None)
     parser.add_argument("--all_pids",   action="store_true")
     parser.add_argument("--collect",    action="store_true")
+    parser.add_argument("--dataset",    type=str,  default="carrabin",
+                        choices=["carrabin", "yoo"],
+                        help="Dataset to use (affects shrinkage, file naming)")
     parser.add_argument("--run_folder", type=str,  default="carrabin")
     parser.add_argument("--n_hidden",   type=int,  default=4)
     parser.add_argument("--lr",         type=float, default=1e-3)
     parser.add_argument("--k",          type=int,  default=5)
-    parser.add_argument("--max_epochs", type=int,  default=5000)
+    parser.add_argument("--max_epochs", type=int,  default=3000)
     parser.add_argument("--patience",   type=int,  default=300)
     parser.add_argument("--seed",       type=int,  default=42)
     args = parser.parse_args()
 
+    dataset = args.dataset
     run_dir = resolve_run_folder(args.run_folder)
 
     if args.collect:
-        collect(args.run_folder)
+        collect(args.run_folder, dataset=dataset)
         return
 
     # Determine sources
@@ -527,7 +560,7 @@ def main() -> None:
         for s in ALL_SOURCES:
             if s == "human":
                 sources.append(s)
-            elif (run_dir / f"{s}_{DATASET}_responses.pkl").exists():
+            elif (run_dir / f"{s}_{dataset}_responses.pkl").exists():
                 sources.append(s)
             else:
                 print(f"  Skipping {s}: no response file found")
@@ -535,13 +568,14 @@ def main() -> None:
         sources = [args.source]
 
     # Determine pids
-    human = pd.read_pickle(data_path(f"{DATASET}.pkl"))
+    human = pd.read_pickle(data_path(f"{dataset}.pkl"))
     pids  = sorted(human["pid"].unique()) if args.all_pids else [args.pid]
     if not pids or pids == [None]:
         parser.error("Specify --pid <n> or --all_pids")
 
     fit_kwargs = dict(
         run_folder=args.run_folder,
+        dataset=dataset,
         n_hidden=args.n_hidden,
         lr=args.lr,
         k=args.k,

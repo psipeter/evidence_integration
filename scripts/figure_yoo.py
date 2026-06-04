@@ -1355,8 +1355,8 @@ def main() -> None:
     parser.add_argument(
         "--extra_models",
         nargs="*",
-        default=[],
-        help="Additional models to include in top-row panels (e.g. RL_lambda ADM)",
+        default=["RNN"],
+        help="Additional models to include in top-row panels (e.g. RNN NoisyCounting)",
     )
     args = parser.parse_args()
 

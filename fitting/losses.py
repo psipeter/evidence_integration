@@ -78,3 +78,79 @@ def compute_loss(
     if not np.isfinite(out):
         raise ValueError(f"compute_loss is not finite: {out}")
     return out
+
+
+
+# ── PMMH-style likelihood from simulation database ────────────────────────────
+
+def compute_sim_db_loss(
+    model_type: str,
+    params: dict,
+    human_pid: pd.DataFrame,
+    db_dir: "Path | str",
+) -> float:
+    """Marginal log-likelihood from simulation database.
+
+    For each trial a pid ran, looks up the (n_seeds, n_obs) response
+    trajectory matrix for that input sequence, fits a Gaussian per
+    observation, and evaluates the log-likelihood of the observed response.
+    Returns negative mean log-likelihood (lower = better, like RMSE).
+
+    The per-observation Gaussian: μ = mean(sim_responses), σ = std(sim_responses).
+    For deterministic models σ is floored at 1e-3 so likelihood is defined.
+
+    Parameters
+    ----------
+    model_type : str
+    params : dict  — model parameters (used only for hashing to find db file)
+    human_pid : pd.DataFrame  — one pid's rows from carrabin.pkl
+        Must have columns: trial, observation, value, response
+    db_dir : Path  — root of simulation database (contains {model_type}/ subdir)
+
+    Returns
+    -------
+    float : negative mean log-likelihood across all (trial, obs) pairs
+    """
+    import hashlib, json
+    from pathlib import Path
+    from scipy.stats import norm
+
+    db_dir = Path(db_dir)
+    SKIP   = {"pid", "model_type", "dataset", "seed", "base_seed"}
+    free   = {k: v for k, v in params.items() if k not in SKIP}
+    key    = json.dumps({"model": model_type, "params": free}, sort_keys=True)
+    ph     = hashlib.md5(key.encode()).hexdigest()[:12]
+    db_path = db_dir / model_type / f"{model_type}_{ph}.pkl"
+
+    if not db_path.exists():
+        raise FileNotFoundError(
+            f"Simulation database not found: {db_path}\n"
+            f"Run: python scripts/build_sim_db.py --model {model_type} "
+            f"--params_json '{json.dumps(free)}'"
+        )
+
+    db      = pd.read_pickle(db_path)["data"]   # {seq_tuple: (n_seeds, n_obs)}
+    log_liks = []
+
+    for trial, trial_df in human_pid.groupby("trial"):
+        trial_df = trial_df.sort_values("observation")
+        # Full input sequence for this trial
+        seq = tuple(trial_df["value"].values)
+        if seq not in db:
+            continue
+        sim_trajs = db[seq]          # (n_seeds, n_obs)
+        if sim_trajs.shape[0] < 2:
+            continue
+
+        obs_responses = trial_df["response"].values   # (n_obs,)
+        for obs_idx, r_obs in enumerate(obs_responses):
+            sim_col = sim_trajs[:, obs_idx]            # n_seeds values
+            mu  = float(sim_col.mean())
+            sig = float(sim_col.std())
+            sig = max(sig, 1e-3)                       # floor for deterministic
+            log_liks.append(norm.logpdf(r_obs, loc=mu, scale=sig))
+
+    if not log_liks:
+        raise ValueError("No valid (trial, obs) pairs found in database for this pid")
+
+    return float(-np.mean(log_liks))
