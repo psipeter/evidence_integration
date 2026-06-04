@@ -195,12 +195,16 @@ def fit_pid(
     optuna_seed: int = 42,
 ) -> None:
     db_dir      = Path(db_folder)
-    # Use absolute path for SQLite; WAL mode set via pragma after first connection
+    # Use absolute path for SQLite
     _abs_db    = Path(optuna_db).resolve()
     optuna_url = f"sqlite:///{_abs_db}"
     Path(optuna_db).parent.mkdir(parents=True, exist_ok=True)
-    # Touch db file so RDBStorage can open it
     Path(optuna_db).touch(exist_ok=True)
+
+    # Brief random sleep to stagger concurrent job starts and reduce
+    # SQLite schema-creation race condition
+    import random
+    time.sleep(random.uniform(0, 5))
 
     human_df    = pd.read_pickle(data_path(f"{dataset}.pkl"))
     all_pids    = sorted(human_df["pid"].unique())
@@ -211,16 +215,24 @@ def fit_pid(
     # Create/load studies for all pids (needed for cross-reporting)
     studies: dict[int, optuna.Study] = {}
     for pid in all_pids:
-        studies[pid] = optuna.create_study(
-            study_name=f"{model_type}_{dataset}_pid{pid}",
-            storage=optuna_url,
-            direction="minimize",
-            load_if_exists=True,
-            sampler=optuna.samplers.TPESampler(
-                seed=optuna_seed + pid,
-                n_startup_trials=20,   # random exploration before TPE kicks in
-            ),
-        )
+        for attempt in range(10):
+            try:
+                studies[pid] = optuna.create_study(
+                    study_name=f"{model_type}_{dataset}_pid{pid}",
+                    storage=optuna_url,
+                    direction="minimize",
+                    load_if_exists=True,
+                    sampler=optuna.samplers.TPESampler(
+                        seed=optuna_seed + pid,
+                        n_startup_trials=20,
+                    ),
+                )
+                break
+            except Exception as e:
+                if attempt < 9:
+                    time.sleep(1 + attempt)
+                else:
+                    raise
 
     target_study  = studies[target_pid]
     _log(f"Starting fit: model={model_type} dataset={dataset} "
@@ -310,6 +322,39 @@ def fit_pid(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+def init_db(
+    dataset: str,
+    model_type: str,
+    optuna_db: str,
+    optuna_seed: int = 42,
+) -> None:
+    """Pre-initialise all pid studies in the SQLite DB before parallel jobs start.
+    Run this once from the submit script before sbatch array submission.
+    """
+    import pandas as pd
+    _abs_db    = Path(optuna_db).resolve()
+    optuna_url = f"sqlite:///{_abs_db}"
+    Path(optuna_db).parent.mkdir(parents=True, exist_ok=True)
+    Path(optuna_db).touch(exist_ok=True)
+
+    human_df = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    all_pids = sorted(human_df["pid"].unique())
+    dists    = _get_distributions(model_type, dataset)
+
+    print(f"Initialising {len(all_pids)} studies in {_abs_db}")
+    for pid in all_pids:
+        study = optuna.create_study(
+            study_name=f"{model_type}_{dataset}_pid{pid}",
+            storage=optuna_url,
+            direction="minimize",
+            load_if_exists=True,
+            sampler=optuna.samplers.TPESampler(seed=optuna_seed + pid,
+                                               n_startup_trials=20),
+        )
+        print(f"  pid={pid}: {len(study.trials)} existing trials")
+    print("Done — safe to submit parallel jobs.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset",     type=str)
@@ -322,7 +367,14 @@ def main() -> None:
                         default="data/optuna/carrabin.db")
     parser.add_argument("--run_folder", type=str, default="carrabin")
     parser.add_argument("--optuna_seed", type=int, default=42)
+    parser.add_argument("--init_db", action="store_true",
+                        help="Pre-initialise all pid studies and exit (run before sbatch)")
     args = parser.parse_args()
+
+    if args.init_db:
+        init_db(dataset=args.dataset, model_type=args.model_type,
+                optuna_db=args.optuna_db, optuna_seed=args.optuna_seed)
+        return
 
     fit_pid(
         dataset=args.dataset,
