@@ -69,12 +69,22 @@ def _log(msg: str, pid: int) -> None:
 # ── Parameter space ───────────────────────────────────────────────────────────
 
 def _get_distributions(model_type: str, dataset: str) -> dict:
+    from optuna.distributions import CategoricalDistribution
     spec = (MLE_PARAMS if dataset in MLE_PARAMS
             and model_type in MLE_PARAMS.get(dataset, {})
             else MODEL_PARAMS)[dataset][model_type]
     dists = {}
     for name, bounds in spec.items():
         if name == "fixed":
+            continue
+        # List value or "categorical" marker -> CategoricalDistribution
+        if isinstance(bounds, list):
+            dists[name] = CategoricalDistribution(bounds)
+            continue
+        if bounds == "categorical":
+            # Resolve from NEF_N_NEURONS_VALUES
+            from fitting.model_params import NEF_N_NEURONS_VALUES
+            dists[name] = CategoricalDistribution(NEF_N_NEURONS_VALUES)
             continue
         low, high, step = bounds
         if step is None or float(step) == 0.0:
@@ -91,8 +101,13 @@ def _full_params(model_type: str, dataset: str, free: dict, pid: int) -> dict:
             and model_type in MLE_PARAMS.get(dataset, {})
             else MODEL_PARAMS)[dataset][model_type]
     fixed = spec.get("fixed", {})
-    return {**fixed, **free,
-            "model_type": model_type, "dataset": dataset, "pid": pid}
+    params = {**fixed, **free,
+              "model_type": model_type, "dataset": dataset, "pid": pid}
+    # For NEF MLE: tie n_neurons_counting to n_neurons
+    if model_type == "NEF" and "n_neurons" in free:
+        params["n_neurons_counting"] = int(free["n_neurons"])
+        params["n_neurons"]          = int(free["n_neurons"])
+    return params
 
 
 # ── Database helpers ──────────────────────────────────────────────────────────
@@ -157,14 +172,16 @@ def _checkpoint_path(db_dir: Path, model_type: str, pid: int) -> Path:
 
 def _save_checkpoint(study: optuna.Study, db_dir: Path,
                      model_type: str, pid: int,
-                     injected: set[str]) -> None:
+                     injected: set[str],
+                     sim_times: list[float] | None = None) -> None:
     """Save study trials and injected hashes to a per-pid checkpoint file."""
     trials_data = [
         {"params": t.params, "value": t.value}
         for t in study.trials
         if t.value is not None
     ]
-    data = {"trials": trials_data, "injected": list(injected)}
+    data = {"trials": trials_data, "injected": list(injected),
+            "sim_times": sim_times or []}
     path = _checkpoint_path(db_dir, model_type, pid)
     tmp  = path.with_suffix(".tmp")
     pd.to_pickle(data, tmp)
@@ -177,7 +194,7 @@ def _load_checkpoint(study: optuna.Study, db_dir: Path,
     """Restore study from checkpoint. Returns injected set."""
     path = _checkpoint_path(db_dir, model_type, pid)
     if not path.exists():
-        return set()
+        return set(), []
     data     = pd.read_pickle(path)
     injected = set(data.get("injected", []))
     for td in data.get("trials", []):
@@ -191,7 +208,7 @@ def _load_checkpoint(study: optuna.Study, db_dir: Path,
             ))
         except Exception:
             pass   # duplicate trial — already in study
-    return injected
+    return injected, data.get("sim_times", [])
 
 
 # ── Main fitting loop ─────────────────────────────────────────────────────────
@@ -221,11 +238,12 @@ def fit_pid(
     )
 
     # Restore from checkpoint if available
-    injected = _load_checkpoint(study, db_dir, model_type, target_pid, dists)
+    injected, sim_times = _load_checkpoint(study, db_dir, model_type, target_pid, dists)
     _log(f"Starting fit: model={model_type} n_fits={n_fits} n_sims={n_sims} "
          f"(resuming from {len(study.trials)} trials)", target_pid)
 
     db_entries: list[Path] = []   # cached directory listing, refreshed every 5 fits
+    sim_times:  list[float] = []  # elapsed seconds per simulation (step 4 only)
 
     for fit_idx in range(n_fits):
         t0 = time.time()
@@ -278,19 +296,20 @@ def fit_pid(
         _log(f"  simulating hash={ph[:8]} params={free}", target_pid)
         _simulate_and_save(model_type, params, db_dir, n_sims, run_folder)
         elapsed = time.time() - t0
+        sim_times.append(elapsed)
 
         # ── Step 5: evaluate and report ───────────────────────────────────────
         loss = compute_sim_db_loss(model_type, params, human_pid, db_dir)
         study.tell(trial, loss)
         injected.add(ph)
-        _log(f"  loss={loss:.4f} ({elapsed:.0f}s)", target_pid)
+        _log(f"  loss={loss:.4f} ({elapsed:.1f}s)", target_pid)
 
         # Checkpoint every 10 fits
         if (fit_idx + 1) % 10 == 0:
-            _save_checkpoint(study, db_dir, model_type, target_pid, injected)
+            _save_checkpoint(study, db_dir, model_type, target_pid, injected, sim_times)
 
     # Final checkpoint
-    _save_checkpoint(study, db_dir, model_type, target_pid, injected)
+    _save_checkpoint(study, db_dir, model_type, target_pid, injected, sim_times)
 
     # Save best params
     best      = study.best_trial
@@ -302,9 +321,17 @@ def fit_pid(
         pd.DataFrame([{**best_full, "mle_loss": best.value}]),
         out_dir / f"{model_type}_{dataset}_{target_pid}_params_mle.pkl",
     )
+    sim_times_arr = np.array(sim_times) if sim_times else np.array([0.0])
     pd.to_pickle(
-        pd.DataFrame([{"pid": target_pid, "mle_loss": best.value,
-                       "n_trials": len(study.trials)}]),
+        pd.DataFrame([{
+            "pid":              target_pid,
+            "mle_loss":         best.value,
+            "n_trials":         len(study.trials),
+            "n_sims_done":      len(sim_times),
+            "sim_time_mean_s":  float(sim_times_arr.mean()),
+            "sim_time_total_s": float(sim_times_arr.sum()),
+            "sim_time_median_s":float(np.median(sim_times_arr)),
+        }]),
         out_dir / f"{model_type}_{dataset}_{target_pid}_performance_mle.pkl",
     )
     _log(f"Done. best_loss={best.value:.4f} params={best_free}", target_pid)

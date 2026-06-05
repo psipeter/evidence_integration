@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """figure_carrabin_variability.py — V group figure for carrabin task.
 
-Layout: 1×3
-  Panel A (schematic): task schematic
-  Panel B (V2): KDE of response variability for identical inputs across sources
-  Panel C (V2): Model RMSE vs human response variability regplot
-
-Message: humans are highly variable even for identical inputs, and this
-variability drives model RMSE — underfitting is partially irreducible noise.
+Layout: 1x4
+  Panel A (V2): KDE of response variability for identical inputs
+  Panel B (V2): Model RMSE vs human response variability regplot
+  Panel C (V3): Test-retest reliability of response variability
+  Panel D (V1): Distributional model fit (NLL boxplots)
 
 Run:
     python scripts/figure_carrabin_variability.py --run_folder carrabin
@@ -65,86 +63,47 @@ def _qid_response_std(resp_df: pd.DataFrame, qid_map: pd.DataFrame,
     return grp.groupby("pid")["resp_std"].mean().reset_index()
 
 
-# ── Panel A — schematic ───────────────────────────────────────────────────────
+# ── Panel A (V2) — KDE of response variability ───────────────────────────────
 
-def _plot_schematic(ax) -> None:
-    pdf_path = FIGURES_DIR / "carrabin_task.pdf"
-    if not pdf_path.exists():
-        ax.set_xticks([]); ax.set_yticks([])
-        for sp in ax.spines.values(): sp.set_visible(False)
-        ax.text(0.5, 0.5, "carrabin_task.pdf\nnot found",
-                ha="center", va="center", transform=ax.transAxes,
-                color="0.5", style="italic")
-        return
-    with tempfile.TemporaryDirectory() as tmpdir:
-        out_prefix = Path(tmpdir) / "carrabin_task"
-        cmd = ["pdftoppm", "-png", "-singlefile", str(pdf_path), str(out_prefix)]
-        try:
-            subprocess.run(cmd, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            ax.set_xticks([]); ax.set_yticks([])
-            for sp in ax.spines.values(): sp.set_visible(False)
-            return
-        img_path = out_prefix.with_suffix(".png")
-        if not img_path.exists():
-            return
-        img = mpimg.imread(img_path)
-    ax.imshow(img, interpolation="nearest")
-    ax.set_xticks([]); ax.set_yticks([])
-    for sp in ax.spines.values(): sp.set_visible(False)
-    ax.set_xlabel(""); ax.set_ylabel("")
-    ax.set_aspect("equal"); ax.set_anchor("C")
-
-
-# ── Panel B (V2) — KDE of response variability ───────────────────────────────
-
-def _plot_panel_b(ax, run_folder: str, palette: dict,
+def _plot_panel_a(ax, run_folder: str, palette: dict,
                   model_order: list[str]) -> None:
-    """Panel B (V2): Normalised KDE of response variability for identical inputs.
+    """Panel A (V2): Normalised KDE of response variability for identical inputs.
 
-    Shows that NEF captures the human variability distribution best.
-    Thin vertical grey lines mark each human participant.
-    Deterministic models produce near-delta spikes; stochastic models spread.
+    Shows Human, NoisyCounting (RMSE-fitted), and NoisyCounting (MLE-fitted).
+    RMSE fitting collapses sigma_c to zero; MLE recovers the correct
+    state-noise distribution that overlaps well with the human distribution.
+    Thin vertical grey lines mark individual human participants.
     """
     run_dir = data_path("runs") / run_folder
     human   = pd.read_pickle(data_path("carrabin.pkl"))
     qid_map = human[["pid", "trial", "observation", "qid"]].drop_duplicates()
 
-    # Build source list: human first, then models in order
-    sources_in_order = ["human"] + [
-        m for m in model_order
-        if (run_dir / f"{m}_carrabin_responses.pkl").exists()
+    # Fixed source list: human + two NoisyCounting variants only
+    SOURCES = [
+        ("human",             None,
+         "Human"),
+        ("NoisyCounting",     run_dir / "NoisyCounting_carrabin_responses.pkl",
+         "NoisyCounting (RMSE)"),
+        ("NoisyCounting_mle", run_dir / "NoisyCounting_carrabin_responses_mle.pkl",
+         "NoisyCounting (MLE)"),
     ]
-    # Add stochastic extras: RMSE-fitted NoisyCounting and MLE-fitted version
-    for extra in ["NoisyCounting", "NoisyCounting_mle"]:
-        if extra not in sources_in_order:
-            resp_file = (run_dir / f"{extra}_carrabin_responses_mle.pkl"
-                         if extra == "NoisyCounting_mle"
-                         else run_dir / f"{extra}_carrabin_responses.pkl")
-            if resp_file.exists():
-                sources_in_order.append(extra)
 
     source_data: dict[str, pd.Series] = {}
+    source_label: dict[str, str]      = {}
     all_vals: list[float] = []
 
-    for src in sources_in_order:
-        if src == "human":
+    for key, resp_path, label in SOURCES:
+        if key == "human":
             rs = _qid_response_std(human, qid_map)
-        elif src == "NoisyCounting_mle":
-            resp_path = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
-            if not resp_path.exists():
-                continue
-            rs = _qid_response_std(pd.read_pickle(resp_path), qid_map)
         else:
-            resp_path = run_dir / f"{src}_carrabin_responses.pkl"
-            if not resp_path.exists():
+            if resp_path is None or not resp_path.exists():
                 continue
             rs = _qid_response_std(pd.read_pickle(resp_path), qid_map)
         vals = rs["resp_std"].dropna()
         if len(vals) < 2:
             continue
-        source_data[src] = vals
+        source_data[key]  = vals
+        source_label[key] = label
         all_vals.extend(vals.tolist())
 
     if not source_data:
@@ -156,14 +115,12 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
     x     = np.linspace(0, x_max, 400)
 
     for src, vals in source_data.items():
-        color      = palette.get(src, palette.get(_display(src), "0.5"))
-        label      = ("Human" if src == "human"
-                   else "NoisyCounting (MLE)" if src == "NoisyCounting_mle"
-                   else _display(src))
-        sigma_std  = float(vals.std())
-        bw         = 0.002 if sigma_std < 0.003 else "scott"
-        alpha_fill = 0.15  if sigma_std < 0.003 else 0.20
-        lw         = 1.2   if sigma_std < 0.003 else 1.8
+        color     = palette.get(src, palette.get(_display(src), "0.5"))
+        label     = source_label.get(src, _display(src))
+        sigma_std = float(vals.std())
+        bw        = 0.002 if sigma_std < 0.003 else "scott"
+        alpha_fill = 0.15 if sigma_std < 0.003 else 0.20
+        lw         = 1.2  if sigma_std < 0.003 else 1.8
         kde        = gaussian_kde(vals, bw_method=bw)
         density    = kde(x)
         density    = density / density.max()
@@ -187,11 +144,11 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
     sns.despine(ax=ax, top=True, right=True)
 
 
-# ── Panel C (V2) — RMSE vs response variability ──────────────────────────────
+# ── Panel B (V2) — RMSE vs response variability ──────────────────────────────
 
-def _plot_panel_c(ax, run_folder: str, palette: dict,
+def _plot_panel_b(ax, run_folder: str, palette: dict,
                   model_order: list[str]) -> None:
-    """Panel C (V2): Model RMSE vs human response variability.
+    """Panel B (V2): Model RMSE vs human response variability.
 
     Each model shown as a regression line (scatter=False).
     Positive correlations for all models: noise drives RMSE.
@@ -203,10 +160,10 @@ def _plot_panel_c(ax, run_folder: str, palette: dict,
     human_rs = _qid_response_std(human, qid_map).rename(
         columns={"resp_std": "human_var"})
 
-    PANEL_C_MODELS = MODEL_ORDER + ["NoisyCounting"]
+    PANEL_B_MODELS = MODEL_ORDER + ["NoisyCounting"]
 
     rows = []
-    for mt in PANEL_C_MODELS:
+    for mt in PANEL_B_MODELS:
         f = run_dir / f"{mt}_carrabin_performance.pkl"
         if not f.exists():
             continue
@@ -221,10 +178,10 @@ def _plot_panel_c(ax, run_folder: str, palette: dict,
         return
 
     df    = pd.concat(rows, ignore_index=True)
-    order = [_display(m) for m in PANEL_C_MODELS
+    order = [_display(m) for m in PANEL_B_MODELS
              if _display(m) in df["model"].unique()]
     pal   = {_display(m): palette.get(_display(m), palette.get(m, "0.5"))
-             for m in PANEL_C_MODELS}
+             for m in PANEL_B_MODELS}
 
     for model in order:
         sub   = df[df["model"] == model].copy()
@@ -242,29 +199,27 @@ def _plot_panel_c(ax, run_folder: str, palette: dict,
     sns.despine(ax=ax, top=True, right=True)
 
 
-# ── Panel D (V3) — Test-retest reliability of response variability ────────────
+# ── Panel C (V3) — Test-retest reliability of response variability ────────────
 
-def _plot_panel_d(ax, run_folder: str, palette: dict,
+def _plot_panel_c(ax, run_folder: str, palette: dict,
                   model_order: list[str]) -> None:
-    """Panel D (V3): Test-retest reliability of response variability.
+    """Panel C (V3): Test-retest reliability of response variability.
 
     Splits trials into first and second half per pid. Computes qid_resp_std
-    for each half. Scatter of first-half vs second-half noise per pid,
-    for human and NEF. High correlation = noise is a stable individual trait.
-
-    Human: r~0.73 (***) — genuinely stable individual differences.
-    NEF: should be near r=1 since noise is determined by fitted params.
+    for each half. Regplot (no scatter) of first vs second half per pid.
+    Shows Human, NEF, NoisyCounting (RMSE), NoisyCounting (MLE).
+    High correlation = noise is a stable individual trait.
     """
     from scipy.stats import pearsonr
     from matplotlib.lines import Line2D
 
-    MIN = 3
+    MIN     = 3
     run_dir = data_path("runs") / run_folder
     human   = pd.read_pickle(data_path("carrabin.pkl"))
     qid_map = human[["pid", "trial", "observation", "qid"]].drop_duplicates()
 
     def half_split_std(resp_df):
-        """Return (first_half_std, second_half_std) per pid."""
+        """Return DataFrame with columns [pid, first, second]."""
         df = resp_df.drop(columns=["qid"], errors="ignore").merge(
             qid_map, on=["pid", "trial", "observation"])
         rows = []
@@ -283,18 +238,24 @@ def _plot_panel_d(ax, run_folder: str, palette: dict,
         wide.columns = ["first", "second"]
         return wide.reset_index()
 
-    pal     = list(palette.values())
-    color_h = "0.3"
-    color_n = pal[3] if len(pal) > 3 else pal[0]
+    color_h       = "0.3"
+    color_n       = palette.get("NEF", list(palette.values())[3])
+    color_nc_rmse = palette.get("NoisyCounting",     "0.6")
+    color_nc_mle  = palette.get("NoisyCounting_mle", "0.4")
+
+    nef_path     = run_dir / "NEF_carrabin_responses.pkl"
+    nc_rmse_path = run_dir / "NoisyCounting_carrabin_responses.pkl"
+    nc_mle_path  = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
+
+    sources = [
+        (human,                                                                 color_h,       "Human"),
+        (pd.read_pickle(nef_path)     if nef_path.exists()     else pd.DataFrame(), color_n,       "NEF"),
+        (pd.read_pickle(nc_rmse_path) if nc_rmse_path.exists() else pd.DataFrame(), color_nc_rmse, "NoisyCounting (RMSE)"),
+        (pd.read_pickle(nc_mle_path)  if nc_mle_path.exists()  else pd.DataFrame(), color_nc_mle,  "NoisyCounting (MLE)"),
+    ]
 
     handles, labels = [], []
-    nef_resp_path = run_dir / "NEF_carrabin_responses.pkl"
-
-    for resp_df, color, src in [
-        (human,                                       color_h, "Human"),
-        (pd.read_pickle(nef_resp_path) if nef_resp_path.exists()
-         else pd.DataFrame(),                         color_n, "NEF"),
-    ]:
+    for resp_df, color, src_label in sources:
         if resp_df.empty: continue
         wide = half_split_std(resp_df)
         if len(wide) < 3: continue
@@ -305,12 +266,11 @@ def _plot_panel_d(ax, run_folder: str, palette: dict,
                     color=color, ci=95, scatter=False,
                     line_kws={"lw": 1.5})
         handles.append(Line2D([0], [0], color=color, lw=1.5))
-        labels.append(f"{src} r={r:.2f}{stars}")
+        labels.append(f"{src_label} r={r:.2f}{stars}")
 
     # Identity line
-    lo, hi = 0.0, 0.20
-    ax.plot([lo, hi], [lo, hi], color="0.75", lw=0.8,
-            ls="--", zorder=1)
+    lo, hi = 0.0, 0.40
+    ax.plot([lo, hi], [lo, hi], color="0.75", lw=0.8, ls="--", zorder=1)
     handles.append(Line2D([0], [0], color="0.75", lw=0.8, ls="--"))
     labels.append("Identity")
 
@@ -320,9 +280,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict,
     sns.despine(ax=ax, top=True, right=True)
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
-
-# ── Panel E (V1) — MLE distributional fit ────────────────────────────────────
+# ── Panel D (V1) — MLE distributional fit ────────────────────────────────────
 
 def _mle_loss_from_responses(
     model_resp: pd.DataFrame,
@@ -330,34 +288,25 @@ def _mle_loss_from_responses(
     seq_map: dict,
     sigma_floor: float = 0.10,
 ) -> pd.DataFrame:
-    """Compute group-level MLE loss from a saved response DataFrame.
-
-    For each (pid, seq, obs_idx) cell, fits Gaussian from model responses
-    and evaluates log-likelihood of observed human responses.
-    sigma_floor=0.10 represents irreducible human noise (~mean qid_resp_std);
-    this puts deterministic and stochastic models on a comparable scale.
-    """
+    """Compute group-level MLE loss from a saved response DataFrame."""
     from collections import defaultdict
     from scipy.stats import norm
 
     rows = []
     for pid, hg in human.groupby("pid"):
         mg = model_resp[model_resp["pid"] == pid]
-
         cell_obs: dict = defaultdict(list)
         for trial, tdf in hg.groupby("trial"):
             seq = seq_map[(pid, trial)]
             for obs_idx, r in enumerate(
                     tdf.sort_values("observation")["response"].values):
                 cell_obs[(seq, obs_idx)].append(float(r))
-
         cell_model: dict = defaultdict(list)
         for trial, tdf in mg.groupby("trial"):
             seq = seq_map[(pid, trial)]
             for obs_idx, r in enumerate(
                     tdf.sort_values("observation")["response"].values):
                 cell_model[(seq, obs_idx)].append(float(r))
-
         total_ll, n_total = 0.0, 0
         for (seq, obs_idx), r_list in cell_obs.items():
             if (seq, obs_idx) not in cell_model:
@@ -368,41 +317,34 @@ def _mle_loss_from_responses(
             r_arr    = np.array(r_list)
             total_ll += float(np.sum(norm.logpdf(r_arr, loc=mu_sim, scale=sig_sim)))
             n_total  += len(r_arr)
-
         if n_total > 0:
             rows.append({"pid": pid, "mle_loss": -total_ll / n_total})
-
     return pd.DataFrame(rows)
 
 
-def _plot_panel_e(ax, run_folder: str, palette: dict,
+def _plot_panel_d(ax, run_folder: str, palette: dict,
                   model_order: list[str]) -> None:
-    """Panel E (V1): Distributional fit — MLE loss per pid, all models.
+    """Panel D (V1): Distributional fit — MLE loss per pid, all models.
 
-    For deterministic models: sigma_floor=0.10 (mean human qid_resp_std)
-    represents irreducible noise; loss penalises mean prediction error.
-    For NoisyCounting: uses pre-fitted MLE params file (full distributional fit).
+    For deterministic models: sigma_floor=0.10 represents irreducible noise.
+    For NoisyCounting: uses pre-fitted MLE params file.
     For NEF: uses saved responses with natural trial-to-trial variability.
-
     Ordering (lower = better):
         NoisyCounting MLE > NEF > LeakyIntegrator > PrimacyRecency > Mean
-    sigma_floor=0.10 puts all models on comparable scale.
     """
     SIGMA_FLOOR = 0.10
     run_dir     = data_path("runs") / run_folder
     human       = pd.read_pickle(data_path("carrabin.pkl"))
 
-    # Seq map: (pid, trial) -> tuple of values
     seq_map = {}
     for (pid, trial), g in human.groupby(["pid", "trial"]):
         seq_map[(pid, trial)] = tuple(
             g.sort_values("observation")["value"].values)
 
-    PANEL_MODELS = MODEL_ORDER + ["NoisyCounting"]
+    PANEL_D_MODELS = MODEL_ORDER + ["NoisyCounting"]
     rows = []
 
-    for mt in PANEL_MODELS:
-        # NoisyCounting: load pre-fitted MLE loss directly
+    for mt in PANEL_D_MODELS:
         if mt == "NoisyCounting":
             mle_path = run_dir / "NoisyCounting_carrabin_params_mle.pkl"
             if not mle_path.exists():
@@ -425,10 +367,10 @@ def _plot_panel_e(ax, run_folder: str, palette: dict,
         return
 
     plot_df = pd.concat(rows, ignore_index=True)
-    order   = [_display(m) for m in PANEL_MODELS
+    order   = [_display(m) for m in PANEL_D_MODELS
                if _display(m) in plot_df["source"].unique()]
     pal     = {_display(m): palette.get(_display(m), palette.get(m, "0.5"))
-               for m in PANEL_MODELS}
+               for m in PANEL_D_MODELS}
 
     sns.boxplot(data=plot_df, x="source", y="mle_loss", order=order,
                 hue="source", palette=pal, legend=False, ax=ax)
@@ -442,18 +384,18 @@ def _plot_panel_e(ax, run_folder: str, palette: dict,
     from scipy.stats import wilcoxon
     nef_vals = plot_df[plot_df["source"] == "NEF"]["mle_loss"]
     if len(nef_vals) >= 3:
-        nef_idx  = order.index("NEF")
-        y_max    = plot_df["mle_loss"].quantile(0.95)
-        y_range  = plot_df["mle_loss"].quantile(0.95) - plot_df["mle_loss"].quantile(0.05)
-        y_step   = y_range * 0.12
-        bar_n    = 0
+        nef_idx = order.index("NEF")
+        y_max   = plot_df["mle_loss"].quantile(0.95)
+        y_range = plot_df["mle_loss"].quantile(0.95) - plot_df["mle_loss"].quantile(0.05)
+        y_step  = y_range * 0.12
+        bar_n   = 0
         for other in [m for m in order if m != "NEF"]:
             other_vals = plot_df[plot_df["source"] == other]["mle_loss"]
             if len(other_vals) < 3:
                 continue
-            merged = (plot_df[plot_df["source"] == "NEF"][["pid","mle_loss"]]
-                      .merge(plot_df[plot_df["source"] == other][["pid","mle_loss"]],
-                             on="pid", suffixes=("_nef","_other")))
+            merged = (plot_df[plot_df["source"] == "NEF"][["pid", "mle_loss"]]
+                      .merge(plot_df[plot_df["source"] == other][["pid", "mle_loss"]],
+                             on="pid", suffixes=("_nef", "_other")))
             if len(merged) < 3:
                 continue
             _, p = wilcoxon(merged["mle_loss_nef"], merged["mle_loss_other"])
@@ -492,11 +434,10 @@ def main() -> None:
             palette[disp] = palette[mt]
     palette["Human"] = HUMAN_NEUTRAL_COLOR
     palette["human"] = HUMAN_NEUTRAL_COLOR
-    # NoisyCounting and its MLE variant get next colour slots
     nc_idx = len(model_order)
-    palette["NoisyCounting"]     = pal[nc_idx]     if nc_idx     < len(pal) else "0.6"
-    palette["NoisyCounting_mle"]       = pal[nc_idx + 1] if nc_idx + 1 < len(pal) else "0.4"
-    palette["NoisyCounting (MLE)"]     = palette["NoisyCounting_mle"]
+    palette["NoisyCounting"]       = pal[nc_idx]     if nc_idx     < len(pal) else "0.6"
+    palette["NoisyCounting_mle"]   = pal[nc_idx + 1] if nc_idx + 1 < len(pal) else "0.4"
+    palette["NoisyCounting (MLE)"] = palette["NoisyCounting_mle"]
 
     fig, axes = plt.subplots(
         1, 4,
@@ -504,10 +445,10 @@ def main() -> None:
         constrained_layout=True,
     )
 
-    _plot_panel_b(axes[0], args.run_folder, palette, model_order)
-    _plot_panel_c(axes[1], args.run_folder, palette, model_order)
-    _plot_panel_d(axes[2], args.run_folder, palette, model_order)
-    _plot_panel_e(axes[3], args.run_folder, palette, model_order)
+    _plot_panel_a(axes[0], args.run_folder, palette, model_order)
+    _plot_panel_b(axes[1], args.run_folder, palette, model_order)
+    _plot_panel_c(axes[2], args.run_folder, palette, model_order)
+    _plot_panel_d(axes[3], args.run_folder, palette, model_order)
 
     label_panels(axes.reshape(1, -1))
 

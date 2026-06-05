@@ -106,11 +106,24 @@ MLE_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "fixed": {},
         },
         "NEF": {
-            **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 5},
+            "lambda_": (0.01, 1.0, 0.001),
+            "alpha_0": (0.01, 1.0, 0.001),
+            # n_neurons is discrete — list signals CategoricalDistribution in fit_mle.py
+            # n_neurons_counting is always set equal to n_neurons
+            "n_neurons": "categorical",
+            "fixed": {
+                **{k: v for k, v in _NEF_FIXED.items()
+                   if k not in ("n_neurons", "n_neurons_counting")},
+                "radius_c": 5,
+            },
         },
     },
 }
+
+# Discrete n_neurons values for NEF MLE fitting.
+# Activity files must exist: data/counting_activities_n{N}_nc{N}_carrabin.pkl
+# Generate locally then scp to cluster before submitting MLE jobs.
+NEF_N_NEURONS_VALUES: list[int] = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
 
 
 # diederen model params archived in archive/misc/

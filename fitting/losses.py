@@ -140,8 +140,8 @@ def compute_sim_db_loss(
         if seq not in db:
             continue
         sim_trajs = db[seq]
-        if sim_trajs.shape[0] < 2:
-            continue
+        if sim_trajs.shape[0] < 1:
+            continue  # need at least 1 simulation
         sim_col  = sim_trajs[:, obs_idx]
         mu_sim   = float(sim_col.mean())
         sig_sim  = max(float(sim_col.std()), 1e-3)
