@@ -129,17 +129,64 @@ def _collect_activities(run_folder: Path, ensembles: list[str], timing: str) -> 
                 print(f"Collected {len(encoder_files)} -> {encoders_out} ({encoders_df.shape})")
 
 
+
+def _collect_mle_params(run_folder: Path, dataset: str,
+                        model_type: str) -> None:
+    """Collect per-pid MLE params/performance into single combined files.
+
+    Globs {model_type}_{dataset}_{pid}_params_mle.pkl and
+    {model_type}_{dataset}_{pid}_performance_mle.pkl from run_folder,
+    concatenates them, and saves combined files.
+
+    Output:
+        {model_type}_{dataset}_params_mle.pkl
+        {model_type}_{dataset}_performance_mle.pkl
+    """
+    params_files = sorted(
+        run_folder.glob(f"{model_type}_{dataset}_*_params_mle.pkl")
+    )
+    perf_files = sorted(
+        run_folder.glob(f"{model_type}_{dataset}_*_performance_mle.pkl")
+    )
+
+    if not params_files:
+        print(f"No MLE params files found for {model_type}/{dataset} in {run_folder}")
+        return
+
+    params_df = pd.concat([pd.read_pickle(f) for f in params_files],
+                           ignore_index=True)
+    out_params = run_folder / f"{model_type}_{dataset}_params_mle.pkl"
+    params_df.to_pickle(out_params)
+    print(f"Collected {len(params_files)} params -> {out_params.name}")
+    print(params_df.sort_values("pid")[
+        ["pid", "mle_loss"] +
+        [c for c in params_df.columns
+         if c not in ("pid", "mle_loss", "model_type", "dataset")]
+    ].to_string(index=False))
+
+    if perf_files:
+        perf_df = pd.concat([pd.read_pickle(f) for f in perf_files],
+                             ignore_index=True)
+        out_perf = run_folder / f"{model_type}_{dataset}_performance_mle.pkl"
+        perf_df.to_pickle(out_perf)
+        print(f"Collected {len(perf_files)} performance -> {out_perf.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fitting.collect")
     parser.add_argument("run_folder", help="Run folder name under data/runs/")
     parser.add_argument(
         "--type",
         type=str,
-        choices=["params", "responses", "activities"],
+        choices=["params", "responses", "activities", "mle_params"],
         required=True,
     )
     parser.add_argument("--ensembles", nargs="+", default=["error"])
     parser.add_argument("--timing", type=str, default="once_per_obs")
+    parser.add_argument("--model_type", type=str, default=None,
+                        help="Model type for mle_params collection")
+    parser.add_argument("--dataset", type=str, default=None,
+                        help="Dataset for mle_params collection")
     args = parser.parse_args()
 
     run_folder = RUNS_DIR / args.run_folder
@@ -147,6 +194,10 @@ def main() -> None:
         _collect_params(run_folder)
     elif args.type == "responses":
         _collect_responses(run_folder)
+    elif args.type == "mle_params":
+        if not args.model_type or not args.dataset:
+            parser.error("--model_type and --dataset required for mle_params")
+        _collect_mle_params(run_folder, args.dataset, args.model_type)
     else:
         _collect_activities(run_folder, args.ensembles, args.timing)
 
