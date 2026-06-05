@@ -1,37 +1,43 @@
 #!/usr/bin/env python3
 """
-MLE fitting via shared simulation database and Optuna TPE.
+MLE fitting via shared simulation database and per-process in-memory Optuna.
 
-Each process fits one pid. All processes share:
-  - A simulation database: {model}/params_{hash}.pkl storing
-    (params, responses[32 seqs × n_sims × n_obs])
-  - An Optuna SQLite storage: one study per pid, all in one file
+Each process fits one pid using its own in-memory Optuna study.
+Processes share only the simulation database (pickle files — no SQLite).
+Cross-pid sharing happens at step 1: each process scans all simulation files
+and evaluates loss for its own pid, injecting any new entries into its study.
 
-Loop per process:
-  1. Scan database for any entries not yet in this pid's Optuna study
-     → compute sim_db_loss(params, pid) → inject as completed trial
-  2. Ask this pid's study for next params (TPE)
-  3. If params already in database: skip to 1 (free reuse)
-  4. Simulate params → save to database
-  5. Cross-report: compute sim_db_loss(params, pid=k) for all pids
-     → inject into each pid's study
-  Repeat n_fits times.
+Architecture:
+  - Simulation database: data/sim_db/{model}/{model}_{hash}.pkl
+    One file per parameter point, shared read/write across all processes.
+    Written via atomic rename (NFS-safe, no stale locks).
+  - Per-pid checkpoint: data/sim_db/{model}/checkpoint_pid{pid}.pkl
+    Saves study state after each fit so jobs can resume if interrupted.
+  - No SQLite / no shared Optuna storage.
 
-Usage (NoisyCounting, pid 1):
+Loop per process (n_fits iterations):
+  1. Scan simulation database → evaluate loss for this pid → inject into study
+  2. Ask in-memory TPE for next params
+  3. Cache hit: params already in database → evaluate loss, report, continue
+  4. Simulate n_sims times → save to database (atomic rename)
+  5. Evaluate loss for this pid → report to study
+
+Usage:
     python -m fitting.fit_mle carrabin NoisyCounting 1 \\
-        --n_fits 50 --n_sims 100 \\
+        --n_fits 500 --n_sims 100 \\
         --db_folder data/sim_db \\
-        --optuna_db data/optuna/NoisyCounting_carrabin.db \\
         --run_folder carrabin
 
-SLURM: one job per pid, all pointing to the same db_folder and optuna_db.
+SLURM: one job per pid, all pointing to the same db_folder.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -63,9 +69,9 @@ def _log(msg: str, pid: int) -> None:
 # ── Parameter space ───────────────────────────────────────────────────────────
 
 def _get_distributions(model_type: str, dataset: str) -> dict:
-    """Return Optuna distributions for the free parameters of a model."""
-    params_source = MLE_PARAMS if dataset in MLE_PARAMS and model_type in MLE_PARAMS.get(dataset, {}) else MODEL_PARAMS
-    spec = params_source[dataset][model_type]
+    spec = (MLE_PARAMS if dataset in MLE_PARAMS
+            and model_type in MLE_PARAMS.get(dataset, {})
+            else MODEL_PARAMS)[dataset][model_type]
     dists = {}
     for name, bounds in spec.items():
         if name == "fixed":
@@ -81,9 +87,10 @@ def _get_distributions(model_type: str, dataset: str) -> dict:
 
 
 def _full_params(model_type: str, dataset: str, free: dict, pid: int) -> dict:
-    """Merge free params with fixed params."""
-    params_source = MLE_PARAMS if dataset in MLE_PARAMS and model_type in MLE_PARAMS.get(dataset, {}) else MODEL_PARAMS
-    fixed = params_source[dataset][model_type].get("fixed", {})
+    spec = (MLE_PARAMS if dataset in MLE_PARAMS
+            and model_type in MLE_PARAMS.get(dataset, {})
+            else MODEL_PARAMS)[dataset][model_type]
+    fixed = spec.get("fixed", {})
     return {**fixed, **free,
             "model_type": model_type, "dataset": dataset, "pid": pid}
 
@@ -95,15 +102,12 @@ def _db_path(db_dir: Path, model_type: str, ph: str) -> Path:
 
 
 def _list_db_entries(db_dir: Path, model_type: str) -> list[Path]:
-    """Return all simulation database files for this model."""
     model_dir = db_dir / model_type
     if not model_dir.exists():
         return []
-    return sorted(model_dir.glob(f"{model_type}_*.pkl"))
-
-
-def _load_db_entry(path: Path) -> dict:
-    return pd.read_pickle(path)
+    # Exclude temp files and checkpoints
+    return sorted(p for p in model_dir.glob(f"{model_type}_*.pkl")
+                  if not p.name.startswith("checkpoint"))
 
 
 def _simulate_and_save(
@@ -113,14 +117,7 @@ def _simulate_and_save(
     n_sims: int,
     run_folder: str,
 ) -> Path:
-    """Simulate params and save to shared database using atomic rename.
-
-    Uses write-to-tempfile + atomic rename instead of file locking.
-    Atomic rename is safe on NFS and avoids stale locks if a job dies.
-    If two processes simulate the same params simultaneously, one will
-    overwrite the other's file — this is safe since both produce the
-    same params hash and the content is statistically equivalent.
-    """
+    """Simulate and save using atomic rename (NFS-safe)."""
     ph        = params_hash(model_type, params)
     model_dir = db_dir / model_type
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -129,9 +126,6 @@ def _simulate_and_save(
     if out_path.exists():
         return out_path
 
-    # Simulate into a temp file in the same directory (same filesystem)
-    # then atomically rename into place.
-    import tempfile, os
     with tempfile.NamedTemporaryFile(
         dir=model_dir, suffix=".pkl.tmp", delete=False
     ) as tmp:
@@ -145,9 +139,8 @@ def _simulate_and_save(
             db_dir=db_dir,
             run_folder=run_folder,
             overwrite=False,
-            out_path_override=tmp_path,  # write to temp first
+            out_path_override=tmp_path,
         )
-        # Atomic rename — safe even if out_path now exists (other process won race)
         os.replace(tmp_path, out_path)
     except Exception:
         tmp_path.unlink(missing_ok=True)
@@ -156,29 +149,49 @@ def _simulate_and_save(
     return out_path
 
 
-# ── Loss evaluation ───────────────────────────────────────────────────────────
+# ── Checkpoint helpers ────────────────────────────────────────────────────────
 
-def _eval_loss(
-    entry: dict,
-    human_pids: dict[int, pd.DataFrame],
-    model_type: str,
-    db_dir: Path,
-) -> dict[int, float]:
-    """Return {pid: loss} for all pids given one database entry."""
-    params = entry["params"]
-    losses = {}
-    for pid, human_pid in human_pids.items():
+def _checkpoint_path(db_dir: Path, model_type: str, pid: int) -> Path:
+    return db_dir / model_type / f"checkpoint_pid{pid}.pkl"
+
+
+def _save_checkpoint(study: optuna.Study, db_dir: Path,
+                     model_type: str, pid: int,
+                     injected: set[str]) -> None:
+    """Save study trials and injected hashes to a per-pid checkpoint file."""
+    trials_data = [
+        {"params": t.params, "value": t.value}
+        for t in study.trials
+        if t.value is not None
+    ]
+    data = {"trials": trials_data, "injected": list(injected)}
+    path = _checkpoint_path(db_dir, model_type, pid)
+    tmp  = path.with_suffix(".tmp")
+    pd.to_pickle(data, tmp)
+    os.replace(tmp, path)
+
+
+def _load_checkpoint(study: optuna.Study, db_dir: Path,
+                     model_type: str, pid: int,
+                     dists: dict) -> set[str]:
+    """Restore study from checkpoint. Returns injected set."""
+    path = _checkpoint_path(db_dir, model_type, pid)
+    if not path.exists():
+        return set()
+    data     = pd.read_pickle(path)
+    injected = set(data.get("injected", []))
+    for td in data.get("trials", []):
+        if td["value"] is None:
+            continue
         try:
-            loss = compute_sim_db_loss(
-                model_type=model_type,
-                params=params,
-                human_pid=human_pid,
-                db_dir=db_dir,
-            )
-            losses[pid] = loss
-        except Exception as e:
-            logging.warning(f"Loss eval failed pid={pid}: {e}")
-    return losses
+            study.add_trial(create_trial(
+                params=td["params"],
+                distributions=dists,
+                value=td["value"],
+            ))
+        except Exception:
+            pass   # duplicate trial — already in study
+    return injected
 
 
 # ── Main fitting loop ─────────────────────────────────────────────────────────
@@ -187,126 +200,103 @@ def fit_pid(
     dataset: str,
     model_type: str,
     target_pid: int,
-    n_fits: int = 50,
+    n_fits: int = 500,
     n_sims: int = 100,
     db_folder: str = "data/sim_db",
-    optuna_db: str = "data/optuna/carrabin.db",
     run_folder: str = "carrabin",
     optuna_seed: int = 42,
 ) -> None:
-    db_dir      = Path(db_folder)
-    # Use absolute path for SQLite
-    _abs_db    = Path(optuna_db).resolve()
-    optuna_url = f"sqlite:///{_abs_db}"
-    Path(optuna_db).parent.mkdir(parents=True, exist_ok=True)
-    Path(optuna_db).touch(exist_ok=True)
+    db_dir     = Path(db_folder)
+    human_df   = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    human_pid  = human_df[human_df["pid"] == target_pid].copy()
+    dists      = _get_distributions(model_type, dataset)
 
-    # Brief random sleep to stagger concurrent job starts and reduce
-    # SQLite schema-creation race condition
-    import random
-    time.sleep(random.uniform(0, 5))
+    # In-memory study — no SQLite, no contention
+    study = optuna.create_study(
+        direction="minimize",
+        sampler=optuna.samplers.TPESampler(
+            seed=optuna_seed + target_pid,
+            n_startup_trials=20,
+        ),
+    )
 
-    human_df    = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    all_pids    = sorted(human_df["pid"].unique())
-    human_pids  = {p: human_df[human_df["pid"] == p].copy() for p in all_pids}
+    # Restore from checkpoint if available
+    injected = _load_checkpoint(study, db_dir, model_type, target_pid, dists)
+    _log(f"Starting fit: model={model_type} n_fits={n_fits} n_sims={n_sims} "
+         f"(resuming from {len(study.trials)} trials)", target_pid)
 
-    dists       = _get_distributions(model_type, dataset)
-
-    # Create/load studies for all pids (needed for cross-reporting)
-    studies: dict[int, optuna.Study] = {}
-    for pid in all_pids:
-        for attempt in range(10):
-            try:
-                studies[pid] = optuna.create_study(
-                    study_name=f"{model_type}_{dataset}_pid{pid}",
-                    storage=optuna_url,
-                    direction="minimize",
-                    load_if_exists=True,
-                    sampler=optuna.samplers.TPESampler(
-                        seed=optuna_seed + pid,
-                        n_startup_trials=20,
-                    ),
-                )
-                break
-            except Exception as e:
-                if attempt < 9:
-                    time.sleep(1 + attempt)
-                else:
-                    raise
-
-    target_study  = studies[target_pid]
-    _log(f"Starting fit: model={model_type} dataset={dataset} "
-         f"n_fits={n_fits} n_sims={n_sims}", target_pid)
-
-    # Track which database hashes have already been injected into each study
-    injected: dict[int, set[str]] = {pid: set() for pid in all_pids}
-    # Pre-populate from existing study trials
-    for pid, study in studies.items():
-        for t in study.trials:
-            if t.system_attrs.get("db_hash"):
-                injected[pid].add(t.system_attrs["db_hash"])
+    db_entries: list[Path] = []   # cached directory listing, refreshed every 5 fits
 
     for fit_idx in range(n_fits):
         t0 = time.time()
 
-        # ── Step 1: scan database → inject new entries into all pid studies ──
-        # This is the cross-pid sharing mechanism. Each process picks up
-        # simulations from all other concurrent processes automatically.
-        for db_path in _list_db_entries(db_dir, model_type):
-            entry = _load_db_entry(db_path)
-            ph    = params_hash(model_type, entry["params"])
-            pids_needing = [p for p in all_pids if ph not in injected[p]]
-            if not pids_needing:
-                continue
-            losses = _eval_loss(
-                entry, {p: human_pids[p] for p in pids_needing},
-                model_type, db_dir,
-            )
-            for pid, loss in losses.items():
-                free_e = {k: v for k, v in entry["params"].items() if k in dists}
-                studies[pid].add_trial(create_trial(
-                    params=free_e, distributions=dists, value=loss,
-                    system_attrs={"db_hash": ph},
-                ))
-                injected[pid].add(ph)
+        # ── Step 1: scan database → inject new entries into this study ────────
+        # Re-glob every 5 iterations to pick up new files from other processes
+        # while avoiding expensive NFS directory reads every iteration.
+        if fit_idx % 5 == 0:
+            db_entries = _list_db_entries(db_dir, model_type)
 
-        n_trials = len(target_study.trials)
+        for db_path in db_entries:
+            # Derive hash from filename — avoids loading file just to check
+            ph = db_path.stem[len(model_type) + 1:]  # strip "{model_type}_"
+            if ph in injected:
+                continue
+            try:
+                entry    = pd.read_pickle(db_path)
+                params_e = entry["params"]
+                free_e   = {k: v for k, v in params_e.items() if k in dists}
+                loss     = compute_sim_db_loss(model_type, params_e, human_pid, db_dir)
+                # Skip system_attrs — we track injected ourselves
+                study.add_trial(create_trial(
+                    params=free_e, distributions=dists, value=loss,
+                ))
+                injected.add(ph)
+            except Exception as e:
+                _log(f"  Warning: could not evaluate {ph[:8]}: {e}", target_pid)
+
+        n_trials = len(study.trials)
         _log(f"fit {fit_idx+1}/{n_fits}: {n_trials} trials in study", target_pid)
 
-        # ── Step 2: ask TPE for next params to try ───────────────────────────
-        trial  = target_study.ask(fixed_distributions=dists)
+        # ── Step 2: ask TPE for next params ───────────────────────────────────
+        trial  = study.ask(fixed_distributions=dists)
         free   = trial.params
         params = _full_params(model_type, dataset, free, target_pid)
         ph     = params_hash(model_type, params)
 
-        # ── Step 3: cache hit — params already in database, skip simulation ──
+        # ── Step 3: cache hit ─────────────────────────────────────────────────
         db_path_new = _db_path(db_dir, model_type, ph)
         if db_path_new.exists():
-            _log(f"  cache hit hash={ph[:8]} — no simulation needed", target_pid)
-            loss = compute_sim_db_loss(model_type, params,
-                                       human_pids[target_pid], db_dir)
-            target_study.tell(trial, loss)
-            continue   # next iteration step 1 will inject into all other studies
+            _log(f"  cache hit hash={ph[:8]}", target_pid)
+            try:
+                loss = compute_sim_db_loss(model_type, params, human_pid, db_dir)
+            except Exception:
+                loss = 1e6
+            study.tell(trial, loss)
+            continue
 
-        # ── Step 4: simulate n_sims times, save to shared database ───────────
+        # ── Step 4: simulate ──────────────────────────────────────────────────
         _log(f"  simulating hash={ph[:8]} params={free}", target_pid)
         _simulate_and_save(model_type, params, db_dir, n_sims, run_folder)
         elapsed = time.time() - t0
 
-        # ── Step 5: evaluate loss for this pid, report to its study ──────────
-        # Other pids will pick this entry up at their next step 1 — no
-        # explicit cross-reporting needed.
-        loss = compute_sim_db_loss(model_type, params,
-                                   human_pids[target_pid], db_dir)
-        target_study.tell(trial, loss)
-        injected[target_pid].add(ph)
+        # ── Step 5: evaluate and report ───────────────────────────────────────
+        loss = compute_sim_db_loss(model_type, params, human_pid, db_dir)
+        study.tell(trial, loss)
+        injected.add(ph)
         _log(f"  loss={loss:.4f} ({elapsed:.0f}s)", target_pid)
 
-    # ── Save best params ──────────────────────────────────────────────────────
-    best       = target_study.best_trial
-    best_free  = best.params
-    best_full  = _full_params(model_type, dataset, best_free, target_pid)
-    out_dir    = resolve_run_folder(run_folder)
+        # Checkpoint every 10 fits
+        if (fit_idx + 1) % 10 == 0:
+            _save_checkpoint(study, db_dir, model_type, target_pid, injected)
+
+    # Final checkpoint
+    _save_checkpoint(study, db_dir, model_type, target_pid, injected)
+
+    # Save best params
+    best      = study.best_trial
+    best_free = best.params
+    best_full = _full_params(model_type, dataset, best_free, target_pid)
+    out_dir   = resolve_run_folder(run_folder)
 
     pd.to_pickle(
         pd.DataFrame([{**best_full, "mle_loss": best.value}]),
@@ -314,7 +304,7 @@ def fit_pid(
     )
     pd.to_pickle(
         pd.DataFrame([{"pid": target_pid, "mle_loss": best.value,
-                       "n_trials": len(target_study.trials)}]),
+                       "n_trials": len(study.trials)}]),
         out_dir / f"{model_type}_{dataset}_{target_pid}_performance_mle.pkl",
     )
     _log(f"Done. best_loss={best.value:.4f} params={best_free}", target_pid)
@@ -322,59 +312,17 @@ def fit_pid(
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-def init_db(
-    dataset: str,
-    model_type: str,
-    optuna_db: str,
-    optuna_seed: int = 42,
-) -> None:
-    """Pre-initialise all pid studies in the SQLite DB before parallel jobs start.
-    Run this once from the submit script before sbatch array submission.
-    """
-    import pandas as pd
-    _abs_db    = Path(optuna_db).resolve()
-    optuna_url = f"sqlite:///{_abs_db}"
-    Path(optuna_db).parent.mkdir(parents=True, exist_ok=True)
-    Path(optuna_db).touch(exist_ok=True)
-
-    human_df = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    all_pids = sorted(human_df["pid"].unique())
-    dists    = _get_distributions(model_type, dataset)
-
-    print(f"Initialising {len(all_pids)} studies in {_abs_db}")
-    for pid in all_pids:
-        study = optuna.create_study(
-            study_name=f"{model_type}_{dataset}_pid{pid}",
-            storage=optuna_url,
-            direction="minimize",
-            load_if_exists=True,
-            sampler=optuna.samplers.TPESampler(seed=optuna_seed + pid,
-                                               n_startup_trials=20),
-        )
-        print(f"  pid={pid}: {len(study.trials)} existing trials")
-    print("Done — safe to submit parallel jobs.")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("dataset",     type=str)
-    parser.add_argument("model_type",  type=str)
-    parser.add_argument("pid",         type=int)
-    parser.add_argument("--n_fits",    type=int, default=50)
-    parser.add_argument("--n_sims",   type=int, default=100)
-    parser.add_argument("--db_folder", type=str, default="data/sim_db")
-    parser.add_argument("--optuna_db", type=str,
-                        default="data/optuna/carrabin.db")
+    parser.add_argument("dataset",      type=str)
+    parser.add_argument("model_type",   type=str)
+    parser.add_argument("pid",          type=int)
+    parser.add_argument("--n_fits",     type=int, default=500)
+    parser.add_argument("--n_sims",     type=int, default=100)
+    parser.add_argument("--db_folder",  type=str, default="data/sim_db")
     parser.add_argument("--run_folder", type=str, default="carrabin")
     parser.add_argument("--optuna_seed", type=int, default=42)
-    parser.add_argument("--init_db", action="store_true",
-                        help="Pre-initialise all pid studies and exit (run before sbatch)")
     args = parser.parse_args()
-
-    if args.init_db:
-        init_db(dataset=args.dataset, model_type=args.model_type,
-                optuna_db=args.optuna_db, optuna_seed=args.optuna_seed)
-        return
 
     fit_pid(
         dataset=args.dataset,
@@ -383,7 +331,6 @@ def main() -> None:
         n_fits=args.n_fits,
         n_sims=args.n_sims,
         db_folder=args.db_folder,
-        optuna_db=args.optuna_db,
         run_folder=args.run_folder,
         optuna_seed=args.optuna_seed,
     )
