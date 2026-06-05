@@ -172,13 +172,96 @@ def _collect_mle_params(run_folder: Path, dataset: str,
         print(f"Collected {len(perf_files)} performance -> {out_perf.name}")
 
 
+
+def _generate_mle_responses(run_folder: Path, dataset: str,
+                             model_type: str, n_sims: int = 200,
+                             db_folder: str = "data/sim_db") -> None:
+    """Generate responses at MLE best-fit params for each pid.
+
+    Reads {model_type}_{dataset}_params_mle.pkl, simulates n_sims trajectories
+    per pid at their best params, and saves a combined responses file matching
+    the format of RMSE-fitted {model_type}_{dataset}_responses.pkl.
+
+    The responses are the mean trajectory across n_sims simulations, so they
+    represent the model's expected response given its best-fit distribution.
+
+    Output: {model_type}_{dataset}_responses_mle.pkl
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.build_sim_db import simulate_param_point, ALL_SEQUENCES
+    from utils.paths import data_path
+
+    params_path = run_folder / f"{model_type}_{dataset}_params_mle.pkl"
+    if not params_path.exists():
+        print(f"No MLE params file found: {params_path}")
+        return
+
+    all_params = pd.read_pickle(params_path)
+    human      = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    db_dir     = Path(db_folder)
+
+    print(f"Generating MLE responses: {model_type} {dataset} "
+          f"({len(all_params)} pids, n_sims={n_sims})")
+
+    rows = []
+    for _, prow in all_params.iterrows():
+        pid    = int(prow["pid"])
+        params = {k: v for k, v in prow.items()
+                  if k not in ("mle_loss",)}
+        params["model_type"] = model_type
+        params["dataset"]    = dataset
+        params["pid"]        = pid
+
+        # Simulate at best params (uses cache if already in db)
+        db_path = simulate_param_point(
+            model_type=model_type,
+            params=params,
+            n_sims=n_sims,
+            db_dir=db_dir,
+            run_folder=dataset,
+            overwrite=False,
+        )
+        db = pd.read_pickle(db_path)["data"]   # {seq: (n_sims, n_obs)}
+
+        # Reconstruct per-trial responses: one row per (sim, trial, obs)
+        # so that qid_resp_std can measure within-group variability.
+        # We use trial indices as sim seeds — each trial maps to one simulation.
+        for trial, tdf in human[human["pid"] == pid].groupby("trial"):
+            tdf  = tdf.sort_values("observation")
+            seq  = tuple(tdf["value"].values)
+            if seq not in db:
+                continue
+            trajs   = db[seq]           # (n_sims, n_obs)
+            sim_idx = (int(trial) - 1) % trajs.shape[0]
+            traj    = trajs[sim_idx]    # one trajectory matching this trial slot
+            for obs_idx in range(len(traj)):
+                rows.append({
+                    "model_type":  f"{model_type}_mle",
+                    "pid":         pid,
+                    "trial":       trial,
+                    "observation": obs_idx + 1,
+                    "response":    float(traj[obs_idx]),
+                })
+
+        print(f"  pid={pid}: done")
+
+    if not rows:
+        print("No responses generated.")
+        return
+
+    out = run_folder / f"{model_type}_{dataset}_responses_mle.pkl"
+    pd.DataFrame(rows).to_pickle(out)
+    print(f"Saved {len(rows)} rows -> {out.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fitting.collect")
     parser.add_argument("run_folder", help="Run folder name under data/runs/")
     parser.add_argument(
         "--type",
         type=str,
-        choices=["params", "responses", "activities", "mle_params"],
+        choices=["params", "responses", "activities", "mle_params", "mle_responses"],
         required=True,
     )
     parser.add_argument("--ensembles", nargs="+", default=["error"])
@@ -187,6 +270,8 @@ def main() -> None:
                         help="Model type for mle_params collection")
     parser.add_argument("--dataset", type=str, default=None,
                         help="Dataset for mle_params collection")
+    parser.add_argument("--db_folder", type=str, default="data/sim_db",
+                        help="Simulation database folder for mle_responses")
     args = parser.parse_args()
 
     run_folder = RUNS_DIR / args.run_folder
@@ -198,6 +283,11 @@ def main() -> None:
         if not args.model_type or not args.dataset:
             parser.error("--model_type and --dataset required for mle_params")
         _collect_mle_params(run_folder, args.dataset, args.model_type)
+    elif args.type == "mle_responses":
+        if not args.model_type or not args.dataset:
+            parser.error("--model_type and --dataset required for mle_responses")
+        _generate_mle_responses(run_folder, args.dataset, args.model_type,
+                                 db_folder=args.db_folder)
     else:
         _collect_activities(run_folder, args.ensembles, args.timing)
 
