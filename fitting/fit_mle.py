@@ -294,8 +294,9 @@ def fit_pid(
 
         # ── Step 4: simulate ──────────────────────────────────────────────────
         _log(f"  simulating hash={ph[:8]} params={free}", target_pid)
+        t_sim = time.time()
         _simulate_and_save(model_type, params, db_dir, n_sims, run_folder)
-        elapsed = time.time() - t0
+        elapsed = time.time() - t_sim   # pure simulation time only
         sim_times.append(elapsed)
 
         # ── Step 5: evaluate and report ───────────────────────────────────────

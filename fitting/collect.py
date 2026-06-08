@@ -255,13 +255,128 @@ def _generate_mle_responses(run_folder: Path, dataset: str,
     print(f"Saved {len(rows)} rows -> {out.name}")
 
 
+
+def _collect_mle_from_db(
+    run_folder: Path,
+    dataset: str,
+    model_type: str,
+    db_folder: str = "data/sim_db",
+) -> None:
+    """Find best-fit params for every pid by scanning the full simulation database.
+
+    For each pid, evaluates compute_sim_db_loss at every (params, responses)
+    entry in the database, finds the minimum-loss entry, and saves combined
+    params and performance files. Also generates response trajectories at the
+    best params for each pid.
+
+    This is the definitive collect step — it is equivalent to running n_fits=1
+    on a job that has already seen the full database, but does it locally and
+    exhaustively without any new simulations.
+
+    Output:
+        {model_type}_{dataset}_params_mle.pkl
+        {model_type}_{dataset}_performance_mle.pkl
+        {model_type}_{dataset}_responses_mle.pkl
+    """
+    import sys, time
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from fitting.losses import compute_sim_db_loss
+    from scripts.build_sim_db import params_hash
+    from utils.paths import data_path
+
+    db_dir   = Path(db_folder)
+    model_dir = db_dir / model_type
+    if not model_dir.exists():
+        print(f"No simulation database found at {model_dir}")
+        return
+
+    db_files = sorted(
+        p for p in model_dir.glob(f"{model_type}_*.pkl")
+        if not p.name.startswith("checkpoint")
+    )
+    if not db_files:
+        print(f"No simulation files found in {model_dir}")
+        return
+
+    print(f"Scanning {len(db_files)} database entries for {model_type}/{dataset}")
+
+    human_df = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    all_pids = sorted(human_df["pid"].unique())
+
+    # For each pid, evaluate loss at every database entry
+    best_params_rows   = []
+    best_perf_rows     = []
+
+    for pid in all_pids:
+        human_pid = human_df[human_df["pid"] == pid].copy()
+        best_loss  = float("inf")
+        best_entry = None
+        t0 = time.time()
+
+        for db_path in db_files:
+            try:
+                entry  = pd.read_pickle(db_path)
+                params = entry["params"]
+                loss   = compute_sim_db_loss(model_type, params, human_pid, db_dir)
+                if loss < best_loss:
+                    best_loss  = loss
+                    best_entry = params
+            except Exception as e:
+                continue
+
+        elapsed = time.time() - t0
+        if best_entry is None:
+            print(f"  pid={pid}: no valid entry found — skipping")
+            continue
+
+        print(f"  pid={pid}: best_loss={best_loss:.4f}  "
+              f"({len(db_files)} entries in {elapsed:.0f}s)")
+
+        # Build full params row
+        row = {k: v for k, v in best_entry.items()
+               if k not in ("model_type", "dataset")}
+        row["model_type"] = model_type
+        row["dataset"]    = dataset
+        row["pid"]        = pid
+        row["mle_loss"]   = best_loss
+        best_params_rows.append(row)
+        best_perf_rows.append({
+            "pid":      pid,
+            "mle_loss": best_loss,
+            "n_db_entries": len(db_files),
+        })
+
+    if not best_params_rows:
+        print("No valid results — aborting")
+        return
+
+    params_df = pd.DataFrame(best_params_rows)
+    perf_df   = pd.DataFrame(best_perf_rows)
+
+    out_params = run_folder / f"{model_type}_{dataset}_params_mle.pkl"
+    out_perf   = run_folder / f"{model_type}_{dataset}_performance_mle.pkl"
+    params_df.to_pickle(out_params)
+    perf_df.to_pickle(out_perf)
+    print(f"Saved {out_params.name}  ({len(params_df)} pids)")
+    print(f"Saved {out_perf.name}")
+    print(params_df.sort_values("pid")[
+        ["pid", "mle_loss"] +
+        [c for c in params_df.columns
+         if c not in ("pid", "mle_loss", "model_type", "dataset")]
+    ].to_string(index=False))
+
+    # Generate responses at best params
+    print("\nGenerating responses at best-fit params...")
+    _generate_mle_responses(run_folder, dataset, model_type, db_folder=db_folder)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fitting.collect")
     parser.add_argument("run_folder", help="Run folder name under data/runs/")
     parser.add_argument(
         "--type",
         type=str,
-        choices=["params", "responses", "activities", "mle_params", "mle_responses"],
+        choices=["params", "responses", "activities", "mle_params", "mle_responses", "mle_from_db"],
         required=True,
     )
     parser.add_argument("--ensembles", nargs="+", default=["error"])
@@ -288,6 +403,11 @@ def main() -> None:
             parser.error("--model_type and --dataset required for mle_responses")
         _generate_mle_responses(run_folder, args.dataset, args.model_type,
                                  db_folder=args.db_folder)
+    elif args.type == "mle_from_db":
+        if not args.model_type or not args.dataset:
+            parser.error("--model_type and --dataset required for mle_from_db")
+        _collect_mle_from_db(run_folder, args.dataset, args.model_type,
+                              db_folder=args.db_folder)
     else:
         _collect_activities(run_folder, args.ensembles, args.timing)
 
