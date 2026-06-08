@@ -302,47 +302,51 @@ def _collect_mle_from_db(
 
     human_df = pd.read_pickle(data_path(f"{dataset}.pkl"))
     all_pids = sorted(human_df["pid"].unique())
+    human_pids = {pid: human_df[human_df["pid"] == pid].copy() for pid in all_pids}
 
-    # For each pid, evaluate loss at every database entry
-    best_params_rows   = []
-    best_perf_rows     = []
+    # Load each db file once, evaluate loss for all pids simultaneously
+    # This avoids re-reading 4000 files 21 times (21x speedup)
+    best_loss  = {pid: float("inf") for pid in all_pids}
+    best_entry = {pid: None         for pid in all_pids}
 
-    for pid in all_pids:
-        human_pid = human_df[human_df["pid"] == pid].copy()
-        best_loss  = float("inf")
-        best_entry = None
-        t0 = time.time()
-
-        for db_path in db_files:
+    t0 = time.time()
+    for i, db_path in enumerate(db_files):
+        if (i + 1) % 200 == 0 or i == 0:
+            elapsed = time.time() - t0
+            print(f"  {i+1}/{len(db_files)} entries scanned  ({elapsed:.0f}s elapsed)", flush=True)
+        try:
+            entry  = pd.read_pickle(db_path)
+            params = entry["params"]
+        except Exception:
+            continue
+        for pid in all_pids:
             try:
-                entry  = pd.read_pickle(db_path)
-                params = entry["params"]
-                loss   = compute_sim_db_loss(model_type, params, human_pid, db_dir)
-                if loss < best_loss:
-                    best_loss  = loss
-                    best_entry = params
-            except Exception as e:
+                loss = compute_sim_db_loss(model_type, params, human_pids[pid], db_dir)
+                if loss < best_loss[pid]:
+                    best_loss[pid]  = loss
+                    best_entry[pid] = params
+            except Exception:
                 continue
 
-        elapsed = time.time() - t0
-        if best_entry is None:
+    print(f"Scan complete in {time.time()-t0:.0f}s")
+
+    best_params_rows = []
+    best_perf_rows   = []
+    for pid in all_pids:
+        if best_entry[pid] is None:
             print(f"  pid={pid}: no valid entry found — skipping")
             continue
-
-        print(f"  pid={pid}: best_loss={best_loss:.4f}  "
-              f"({len(db_files)} entries in {elapsed:.0f}s)")
-
-        # Build full params row
-        row = {k: v for k, v in best_entry.items()
+        print(f"  pid={pid}: best_loss={best_loss[pid]:.4f}")
+        row = {k: v for k, v in best_entry[pid].items()
                if k not in ("model_type", "dataset")}
         row["model_type"] = model_type
         row["dataset"]    = dataset
         row["pid"]        = pid
-        row["mle_loss"]   = best_loss
+        row["mle_loss"]   = best_loss[pid]
         best_params_rows.append(row)
         best_perf_rows.append({
-            "pid":      pid,
-            "mle_loss": best_loss,
+            "pid":          pid,
+            "mle_loss":     best_loss[pid],
             "n_db_entries": len(db_files),
         })
 
