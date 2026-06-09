@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """figure_yoo_temporal.py — T group figure for yoo task.
 
-Layout: 1×2
-  Panel A (T1): Estimation error — RMSE to cumulative true mean vs observation
+Layout: 1×4
+  Panel A (T1): Estimation error vs observation; shaded bands show weak/strong U-shape range
   Panel B (T2): Mean |Δresponse| vs observation (obs ≥ 2)
+  Panel C (T3): Split-half reliability of λ (first vs second half of trials)
+  Panel D (T4): λ_model vs λ_human regplot (dynamical model fit)
 
 Run:
     python scripts/figure_yoo_temporal.py
@@ -20,6 +22,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from scipy.optimize import curve_fit as scipy_curve_fit
+from scipy.stats import pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -29,11 +34,16 @@ from utils.plot_style import (
     apply_style,
     get_palette,
     label_panels,
+    annotate_nef_comparisons,
+    fit_power_law_params,
+    pvalue_to_stars,
 )
 
 MODEL_ORDER = ["Mean", "PrimacyRecency", "LeakyIntegrator", "NEF"]
 HUMAN_COLOR = "0.3"
 OBS_TICKS   = [5, 10, 15, 20, 25, 30]
+N_GROUP     = 10
+SMOOTH_WIN  = 5
 
 
 def _display(model_type: str) -> str:
@@ -46,7 +56,6 @@ def _resp_path(mt: str, run_dir: Path, nef_dir: Path) -> Path:
 
 
 def _abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-trial |Δresponse| at each obs ≥ 2 (diff from previous observation)."""
     pieces = []
     for (pid, trial), g in df.groupby(["pid", "trial"], sort=False):
         g = g.sort_values("observation").copy()
@@ -58,109 +67,248 @@ def _abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
     return out[out["observation"] >= 2].dropna(subset=["delta"])
 
 
-# ── Panel A (T1) — Estimation error vs observation ───────────────────────────
+def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
+    def power_law(n, A, lam):
+        return A * np.power(np.asarray(n, dtype=float), -lam)
+    out: dict = {}
+    for pid, grp in df.groupby("pid"):
+        pieces = []
+        for _, tg in grp.groupby("trial"):
+            g = tg.sort_values("observation").copy()
+            g["delta"] = g["response"].diff().abs()
+            pieces.append(g)
+        delta = pd.concat(pieces, ignore_index=True)
+        curve = delta.groupby("observation")["delta"].mean().dropna()
+        curve = curve[curve.index >= 2]
+        if len(curve) < 3: continue
+        n = curve.index.values.astype(float)
+        y = curve.values.astype(float)
+        if not (np.all(np.isfinite(n)) and np.all(np.isfinite(y))): continue
+        try:
+            popt, _ = scipy_curve_fit(power_law, n, y, p0=[0.1, 0.5],
+                                      bounds=([0.0, 0.0], [2.0, 2.0]), maxfev=2000)
+            out[int(pid)] = float(popt[1])
+        except Exception:
+            pass
+    return pd.Series(out, name="lambda_")
 
-def _plot_panel_a(ax, run_folder: str, palette: dict,
-                  model_order: list[str], nef_folder: str | None) -> None:
-    """Panel A (T1): RMSE to cumulative true mean as a function of observation.
 
-    true_mean at obs t = mean(value[1..t]) for that trial.
-    Mean ± SEM across pids at each observation position.
+def _fit_lambda_split_half(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-pid λ fitted separately on first and second half of trials."""
+    rows = []
+    for pid, grp in df.groupby("pid"):
+        trials = sorted(grp["trial"].unique())
+        mid    = len(trials) // 2
+        if mid < 3:
+            continue
+        for half_label, trial_set in [("first", trials[:mid]), ("second", trials[mid:])]:
+            sub = grp[grp["trial"].isin(trial_set)].copy()
+            lam = _fit_lambda_curve_fit(sub.assign(pid=pid))
+            if int(pid) in lam.index:
+                rows.append({"pid": int(pid), "half": half_label,
+                             "lambda_": float(lam[int(pid)])})
+    if not rows:
+        return pd.DataFrame(columns=["pid", "first", "second"])
+    wide = (pd.DataFrame(rows)
+            .pivot(index="pid", columns="half", values="lambda_")
+            .dropna())
+    wide.columns.name = None
+    return wide.reset_index()
+
+
+def _task_error_per_pid_obs(df: pd.DataFrame, value_map: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    merged = df.drop(columns=["value"], errors="ignore").merge(
+        value_map, on=["pid", "trial", "observation"], how="left")
+    for (pid, trial), tdf in merged.groupby(["pid", "trial"]):
+        tdf = tdf.sort_values("observation").copy()
+        tdf = tdf[tdf["value"].notna()]
+        if tdf.empty: continue
+        rm = tdf["value"].expanding().mean()
+        te = (tdf["response"] - rm).abs()
+        for obs, t in zip(tdf["observation"], te):
+            if np.isfinite(t):
+                rows.append({"pid": int(pid), "observation": int(obs), "task_error": float(t)})
+    if not rows:
+        return pd.DataFrame(columns=["pid", "observation", "task_error"])
+    return pd.DataFrame(rows).groupby(["pid","observation"], as_index=False)["task_error"].mean()
+
+
+def _u_strength(te_df: pd.DataFrame) -> pd.Series:
+    out = {}
+    for pid, g in te_df.groupby("pid"):
+        g   = g.sort_values("observation")
+        obs = g["observation"].to_numpy(int)
+        y   = g["task_error"].to_numpy(float)
+        sm  = (pd.Series(y).rolling(SMOOTH_WIN, min_periods=1, center=True)
+               .mean().to_numpy())
+        late = float(np.nanmean(y[obs >= 26])) if np.any(obs >= 26) else float(np.nanmean(y))
+        s    = late - float(np.nanmin(sm))
+        if np.isfinite(s):
+            out[int(pid)] = s
+    return pd.Series(out, dtype=float)
+
+
+# ── Panel A ───────────────────────────────────────────────────────────────────
+
+def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
+    """Panel A (T1): Estimation error vs observation.
+
+    For each source, shaded band spans from the weak-U subgroup mean
+    (bottom N_GROUP pids by U-strength) to the strong-U subgroup mean
+    (top N_GROUP). Thin edge lines at each boundary. No center mean line.
     """
     run_dir = RUNS_DIR / run_folder
     nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
     yoo     = pd.read_pickle(data_path("yoo.pkl"))
-
-    yoo_s = yoo.sort_values(["pid", "trial", "observation"]).copy()
-    yoo_s["true_mean"] = (yoo_s.groupby(["pid", "trial"])["value"]
+    yoo_s   = yoo.sort_values(["pid","trial","observation"]).copy()
+    yoo_s["true_mean"] = (yoo_s.groupby(["pid","trial"])["value"]
                                .expanding().mean().values)
-    true_map = yoo_s[["pid", "trial", "observation", "true_mean"]].drop_duplicates()
+    true_map  = yoo_s[["pid","trial","observation","true_mean"]].drop_duplicates()
+    value_map = yoo[["pid","trial","observation","value"]].drop_duplicates()
+
+    def task_rmse_per_pid_obs(df):
+        m = df.drop(columns=["true_mean"], errors="ignore").merge(
+            true_map, on=["pid","trial","observation"], how="left")
+        return (m.assign(sq_err=(m["response"] - m["true_mean"]) ** 2)
+                 .groupby(["pid","observation"])["sq_err"].mean()
+                 .apply(np.sqrt).reset_index(name="rmse"))
+
+    def u_split_pids(df):
+        te = _task_error_per_pid_obs(df, value_map)
+        us = _u_strength(te).sort_values()
+        if len(us) < N_GROUP * 2:
+            return set(), set()
+        return (set(int(p) for p in us.index[:N_GROUP]),
+                set(int(p) for p in us.index[-N_GROUP:]))
 
     handles, labels = [], []
 
-    # Human
-    h = yoo_s.assign(sq_err=(yoo_s["response"] - yoo_s["true_mean"]) ** 2)
-    stats_h = (h.groupby(["pid", "observation"])["sq_err"].mean()
-                .apply(np.sqrt).reset_index(name="rmse")
-                .groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index())
-    ax.plot(stats_h["observation"], stats_h["mean"], "-", color=HUMAN_COLOR, lw=1.8)
-    ax.fill_between(stats_h["observation"],
-                    stats_h["mean"] - stats_h["sem"],
-                    stats_h["mean"] + stats_h["sem"],
-                    color=HUMAN_COLOR, alpha=0.2)
-    handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5))
-    labels.append("Human")
+    all_sources = [("Human", yoo, HUMAN_COLOR)] + [
+        (_display(mt), pd.read_pickle(_resp_path(mt, run_dir, nef_dir)),
+         palette.get(_display(mt), "0.5"))
+        for mt in model_order
+        if _resp_path(mt, run_dir, nef_dir).exists()
+    ]
 
-    # Models
+    for source_name, df, color in all_sources:
+        weak_pids, strong_pids = u_split_pids(df)
+        if not weak_pids:
+            continue
+        rm  = task_rmse_per_pid_obs(df)
+        obs = sorted(rm["observation"].unique())
+        weak_mean   = rm[rm["pid"].isin(weak_pids)  ].groupby("observation")["rmse"].mean().reindex(obs)
+        strong_mean = rm[rm["pid"].isin(strong_pids)].groupby("observation")["rmse"].mean().reindex(obs)
+        ax.fill_between(obs, weak_mean.values, strong_mean.values,
+                        color=color, alpha=0.18, zorder=1, linewidth=0)
+        ax.plot(obs, weak_mean.values,   color=color, lw=1.8, zorder=2)
+        ax.plot(obs, strong_mean.values, color=color, lw=1.8, zorder=2)
+        handles.append(Line2D([0],[0], color=color, lw=1.8))
+        labels.append(source_name)
+
+    handles.append(Patch(facecolor="0.5", alpha=0.25, linewidth=0))
+    labels.append(f"weak-strong U range (n={N_GROUP} each)")
+
+    ax.set_xlabel("Observation"); ax.set_ylabel("Estimation error (RMSE to true mean)")
+    ax.set_xticks(OBS_TICKS); ax.set_ylim(bottom=0)
+    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Panel B ───────────────────────────────────────────────────────────────────
+
+def _plot_panel_b(ax, run_folder, palette, model_order, nef_folder):
+    run_dir = RUNS_DIR / run_folder
+    nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
+    yoo     = pd.read_pickle(data_path("yoo.pkl"))
+    handles, labels = [], []
+
+    sns.lineplot(data=_abs_delta_long(yoo), x="observation", y="delta",
+                 color=HUMAN_COLOR, lw=1.8, errorbar="ci", ax=ax, label="_nolegend_")
+    handles.append(Line2D([0],[0], color=HUMAN_COLOR, lw=1.8, alpha=0.65)); labels.append("Human")
+
     for mt in model_order:
         rp = _resp_path(mt, run_dir, nef_dir)
-        if not rp.exists():
-            continue
-        mdf = pd.read_pickle(rp).merge(
-            true_map, on=["pid", "trial", "observation"], how="left")
-        stats_m = (mdf.assign(sq_err=(mdf["response"] - mdf["true_mean"]) ** 2)
-                   .groupby(["pid", "observation"])["sq_err"].mean()
-                   .apply(np.sqrt).reset_index(name="rmse")
-                   .groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index())
+        if not rp.exists(): continue
         color = palette.get(_display(mt), "0.5")
-        ax.plot(stats_m["observation"], stats_m["mean"], "-", color=color, lw=1.8)
-        ax.fill_between(stats_m["observation"],
-                        stats_m["mean"] - stats_m["sem"],
-                        stats_m["mean"] + stats_m["sem"],
-                        color=color, alpha=0.2)
-        handles.append(Line2D([0], [0], color=color, lw=1.5))
+        sns.lineplot(data=_abs_delta_long(pd.read_pickle(rp)),
+                     x="observation", y="delta", color=color, lw=1.8,
+                     errorbar="ci", ax=ax, label="_nolegend_")
+        handles.append(Line2D([0],[0], color=color, lw=1.8, alpha=0.65))
         labels.append(_display(mt))
 
-    ax.set_xlabel("Observation")
-    ax.set_ylabel("Estimation error (RMSE to true mean)")
-    ax.set_xticks(OBS_TICKS)
-    ax.set_ylim(bottom=0)
+    ax.set_xlabel("Observation"); ax.set_ylabel("Mean |Δresponse|")
+    ax.set_xticks(OBS_TICKS); ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
-# ── Panel B (T2) — Mean |Δresponse| vs observation ───────────────────────────
+# ── Panel C (T3) — Split-half reliability of λ ───────────────────────────────
 
-def _plot_panel_b(ax, run_folder: str, palette: dict,
-                  model_order: list[str], nef_folder: str | None) -> None:
-    """Panel B (T2): Mean |Δresponse| vs observation (obs ≥ 2 only).
-
-    delta = |response(t) - response(t-1)|, undefined at obs 1 (dropped).
-    Uses sns.lineplot with CI across trials for smooth uncertainty bands,
-    matching the approach in figure_yoo.py panel C.
-    """
+def _plot_panel_c(ax, run_folder: str, nef_folder: str | None,
+                  palette: dict, model_order: list) -> None:
+    """Panel C (T3): Split-half reliability of the decay-rate metric λ."""
     run_dir = RUNS_DIR / run_folder
     nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
     yoo     = pd.read_pickle(data_path("yoo.pkl"))
 
-    handles, labels = [], []
-
-    # Human — per-trial rows, CI across trials
-    long_h = _abs_delta_long(yoo)
-    sns.lineplot(data=long_h, x="observation", y="delta",
-                 color=HUMAN_COLOR, lw=1.8, errorbar="ci", ax=ax,
-                 label="_nolegend_")
-    handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5))
-    labels.append("Human")
-
-    # Models
+    sources = [("Human", yoo, HUMAN_COLOR)]
     for mt in model_order:
         rp = _resp_path(mt, run_dir, nef_dir)
-        if not rp.exists():
-            continue
-        long_m = _abs_delta_long(pd.read_pickle(rp))
-        color  = palette.get(_display(mt), "0.5")
-        sns.lineplot(data=long_m, x="observation", y="delta",
-                     color=color, lw=1.8, errorbar="ci", ax=ax,
-                     label="_nolegend_")
-        handles.append(Line2D([0], [0], color=color, lw=1.5))
-        labels.append(_display(mt))
+        if rp.exists():
+            sources.append((_display(mt), pd.read_pickle(rp),
+                            palette.get(_display(mt), "0.5")))
 
-    ax.set_xlabel("Observation")
-    ax.set_ylabel("Mean |Δresponse|")
-    ax.set_xticks(OBS_TICKS)
-    ax.set_ylim(bottom=0)
+    handles, labels = [], []
+    for source_name, df, color in sources:
+        wide = _fit_lambda_split_half(df)
+        if len(wide) < 3:
+            continue
+        r, p = pearsonr(wide["first"], wide["second"])
+        sns.regplot(data=wide, x="first", y="second", ax=ax,
+                    color=color, ci=95, scatter=False,
+                    line_kws={"lw": 1.5})
+        handles.append(Line2D([0],[0], color=color, lw=1.5))
+        labels.append(f"{source_name}, r={r:.2f}{pvalue_to_stars(p)}")
+
+    ax.set_xlabel("λ (first half of trials)")
+    ax.set_ylabel("λ (second half of trials)")
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Panel D (T4) — Lambda model vs lambda human regplot ──────────────────────
+
+def _plot_panel_d(ax, run_folder, palette, model_order, nef_folder):
+    """Panel D (T4): λ_model vs λ_human per pid, one regplot line per model."""
+    run_dir = RUNS_DIR / run_folder
+    nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
+    yoo     = pd.read_pickle(data_path("yoo.pkl"))
+    lam_h   = _fit_lambda_curve_fit(yoo)
+
+    handles, labels = [], []
+    for mt in model_order:
+        rp = _resp_path(mt, run_dir, nef_dir)
+        if not rp.exists(): continue
+        lam_m  = _fit_lambda_curve_fit(pd.read_pickle(rp))
+        merged = pd.DataFrame({"human": lam_h, "model": lam_m}).dropna()
+        if len(merged) < 3: continue
+        r, p   = pearsonr(merged["human"], merged["model"])
+        color  = palette.get(_display(mt), "0.5")
+        sns.regplot(data=merged, x="human", y="model", ax=ax,
+                    color=color, ci=95, scatter=False,
+                    line_kws={"lw": 1.5})
+        handles.append(Line2D([0],[0], color=color, lw=1.5))
+        labels.append(f"{_display(mt)}, r={r:.2f}{pvalue_to_stars(p)}")
+
+    lims = [ax.get_xlim(), ax.get_ylim()]
+    lo   = min(lims[0][0], lims[1][0])
+    hi   = max(lims[0][1], lims[1][1])
+    ax.plot([lo, hi], [lo, hi], color="0.7", lw=0.8, ls="--", zorder=0)
+
+    ax.set_xlabel("λ (human)")
+    ax.set_ylabel("λ (model)")
+    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -169,13 +317,11 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder", type=str, default="yoo")
-    parser.add_argument("--nef_folder", type=str, default=None,
-                        help="Load NEF data from this folder instead of --run_folder")
+    parser.add_argument("--nef_folder", type=str, default=None)
     parser.add_argument("--extra_models", nargs="*", default=[])
     args = parser.parse_args()
 
-    model_order = MODEL_ORDER + [
-        m for m in args.extra_models if m not in MODEL_ORDER]
+    model_order = MODEL_ORDER + [m for m in args.extra_models if m not in MODEL_ORDER]
 
     apply_style()
     pal     = get_palette(len(model_order) + 1)
@@ -186,13 +332,15 @@ def main() -> None:
             palette[disp] = palette[mt]
 
     fig, axes = plt.subplots(
-        1, 2,
-        figsize=(FIGURE_SIZE[0] * 0.55, FIGURE_SIZE[1] / 2),
+        1, 4,
+        figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] / 2),
         constrained_layout=True,
     )
 
     _plot_panel_a(axes[0], args.run_folder, palette, model_order, args.nef_folder)
     _plot_panel_b(axes[1], args.run_folder, palette, model_order, args.nef_folder)
+    _plot_panel_c(axes[2], args.run_folder, args.nef_folder, palette, model_order)
+    _plot_panel_d(axes[3], args.run_folder, palette, model_order, args.nef_folder)
 
     label_panels(axes.reshape(1, -1))
 

@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""figure_yoo_neural.py — N group figure for yoo task.
+
+Layout: 1×3
+  Panel A (N1): Error-ensemble weight-neuron activity vs observation,
+                split by high vs low lambda group
+  Panel B (N2): Mean weight-neuron activity vs mean |delta response| across obs
+                (regplot, population means per observation)
+  Panel C (N3): Fitted lambda vs mean |delta response| — model scatter/line
+                with per-pid human reference lines
+
+Run:
+    python scripts/figure_yoo_neural.py
+    python scripts/figure_yoo_neural.py --run_folder yoo --nef_folder refit
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from matplotlib.lines import Line2D
+from scipy.stats import linregress, pearsonr
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
+from utils.plot_style import (
+    FIGURE_SIZE,
+    apply_style,
+    get_palette,
+    label_panels,
+    pvalue_to_stars,
+)
+
+ENCODER_THRESHOLD = 0.5
+LAMBDA_N          = 10
+OBS_RANGE         = (2, 30)
+ERROR_STYLE       = "ci"
+
+
+def _placeholder(ax, text: str) -> None:
+    ax.set_xticks([]); ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.text(0.5, 0.5, text, ha="center", va="center",
+            transform=ax.transAxes, color="0.5", style="italic", fontsize=8)
+
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+def _weight_on_cols(pid_enc: pd.DataFrame, neuron_cols: list[str]) -> list[str]:
+    on_idx = pid_enc[pid_enc["enc_dim_0"] > ENCODER_THRESHOLD]["neuron_idx"].values
+    return [f"n{i}" for i in on_idx if f"n{i}" in neuron_cols]
+
+
+def _per_pid_metrics(nef_dir: Path) -> pd.DataFrame | None:
+    """Per-pid lambda, activity_decay (late-early), and mean delta response.
+
+    act_decay = mean(act[obs 26..30]) - mean(act[obs 2..5])
+      — negative sign convention: higher lambda -> steeper decay -> more negative.
+    mean_delta = mean |response(t) - response(t-1)| for obs >= 2 (human data).
+    """
+    acts_path   = nef_dir / "activities_error_yoo.pkl"
+    encs_path   = nef_dir / "encoders_error_yoo.pkl"
+    params_path = nef_dir / "NEF_yoo_params.pkl"
+    for p in [params_path]:
+        if not p.exists(): return None
+
+    params = pd.read_pickle(params_path)[["pid", "lambda_"]].drop_duplicates()
+    yoo    = pd.read_pickle(data_path("yoo.pkl"))
+
+    # Activity decay — only if files exist
+    act_decay_map: dict[int, float] = {}
+    if acts_path.exists() and encs_path.exists():
+        acts = pd.read_pickle(acts_path)
+        encs = pd.read_pickle(encs_path)
+        neuron_cols = [c for c in acts.columns if c.startswith("n") and c[1:].isdigit()]
+        for pid, pid_enc in encs.groupby("pid"):
+            on_cols = _weight_on_cols(pid_enc, neuron_cols)
+            if not on_cols: continue
+            acts_pid = acts[acts["pid"] == pid].copy()
+            acts_pid["mean_act"] = acts_pid[on_cols].mean(axis=1)
+            obs_mean  = acts_pid.groupby("observation")["mean_act"].mean()
+            early_act = float(obs_mean[obs_mean.index.isin(range(2, 6))].mean())
+            late_act  = float(obs_mean[obs_mean.index.isin(range(26, 31))].mean())
+            act_decay_map[int(pid)] = late_act - early_act   # late - early → negative
+
+    rows = []
+    for pid in params["pid"].unique():
+        hum_pid = yoo[yoo["pid"] == pid]
+        pieces  = []
+        for trial, tg in hum_pid.groupby("trial"):
+            tg = tg.sort_values("observation").copy()
+            tg["delta"] = tg["response"].diff().abs()
+            pieces.append(tg)
+        d = pd.concat(pieces).dropna(subset=["delta"])
+        d = d[d["observation"] >= 2]
+        mean_delta = float(d["delta"].mean()) if len(d) > 0 else np.nan
+        rows.append({"pid": int(pid), "mean_delta": mean_delta,
+                     "act_decay": act_decay_map.get(int(pid), np.nan)})
+
+    df = pd.DataFrame(rows).merge(params, on="pid")
+    return df if not df.empty else None
+
+
+
+def _prepare_activity_delta(nef_dir: Path):
+    """Per-obs population-mean activity and human delta for panel B."""
+    acts_path = nef_dir / "activities_error_yoo.pkl"
+    encs_path = nef_dir / "encoders_error_yoo.pkl"
+    for p in [acts_path, encs_path]:
+        if not p.exists(): return None
+
+    acts   = pd.read_pickle(acts_path)
+    encs   = pd.read_pickle(encs_path)
+    params_path = nef_dir / "NEF_yoo_params.pkl"
+    params = pd.read_pickle(params_path).set_index("pid") if params_path.exists() else None
+    human  = pd.read_pickle(data_path("yoo.pkl"))
+
+    neuron_cols = [c for c in acts.columns if c.startswith("n") and c[1:].isdigit()]
+    obs_range   = np.arange(OBS_RANGE[0], OBS_RANGE[1] + 1, dtype=int)
+
+    pid_results, activity_rows, delta_rows = [], [], []
+    for pid in sorted(human["pid"].unique()):
+        enc_pid = encs[encs["pid"] == pid]
+        on_cols = _weight_on_cols(enc_pid, neuron_cols)
+        if not on_cols: continue
+        acts_pid = acts[acts["pid"] == pid].copy()
+        acts_pid["mean_weight_on"] = acts_pid[on_cols].mean(axis=1)
+        hum_pid = human[human["pid"] == pid].sort_values(["trial","observation"]).copy()
+        hum_pid["prev_response"] = hum_pid.groupby("trial")["response"].shift(1)
+        hum_pid["delta_abs"] = (hum_pid["response"] - hum_pid["prev_response"]).abs()
+        merged = acts_pid.merge(hum_pid[["trial","observation","delta_abs"]],
+                                on=["trial","observation"], how="inner")
+        g_act = merged.groupby("observation")["mean_weight_on"].mean()
+        g_del = merged.groupby("observation")["delta_abs"].mean()
+        activity = np.array([float(g_act[o]) if o in g_act.index else np.nan for o in obs_range])
+        delta    = np.array([float(g_del[o]) if o in g_del.index else np.nan for o in obs_range])
+        mask = np.isfinite(activity) & np.isfinite(delta)
+        if mask.sum() < 3: continue
+        slope, _, r_val, pval, _ = linregress(activity[mask], delta[mask])
+        lam = float(params.loc[pid, "lambda_"]) if params is not None and pid in params.index else np.nan
+        pid_results.append({"pid": int(pid), "delta": delta, "activity": activity,
+                             "slope": float(slope), "r": float(r_val), "pval": float(pval),
+                             "lambda_": lam})
+        activity_rows.append(activity)
+        delta_rows.append(delta)
+    if not pid_results: return None
+    return pid_results, np.nanmean(activity_rows, axis=0), np.nanmean(delta_rows, axis=0)
+
+
+def _load_panel_a_data(nef_dir: Path):
+    acts_path   = nef_dir / "activities_error_yoo.pkl"
+    encs_path   = nef_dir / "encoders_error_yoo.pkl"
+    resp_path   = nef_dir / "NEF_yoo_responses.pkl"
+    params_path = nef_dir / "NEF_yoo_params.pkl"
+    for p in [acts_path, encs_path, resp_path, params_path]:
+        if not p.exists(): return None, None, None
+    acts   = pd.read_pickle(acts_path)
+    encs   = pd.read_pickle(encs_path)
+    resp   = pd.read_pickle(resp_path)
+    params = pd.read_pickle(params_path)[["pid","lambda_"]].drop_duplicates()
+    yoo    = pd.read_pickle(data_path("yoo.pkl"))
+    merged = resp.merge(yoo[["pid","trial","observation","value"]],
+                        on=["pid","trial","observation"], how="left")
+    merged = merged.sort_values(["pid","trial","observation"])
+    merged["prev_response"] = merged.groupby(["pid","trial"])["response"].shift(1).fillna(0.0)
+    merged["pe"] = merged["value"] - merged["prev_response"]
+    acts = acts.merge(merged[["pid","trial","observation","pe"]],
+                      on=["pid","trial","observation"], how="left")
+    neuron_cols = [c for c in acts.columns if c.startswith("n") and c[1:].isdigit()]
+    for pid, pid_enc in encs.groupby("pid"):
+        on_cols = _weight_on_cols(pid_enc, neuron_cols)
+        mask = acts["pid"] == pid
+        if on_cols:
+            acts.loc[mask, "mean_activity_weight_on"] = acts.loc[mask, on_cols].mean(axis=1)
+    if "mean_activity_weight_on" not in acts.columns: return None, None, None
+    acts = acts.merge(params, on="pid", how="left")
+    plot_df = acts[(acts["observation"] >= OBS_RANGE[0]) &
+                   (acts["observation"] <= OBS_RANGE[1])].copy()
+    if plot_df.empty: return None, None, None
+    lam_by_pid = plot_df.groupby("pid")["lambda_"].first().sort_values()
+    if len(lam_by_pid) < LAMBDA_N: return None, None, None
+    low_thr  = float(lam_by_pid.iloc[LAMBDA_N - 1])
+    high_thr = float(lam_by_pid.iloc[-LAMBDA_N])
+    low_df  = plot_df[plot_df["pid"].isin(lam_by_pid.index[:LAMBDA_N])].copy()
+    high_df = plot_df[plot_df["pid"].isin(lam_by_pid.index[-LAMBDA_N:])].copy()
+    low_df["lambda_group"] = "low"; high_df["lambda_group"] = "high"
+    return pd.concat([low_df, high_df], ignore_index=True), low_thr, high_thr
+
+
+# ── Panel A (N1) ──────────────────────────────────────────────────────────────
+
+def _plot_panel_a(ax, nef_dir: Path) -> None:
+    plot_df, low_thr, high_thr = _load_panel_a_data(nef_dir)
+    if plot_df is None:
+        _placeholder(ax, "No activity data\n(run fitting.collect --type activities)"); return
+    cb = get_palette(2)
+    sns.lineplot(data=plot_df[plot_df["lambda_group"] == "high"],
+                 x="observation", y="mean_activity_weight_on",
+                 color=cb[1], errorbar=ERROR_STYLE, ax=ax, legend=False)
+    sns.lineplot(data=plot_df[plot_df["lambda_group"] == "low"],
+                 x="observation", y="mean_activity_weight_on",
+                 color=cb[0], errorbar=ERROR_STYLE, ax=ax, legend=False)
+    handles = [
+        Line2D([0],[0], color=cb[1], lw=2,
+               label=f"High discounting (λ > {high_thr:.2f}, n={LAMBDA_N})"),
+        Line2D([0],[0], color=cb[0], lw=2,
+               label=f"Low discounting (λ < {low_thr:.2f}, n={LAMBDA_N})"),
+    ]
+    ax.set_xticks(range(0, 31, 5))
+    ax.set_xlabel("Observation"); ax.set_ylabel("Error neuron activity (Hz)")
+    ax.legend(handles=handles, frameon=True, framealpha=0.9, loc="upper left", fontsize=8)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Panel B (N2) ──────────────────────────────────────────────────────────────
+
+def _plot_panel_b(ax, nef_dir: Path) -> None:
+    prep = _prepare_activity_delta(nef_dir)
+    if prep is None:
+        _placeholder(ax, "No activity data"); return
+    _, mean_activity, mean_delta = prep
+    pal = get_palette(2)
+    mean_df = pd.DataFrame({"activity": mean_activity, "delta": mean_delta})
+    fin = np.isfinite(mean_df["activity"]) & np.isfinite(mean_df["delta"])
+    if fin.sum() < 2:
+        _placeholder(ax, "Insufficient data"); return
+    slope, _, r, p, _ = linregress(mean_df["activity"][fin], mean_df["delta"][fin])
+    ax.scatter(mean_df["activity"][fin], mean_df["delta"][fin],
+               color=pal[0], s=35, alpha=0.85, zorder=3,
+               label="Mean across trials for one observation")
+    sns.regplot(data=mean_df[fin], x="activity", y="delta", scatter=False,
+                line_kws={"color": pal[0], "linewidth": 1.8}, ci=95, truncate=True, ax=ax,
+                label=f"Group-level correlation, r={r:.2f}{pvalue_to_stars(p)}")
+    ax.set_xlabel("Error neuron activity (Hz)"); ax.set_ylabel("Mean |Δresponse|")
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Panel C (N3) — Lambda mediates activity decay and mean delta ──────────────
+
+def _plot_panel_c(ax, nef_dir: Path) -> None:
+    """Panel C (N3): Fitted λ mediates both neural activity change and |Δresponse|.
+
+    X-axis: fitted λ per pid.
+    Left y-axis (blue):  activity decay = mean(act[obs 26-30]) - mean(act[obs 2-5])
+      — negative value: activity decreases as sequence progresses; higher λ →
+      steeper decline → more negative decay.
+    Right y-axis (orange): mean |Δresponse| from human data (obs >= 2).
+      Higher λ → faster discounting → smaller mean behavioural updates.
+    Thin grey horizontal lines: per-pid human mean |Δresponse| (right y-scale).
+    """
+    df = _per_pid_metrics(nef_dir)
+    if df is None:
+        _placeholder(ax, "No params data"); return
+
+    pal     = get_palette(2)
+    c_del   = pal[0]   # mean delta — left axis
+    c_act   = pal[1]   # activity change — right axis
+    c_human = "0.78"
+
+    df_act = df.dropna(subset=["act_decay"])
+    r_act, p_act = pearsonr(df_act["lambda_"], df_act["act_decay"])
+    r_del, p_del = pearsonr(df["lambda_"], df["mean_delta"])
+
+    # ── Left axis: mean delta response ───────────────────────────────────────
+    for _, row in df.iterrows():
+        ax.axhline(row["mean_delta"], color=c_human, lw=0.3, zorder=0)
+
+    ax.scatter(df["lambda_"], df["mean_delta"],
+               color=c_del, s=35, alpha=0.85, zorder=3,
+               label=f"Mean |Δresponse|, r={r_del:.2f}{pvalue_to_stars(p_del)}")
+    sns.regplot(data=df, x="lambda_", y="mean_delta", scatter=False,
+                color=c_del, line_kws={"lw": 1.8}, ci=95, ax=ax, label="_nolegend_")
+
+    ax.set_xlabel("Fitted λ (discounting rate)")
+    ax.set_ylabel("Mean |Δresponse|", color=c_del)
+    ax.tick_params(axis="y", labelcolor=c_del)
+    ax.set_ylim(bottom=0)
+
+    # ── Right axis: activity change ───────────────────────────────────────────
+    ax2 = ax.twinx()
+
+    ax2.scatter(df_act["lambda_"], df_act["act_decay"],
+                color=c_act, s=35, alpha=0.85, zorder=3,
+                label=f"Activity change, r={r_act:.2f}{pvalue_to_stars(p_act)}")
+    sns.regplot(data=df_act, x="lambda_", y="act_decay", scatter=False,
+                color=c_act, line_kws={"lw": 1.8}, ci=95, ax=ax2, label="_nolegend_")
+
+    ax2.set_ylabel("Activity change (late − early, Hz)", color=c_act)
+    ax2.tick_params(axis="y", labelcolor=c_act)
+    sns.despine(ax=ax2, top=True)
+
+    # Combined legend — upper right, overlaying data
+    handles, labels = [], []
+    for a in [ax, ax2]:
+        h, l = a.get_legend_handles_labels()
+        handles += [x for x, y in zip(h, l) if y != "_nolegend_"]
+        labels  += [y for y in l if y != "_nolegend_"]
+    handles.append(Line2D([0],[0], color=c_human, lw=0.8))
+    labels.append("Human (individual)")
+    # Add legend to the figure so it composites above both ax and ax2
+    leg = ax.figure.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.95,
+                           loc="upper right",
+                           bbox_to_anchor=(0.94, 0.94),
+                           bbox_transform=ax.figure.transFigure)
+
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_folder", type=str, default="yoo")
+    parser.add_argument("--nef_folder", type=str, default="refit")
+    args = parser.parse_args()
+
+    nef_dir = RUNS_DIR / args.nef_folder
+
+    apply_style()
+
+    fig, axes = plt.subplots(
+        1, 3,
+        figsize=(FIGURE_SIZE[0] * 0.75, FIGURE_SIZE[1] / 2),
+        constrained_layout=True,
+    )
+
+    _plot_panel_a(axes[0], nef_dir)
+    _plot_panel_b(axes[1], nef_dir)
+    _plot_panel_c(axes[2], nef_dir)
+
+    label_panels(axes.reshape(1, -1))
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    stem = "figure_yoo_neural"
+    plt.savefig(FIGURES_DIR / f"{stem}.pdf")
+    print(f"Saved figures/{stem}.pdf")
+
+
+if __name__ == "__main__":
+    main()
