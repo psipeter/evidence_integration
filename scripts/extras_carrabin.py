@@ -643,13 +643,147 @@ def _run_probe_timeseries(
     )
 
 
+
+def _run_pe_dynamics(
+    pids: list[int],
+    run_folder: Path,
+    out_folder: str,
+    n_seeds: int = 10,
+    alpha_0_list: list[float] | None = None,
+    n_neurons_list_pe: list[int] | None = None,
+    lambda_fixed: float = 0.0,
+) -> None:
+    """Simulate PE dynamics for a set of pids or explicit param combinations.
+
+    Two modes:
+      1. pid mode (default): load MLE-fitted params per pid, simulate with those.
+         Output filename: pe_dynamics_NEF_carrabin_pid{pid}.pkl
+      2. param grid mode (alpha_0_list + n_neurons_list_pe provided): simulate
+         all combinations of alpha_0 x n_neurons, ignoring pids.
+         Output filename: pe_dynamics_NEF_carrabin_a{alpha_0}_n{n_neurons}.pkl
+
+    In both modes, runs n_seeds trials with a constant +1 artificial input
+    (single observation per trial). Saves full once_per_dt timeseries of:
+      - pe_product: error[:, 0] * error[:, 1]  (alpha * (obs − value))
+      - pe_raw:     error[:, 1]                 (obs − value)
+      - weight:     error[:, 0]                 (alpha(t))
+      - value:      value ensemble output
+    """
+    from fitting.model_params import MODEL_PARAMS
+    from models.NEF import PARAM_DEFAULTS, _pretrain, build_network
+    import nengo
+
+    out_dir = RUNS_DIR / out_folder
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fixed = MODEL_PARAMS["carrabin"]["NEF"].get("fixed", {})
+
+    # ── Build list of (label, params_dict) to simulate ───────────────────────
+    jobs = []  # list of (out_path, params_dict, label)
+
+    if alpha_0_list is not None and n_neurons_list_pe is not None:
+        # Param grid mode — ignore pids
+        from fitting.model_params import _NEF_FIXED
+        base = {**PARAM_DEFAULTS, **fixed,
+                "dataset": "carrabin", "model_type": "NEF", "pid": 0,
+                "lambda_": lambda_fixed}
+        for a0 in alpha_0_list:
+            for nn in n_neurons_list_pe:
+                tag = f"a{str(a0).replace('.','p')}_n{nn}"
+                out_path = out_dir / f"pe_dynamics_NEF_carrabin_{tag}.pkl"
+                p = {**base, "alpha_0": a0, "n_neurons": nn,
+                     "n_neurons_counting": nn}
+                jobs.append((out_path, p, f"alpha_0={a0} n_neurons={nn}"))
+    else:
+        # Pid mode — load fitted params
+        for suffix in ("_mle", ""):
+            params_path = run_folder / f"NEF_carrabin_params{suffix}.pkl"
+            if params_path.exists():
+                all_params = pd.read_pickle(params_path)
+                params_label = "mle" if suffix == "_mle" else "rmse"
+                break
+        else:
+            raise FileNotFoundError(f"No NEF params file found in {run_folder}")
+        print(f"Using {params_label} params from {params_path.name}")
+
+        for pid in pids:
+            row = all_params[all_params["pid"] == pid]
+            if row.empty:
+                print(f"  pid={pid}: no params found — skipping")
+                continue
+            p = {**PARAM_DEFAULTS, **fixed, **row.iloc[0].to_dict()}
+            p["dataset"] = "carrabin"; p["model_type"] = "NEF"; p["pid"] = int(pid)
+            out_path = out_dir / f"pe_dynamics_NEF_carrabin_pid{pid}.pkl"
+            jobs.append((out_path, p,
+                         f"pid={pid} alpha_0={p['alpha_0']:.3f} "
+                         f"n_neurons={int(p['n_neurons'])}"))
+
+    # ── Simulate each job ─────────────────────────────────────────────────────
+    for out_path, params, label in jobs:
+        if out_path.exists():
+            print(f"  {label}: already exists — skipping (delete to rerun)")
+            continue
+
+        alpha_0   = float(params["alpha_0"])
+        lambda_   = float(params["lambda_"])
+        n_neurons = int(params["n_neurons"])
+        dt        = float(params["dt"])
+        t_obs_    = float(params["t_obs"])
+        t_iti_    = float(params["t_iti"])
+        print(f"  {label}")
+
+        obs_values = np.array([1.0])
+        rows = []
+
+        for seed in range(n_seeds):
+            p = {**params, "seed": seed}
+            decoders = _pretrain({**p})
+            net      = build_network(obs_values, p, decoders)
+            t_total  = t_obs_ + t_iti_
+            with nengo.Simulator(net, dt=dt, seed=seed, progress_bar=False) as sim:
+                sim.run(t_total)
+
+            t_arr      = np.arange(len(sim.data[net.probe_value])) * dt
+            value_dec  = sim.data[net.probe_value].squeeze()
+            error_dec  = sim.data[net.probe_error]
+            obs_probe  = sim.data[net.probe_obs].squeeze()
+            weight_dec = error_dec[:, 0]
+            pe_raw     = error_dec[:, 1]
+            pe_prod    = weight_dec * pe_raw
+
+            mask     = (t_arr >= t_iti_) & (t_arr < t_iti_ + t_obs_)
+            t_within = t_arr[mask] - t_iti_
+
+            for j in range(mask.sum()):
+                rows.append({
+                    "seed":        seed,
+                    "t":           float(t_within[j]),
+                    "pe_product":  float(pe_prod[mask][j]),
+                    "pe_raw":      float(pe_raw[mask][j]),
+                    "weight":      float(weight_dec[mask][j]),
+                    "value":       float(value_dec[mask][j]),
+                    "obs":         float(obs_probe[mask][j]),
+                    "alpha_0":     alpha_0,
+                    "lambda_":     lambda_,
+                    "n_neurons":   n_neurons,
+                })
+
+            print(f"    seed {seed+1}/{n_seeds}", end="\r", flush=True)
+
+        print()
+        df = pd.DataFrame(rows)
+        df.to_pickle(out_path)
+        print(f"  Saved {len(df):,} rows ({n_seeds} seeds × {mask.sum()} timesteps)"
+              f" -> {out_path.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--experiment",
         type=str,
         default="probe_pids",
-        choices=["probe_pids", "n_neurons_scan", "pe_readout", "probe_timeseries"],
+        choices=["probe_pids", "n_neurons_scan", "pe_readout", "probe_timeseries", "pe_dynamics"],
         help="Which experiment to run",
     )
     parser.add_argument(
@@ -670,6 +804,14 @@ def main() -> None:
         help="Source folder for fitted NEF params (run mode only)",
     )
     parser.add_argument("--out_folder", type=str, default="refit")
+    parser.add_argument("--n_seeds", type=int, default=10,
+                        help="Number of network seeds for pe_dynamics")
+    parser.add_argument("--alpha_0_list", type=float, nargs="+", default=None,
+                        help="Explicit alpha_0 values for pe_dynamics param grid")
+    parser.add_argument("--n_neurons_pe", type=int, nargs="+", default=None,
+                        help="Explicit n_neurons values for pe_dynamics param grid")
+    parser.add_argument("--lambda_fixed", type=float, default=0.0,
+                        help="Fixed lambda_ for pe_dynamics param grid (default 0.0)")
     parser.add_argument(
         "--pids",
         type=int,
@@ -701,6 +843,19 @@ def main() -> None:
 
     out_folder = args.out_folder
     run_folder = RUNS_DIR / args.run_folder
+
+    # pe_dynamics: no mode required
+    if args.experiment == "pe_dynamics":
+        _run_pe_dynamics(
+            pids=args.pids,
+            run_folder=run_folder,
+            out_folder=out_folder,
+            n_seeds=args.n_seeds,
+            alpha_0_list=args.alpha_0_list,
+            n_neurons_list_pe=args.n_neurons_pe,
+            lambda_fixed=args.lambda_fixed,
+        )
+        return
 
     # n_neurons_scan: per-pid run or collect
     if args.experiment == "n_neurons_scan":

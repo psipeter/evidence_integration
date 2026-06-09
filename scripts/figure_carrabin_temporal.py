@@ -81,7 +81,10 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
     handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)); labels.append("Human")
 
     for mt in model_order:
-        resp_path = run_dir / f"{mt}_carrabin_responses.pkl"
+        if mt == "NEF":
+            resp_path = run_dir / "NEF_carrabin_responses_mle.pkl"
+        else:
+            resp_path = run_dir / f"{mt}_carrabin_responses.pkl"
         if not resp_path.exists(): continue
         mdf    = pd.read_pickle(resp_path).merge(
             true_p_map, on=["pid", "trial", "observation"], how="left")
@@ -94,7 +97,8 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
         ax.fill_between(stats_m["observation"],
                         stats_m["mean"] - stats_m["sem"], stats_m["mean"] + stats_m["sem"],
                         color=color, alpha=0.2)
-        handles.append(Line2D([0], [0], color=color, lw=1.5)); labels.append(_display(mt))
+        lbl = "NEF (MLE)" if mt == "NEF" else _display(mt)
+        handles.append(Line2D([0], [0], color=color, lw=1.5)); labels.append(lbl)
 
     # Add NoisyCounting MLE explicitly
     nc_mle_path = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
@@ -151,7 +155,10 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
     handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)); labels.append("Human")
 
     for mt in model_order:
-        resp_path = run_dir / f"{mt}_carrabin_responses.pkl"
+        if mt == "NEF":
+            resp_path = run_dir / "NEF_carrabin_responses_mle.pkl"
+        else:
+            resp_path = run_dir / f"{mt}_carrabin_responses.pkl"
         if not resp_path.exists(): continue
         m_delta = abs_delta(pd.read_pickle(resp_path)).dropna()
         stats_m = (m_delta.groupby(["pid", "observation"])["delta"].mean().reset_index()
@@ -161,7 +168,8 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
         ax.fill_between(stats_m["observation"],
                         stats_m["mean"] - stats_m["sem"], stats_m["mean"] + stats_m["sem"],
                         color=color, alpha=0.2)
-        handles.append(Line2D([0], [0], color=color, lw=1.5)); labels.append(_display(mt))
+        lbl = "NEF (MLE)" if mt == "NEF" else _display(mt)
+        handles.append(Line2D([0], [0], color=color, lw=1.5)); labels.append(lbl)
 
     # Add NoisyCounting MLE explicitly
     nc_mle_path = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
@@ -204,10 +212,10 @@ def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
     sources = []
     sources.append((_add_resid(human), HUMAN_COLOR, "Human"))
 
-    nef_path = run_dir / "NEF_carrabin_responses.pkl"
+    nef_path = run_dir / "NEF_carrabin_responses_mle.pkl"
     if nef_path.exists():
         nef2 = _add_resid(_load_with_qid(nef_path, qid_map))
-        sources.append((nef2, palette.get("NEF", "0.5"), "NEF"))
+        sources.append((nef2, palette.get("NEF", "0.5"), "NEF (MLE)"))
 
     nc_mle_path = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
     if nc_mle_path.exists():
@@ -216,26 +224,42 @@ def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
                                               palette.get("NoisyCounting", "0.6")),
                         "NoisyCounting (MLE)"))
 
-    lags    = [1, 2, 3, 4]
+    lags    = [1, 2, 3]  # lag-4 is degenerate: (obs1, obs5) residuals near-zero for some pids
     handles, labels = [], []
     for df, color, src in sources:
-        rs = []
-        for lag in lags:
-            pairs = []
-            for (pid, trial), g in df.groupby(["pid", "trial"]):
-                r = g.sort_values("observation")["resid"].values
-                if len(r) > lag:
-                    pairs.extend(zip(r[:-lag], r[lag:]))
-            arr = np.array(pairs)
-            rv, _ = pearsonr(arr[:, 0], arr[:, 1])
-            rs.append(rv)
-        ax.plot(lags, rs, "o-", color=color, lw=1.8, ms=5)
+        # Compute lag-k autocorrelation per pid, then mean ± SEM across pids
+        # (consistent with SEM error bars in panels A and B)
+        pid_rs = {lag: [] for lag in lags}
+        for pid, pid_df in df.groupby("pid"):
+            for lag in lags:
+                pairs = []
+                for (_, trial), g in pid_df.groupby(["pid", "trial"]):
+                    r = g.sort_values("observation")["resid"].values
+                    if len(r) > lag:
+                        pairs.extend(zip(r[:-lag], r[lag:]))
+                if len(pairs) < 3:
+                    continue
+                arr = np.array(pairs)
+                rv, _ = pearsonr(arr[:, 0], arr[:, 1])
+                pid_rs[lag].append(rv)
+
+        means = [np.mean(pid_rs[lag]) for lag in lags]
+        sems  = [np.std(pid_rs[lag]) / np.sqrt(len(pid_rs[lag]))
+                 for lag in lags]
+        means_arr = np.array(means)
+        sems_arr  = np.array(sems)
+
+        ax.plot(lags, means_arr, "o-", color=color, lw=1.8, ms=5)
+        ax.fill_between(lags,
+                        means_arr - sems_arr,
+                        means_arr + sems_arr,
+                        color=color, alpha=0.2)
         handles.append(Line2D([0], [0], color=color, lw=1.5))
         labels.append(src)
 
     ax.axhline(0, color="0.7", lw=0.8, ls="--")
     ax.set_xlabel("Lag (observations)")
-    ax.set_ylabel("Residual autocorrelation")
+    ax.set_ylabel("Autocorrelation of trial-to-trial deviations")
     ax.set_xticks(lags)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -260,10 +284,10 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
     sources = []
     sources.append((_add_resid(human), HUMAN_COLOR, "Human"))
 
-    nef_path = run_dir / "NEF_carrabin_responses.pkl"
+    nef_path = run_dir / "NEF_carrabin_responses_mle.pkl"
     if nef_path.exists():
         nef2 = _add_resid(_load_with_qid(nef_path, qid_map))
-        sources.append((nef2, palette.get("NEF", "0.5"), "NEF"))
+        sources.append((nef2, palette.get("NEF", "0.5"), "NEF (MLE)"))
 
     nc_mle_path = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
     if nc_mle_path.exists():
@@ -291,7 +315,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
         labels.append(src)
 
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Response variability (residual std)")
+    ax.set_ylabel("Response variability")
     ax.set_xticks(obs_vals)
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
@@ -333,8 +357,8 @@ def main() -> None:
 
     _plot_panel_a(axes[0], args.run_folder, palette, model_order)
     _plot_panel_b(axes[1], args.run_folder, palette, model_order)
-    _plot_panel_c(axes[2], args.run_folder, palette)
-    _plot_panel_d(axes[3], args.run_folder, palette)
+    _plot_panel_d(axes[2], args.run_folder, palette)
+    _plot_panel_c(axes[3], args.run_folder, palette)
 
     label_panels(axes.reshape(1, -1))
 

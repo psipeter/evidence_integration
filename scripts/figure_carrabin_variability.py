@@ -78,14 +78,9 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
     human   = pd.read_pickle(data_path("carrabin.pkl"))
     qid_map = human[["pid", "trial", "observation", "qid"]].drop_duplicates()
 
-    # Fixed source list: human + two NoisyCounting variants only
+    # Panel A: human only — individual pid lines show the distribution
     SOURCES = [
-        ("human",             None,
-         "Human"),
-        ("NoisyCounting",     run_dir / "NoisyCounting_carrabin_responses.pkl",
-         "NoisyCounting (RMSE)"),
-        ("NoisyCounting_mle", run_dir / "NoisyCounting_carrabin_responses_mle.pkl",
-         "NoisyCounting (MLE)"),
+        ("human", None, "Human"),
     ]
 
     source_data: dict[str, pd.Series] = {}
@@ -112,20 +107,49 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
         return
 
     x_max = np.quantile(all_vals, 0.99) * 1.1
-    x     = np.linspace(0, x_max, 400)
+    x     = np.linspace(0, x_max, 400)  # cut=0 enforced below
 
+    # Same colour per family; linestyle distinguishes RMSE (solid) from MLE (dashed)
+    _PANEL_A_DISPLAY = {
+        "human":             "Human",
+        "NEF":               "NEF (RMSE)",
+        "NEF_mle":           "NEF (MLE)",
+        "NoisyCounting":     "NoisyCounting (RMSE)",
+        "NoisyCounting_mle": "NoisyCounting (MLE)",
+    }
+    _PANEL_A_LS = {
+        "human":             "-",
+        "NEF":               "-",
+        "NEF_mle":           "--",
+        "NoisyCounting":     "-",
+        "NoisyCounting_mle": "--",
+    }
+    # NEF family uses same colour; NC family uses same colour
+    _PANEL_A_COLOR_KEY = {
+        "human":             "human",
+        "NEF":               "NEF",
+        "NEF_mle":           "NEF",
+        "NoisyCounting":     "NoisyCounting",
+        "NoisyCounting_mle": "NoisyCounting",
+    }
     for src, vals in source_data.items():
-        color     = palette.get(src, palette.get(_display(src), "0.5"))
-        label     = source_label.get(src, _display(src))
+        ck        = _PANEL_A_COLOR_KEY.get(src, src)
+        color     = palette.get(ck, palette.get(_display(ck), "0.5"))
+        label     = source_label.get(src, _PANEL_A_DISPLAY.get(src, _display(src)))
+        ls        = _PANEL_A_LS.get(src, "-")
         sigma_std = float(vals.std())
         bw        = 0.002 if sigma_std < 0.003 else "scott"
-        alpha_fill = 0.15 if sigma_std < 0.003 else 0.20
+        alpha_fill = 0.10 if sigma_std < 0.003 else 0.15
         lw         = 1.2  if sigma_std < 0.003 else 1.8
         kde        = gaussian_kde(vals, bw_method=bw)
         density    = kde(x)
         density    = density / density.max()
-        ax.fill_between(x, density, alpha=alpha_fill, color=color)
-        ax.plot(x, density, lw=lw, color=color, label=label)
+        # cut=0: zero out density outside the actual data range
+        density[x < float(vals.min())] = 0
+        density[x > float(vals.max())] = 0
+        ax.fill_between(x, density, alpha=alpha_fill, color=color,
+                        linestyle=ls)
+        ax.plot(x, density, lw=lw, color=color, label=label, linestyle=ls)
 
     # Per-pid vertical lines for human
     if "human" in source_data:
@@ -140,7 +164,7 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
     ax.set_xlabel(NOISE_LABEL)
     ax.set_ylabel("Normalised density")
     ax.set_xlim(left=0); ax.set_ylim(bottom=0)
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -239,19 +263,16 @@ def _plot_panel_c(ax, run_folder: str, palette: dict,
         return wide.reset_index()
 
     color_h       = "0.3"
-    color_n       = palette.get("NEF", list(palette.values())[3])
-    color_nc_rmse = palette.get("NoisyCounting",     "0.6")
-    color_nc_mle  = palette.get("NoisyCounting_mle", "0.4")
+    color_n_mle   = palette.get("NEF",            "0.5")
+    color_nc_mle  = palette.get("NoisyCounting",  "0.6")
 
-    nef_path     = run_dir / "NEF_carrabin_responses.pkl"
-    nc_rmse_path = run_dir / "NoisyCounting_carrabin_responses.pkl"
+    nef_mle_path = run_dir / "NEF_carrabin_responses_mle.pkl"
     nc_mle_path  = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
 
     sources = [
-        (human,                                                                 color_h,       "Human"),
-        (pd.read_pickle(nef_path)     if nef_path.exists()     else pd.DataFrame(), color_n,       "NEF"),
-        (pd.read_pickle(nc_rmse_path) if nc_rmse_path.exists() else pd.DataFrame(), color_nc_rmse, "NoisyCounting (RMSE)"),
-        (pd.read_pickle(nc_mle_path)  if nc_mle_path.exists()  else pd.DataFrame(), color_nc_mle,  "NoisyCounting (MLE)"),
+        (human,                                                                       color_h,      "Human"),
+        (pd.read_pickle(nef_mle_path) if nef_mle_path.exists() else pd.DataFrame(),  color_n_mle,  "NEF (MLE)"),
+        (pd.read_pickle(nc_mle_path)  if nc_mle_path.exists()  else pd.DataFrame(),  color_nc_mle, "NoisyCounting (MLE)"),
     ]
 
     handles, labels = [], []
@@ -268,11 +289,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict,
         handles.append(Line2D([0], [0], color=color, lw=1.5))
         labels.append(f"{src_label} r={r:.2f}{stars}")
 
-    # Identity line
-    lo, hi = 0.0, 0.40
-    ax.plot([lo, hi], [lo, hi], color="0.75", lw=0.8, ls="--", zorder=1)
-    handles.append(Line2D([0], [0], color="0.75", lw=0.8, ls="--"))
-    labels.append("Identity")
+
 
     ax.set_xlabel("Response variability\n(first half of trials)")
     ax.set_ylabel("Response variability\n(second half of trials)")
@@ -341,25 +358,32 @@ def _plot_panel_d(ax, run_folder: str, palette: dict,
         seq_map[(pid, trial)] = tuple(
             g.sort_values("observation")["value"].values)
 
-    PANEL_D_MODELS = MODEL_ORDER + ["NoisyCounting"]
+    # Deterministic models evaluated with sigma_floor; stochastic use MLE params
+    DET_MODELS  = ["Mean", "PrimacyRecency", "LeakyIntegrator"]
     rows = []
 
-    for mt in PANEL_D_MODELS:
-        if mt == "NoisyCounting":
-            mle_path = run_dir / "NoisyCounting_carrabin_params_mle.pkl"
-            if not mle_path.exists():
-                continue
-            mle_df = pd.read_pickle(mle_path)[["pid", "mle_loss"]].copy()
-            mle_df["source"] = "NoisyCounting"
-            rows.append(mle_df)
-        else:
-            rpath = run_dir / f"{mt}_carrabin_responses.pkl"
-            if not rpath.exists():
-                continue
-            df = _mle_loss_from_responses(
-                pd.read_pickle(rpath), human, seq_map, SIGMA_FLOOR)
-            df["source"] = _display(mt)
-            rows.append(df)
+    for mt in DET_MODELS:
+        rpath = run_dir / f"{mt}_carrabin_responses.pkl"
+        if not rpath.exists():
+            continue
+        df = _mle_loss_from_responses(
+            pd.read_pickle(rpath), human, seq_map, SIGMA_FLOOR)
+        df["source"] = _display(mt)
+        rows.append(df)
+
+    # NEF MLE
+    nef_mle_path = run_dir / "NEF_carrabin_params_mle.pkl"
+    if nef_mle_path.exists():
+        nef_mle_df = pd.read_pickle(nef_mle_path)[["pid", "mle_loss"]].copy()
+        nef_mle_df["source"] = "NEF (MLE)"
+        rows.append(nef_mle_df)
+
+    # NoisyCounting MLE
+    nc_mle_path = run_dir / "NoisyCounting_carrabin_params_mle.pkl"
+    if nc_mle_path.exists():
+        nc_mle_df = pd.read_pickle(nc_mle_path)[["pid", "mle_loss"]].copy()
+        nc_mle_df["source"] = "NoisyCounting (MLE)"
+        rows.append(nc_mle_df)
 
     if not rows:
         ax.text(0.5, 0.5, "No data", ha="center", va="center",
@@ -367,10 +391,15 @@ def _plot_panel_d(ax, run_folder: str, palette: dict,
         return
 
     plot_df = pd.concat(rows, ignore_index=True)
-    order   = [_display(m) for m in PANEL_D_MODELS
-               if _display(m) in plot_df["source"].unique()]
-    pal     = {_display(m): palette.get(_display(m), palette.get(m, "0.5"))
-               for m in PANEL_D_MODELS}
+    _D_ORDER = ["Mean", "PrimacyRecency", "LeakyIntegrator", "NEF (MLE)", "NoisyCounting (MLE)"]
+    order    = [s for s in _D_ORDER if s in plot_df["source"].unique()]
+    pal      = {
+        "Mean":                palette.get("Mean",           "0.5"),
+        "PrimacyRecency":      palette.get("PrimacyRecency", "0.5"),
+        "LeakyIntegrator":     palette.get("LeakyIntegrator","0.5"),
+        "NEF (MLE)":           palette.get("NEF",            "0.5"),
+        "NoisyCounting (MLE)": palette.get("NoisyCounting",  "0.5"),
+    }
 
     sns.boxplot(data=plot_df, x="source", y="mle_loss", order=order,
                 hue="source", palette=pal, legend=False, ax=ax)
@@ -380,20 +409,21 @@ def _plot_panel_d(ax, run_folder: str, palette: dict,
     ax.set_ylabel("Distributional model fit (NLL)")
     ax.tick_params(axis="x", rotation=45)
 
-    # Significance bars: NEF vs each other model (Wilcoxon signed-rank)
+    # Significance bars: NoisyCounting MLE vs each other model (Wilcoxon)
     from scipy.stats import wilcoxon
-    nef_vals = plot_df[plot_df["source"] == "NEF"]["mle_loss"]
+    ref_label = "NEF (MLE)"
+    nef_vals = plot_df[plot_df["source"] == ref_label]["mle_loss"]
     if len(nef_vals) >= 3:
-        nef_idx = order.index("NEF")
+        nef_idx = order.index(ref_label)
         y_max   = plot_df["mle_loss"].quantile(0.95)
         y_range = plot_df["mle_loss"].quantile(0.95) - plot_df["mle_loss"].quantile(0.05)
         y_step  = y_range * 0.12
         bar_n   = 0
-        for other in [m for m in order if m != "NEF"]:
+        for other in [m for m in order if m != ref_label]:
             other_vals = plot_df[plot_df["source"] == other]["mle_loss"]
             if len(other_vals) < 3:
                 continue
-            merged = (plot_df[plot_df["source"] == "NEF"][["pid", "mle_loss"]]
+            merged = (plot_df[plot_df["source"] == ref_label][["pid", "mle_loss"]]
                       .merge(plot_df[plot_df["source"] == other][["pid", "mle_loss"]],
                              on="pid", suffixes=("_nef", "_other")))
             if len(merged) < 3:
@@ -426,7 +456,7 @@ def main() -> None:
     ]
 
     apply_style()
-    pal     = get_palette(len(model_order) + 2)
+    pal     = get_palette(len(model_order) + 4)
     palette = {m: pal[i] for i, m in enumerate(model_order)}
     for mt in model_order:
         disp = _display(mt)
@@ -435,9 +465,12 @@ def main() -> None:
     palette["Human"] = HUMAN_NEUTRAL_COLOR
     palette["human"] = HUMAN_NEUTRAL_COLOR
     nc_idx = len(model_order)
-    palette["NoisyCounting"]       = pal[nc_idx]     if nc_idx     < len(pal) else "0.6"
-    palette["NoisyCounting_mle"]   = pal[nc_idx + 1] if nc_idx + 1 < len(pal) else "0.4"
-    palette["NoisyCounting (MLE)"] = palette["NoisyCounting_mle"]
+    palette["NoisyCounting"]         = pal[nc_idx]     if nc_idx     < len(pal) else "0.6"
+    palette["NoisyCounting_mle"]     = pal[nc_idx + 1] if nc_idx + 1 < len(pal) else "0.4"
+    palette["NoisyCounting (MLE)"]   = palette["NoisyCounting_mle"]
+    palette["NEF_mle"]               = pal[nc_idx + 2] if nc_idx + 2 < len(pal) else "0.45"
+    palette["NEF (RMSE)"]            = palette.get("NEF", pal[3] if len(pal)>3 else "0.5")
+    palette["NEF (MLE)"]             = palette["NEF_mle"]
 
     fig, axes = plt.subplots(
         1, 4,
