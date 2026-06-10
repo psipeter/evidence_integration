@@ -90,12 +90,13 @@ NEF predictions; testable in future empirical experiments.
 | Code | Metric | Carrabin | Yoo |
 |------|--------|----------|-----|
 | N1 | Decoded PE timecourse within observation window | Y | Y |
-| N2 | Response/PE variability vs n_neurons (scan) | Y | N |
-| N3 | PE variability vs response variability (matched probe simulations) | Y | N |
-| N4 | Error-ensemble weight-neuron activity vs observation, split by λ group | N | Y |
-| N5 | Mean weight-neuron activity vs mean |Δresponse| across observations | N | Y |
-| N6 | Fitted λ mediates activity change and mean |Δresponse| (twin-axis) | N | Y |
-| N7 | Late |Δresponse| vs late estimation error (last 10 obs) | N | Y |
+| N2 | PE variability vs response variability, probe sims; partial-r control for α₀ | Y | N |
+| N3 | Response and PE variability vs fitted α₀ (shared scaling factor) | Y | N |
+| N4 | Response and PE variability vs n_neurons scan | Y | N |
+| N5 | Error-ensemble weight-neuron activity vs observation, split by λ group | N | Y |
+| N6 | Mean weight-neuron activity vs mean |Δresponse| across observations | N | Y |
+| N7 | Fitted λ mediates activity change and mean |Δresponse| (twin-axis) | N | Y |
+| N8 | Late |Δresponse| vs late estimation error (last 10 obs) | N | Y |
 
 ---
 
@@ -253,7 +254,7 @@ Never run NEF simulations through MCP tool calls (will time out).
         --out_folder refit
     # Output: data/runs/refit/probe_pids_carrabin.pkl
 
-### n_neurons scan (carrabin neural panels C–D — figure_carrabin_neural.py)
+### n_neurons scan (carrabin neural panel D — figure_carrabin_neural.py)
 
     # Run locally (moderate compute)
     python scripts/extras_carrabin.py --experiment n_neurons_scan \
@@ -356,9 +357,9 @@ Figures save PDF only (no PNG/SVG).
 | Panel | Code | Content |
 |-------|------|---------|
 | A | N1 | Decoded PE dynamics, 4 param combinations (α₀ × n_neurons) |
-| B | N3 | PE variability vs response variability (matched probe simulations); r=0.97**** |
-| C | N2 | Response/PE variability vs n_neurons; human refs |
-| D | N2 | Response variability growth (slope_c) vs n_neurons |
+| B | N2 | PE vs response variability (r=0.97****); partial r excl. α₀=0.97**** |
+| C | N3 | Response and PE variability vs fitted α₀ |
+| D | N4 | Response and PE variability vs n_neurons scan |
 
 ### figure_yoo_performance.py (P group, 1×3)
 | Panel | Code | Content |
@@ -384,10 +385,10 @@ Default: --run_folder yoo --nef_folder refit
 ### figure_yoo_neural.py (N group, 1×4)
 | Panel | Code | Content |
 |-------|------|---------|
-| A | N4 | Weight-neuron activity vs obs, split by high/low λ group (N=10 each) |
-| B | N5 | Mean weight-neuron activity vs mean |Δresponse| per obs (regplot); r=0.92**** |
-| C | N6 | Fitted λ mediates activity change (right axis) and mean |Δresponse| (left axis) |
-| D | N7 | Late |Δresponse| vs late estimation error (obs 21–30); Human + NEF |
+| A | N5 | Weight-neuron activity vs obs, split by high/low λ group (N=10 each) |
+| B | N6 | Mean weight-neuron activity vs mean |Δresponse| per obs (regplot); r=0.92**** |
+| C | N7 | Fitted λ mediates activity change (right axis) and mean |Δresponse| (left axis) |
+| D | N8 | Late |Δresponse| vs late estimation error (obs 21–30); Human + NEF |
 
 Weight-on neurons: enc_dim_0 > 0.5 in error ensemble encoders.
 Default: --nef_folder refit

@@ -23,6 +23,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
 from scipy.stats import pearsonr, linregress
+from numpy.linalg import lstsq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -191,14 +192,58 @@ def _load_panel_b_metrics(run_folder: str) -> pd.DataFrame:
     return agg.groupby("pid")[["pe_std", "resp_std"]].mean().reset_index()
 
 
+def _regress_out(df: pd.DataFrame, y_col: str, covariates: list) -> np.ndarray:
+    """Return residuals of y_col after regressing out covariates."""
+    X    = np.column_stack([df[c].values for c in covariates] + [np.ones(len(df))])
+    coef, _, _, _ = lstsq(X, df[y_col].values, rcond=None)
+    return df[y_col].values - X @ coef
+
+
+def _zscore(v: np.ndarray) -> np.ndarray:
+    return (v - v.mean()) / (v.std() + 1e-12)
+
+
 def _plot_panel_b(ax, run_folder: str) -> None:
+    """Panel B (N2): PE variability vs response variability (probe sims).
+
+    Scatter + regplot of raw values. Partial correlations after regressing
+    out alpha_0 and alpha_0+lambda_ are reported as text to demonstrate
+    that the relationship is driven by spiking noise, not learning-rate
+    individual differences.
+    """
     df = _load_panel_b_metrics(run_folder)
     if df.empty:
         _placeholder(ax, "No probe data")
         return
 
-    r, p  = pearsonr(df["pe_std"], df["resp_std"])
-    color = get_palette(6)[0]
+    # Load per-pid fitted params from probe data
+    probe_path = RUNS_DIR / "refit" / "probe_pids_carrabin.pkl"
+    if not probe_path.exists():
+        _placeholder(ax, "No probe data"); return
+    probes = pd.read_pickle(probe_path)
+    pparams = {}
+    for p in probes:
+        pid = int(p["pid"])
+        if pid not in pparams:
+            pparams[pid] = {"alpha_0": float(p["params"]["alpha_0"]),
+                             "lambda_": float(p["params"]["lambda_"])}
+    params_df = pd.DataFrame(pparams).T.reset_index().rename(columns={"index": "pid"})
+    df = df.merge(params_df, on="pid")
+
+    pal   = get_palette(6)
+    color = pal[0]
+
+    # Partial correlations
+    def partial_r(df, x, y, covariates):
+        X = np.column_stack([df[c].values for c in covariates] + [np.ones(len(df))])
+        def resid(col):
+            coef, _, _, _ = lstsq(X, df[col].values, rcond=None)
+            return df[col].values - X @ coef
+        return pearsonr(resid(x), resid(y))
+
+    r_raw, p_raw = pearsonr(df["pe_std"], df["resp_std"])
+    r1, p1 = partial_r(df, "pe_std", "resp_std", ["alpha_0"])
+    r2, p2 = partial_r(df, "pe_std", "resp_std", ["alpha_0", "lambda_"])
 
     ax.scatter(df["pe_std"], df["resp_std"],
                color=color, s=35, alpha=0.85, zorder=3,
@@ -206,18 +251,75 @@ def _plot_panel_b(ax, run_folder: str) -> None:
     sns.regplot(data=df, x="pe_std", y="resp_std", ax=ax,
                 color=color, ci=95, scatter=False,
                 line_kws={"lw": 1.8},
-                label=f"Group-level correlation, r={r:.2f}{pvalue_to_stars(p)}")
+                label=(f"r={r_raw:.2f}{pvalue_to_stars(p_raw)}"
+                       f" (partial r excl. \u03b1\u2080: {r1:.2f}{pvalue_to_stars(p1)})"))
 
     ax.set_xlabel("PE variability (within sequence)")
     ax.set_ylabel("Response variability (within sequence)")
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
+    ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Panel C (N3b) — Variability vs fitted alpha_0 ────────────────────────────
+
+def _plot_panel_c(ax, run_folder: str) -> None:
+    """Panel C: Response variability and PE variability vs fitted alpha_0.
+
+    Each point is one pid. Both metrics decrease with alpha_0, showing that
+    alpha_0 acts as a shared scaling factor on spiking noise. This motivates
+    the partial-correlation control in panel B: alpha_0 modulates both
+    variability measures together, but does not cause their covariation.
+    Twin y-axes keep each metric on its natural scale.
+    """
+    df = _load_panel_b_metrics(run_folder)
+    if df.empty:
+        _placeholder(ax, "No probe data"); return
+
+    probe_path = RUNS_DIR / "refit" / "probe_pids_carrabin.pkl"
+    if not probe_path.exists():
+        _placeholder(ax, "No probe data"); return
+    probes = pd.read_pickle(probe_path)
+    pparams = {}
+    for p in probes:
+        pid = int(p["pid"])
+        if pid not in pparams:
+            pparams[pid] = {"alpha_0": float(p["params"]["alpha_0"]),
+                             "lambda_": float(p["params"]["lambda_"])}
+    params_df = pd.DataFrame(pparams).T.reset_index().rename(columns={"index": "pid"})
+    df = df.merge(params_df, on="pid")
+
+    pal    = get_palette(6)
+    c_resp = pal[0]
+    c_pe   = pal[1]
+
+    r_resp, p_resp = pearsonr(df["alpha_0"], df["resp_std"])
+    r_pe,   p_pe   = pearsonr(df["alpha_0"], df["pe_std"])
+
+    # Single shared axis — both metrics on same scale
+    ax.scatter(df["alpha_0"], df["resp_std"],
+               color=c_resp, s=30, alpha=0.7, zorder=3)
+    sns.regplot(data=df, x="alpha_0", y="resp_std", ax=ax,
+                color=c_resp, ci=95, scatter=False,
+                line_kws={"lw": 1.8},
+                label=f"Response variability, r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
+    ax.scatter(df["alpha_0"], df["pe_std"],
+               color=c_pe, s=30, alpha=0.7, zorder=3)
+    sns.regplot(data=df, x="alpha_0", y="pe_std", ax=ax,
+                color=c_pe, ci=95, scatter=False,
+                line_kws={"lw": 1.8},
+                label=f"PE variability, r={r_pe:.2f}{pvalue_to_stars(p_pe)}")
+    ax.set_xlabel("Fitted α₀")
+    ax.set_ylabel("Variability (within sequence)")
+    ax.set_ylim(bottom=0)
+    ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
+
 
 
 # ── Panel C (N3) — Response and PE variability vs n_neurons ──────────────────
 
-def _plot_panel_c(ax, run_folder: str) -> None:
-    """Panel C (N3): Response variability and PE variability vs n_neurons."""
+def _plot_panel_d(ax, run_folder: str) -> None:
+    """Panel D (N3): Response variability and PE variability vs n_neurons."""
     run_dir   = data_path("runs") / run_folder
     scan_path = run_dir / "n_neurons_scan.pkl"
     if not scan_path.exists():
@@ -290,8 +392,8 @@ def _plot_panel_c(ax, run_folder: str) -> None:
 
 # ── Panel D (N4) — Response variability growth (slope_c) vs n_neurons ────────
 
-def _plot_panel_d(ax, run_folder: str) -> None:
-    """Panel D (N4): Slope of response variability growth vs n_neurons.
+def _plot_panel_e_archived(ax, run_folder: str) -> None:
+    """[ARCHIVED] Panel D (N4): Slope of response variability growth vs n_neurons.
 
     NEF: mean ± SD across pids at each n_neurons level from n_neurons_scan.
     Human: each pid's slope_c drawn as a thin grey horizontal reference line.

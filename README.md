@@ -134,26 +134,38 @@ model, here is what you should see in neural recordings."
   ensemble rises at observation onset and decays as the estimate stabilises.
   Different α₀/n_neurons combinations produce characteristically different
   timecourses — testable in EEG/single-unit data.
-- N2/N3: Both response variability and PE variability decrease with n_neurons
-  (more neurons = less spiking noise = less variability). The two converge to
-  human levels at n~100-200, suggesting a plausible biological parameter range.
+- N2 (panel B): PE variability and response variability covary tightly across
+  participants (r=0.97****), using probe simulations run at each pid's fitted
+  α₀ and λ. Partial correlation after regressing out α₀ remains r=0.97****,
+  showing the covariation is driven by spiking noise propagating from the error
+  ensemble to the value ensemble — not by individual differences in learning
+  rate. α₀ acts as a shared scaling factor on both metrics, not an independent
+  cause of their covariation. This is confirmed by the fact that the
+  deterministic model (RL_lambda) produces zero within-qid variability
+  regardless of α₀.
+- N3 (panel C): Both response variability and PE variability decrease with
+  fitted α₀ (r≈-0.56** and r≈-0.66**), confirming that α₀ scales the
+  amplitude of spiking noise in the same direction for both metrics.
+- N4 (panel D): Both variability metrics decrease with n_neurons for fixed
+  α₀/λ (n_neurons scan). They converge to human levels at n~100-200,
+  suggesting a plausible biological parameter range.
 
 **Yoo N:**
-- N4: Weight-neuron activity in the error ensemble decays more steeply for
+- N5: Weight-neuron activity in the error ensemble decays more steeply for
   high-λ pids — the neural signature of stronger discounting.
-- N5: Mean weight-neuron activity correlates strongly with mean |Δresponse|
+- N6: Mean weight-neuron activity correlates strongly with mean |Δresponse|
   across observation positions (r=0.92). The model's α(t) signal directly drives
   the magnitude of behavioural updating — this is the key mechanistic link.
-- N6: λ mediates both the neural activity change (activity decay across sequence)
+- N7: λ mediates both the neural activity change (activity decay across sequence)
   and the behavioural update magnitude (mean |Δresponse|). Both relationships
   are negative and significant, showing λ as the shared parameter.
-- N7: Late |Δresponse| vs late estimation error (obs 21-30) — pids who keep
+- N8: Late |Δresponse| vs late estimation error (obs 21-30) — pids who keep
   updating late also have higher late error. NEF reproduces this tightly
   (r=0.89****); humans show the same trend but noisier (r=0.40*), consistent
   with the model capturing the mechanistic relationship.
 
 **Connecting N to T:** The same λ that differentiates models in T3/T4 is also
-the parameter that drives the neural predictions in N4-N6. This is the punchline:
+the parameter that drives the neural predictions in N5-N7. This is the punchline:
 λ is not just a behavioural parameter — it has a specific neural implementation
 in the counting subnetwork whose activity is directly observable.
 
@@ -185,12 +197,13 @@ One figure per group per task. Figures save PDF only.
 | Code | Metric |
 |------|--------|
 | N1 | Decoded PE timecourse within observation window |
-| N2 | Response/PE variability vs n_neurons (carrabin) |
-| N3 | PE variability vs response variability, matched probe simulations (carrabin) |
-| N4 | Weight-neuron activity vs observation, split by λ group (yoo) |
-| N5 | Mean weight-neuron activity vs mean |Δresponse| per observation (yoo) |
-| N6 | λ mediates activity change and mean |Δresponse| (yoo) |
-| N7 | Late |Δresponse| vs late estimation error, obs 21–30 (yoo) |
+| N2 | PE variability vs response variability, probe sims; partial-r control for α₀ (carrabin) |
+| N3 | Response and PE variability vs fitted α₀ — shared scaling factor (carrabin) |
+| N4 | Response and PE variability vs n_neurons scan; converge to human levels (carrabin) |
+| N5 | Weight-neuron activity vs observation, split by λ group (yoo) |
+| N6 | Mean weight-neuron activity vs mean |Δresponse| per observation (yoo) |
+| N7 | λ mediates activity change and mean |Δresponse| (yoo) |
+| N8 | Late |Δresponse| vs late estimation error, obs 21–30 (yoo) |
 
 ---
 
@@ -222,7 +235,7 @@ A: V2 KDE | B: V2 RMSE regplot | C: V3 test-retest | D: V1 NLL boxplots
 A: T1 RMSE vs obs | B: T2 |Δresponse| vs obs | C: T6 autocorrelation | D: T5 variance growth
 
 ### figure_carrabin_neural.py (N group, 1×4)
-A: N1 PE dynamics | B: N3 PE vs response variability | C: N2 variability vs n_neurons | D: N2 slope_c vs n_neurons
+A: N1 PE dynamics | B: N2 PE vs response variability (r=0.97, partial r excl. α₀=0.97) | C: N3 variability vs fitted α₀ | D: N4 variability vs n_neurons
 
 ### figure_yoo_performance.py (P group, 1×3)
 A: schematic | B: P1 estimation error | C: P2 model fit
@@ -233,7 +246,7 @@ A: T1 + U-shape bands | B: T2 |Δresponse| | C: T3 split-half λ | D: T4 λ_mode
 Run: python scripts/figure_yoo_temporal.py --run_folder yoo --nef_folder refit
 
 ### figure_yoo_neural.py (N group, 1×4)
-A: N4 weight activity by λ group | B: N5 activity vs |Δresponse| | C: N6 λ twin-axis | D: N7 late error vs late delta
+A: N5 weight activity by λ group | B: N6 activity vs |Δresponse| | C: N7 λ twin-axis | D: N8 late error vs late delta
 Run: python scripts/figure_yoo_neural.py --nef_folder refit
 
 ---
