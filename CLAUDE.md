@@ -6,123 +6,96 @@ README.md when they conflict.
 
 ---
 
-## Scientific goals and hypotheses
+## Scientific goals
 
-This project studies **how people integrate sequential noisy evidence**, with
-the goal of identifying the cognitive algorithms and neural mechanisms
-underlying that process. The central scientific argument is that a biophysical
-spiking neural network model — built using the **Neural Engineering Framework
-(NEF)** — captures those mechanisms in a principled, generalisable, and
-mechanistically transparent way.
+This project studies **how people integrate sequential noisy evidence**, using
+cognitive models and a biophysical spiking neural network (NEF) to identify the
+computational and neural mechanisms underlying that process.
 
-There are four interlocking goals:
+### Goal 1 — Cross-task generalisation of cognitive mechanisms
+The NEF model must capture human behaviour across multiple tasks (carrabin and
+yoo), demonstrating that the same underlying cognitive algorithm generalises
+across task domains without task-specific modification. The NEF is benchmarked
+against a spectrum of established models from the evidence-integration
+literature: an optimal Bayesian integrator (Mean), a leaky integrator
+(LeakyIntegrator), and primacy/recency weighting models (PrimacyRecency). On
+trial-wise RMSE the expected ordering is:
 
-### Goal 1 — Realistic comparative model performance
-The NEF model must be benchmarked honestly against a spectrum of alternative
-models: optimal baselines, simple RL, task-specific cognitive models, and a
-black-box RNN ceiling. The expected ordering on trial-wise RMSE is:
+    task-specific model ≈ NEF > LeakyIntegrator ≥ PrimacyRecency ≥ Mean (optimal)
 
-    RNN (best) > task-specific model ≈ NEF > simple RL ≥ optimal (worst)
+The NEF need not outperform task-specific models; comparable RMSE combined with
+cross-task generalisability is the target.
 
-The NEF is not expected to beat task-specific models on trial-wise RMSE
-because: (a) it has intrinsic spiking noise that inflates RMSE; (b) its
-mechanisms are task-agnostic. Comparable (not superior) RMSE relative to
-cognitive models is sufficient, as long as NEF is consistently better than
-simple baselines.
+### Goal 2 — Emergent higher-order behavioural signatures
+Beyond RMSE, the NEF must reproduce secondary behavioural phenomena that it was
+not explicitly trained to capture. These signatures should emerge naturally from
+the model's spiking dynamics: temporal update patterns, the decay of response
+change across the observation sequence, individual differences in discounting
+rate (λ), test-retest reliability of noise and decay-rate metrics, and
+state-persistent response variability. The fact that these emerge without being
+directly optimised is the key scientific contribution.
 
-### Goal 2 — Cross-task generalisability
-The same NEF architecture is applied across multiple tasks. If it achieves
-reasonable performance across tasks where task-specific models cannot
-generalise, this establishes that the NEF implements a general cognitive
-strategy rather than a task-specific fit.
-
-### Goal 3 — Breadth of behavioural and neural predictions
-Beyond RMSE, the NEF must also capture secondary behavioural signatures that
-it was not trained to reproduce: temporal update patterns, response noise,
-state persistence, individual differences in lambda and alpha_0. For neural
-predictions, the NEF produces ensemble-level activity traces and spiking noise
-magnitude as a function of n_neurons and alpha_0.
+### Goal 3 — Joint behavioural and neural predictions
+The NEF generates both behavioural and neural predictions simultaneously from
+the same underlying mechanism. Behavioural: response trajectories, update
+magnitudes, individual λ and α₀. Neural: error-ensemble activity, prediction-
+error dynamics, and how both scale with architectural parameters (n_neurons,
+α₀, λ). Together these constitute a mechanistically coherent account that is
+testable at multiple levels of analysis.
 
 ### Goal 4 — Novel testable predictions
 Spiking noise produces state-persistent variability that differs qualitatively
 from response noise; this prediction distinguishes the NEF from NoisyCounting
-even when both achieve similar RMSE. Response variability scales with n_neurons
-and alpha_0; neural activity profiles match known ensemble dynamics.
+even when both achieve similar RMSE. Response variability and PE variability
+scale with n_neurons and α₀; neural activity profiles match known ensemble
+dynamics. These are quantitative predictions for future empirical work.
 
 ---
 
-## Metric taxonomy (PVTBN framework)
+## Metric taxonomy (PTN framework)
 
-All analyses and figure panels are organised under five groups.
-Target layout: one figure per group per task; figures may be combined later.
+All analyses and figure panels are organised under three groups.
 Figures save PDF only (no PNG/SVG).
 
 ### P — Performance
-Metrics measuring how well participants and models do on the task itself.
+Metrics measuring how well participants and models do on the task.
 
-| Code | Metric | Carrabin | Yoo | New task |
-|------|--------|----------|-----|----------|
-| P1 | Overall task performance: RMSE to hidden probability (true_p), boxplot per source | Y | Y | Y |
-| P2 | Trial-wise RMSE to human responses: model vs human, boxplots across pids | Y | Y | Y |
+| Code | Metric | Carrabin | Yoo |
+|------|--------|----------|-----|
+| P1 | Estimation error: RMSE to hidden probability / true mean, per pid boxplot | Y | Y |
+| P2 | Model fit: RMSE to human responses, per pid boxplot | Y | Y |
 
-P1 uses true_p from carrabin_original.csv, merged into carrabin.pkl as the
-true_p column. Responses on [-1,1]; true_p converted as true_p*2-1.
-Key result: humans have higher task error than all models, establishing that
-human noise is a major source of performance limitation.
-
-### V — Variance
-Metrics measuring how noisy participants and models are, including
-distributional fit quality.
-
-| Code | Metric | Carrabin | Yoo | New task |
-|------|--------|----------|-----|----------|
-| V1 | Distributional fit (MLE-based): model captures full response distribution | active | future | Y |
-| V2 | Response variability for identical inputs: std(response|obs,qid) per pid; KDE + regplot | Y | N | Y |
-| V3 | Test-retest reliability: response variability stable across first/second half of session | Y | N | Y |
-| V4 | State vs response noise: T3/T4 patterns distinguish NEF spiking noise from NoisyCounting response noise | Y | partial | Y |
-
-V4 is the key novel contribution: NoisyCounting fitted by RMSE collapses
-sigma_c to ~0 (response-noise artefact). MLE fitting recovers larger sigma_c
-(~0.03-0.08) and nu (~0.08-0.21), confirming state noise is present. The
-T3/T4 temporal patterns expose this distinction.
-
-Retired: RNN-based sigma (cv_rmse from TinyGRU). Replaced by qid-grouped
-response std = mean of std(response | pid, obs, qid) per pid.
-
-Validated: inter-trial carryover check confirms qid-grouped std is not
-contaminated by preceding trial (all r < 0.04 ns). Safe to use as noise metric.
+Carrabin: true_p converted as true_p*2-1 to match response scale [-1,1].
+Yoo: true_mean = cumulative mean of value stream (expanding mean per trial).
 
 ### T — Temporal
-Metrics that look at patterns within the observation sequence.
+Metrics capturing within-sequence dynamics.
 
-| Code | Metric | Carrabin | Yoo | New task |
-|------|--------|----------|-----|----------|
-| T1 | Task performance vs observation: RMSE as function of obs position | Y | Y | Y |
-| T2 | Response change vs observation: mean |Δresponse| per obs position | Y | Y | Y |
-| T3 | Residual variance growth: std(resid|obs,qid) growing across obs | Y | N | Y |
-| T4 | Within-trial residual autocorrelation decay: lag-k correlation of residuals, k=1..n_obs | Y | N | Y |
+| Code | Metric | Carrabin | Yoo |
+|------|--------|----------|-----|
+| T1 | Task performance vs observation: RMSE per obs position | Y | Y |
+| T2 | Response change vs observation: mean |Δresponse| per obs | Y | Y |
+| T3 | Split-half reliability of λ: first vs second half of trials | N | Y |
+| T4 | Dynamical model fit: λ_model vs λ_human regplot (individual differences) | N | Y |
+| T5 | Residual variance growth across obs (state noise accumulation) | Y | N |
+| T6 | Within-trial residual autocorrelation decay (state persistence) | Y | N |
 
-Residuals for T3/T4: response - mean(response | pid, obs, qid).
-No qid grouping possible for yoo (no repeated sequences).
-
-### B — Bias
-Metrics investigating suboptimal or structured patterns in human responses.
-
-| Code | Metric | Carrabin | Yoo | New task |
-|------|--------|----------|-----|----------|
-| B1 | Weight profile across observations: fitted temporal weighting (flat/primacy/recency/U-shaped) | Y | Y | Y |
-| B2 | Surprise sensitivity and confirmation bias: update size by surprise magnitude and direction | partial | Y | Y |
+T3–T4 require enough trials and observations to fit λ reliably.
+λ is fit via curve_fit: A·n^(-λ), bounds [0,2], on mean |Δresponse| curve.
+T5–T6 use residuals = response − mean(response | pid, obs, qid); require qid.
 
 ### N — Neural
-Predictions from NEF neural dynamics. No empirical neural data exists for
-these tasks; N panels are testable predictions for future experiments.
+NEF predictions; testable in future empirical experiments.
 
-| Code | Metric | Carrabin | Yoo | New task |
-|------|--------|----------|-----|----------|
-| N1 | Decoded PE timecourse: PE signal decoded from NEF activity within obs window | Y | Y | Y |
-| N2 | Response and PE variability vs n_neurons: both decrease with n_neurons | Y | future | Y |
-| N3 | State persistence from spiking noise: NEF prediction driving T3/T4 patterns | Y | N | Y |
-| N4 | (Future) Neural population geometry | future | future | future |
+| Code | Metric | Carrabin | Yoo |
+|------|--------|----------|-----|
+| N1 | Decoded PE timecourse within observation window | Y | Y |
+| N2 | Response/PE variability vs n_neurons (scan) | Y | N |
+| N3 | PE variability vs response variability (matched probe simulations) | Y | N |
+| N4 | Error-ensemble weight-neuron activity vs observation, split by λ group | N | Y |
+| N5 | Mean weight-neuron activity vs mean |Δresponse| across observations | N | Y |
+| N6 | Fitted λ mediates activity change and mean |Δresponse| (twin-axis) | N | Y |
+| N7 | Late |Δresponse| vs late estimation error (last 10 obs) | N | Y |
 
 ---
 
@@ -132,8 +105,12 @@ Updates follow a power-law decaying learning rate:
 
     alpha(t) = alpha_0 / t^lambda
 
-High lambda: primacy bias. Low lambda: recency bias. In the NEF, alpha(t) is
-an emergent property of the spiking dynamics rather than a hardcoded equation.
+High lambda: steep discounting (primacy-like). Low lambda: slow discounting
+(recency-like). In the NEF, alpha(t) is an emergent property of the spiking
+dynamics rather than a hardcoded equation — a counting subnetwork tracks the
+observation index and decodes the appropriate weight, which then gates the
+error signal driving the value ensemble. This is analogous to RL_lambda (which
+implements the same equation explicitly) but arises from biophysical dynamics.
 
 ---
 
@@ -142,14 +119,16 @@ an emergent property of the spiking dynamics rather than a hardcoded equation.
 | Name | N | Task |
 |------|---|------|
 | carrabin | 21 | Binary inputs; slider after each of 5 obs; sequences repeat (qid); true_p known |
-| yoo | 38 | Continuous inputs; slider; 30 obs x 30 trials |
+| yoo | 38 | Continuous inputs; slider; 30 obs × 30 trials; no sequence repetition |
 
 Pickles: data/carrabin.pkl, data/yoo.pkl.
 Required columns: pid, trial, observation, value, response.
-Carrabin adds: qid, true_p (generating probability, from carrabin_original.csv).
+Carrabin adds: qid, true_p (from carrabin_original.csv).
 
 Proposed new task: combines repeated sequences (carrabin) with long sequences
-and continuous values (yoo). Unlocks all PVTBN metrics simultaneously.
+and continuous values (yoo). Unlocks all PTN metrics simultaneously.
+Target: ~15–20 observations per trial for U-shape detection at individual level
+(15 obs is marginal; 20+ observations recommended for reliable per-pid λ).
 
 Archived (do not reactivate): diederen, jiang, usher.
 
@@ -157,243 +136,51 @@ Archived (do not reactivate): diederen, jiang, usher.
 
 ## Active models
 
-| Dataset | Model | Role | Free params |
-|---------|-------|------|-------------|
-| carrabin | Mean | Optimal running mean | none |
-| carrabin | LeakyIntegrator | Leaky integrator baseline | gamma |
-| carrabin | PrimacyRecency | Temporal weighting function | eps_p, eps_r |
-| carrabin | NoisyCounting | Task-specific (Prat-Carrabin) | mu, sigma_c, nu |
-| carrabin | RL_lambda | Power-law delta rule | alpha_0, lambda_ |
-| carrabin | NEF | Spiking NEF integrator | alpha_0, lambda_ |
-| yoo | Mean | Optimal running mean | none |
-| yoo | LeakyIntegrator | Leaky integrator baseline | gamma |
-| yoo | PrimacyRecency | Temporal weighting function | eps_p, eps_r |
-| yoo | RL_lambda | Power-law delta rule | alpha_0, lambda_ |
-| yoo | NEF | Spiking NEF integrator | alpha_0, lambda_ |
+| Model | Role | Free params |
+|-------|------|-------------|
+| Mean | Optimal running mean (Bayesian baseline) | none |
+| LeakyIntegrator | Exponential forgetting baseline | gamma |
+| PrimacyRecency | Temporal weighting (primacy + recency terms) | eps_p, eps_r |
+| NoisyCounting | Task-specific model (Prat-Carrabin 2024); carrabin only | mu, sigma_c, nu |
+| RL_lambda | Power-law delta rule (explicit equation) | alpha_0, lambda_ |
+| NEF | Spiking NEF integrator (emergent power-law dynamics) | alpha_0, lambda_ |
+
+NoisyCounting applies to carrabin only. Two fitted versions:
+- RMSE-fitted: sigma_c collapses to ~0 (response-noise artefact; methodologically revealing)
+- MLE-fitted (fit_mle.py): recovers sigma_c ~0.03-0.08, nu ~0.08-0.21
 
 RNN (models/RNN.py): retained for reference; not used in active figures.
 
-NoisyCounting note: RMSE fitting collapses sigma_c to ~0 (response-noise
-artefact). MLE fitting (fit_mle.py) correctly recovers sigma_c ~0.03-0.08.
-Both fitted versions are scientifically meaningful — RMSE version demonstrates
-the limitation of RMSE as a noise metric; MLE version shows what the model
-actually predicts when properly calibrated.
-
 ---
 
-## NoisyCounting generative model (build_sim_db.py)
+## NEF architecture
 
-The simulation in _simulate_noisy_counting must match math_models.py exactly:
+The NEF model implements sequential evidence integration via three interacting
+neural populations:
 
-    r = 0.0; p_hat = 0.0
-    for each observation x:
-        xi    = N(0, sigma_c)
-        r     = r + x * mu + xi
-        eps   = N(0, nu)
-        p_hat = p_hat + (r - p_hat) * exp(eps)
-        p_hat = clip(p_hat, -1, 1)
-        response[obs] = p_hat
+1. **Value ensemble**: maintains a running estimate of the current evidence
+   mean. Receives weighted prediction-error input; its activity decodes the
+   current estimate after each observation.
 
-No carrabin shrinkage transform applied (NoisyCounting is excluded from it).
-Seeds are 0..n_sims-1 (not trial-based), so each simulation is independent.
+2. **Error ensemble**: computes the prediction error (new value − current
+   estimate) and gates it by the current observation weight α(t). This
+   ensemble's weight-tuned neurons are the key neural readout — their activity
+   directly tracks α(t) across the sequence.
 
----
+3. **Counting subnetwork**: tracks the observation count and decodes the
+   power-law weight α(t) = α₀ / t^λ. This is the mechanism that produces
+   the same per-observation discounting as RL_lambda but via spiking dynamics
+   rather than an explicit equation. The subnetwork requires a precomputed
+   activity file (counting_activities_n{n}_nc{nc}_{dataset}.pkl) generated by
+   counting_integrator.py.
 
-## MLE fitting pipeline (fit_mle.py)
+Trial-to-trial variability in neural tuning curves (controlled by `seed =
+int(trial)`) is the primary spiking noise source, producing state-persistent
+response variability across observations within a trial.
 
-### Architecture
-Shared simulation database + per-pid Optuna studies sharing one SQLite file.
-
-Loop per process (n_fits iterations per pid):
-  1. Scan database -> inject new (params, loss_for_this_pid) into this pid's study
-  2. Ask TPE for next params
-  3. If params already in database: evaluate loss, report, continue (free reuse)
-  4. Simulate n_sims times -> save to shared database (atomic rename, NFS-safe)
-  5. Evaluate loss for this pid -> report to study
-
-Other pids pick up new simulations at their next step 1 (cross-pid sharing).
-No explicit cross-reporting needed.
-
-### Loss function (compute_sim_db_loss)
-For each (sequence, obs_idx) cell, collect all observed responses from this pid.
-Fit Gaussian from simulated responses: mu_sim = mean(sim), sigma_sim = std(sim).
-Group log-likelihood: sum_i log N(r_i | mu_sim, sigma_sim).
-Normalise by total n_obs. Returns negative mean log-likelihood (lower = better).
-This naturally penalises both mean mismatch and variance mismatch simultaneously.
-
-### MLE_PARAMS ranges (carrabin NoisyCounting)
-mu: 0.05-0.40 step 0.002
-sigma_c: 0.001-0.30 step 0.002  (RMSE collapses to ~0; MLE recovers ~0.03-0.08)
-nu: 0.001-0.35 step 0.002       (expanded from 0.25; pid1 nu~0.21)
-
-### Run on cluster
-    bash jobs/submit_mle_fit.sh NoisyCounting carrabin 500 100
-    # -> 21 jobs, ~8 min wall time, ~10500 trials per study after cross-sharing
-
-### Check results
-    venv/bin/python -c "
-    import optuna
-    for pid in range(1,22):
-        s = optuna.load_study(
-            study_name=f'NoisyCounting_carrabin_pid{pid}',
-            storage='sqlite:///data/optuna/NoisyCounting_carrabin.db')
-        b = s.best_trial
-        print(f'pid={pid}: loss={b.value:.4f} params={b.params}')
-    "
-
----
-
-## Response variability metric (primary noise measure)
-
-    qid_response_std(pid) = mean over (obs, qid) groups of std(response | pid, obs, qid)
-
-Requires >= 3 trials per group. Implemented in figure_carrabin.py via
-_qid_response_std(). Used in V2, V3, N2 panels.
-
-Validated: inter-trial carryover is negligible (r < 0.04, ns for obs=1
-residuals vs preceding trial features). Safe to interpret as within-condition
-noise rather than carryover artefact (suitable for footnote/SI).
-
-Test-retest reliability (V3): r = 0.88 (****) across session halves,
-confirming noise is a stable individual trait.
-
----
-
-## Repository structure
-
-```
-evidence_integration/
-  data/
-    carrabin.pkl              # includes true_p column from carrabin_original.csv
-    carrabin_original.csv     # raw data with probability column
-    yoo.pkl
-    counting_activities_n{n}_nc{nc}_{dataset}.pkl
-    runs/
-      carrabin/
-      yoo/
-    sim_db/                   # MLE simulation database (one pkl per params hash)
-  papers/
-    carrabin_paper.txt
-  archive/
-  models/
-    math_models.py
-    NEF.py
-    RNN.py
-    counting_integrator.py
-  fitting/
-    losses.py          # RMSE + compute_sim_db_loss (group-level MLE)
-    fit.py             # Optuna k-fold CV, RMSE
-    fit_mle.py         # MLE fitting via shared simulation database
-    model_params.py    # MODEL_PARAMS + MLE_PARAMS
-    submit.py
-    collect.py
-  utils/
-    paths.py
-    plot_style.py
-    slurm.py
-    carrabin_transform.py
-    save_responses.py
-  scripts/
-    figure_carrabin.py              # 2x4 main carrabin figure (A-H)
-    figure_carrabin_performance.py  # P group: schematic + P1 + P2
-    figure_carrabin_variability.py  # V group: V2 KDE + regplot + V3 test-retest
-    figure_yoo.py                   # 2x4 main yoo figure
-    extras_carrabin.py
-    extras_yoo.py
-    build_sim_db.py    # simulate (model, params) x 32 sequences x n_sims
-    dynamics_NEF.py
-    check_jobs.py
-  jobs/
-    submit_pe_readout.sh
-    submit_n_neurons_scan.sh
-    submit_probe_pids.sh
-    submit_yoo_noise.sh
-    submit_mle_fit.sh  # one job per pid, shared sim_db + optuna SQLite
-  venv/
-```
-
-All new scripts go in scripts/. Never create scripts at the project root.
-Figures save PDF only (no PNG/SVG).
-
----
-
-## Current figure panel inventory
-
-### figure_carrabin.py (2x4, panels A-H)
-
-| Panel | Category | Content | Status |
-|-------|----------|---------|--------|
-| A | - | Task schematic | done |
-| B | P2 | RMSE boxplots (models vs human) | done |
-| C | V2 | KDE of response variability for identical inputs | done |
-| D | P2/V2 | Model RMSE vs human response variability regplot | done |
-| E | N2/N3 | NEF resp and PE variability vs n_neurons | done |
-| F | T4 | Within-trial residual autocorrelation decay | done |
-| G | T3 | Residual variance growth across obs | done |
-| H | - | pending | - |
-
-### figure_carrabin_performance.py (1x3)
-
-| Panel | Category | Content | Status |
-|-------|----------|---------|--------|
-| A | - | Task schematic | done |
-| B | P1 | Estimation error (RMSE to hidden probability), human + models | done |
-| C | P2 | Model fit (RMSE to human responses) | done |
-
-### figure_carrabin_variability.py (1x3)
-
-| Panel | Category | Content | Status |
-|-------|----------|---------|--------|
-| A | V2 | KDE of response variability, per-pid lines for human | done |
-| B | V2 | Model fit vs human response variability regplot | done |
-| C | V3 | Test-retest reliability scatter (first vs second half) | done |
-
-### figure_yoo.py (2x4, panels A-H)
-
-| Panel | Category | Content | Status |
-|-------|----------|---------|--------|
-| A | - | Task schematic | done |
-| B | P2 | RMSE boxplots | done |
-| C | T2 | Response change vs observation | done |
-| D | B1 | Decay rate error boxplots (primacy/recency weight profile) | done |
-| E-F | - | pending | - |
-| G | T1 | Task error curves by obs | done |
-| H | - | pending | - |
-
----
-
-## Environment
-
-Always use: /home/psipeter/evidence_integration/venv/bin/python
-
-Cluster home: /dartfs-hpc/rc/home/n/f007qzn/
-All SLURM scripts: use pwd -P and export EVIDENCE_INTEGRATION_ROOT=${ROOT}.
-NFS mount uses local_lock=none (safe for fcntl/SQLite). Atomic rename used
-for simulation database writes (NFS-safe, no stale locks if job dies).
-
----
-
-## NEF implementation
-
-### Architecture
-- value ensemble: running estimate (n_neurons=100)
-- error ensemble: prediction-error-driven updates (n_neurons=100)
-- counting subnetwork: decodes count and weight W=alpha_0/t^lambda
-  (n_neurons_counting=100, radius_c=5 carrabin / 30 yoo)
-
-### Seed
-params["seed"] = int(trial). Trial-to-trial tuning curve variability is the
-primary spiking noise source.
-
-### Fast counting decoder
-Activity files: data/counting_activities_n{n}_nc{nc}_{dataset}.pkl
-(compact format: Mty_basis + mem_readout, ~25-100 MB).
-
-### Key findings
-- qid_response_std: human ~0.10, NEF ~0.07
-- NEF response variability scales with n_neurons; converges to human range at n~100-200
-- Within-trial residual autocorrelation: human r~0.62, NEF r~0.78 at lag=1
-- NoisyCounting (RMSE-fitted): near-zero autocorrelation, flat variance growth
+Activity files are loaded at fit time for speed (fast_decode mode). Generate
+locally with counting_integrator.py then scp to the cluster before submitting
+fitting jobs (see Simulation pipeline below).
 
 ---
 
@@ -404,17 +191,216 @@ Implemented in utils/carrabin_transform.py. Never apply it twice.
 
 ---
 
-## Fitting pipelines
+## Fitting pipeline (RMSE)
 
-### RMSE fitting (existing)
-    python -m fitting.submit carrabin NEF --n_trials 100 --run_folder carrabin
-    python -m fitting.collect carrabin --type params
-    python scripts/figure_carrabin.py --run_folder carrabin --extra_models NoisyCounting RNN
+Submit and collect per-dataset per-model:
 
-### MLE fitting (new, NoisyCounting first)
+    # Submit (cluster)
+    venv/bin/python -m fitting.submit carrabin NEF --n_trials 100 --run_folder carrabin --k 5
+    venv/bin/python -m fitting.submit yoo NEF --run_folder yoo --n_trials 100 --k 5
+
+    # Collect params and responses
+    venv/bin/python -m fitting.collect carrabin --type params
+    venv/bin/python -m fitting.collect carrabin --type responses
+    venv/bin/python -m fitting.collect yoo --type params
+    venv/bin/python -m fitting.collect yoo --type responses
+
+    # Collect activities (after responses; needed for neural figures)
+    venv/bin/python -m fitting.collect yoo --type activities --ensembles error --timing once_per_obs
+
+Run folders: data/runs/carrabin/, data/runs/yoo/, data/runs/refit/
+The --nef_folder flag in figure scripts redirects NEF data to a separate folder
+(e.g. --run_folder yoo --nef_folder refit uses yoo for other models, refit for NEF).
+
+## Fitting pipeline (MLE — NoisyCounting only, carrabin)
+
     bash jobs/submit_mle_fit.sh NoisyCounting carrabin 500 100
     # args: model, dataset, n_fits, n_sims
     # output: data/runs/carrabin/NoisyCounting_carrabin_{pid}_params_mle.pkl
+
+---
+
+## Simulation pipeline (extra data for figure scripts)
+
+Some figure panels require data generated outside the main fitting pipeline.
+Always generate locally (or via cluster if slow), then scp to the cluster.
+Never run NEF simulations through MCP tool calls (will time out).
+
+### Counting activity files (required before NEF fitting)
+
+    # Generate locally
+    venv/bin/python models/counting_integrator.py --precompute_activities \
+        --n_neurons 200 --n_neurons_counting 1000 --dataset yoo --n_trials 30
+
+    # Copy to cluster
+    scp data/counting_activities_n200_nc1000_yoo.pkl \
+        f007qzn@discovery.dartmouth.edu:~/evidence_integration/data/
+
+### PE dynamics (carrabin neural panel A — figure_carrabin_neural.py)
+
+    # Run locally or via cluster (slow for large n_neurons)
+    python scripts/extras_carrabin.py --experiment pe_dynamics --mode simulate \
+        --alpha_0_list 0.1 0.3 --n_neurons_list 50 150 --run_folder carrabin
+    # Output: data/runs/carrabin/pe_dynamics_NEF_carrabin_a{...}_n{...}.pkl
+
+### Probe simulations (carrabin neural panels B–D — figure_carrabin_neural.py)
+
+    # Submit to cluster
+    bash jobs/submit_probe_pids.sh
+
+    # Collect
+    python scripts/extras_carrabin.py --experiment probe_pids --mode collect \
+        --out_folder refit
+    # Output: data/runs/refit/probe_pids_carrabin.pkl
+
+### n_neurons scan (carrabin neural panels C–D — figure_carrabin_neural.py)
+
+    # Run locally (moderate compute)
+    python scripts/extras_carrabin.py --experiment n_neurons_scan \
+        --n_neurons_list 50 100 150 200 250 300 --run_folder carrabin
+    # Output: data/runs/carrabin/n_neurons_scan.pkl, n_neurons_scan_metrics.pkl
+
+### Error ensemble activities (yoo neural panels A–C — figure_yoo_neural.py)
+
+    # Collect after NEF yoo fitting is complete
+    venv/bin/python -m fitting.collect yoo --type activities \
+        --ensembles error --timing once_per_obs
+    # Output: data/runs/{folder}/activities_error_yoo.pkl, encoders_error_yoo.pkl
+
+---
+
+## Repository structure
+
+```
+evidence_integration/
+  data/
+    carrabin.pkl
+    carrabin_original.csv
+    yoo.pkl
+    counting_activities_n{n}_nc{nc}_{dataset}.pkl
+    runs/
+      carrabin/      — RMSE fits + MLE fits + extras
+      yoo/           — RMSE fits for non-NEF models
+      refit/         — NEF responses/params/activities (yoo + carrabin)
+    sim_db/          — MLE simulation database
+    optuna/          — MLE Optuna SQLite databases
+  models/
+    math_models.py
+    NEF.py
+    counting_integrator.py
+    RNN.py
+  fitting/
+    fit.py           — Optuna k-fold CV RMSE
+    fit_mle.py       — MLE via shared simulation database
+    model_params.py  — MODEL_PARAMS, MLE_PARAMS, NEF_N_NEURONS_VALUES
+    submit.py
+    collect.py
+    losses.py
+  utils/
+    paths.py
+    plot_style.py    — apply_style, get_palette, pvalue_to_stars, fit_power_law_params
+    slurm.py
+    carrabin_transform.py
+    save_responses.py
+  scripts/
+    figure_carrabin_performance.py   — P group (1×3)
+    figure_carrabin_variability.py   — V group (1×4)
+    figure_carrabin_temporal.py      — T group (1×4)
+    figure_carrabin_neural.py        — N group (1×4)
+    figure_yoo_performance.py        — P group (1×3)
+    figure_yoo_temporal.py           — T group (1×4)
+    figure_yoo_neural.py             — N group (1×4)
+    figure_carrabin.py               — legacy combined figure
+    figure_yoo.py                    — legacy combined figure
+    extras_carrabin.py               — PE dynamics, probe_pids, n_neurons_scan
+    extras_yoo.py                    — NEF response noise simulations
+  jobs/
+    submit_probe_pids.sh
+    submit_n_neurons_scan.sh
+    submit_yoo_noise.sh
+    submit_mle_fit.sh
+  venv/
+```
+
+All new scripts go in scripts/. Never create scripts at the project root.
+Figures save PDF only (no PNG/SVG).
+
+---
+
+## Current figure panel inventory
+
+### figure_carrabin_performance.py (P group, 1×3)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | — | Task schematic |
+| B | P1 | Estimation error (RMSE to hidden probability) |
+| C | P2 | Model fit (RMSE to human responses); sig bars from NEF outward |
+
+### figure_carrabin_variability.py (V group, 1×4)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | V2 | KDE of response variability (human only); per-pid lines |
+| B | V2 | Model RMSE regplot vs human response variability |
+| C | V3 | Test-retest reliability scatter (first vs second half); Human, NEF, NC |
+| D | V1 | NLL boxplots; sig bars from NEF outward |
+
+### figure_carrabin_temporal.py (T group, 1×4)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | T1 | RMSE to true_p vs observation |
+| B | T2 | Mean |Δresponse| vs observation |
+| C | T6 | Within-trial residual autocorrelation, lag 1–3 |
+| D | T5 | Residual std growth across observations |
+
+### figure_carrabin_neural.py (N group, 1×4)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | N1 | Decoded PE dynamics, 4 param combinations (α₀ × n_neurons) |
+| B | N3 | PE variability vs response variability (matched probe simulations); r=0.97**** |
+| C | N2 | Response/PE variability vs n_neurons; human refs |
+| D | N2 | Response variability growth (slope_c) vs n_neurons |
+
+### figure_yoo_performance.py (P group, 1×3)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | — | Task schematic (yoo_task.pdf) |
+| B | P1 | Estimation error (RMSE to cumulative true mean) |
+| C | P2 | Model fit (RMSE to human responses); sig bars from NEF outward |
+
+Default: --run_folder yoo --nef_folder refit
+
+### figure_yoo_temporal.py (T group, 1×4)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | T1 | Estimation error vs obs; shaded bands show weak/strong U-shape range (N_GROUP=10) |
+| B | T2 | Mean |Δresponse| vs obs (sns.lineplot, CI across trials, obs ≥ 2) |
+| C | T3 | Split-half λ reliability: regplot per source (Human + all models) |
+| D | T4 | λ_model vs λ_human regplot; identity line; one line per model |
+
+λ fitted via curve_fit A·n^(-λ), bounds [0,2], no smoothing, obs ≥ 2.
+U-strength = mean(task_error[obs≥26]) − min(smoothed error curve, w=5).
+Default: --run_folder yoo --nef_folder refit
+
+### figure_yoo_neural.py (N group, 1×4)
+| Panel | Code | Content |
+|-------|------|---------|
+| A | N4 | Weight-neuron activity vs obs, split by high/low λ group (N=10 each) |
+| B | N5 | Mean weight-neuron activity vs mean |Δresponse| per obs (regplot); r=0.92**** |
+| C | N6 | Fitted λ mediates activity change (right axis) and mean |Δresponse| (left axis) |
+| D | N7 | Late |Δresponse| vs late estimation error (obs 21–30); Human + NEF |
+
+Weight-on neurons: enc_dim_0 > 0.5 in error ensemble encoders.
+Default: --nef_folder refit
+
+---
+
+## Environment
+
+Always use: /home/psipeter/evidence_integration/venv/bin/python
+
+Cluster: /dartfs-hpc/rc/home/n/f007qzn/
+SLURM scripts: use pwd -P and export EVIDENCE_INTEGRATION_ROOT=${ROOT}.
+NFS mount uses local_lock=none. Atomic rename used for simulation DB writes.
 
 ---
 
@@ -423,11 +409,12 @@ Implemented in utils/carrabin_transform.py. Never apply it twice.
 - alpha_0, lambda_ (trailing underscore), gamma, eps_p, eps_r
 - Merge order: PARAM_DEFAULTS < _NEF_FIXED < fitted Optuna params
 - Read loss with _get_loss(perf_df) — never hardcode cv_loss_mean
-- Run folder: always pass short name (e.g. carrabin) — resolve_run_folder prepends RUNS_DIR
+- Run folder: always pass short name (e.g. yoo) — resolve_run_folder prepends RUNS_DIR
 - --local runs must print JOB_COMPLETE as the final stdout line
 - Python 3.11; pathlib via utils.paths; figures save PDF only
 - New figure panels go inside existing figure_*.py scripts
 - Do not compute metrics in extras scripts — save raw data, compute in figure scripts
+- pvalue_to_stars, fit_power_law_params, smooth_curve, POWER_LAW_SMOOTH_WINDOW are in utils/plot_style.py
 
 ---
 
@@ -438,15 +425,40 @@ Implemented in utils/carrabin_transform.py. Never apply it twice.
 2. Check fitting/model_params.py before touching models or fitting.
 3. Propose a plan for structural changes before executing.
 
-### NEF simulations via MCP
-Never run NEF simulations via MCP — will time out. Write a script, give command.
+### NEF simulations
+Never run NEF simulations via MCP tool calls — will time out.
+Write a script and give the command to run on cluster.
 
 ### Figure iteration
-After any figure change, regenerate and display using pdftoppm to convert PDF
-to a temporary PNG for viewing, then delete the PNG.
+After any figure change, render using pdftoppm and inspect with
+filesystem:read_media_file. **Use this sparingly** — each image upload
+consumes significant context. Prefer:
+- Running analysis in shell_run_command to check numerical results first
+- Only uploading an image when visual layout/style review is actually needed
+- Deleting the temporary PNG immediately after inspection
+
+Render command:
+    pdftoppm -png -singlefile -r 150 figures/figure_X.pdf figures/_prev
+    # then filesystem:read_media_file figures/_prev.png
+    # then git clean -f figures/_prev.png
+
+### Temporary analysis scripts
+For exploratory analysis (scanning parameters, computing correlations):
+- Write to scripts/_tmp_*.py
+- Run via shell:run_command
+- Delete immediately after: venv/bin/python -c "import pathlib; pathlib.Path('scripts/_tmp_X.py').unlink()"
+- Never commit _tmp files
 
 ### Git
 Generate a commit message and wait for confirmation. Never push without being asked.
+
+### Context efficiency
+- Prefer shell:run_command with Python -c for short computations over writing tmp files
+- Use filesystem tools (read_text_file with head/tail) rather than loading full files
+  when only a portion is needed
+- When scanning over parameters, print a compact table rather than per-pid details
+  unless the per-pid breakdown is specifically needed
+- Avoid loading the full transcript for routine tasks; use conversation_search instead
 
 ---
 
@@ -458,10 +470,11 @@ Generate a commit message and wait for confirmation. Never push without being as
 - Do not read cv_loss_mean directly — use _get_loss
 - Do not create scripts outside scripts/
 - Do not add NEF_synaptic, LMU counting variant, or ADM model name
-- Do not double-apply the carrabin transform
+- Do not double-apply the carrabin transform (NoisyCounting excluded)
 - Do not pass a full path as run_folder — always use a short name
 - Do not commit or push without being asked
 - Do not run NEF simulations through MCP tool calls (will time out)
 - Do not use RNN-based sigma as the noise metric — use qid-grouped response std
 - Do not compute metrics in extras scripts — save raw data, compute in figure scripts
 - Do not save figures as PNG or SVG — PDF only
+- Do not upload figure images unnecessarily — use numerical checks first

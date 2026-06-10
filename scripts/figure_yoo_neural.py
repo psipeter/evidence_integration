@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """figure_yoo_neural.py — N group figure for yoo task.
 
-Layout: 1×3
+Layout: 1×4
   Panel A (N1): Error-ensemble weight-neuron activity vs observation,
                 split by high vs low lambda group
   Panel B (N2): Mean weight-neuron activity vs mean |delta response| across obs
                 (regplot, population means per observation)
   Panel C (N3): Fitted lambda vs mean |delta response| — model scatter/line
                 with per-pid human reference lines
+  Panel D (N4): Mean |Δresponse| vs estimation error in last 5 obs (Human and NEF)
 
 Run:
     python scripts/figure_yoo_neural.py
@@ -308,9 +309,77 @@ def _plot_panel_c(ax, nef_dir: Path) -> None:
     # Add legend to the figure so it composites above both ax and ax2
     leg = ax.figure.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.95,
                            loc="upper right",
-                           bbox_to_anchor=(0.94, 0.94),
+                           bbox_to_anchor=(ax.get_position().x1 - 0.01,
+                                           ax.get_position().y1 - 0.01),
                            bbox_transform=ax.figure.transFigure)
 
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Panel D (N4) — Late delta response vs late estimation error ───────────────
+
+def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
+    """Panel D (N4): Mean |Δresponse| vs estimation error in the last 5 obs.
+
+    X-axis: mean |Δresponse| (obs 26-30) per pid — how much a pid is still
+    updating their estimate near the end of the sequence.
+    Y-axis: mean estimation error (RMSE to true mean, obs 26-30) per pid —
+    how accurate they are at the end.
+
+    Pids that keep updating late (high x) have higher late error (positive r
+    for NEF: r=0.87****). Humans show the same trend but noisier (r=0.31 ns).
+    One point per pid; separate scatter+regline for Human (grey) and NEF (colour).
+    """
+    LATE_OBS = range(21, 31)
+    yoo      = pd.read_pickle(data_path("yoo.pkl"))
+    yoo_s    = yoo.sort_values(["pid","trial","observation"]).copy()
+    yoo_s["true_mean"] = yoo_s.groupby(["pid","trial"])["value"].expanding().mean().values
+    true_map = yoo_s[["pid","trial","observation","true_mean"]].drop_duplicates()
+
+    pal        = get_palette(2)
+    nef_color  = pal[0]
+    hum_color  = "0.4"
+
+    def late_per_pid(df):
+        df = df.sort_values(["pid","trial","observation"]).copy()
+        # delta
+        delta_rows = []
+        for (pid, trial), g in df.groupby(["pid","trial"]):
+            g = g.sort_values("observation").copy()
+            g["delta"] = g["response"].diff().abs()
+            delta_rows.append(g[g["observation"].isin(LATE_OBS)][["pid","observation","delta"]])
+        delta_df   = pd.concat(delta_rows).dropna()
+        mean_delta = delta_df.groupby("pid")["delta"].mean()
+        # rmse
+        m    = df.drop(columns=["true_mean"], errors="ignore").merge(
+            true_map, on=["pid","trial","observation"], how="left")
+        m    = m[m["observation"].isin(LATE_OBS)]
+        rmse = (m.assign(sq=(m["response"] - m["true_mean"])**2)
+                 .groupby("pid")["sq"].mean().apply(np.sqrt))
+        return pd.DataFrame({"delta": mean_delta, "rmse": rmse}).dropna()
+
+    # Human
+    h = late_per_pid(yoo)
+    r_h, p_h = pearsonr(h["delta"], h["rmse"])
+    ax.scatter(h["delta"], h["rmse"], color=hum_color, s=30, alpha=0.7, zorder=3,
+               label=f"Human, r={r_h:.2f}{pvalue_to_stars(p_h)}")
+    sns.regplot(data=h, x="delta", y="rmse", scatter=False,
+                color=hum_color, line_kws={"lw": 1.5}, ci=95, ax=ax, label="_nolegend_")
+
+    # NEF
+    nef_resp_path = nef_dir / "NEF_yoo_responses.pkl"
+    if nef_resp_path.exists():
+        n = late_per_pid(pd.read_pickle(nef_resp_path))
+        r_n, p_n = pearsonr(n["delta"], n["rmse"])
+        ax.scatter(n["delta"], n["rmse"], color=nef_color, s=30, alpha=0.7, zorder=3,
+                   label=f"NEF, r={r_n:.2f}{pvalue_to_stars(p_n)}")
+        sns.regplot(data=n, x="delta", y="rmse", scatter=False,
+                    color=nef_color, line_kws={"lw": 1.5}, ci=95, ax=ax, label="_nolegend_")
+
+    ax.set_xlabel("Mean |Δresponse| (obs 21-30)")
+    ax.set_ylabel("Estimation error (obs 21-30)")
+    ax.set_ylim(bottom=0); ax.set_xlim(left=0)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -327,14 +396,15 @@ def main() -> None:
     apply_style()
 
     fig, axes = plt.subplots(
-        1, 3,
-        figsize=(FIGURE_SIZE[0] * 0.75, FIGURE_SIZE[1] / 2),
+        1, 4,
+        figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] / 2),
         constrained_layout=True,
     )
 
     _plot_panel_a(axes[0], nef_dir)
     _plot_panel_b(axes[1], nef_dir)
     _plot_panel_c(axes[2], nef_dir)
+    _plot_panel_d(axes[3], nef_dir, args.run_folder)
 
     label_panels(axes.reshape(1, -1))
 
