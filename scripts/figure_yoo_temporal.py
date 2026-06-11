@@ -209,7 +209,7 @@ def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
     handles.append(Patch(facecolor="0.5", alpha=0.25, linewidth=0))
     labels.append(f"weak-strong U range (n={N_GROUP} each)")
 
-    ax.set_xlabel("Observation"); ax.set_ylabel("Estimation error (RMSE to true mean)")
+    ax.set_xlabel("Observation"); ax.set_ylabel("Performance error vs ground truth (RMSE)")
     ax.set_xticks(OBS_TICKS); ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)

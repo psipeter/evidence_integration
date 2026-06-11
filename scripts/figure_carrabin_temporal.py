@@ -119,7 +119,7 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
         labels.append("NoisyCounting (MLE)")
 
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Estimation error (RMSE to hidden probability)")
+    ax.set_ylabel("Performance error vs ground truth (RMSE)")
     ax.set_xticks(obs_vals); ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)

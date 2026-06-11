@@ -236,12 +236,22 @@ def _plot_panel_a(ax, nef_dir: Path) -> None:
 
 # ── Panel B (N2) ──────────────────────────────────────────────────────────────
 
-def _prepare_per_pid_changes(nef_dir: Path) -> pd.DataFrame | None:
-    """Per-pid: NEF activity decay and NEF delta_decay for panel B."""
-    acts_path   = nef_dir / "activities_error_yoo.pkl"
-    encs_path   = nef_dir / "encoders_error_yoo.pkl"
-    params_path = nef_dir / "NEF_yoo_params.pkl"
-    resp_path   = nef_dir / "NEF_yoo_responses.pkl"
+def _prepare_per_pid_changes(nef_dir: Path,
+                              acts_file: str = "activities_error_yoo.pkl",
+                              encs_file: str = "encoders_error_yoo.pkl",
+                              resp_file: str = "NEF_yoo_responses.pkl",
+                              params_path: Path | None = None) -> pd.DataFrame | None:
+    """Per-pid: NEF activity decay and NEF delta_decay for panel B.
+
+    acts_file / encs_file / resp_file: filenames relative to nef_dir,
+    allowing config-specific files (e.g. activities_error_yoo_fitted.pkl).
+    params_path: explicit path to params file; defaults to nef_dir/NEF_yoo_params.pkl.
+    """
+    acts_path   = nef_dir / acts_file
+    encs_path   = nef_dir / encs_file
+    if params_path is None:
+        params_path = nef_dir / "NEF_yoo_params.pkl"
+    resp_path   = nef_dir / resp_file
     for p in [acts_path, encs_path, params_path, resp_path]:
         if not p.exists(): return None
 
@@ -299,50 +309,72 @@ def _prepare_per_pid_changes(nef_dir: Path) -> pd.DataFrame | None:
     return df if not df.empty else None
 
 
-def _plot_panel_b(ax, nef_dir: Path) -> None:
+def _plot_panel_b(ax, nef_dir: Path, ablation_dir: Path | None = None) -> None:
     """Panel B (N6): NEF activity decay vs NEF |Δresponse| decay, per pid.
 
     X: activity decay = mean(act[obs=1]) - mean(act[obs=30]) [Hz, positive = decay]
     Y: NEF |Δresponse| decay = mean(|delta|[obs 1-2]) - mean(|delta|[obs 29-30])
-    Each point is one pid. Grey reference lines show per-pid human delta decay.
-    Partial r after removing lambda reported in legend.
-    """
-    from numpy.linalg import lstsq as nplstsq
 
-    df = _prepare_per_pid_changes(nef_dir)
-    if df is None or len(df) < 5:
+    Two regplot lines:
+      - Fitted lambda (from ablation_dir/*_fitted.pkl): shows full coupling
+      - Lambda=0 ablation (from ablation_dir/*_lambda0.pkl): shows what remains
+        without temporal discounting mechanism
+
+    If ablation_dir is None, falls back to single line from nef_dir.
+    Grey reference lines show per-pid human delta decay.
+    """
+    pal    = get_palette(2)
+    c_fit  = pal[0]
+    c_l0   = pal[1]
+
+    # Shared params path (lambda_ values always from fitted refit params)
+    params_path = nef_dir / "NEF_yoo_params.pkl"
+
+    configs = []
+    if ablation_dir is not None and ablation_dir.exists():
+        for label, color, acts_f, encs_f, resp_f in [
+            ("Fitted λ",
+             c_fit,
+             "activities_error_yoo_fitted.pkl",
+             "encoders_error_yoo_fitted.pkl",
+             "NEF_yoo_fitted_responses.pkl"),
+            ("λ = 0 (ablation)",
+             c_l0,
+             "activities_error_yoo_lambda0.pkl",
+             "encoders_error_yoo_lambda0.pkl",
+             "NEF_yoo_lambda0_responses.pkl"),
+        ]:
+            df = _prepare_per_pid_changes(
+                ablation_dir,
+                acts_file   = acts_f,
+                encs_file   = encs_f,
+                resp_file   = resp_f,
+                params_path = params_path,
+            )
+            if df is not None and len(df) >= 5:
+                configs.append((label, color, df))
+    else:
+        df = _prepare_per_pid_changes(nef_dir, params_path=params_path)
+        if df is not None and len(df) >= 5:
+            configs.append(("NEF", c_fit, df))
+
+    if not configs:
         _placeholder(ax, "No activity data"); return
 
-    pal   = get_palette(2)
-    color = pal[0]
+    handles, labels_leg = [], []
+    for label, color, df in configs:
+        r, p = pearsonr(df["act_decay"], df["nef_decay"])
+        ax.scatter(df["act_decay"], df["nef_decay"],
+                   color=color, s=35, alpha=0.85, zorder=3)
+        sns.regplot(data=df, x="act_decay", y="nef_decay", scatter=False,
+                    color=color, ci=95, ax=ax, line_kws={"lw": 1.8},
+                    label="_nolegend_")
+        handles.append(Line2D([0],[0], color=color, lw=1.8))
+        labels_leg.append(f"{label}, r={r:.2f}{pvalue_to_stars(p)}")
 
-    r_raw, p_raw = pearsonr(df["act_decay"], df["nef_decay"])
-
-    def resid_of(y_col):
-        X = np.column_stack([df["lambda_"].values, np.ones(len(df))])
-        c, _, _, _ = nplstsq(X, df[y_col].values, rcond=None)
-        return df[y_col].values - X @ c
-
-    r_part, p_part = pearsonr(resid_of("act_decay"), resid_of("nef_decay"))
-
-    # Grey lines: human delta decay per pid
-    for _, row in df.iterrows():
-        ax.axhline(row["hum_decay"], color="0.78", lw=0.3, zorder=0)
-
-    ax.scatter(df["act_decay"], df["nef_decay"],
-               color=color, s=35, alpha=0.85, zorder=3,
-               label="Mean across trials for one participant")
-    sns.regplot(data=df, x="act_decay", y="nef_decay", scatter=False,
-                color=color, ci=95, ax=ax, line_kws={"lw": 1.8},
-                label=(f"r={r_raw:.2f}{pvalue_to_stars(p_raw)}"
-                       f" (partial r excl. \u03bb: {r_part:.2f}{pvalue_to_stars(p_part)})"))
-
-    handles, labels_leg = ax.get_legend_handles_labels()
-    handles.append(Line2D([0],[0], color="0.78", lw=0.8))
-    labels_leg.append("Human (individual)")
-
-    ax.set_xlabel("Activity decay (obs 1 \u2212 obs 30, Hz)")
-    ax.set_ylabel("|\u0394response| decay (early \u2212 late)")
+    ax.set_xlabel("Activity decay (obs 1 − obs 30, Hz)")
+    ax.set_ylabel("|Δresponse| decay (early − late)")
+    ax.set_ylim(bottom=0)
     ax.legend(handles, labels_leg, fontsize=7, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
@@ -477,7 +509,7 @@ def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
                     color=nef_color, line_kws={"lw": 1.5}, ci=95, ax=ax, label="_nolegend_")
 
     ax.set_xlabel("Mean |Δresponse| (obs 21-30)")
-    ax.set_ylabel("Estimation error (obs 21-30)")
+    ax.set_ylabel("Performance error vs ground truth (obs 21-30)")
     ax.set_ylim(bottom=0); ax.set_xlim(left=0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -487,11 +519,14 @@ def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_folder", type=str, default="yoo")
-    parser.add_argument("--nef_folder", type=str, default="refit")
+    parser.add_argument("--run_folder",     type=str, default="yoo")
+    parser.add_argument("--nef_folder",     type=str, default="refit")
+    parser.add_argument("--ablation_folder",type=str, default=None,
+                        help="Folder with fitted/lambda0 ablation data for panel B")
     args = parser.parse_args()
 
-    nef_dir = RUNS_DIR / args.nef_folder
+    nef_dir      = RUNS_DIR / args.nef_folder
+    ablation_dir = RUNS_DIR / args.ablation_folder if args.ablation_folder else None
 
     apply_style()
 
@@ -502,7 +537,7 @@ def main() -> None:
     )
 
     _plot_panel_a(axes[0], nef_dir)
-    _plot_panel_b(axes[1], nef_dir)
+    _plot_panel_b(axes[1], nef_dir, ablation_dir=ablation_dir)
     _plot_panel_c(axes[2], nef_dir)
     _plot_panel_d(axes[3], nef_dir, args.run_folder)
 

@@ -151,23 +151,37 @@ model, here is what you should see in neural recordings."
   suggesting a plausible biological parameter range.
 
 **Yoo N:**
-- N5: Weight-neuron activity in the error ensemble decays more steeply for
-  high-λ pids — the neural signature of stronger discounting.
-- N6: Mean weight-neuron activity correlates strongly with mean |Δresponse|
-  across observation positions (r=0.92). The model's α(t) signal directly drives
-  the magnitude of behavioural updating — this is the key mechanistic link.
-- N7: λ mediates both the neural activity change (activity decay across sequence)
-  and the behavioural update magnitude (mean |Δresponse|). Both relationships
-  are negative and significant, showing λ as the shared parameter.
-- N8: Late |Δresponse| vs late estimation error (obs 21-30) — pids who keep
-  updating late also have higher late error. NEF reproduces this tightly
-  (r=0.89****); humans show the same trend but noisier (r=0.40*), consistent
-  with the model capturing the mechanistic relationship.
+- N5 (panel A): Weight-neuron activity in the error ensemble decays more steeply
+  for high-λ pids — the neural signature of stronger temporal discounting.
 
-**Connecting N to T:** The same λ that differentiates models in T3/T4 is also
-the parameter that drives the neural predictions in N5-N7. This is the punchline:
-λ is not just a behavioural parameter — it has a specific neural implementation
-in the counting subnetwork whose activity is directly observable.
+- N6 (panel B): Activity decay (obs 1 − obs 30) correlates with |Δresponse| decay
+  (early − late) per pid (r=0.68****). This coupling is mediated by λ: removing the
+  temporal discounting mechanism (λ=0 ablation) eliminates the correlation
+  (r=0.25 ns), confirming that the activity↔behaviour coupling arises from the
+  counting dynamics that implement α(t), not from spiking noise alone.
+
+- N7 (panel C): λ mediates both activity decay and |Δresponse| decay simultaneously.
+  Human per-pid |Δresponse| decay values (grey reference lines) fall within the
+  range of NEF model values, showing that the fitted NEF models span the observed
+  human distribution. Higher λ → steeper decay in both neural activity and
+  behavioural updating.
+
+- N8 (panel D): Pids with higher late |Δresponse| (obs 21-30) also have higher
+  late performance error — the U-shaped error curve seen in T1 is related to
+  continued large updates late in the sequence. NEF reproduces this relationship
+  tightly (r=0.89****); humans show the same trend (r=0.40*). This links the
+  U-shape phenomenon in T to the neural updating mechanism in N.
+
+**Connecting N to T:** λ drives both the temporal signatures in T (split-half
+reliability, λ_model vs λ_human) and the neural dynamics in N (activity decay,
+activity↔behaviour coupling). The U-shaped performance pattern in T1 is explained
+mechanistically by N8: pids who keep updating late (high λ) accumulate more error
+in the second half of the sequence because they over-weight recent noisy evidence.
+
+**Potential panel E (planned):** λ vs late performance error per pid — showing
+that both NEF and human late-error is predicted by fitted λ. This would close
+the loop from T1 (group-level U-shape) → N8 (late update→late error) → N-E
+(λ→late error), providing a complete mechanistic account.
 
 ---
 
@@ -246,8 +260,8 @@ A: T1 + U-shape bands | B: T2 |Δresponse| | C: T3 split-half λ | D: T4 λ_mode
 Run: python scripts/figure_yoo_temporal.py --run_folder yoo --nef_folder refit
 
 ### figure_yoo_neural.py (N group, 1×4)
-A: N5 weight activity by λ group | B: N6 activity vs |Δresponse| | C: N7 λ twin-axis | D: N8 late error vs late delta
-Run: python scripts/figure_yoo_neural.py --nef_folder refit
+A: N5 weight activity by λ group | B: N6 activity decay vs |Δresponse| decay (fitted vs λ=0 ablation) | C: N7 λ mediates both decays | D: N8 late |Δresponse| vs late error
+Run: python scripts/figure_yoo_neural.py --nef_folder refit --ablation_folder yoo_ablation
 
 ---
 
@@ -284,3 +298,110 @@ Cluster: /dartfs-hpc/rc/home/n/f007qzn/
 
 Older models/data (diederen, jiang, usher) in archive/. Do not reactivate.
 Legacy combined figures (figure_carrabin.py, figure_yoo.py) retained for reference.
+
+---
+
+## New task (task/)
+
+A new online experiment combining the key features of both existing tasks:
+repeated sequences (carrabin) + long sequences + continuous values (yoo).
+This unlocks all PTN metrics simultaneously and enables cross-task
+individual-differences analysis (same pid's λ across both task types).
+
+### Design
+
+| Parameter | Value |
+|-----------|-------|
+| Observations per trial | 15 (unknown to participant) |
+| Trials | 100 |
+| Value range | 10–99 (integer) |
+| Generative model | Normal(mean, std); mean ~ Uniform(30,79); std ~ Uniform(5,15) |
+| Response | Continuous slider (10–99) after each observation |
+| Response deadline | Configurable (`T_OBS_MS`, default 5000ms) |
+| ITI | Configurable (`ITI_MS`, default 1000ms) |
+| Practice block | 5 observations, full distribution shown, no timeout |
+
+Sequence file: `task/sequences/sequences.json` (100 trials × 15 obs).
+Generated by `task/generate_sequences.py` (seed=42, reproducible).
+
+### Infrastructure
+
+| Tool | Role |
+|------|------|
+| jsPsych 8 | Experiment framework |
+| Vite 6 | Local dev server + production bundler |
+| MindProbe (JATOS) | Free academic experiment hosting, Prolific-compatible |
+| Prolific | Participant recruitment; `PROLIFIC_PID` passed as URL param |
+
+Participant identity comes from Prolific — no custom PID generation needed.
+Data saved to MindProbe via `jatos.submitResultData()` at experiment end.
+JATOS shim in `experiment.js` allows standalone local development.
+
+### Task directory structure
+
+```
+task/
+  src/
+    experiment.js                  — main timeline, all parameters at top
+    style.css                      — all styles
+    plugin-observation.js          — single observation trial (number + slider + timeout)
+    plugin-iti-clock.js            — inter-observation clock (auto-advances)
+    plugin-practice-observation.js — practice trial (3-column layout, no timeout)
+    plugin-practice-summary.js     — end-of-practice summary canvas
+    plugin-trial-summary.js        — inter-trial summary canvas
+    draw-performance.js            — shared canvas drawing (distribution + ticks)
+    sequences.json                 — copy of sequences/sequences.json (gitignored)
+  sequences/
+    sequences.json                 — canonical sequence file (tracked)
+    sequences.pkl                  — binary version for analysis pipeline (gitignored)
+  generate_sequences.py            — sequence generation script
+  index.html                       — Vite entry point
+  package.json                     — npm dependencies
+  vite.config.js                   — Vite config (base: './' for JATOS compatibility)
+```
+
+### Key parameters (top of experiment.js)
+
+```js
+const N_TRIALS_TO_RUN        = 100;   // set low for dev
+const SHOW_SLIDER_VALUE      = true;  // numeric label above thumb
+const SLIDER_DEFAULT         = 'none'; // 'none' | 'last' | 'value'
+const ITI_MS                 = 1000;
+const T_OBS_MS               = 5000;
+const SHOW_TRIAL_PERFORMANCE = false; // show summary plot after each trial
+const PRACTICE_N_OBS         = 5;
+const PRACTICE_MEAN          = 55;
+const PRACTICE_STD           = 10;
+```
+
+### Local development
+
+```bash
+cd task
+npm install        # first time only
+npm run dev        # dev server at http://localhost:5173
+npm run build      # production build → dist/
+```
+
+### Deploying to MindProbe
+
+1. `npm run build` → produces `dist/`
+2. Zip `dist/` contents
+3. Upload zip to MindProbe as a new JATOS study component
+4. Set Prolific study URL to `https://mindprobe.eu/publix/...?PROLIFIC_PID={{%PROLIFIC_PID%}}`
+5. Set completion redirect to `https://app.prolific.com/submissions/complete?cc=<CODE>`
+
+### Data format (downloaded from MindProbe)
+
+Each participant produces a JSON array of trial objects. Key fields per observation row:
+
+| Field | Description |
+|-------|-------------|
+| `prolific_pid` | Prolific participant ID |
+| `trial` | 0-indexed trial number |
+| `observation` | 0-indexed observation within trial |
+| `value` | Stimulus shown (integer 10–99) |
+| `true_mean` | Generative mean for that trial |
+| `true_std` | Generative std for that trial |
+| `response` | Participant estimate (integer 10–99, or null if timed out) |
+| `timed_out` | Boolean — true if response deadline elapsed |

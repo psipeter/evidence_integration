@@ -140,7 +140,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict,
         hue="source", palette=pal, legend=False, ax=ax,
     )
     ax.set_xlabel("")
-    ax.set_ylabel("Estimation error (RMSE to hidden probability)")
+    ax.set_ylabel("Performance error vs ground truth (RMSE)")
     ax.tick_params(axis="x", rotation=45)
     sns.despine(ax=ax, top=True, right=True)
 

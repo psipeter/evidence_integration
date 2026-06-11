@@ -1,0 +1,326 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f5f5f5;
+}
+
+.jspsych-display-element {
+  padding: 1rem 1rem;
+  position: relative;
+}
+.jspsych-content {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.jspsych-content p { line-height: 1.6; }
+.jspsych-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Trial counter: fixed top-left ───────────────────────────────────────── */
+.trial-counter {
+  position: fixed;
+  top: 1.2rem;
+  left: 1.5rem;
+  font-size: 0.9rem;
+  color: #888;
+  letter-spacing: 0.03em;
+  z-index: 100;
+}
+
+/* ── Instruction / welcome / consent screens ─────────────────────────────── */
+.screen-wrap {
+  max-width: 700px;
+  text-align: left;
+  margin: auto;
+}
+.screen-wrap h2 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+/* ── Observation screen: centred column ──────────────────────────────────── */
+.obs-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5rem;        /* breathing room between number, slider, button */
+  padding: 3rem 0;    /* equal top/bottom margin from viewport centre */
+}
+
+/* Big stimulus number — border only as wide as the rendered text */
+.stimulus-number {
+  font-size: 8rem;
+  font-weight: bold;
+  color: #222;
+  line-height: 1;
+}
+
+/* Slider block */
+.slider-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  width: 50vw;
+}
+
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.slider-label {
+  font-size: 1rem;
+  color: #555;
+  min-width: 2.5rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  cursor: pointer;
+  background: transparent;
+  height: 48px;             /* hit area */
+}
+
+/* Track: thin flat line */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 0;
+  background: #aaa;
+}
+input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 0;
+  background: #aaa;
+}
+
+/* Thumb: narrow tall rectangle — a precise positional marker */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  margin-top: -18px;        /* centres thumb: (40-3)/2 ≈ 18 */
+  cursor: ew-resize;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: ew-resize;
+}
+
+/* 'none' mode: hide thumb */
+input[type="range"].slider-unset::-webkit-slider-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+input[type="range"].slider-unset::-moz-range-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Numeric readout */
+.slider-current {
+  font-size: 1rem;
+  color: #333;
+  height: 1.4rem;
+}
+
+/* ── ITI clock screen ─────────────────────────────────────────────────────── */
+.iti-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+/* ── Floating value label above slider thumb ─────────────────────────────── */
+.slider-label-float-wrap {
+  position: relative;
+  width: 100%;
+  height: 0;           /* zero height — label overflows visually but takes no space */
+  overflow: visible;
+  pointer-events: none; /* never intercept clicks meant for the slider below */
+}
+
+.slider-float-label {
+  position: absolute;
+  top: -1.8rem;             /* sits above the thumb */
+  transform: translateX(-50%);
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #222;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Timeout countdown clock (top-right of obs screen) ───────────────────── */
+.timeout-clock {
+  position: fixed;
+  top: 1.2rem;
+  right: 1.5rem;
+  z-index: 100;
+}
+
+/* "Too slow" message replacing the stimulus number */
+.too-slow-text {
+  font-size: 8rem;
+  font-weight: bold;
+  color: #ef4444;
+  line-height: 1;
+}
+
+/* ── Consent form layout ─────────────────────────────────────────────────── */
+.consent-outer {
+  max-width: 700px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  /* Fill the jsPsych content area height so footer pins to bottom */
+  height: 75vh;
+}
+
+.consent-scroll {
+  flex: 1;              /* takes all available space above the footer */
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  line-height: 1.6;
+  /* Subtle inner shadow hints that content is scrollable */
+  mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+}
+
+.consent-footer {
+  flex-shrink: 0;
+  padding-top: 1rem;
+}
+
+/* ── Practice layout ────────────────────────────────────────────────────── */
+.practice-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.5rem 0;
+  width: 100%;
+}
+
+/* Top row: three equal-width panels */
+.practice-top-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1.5rem;
+  width: 50vw;   /* matches slider width */
+}
+
+.practice-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.practice-panel-centre {
+  align-items: center;
+  justify-content: center;
+}
+
+.practice-panel-right {
+  align-items: center;
+  justify-content: center;
+}
+
+.practice-info-block {
+  font-size: 0.85rem;
+  color: #444;
+  line-height: 1.5;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+}
+
+.practice-sample-label {
+  font-size: 0.8rem;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: -0.5rem;
+}
+
+.dist-canvas {
+  display: block;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+  width: 100%;
+  height: auto;
+}
+
+/* Slider in practice uses same .slider-section/.slider-wrap as main task,
+   constrained to 50vw by the parent .practice-wrap */
+.practice-wrap .slider-section {
+  width: 50vw;
+}
+
+/* ── Practice counter (two lines) ───────────────────────────────────────── */
+.practice-counter {
+  position: fixed;
+  top: 1.2rem;
+  left: 1.5rem;
+  font-size: 0.9rem;
+  color: #888;
+  letter-spacing: 0.03em;
+  line-height: 1.5;
+  z-index: 100;
+}
+
+/* ── Keyboard shortcut badge ─────────────────────────────────────────────── */
+.key-badge {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 0.8em;
+  font-style: normal;
+  font-weight: normal;
+  color: #333;
+  background: #f3f4f6;
+  border: 1px solid #ccc;
+  border-bottom: 2px solid #aaa;
+  border-radius: 4px;
+  padding: 1px 6px;
+  line-height: 1.4;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ── Summary info boxes below plot ──────────────────────────────────────── */
+.summary-info-row {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.summary-info-row .practice-info-block {
+  flex: 1;
+  text-align: left;
+  font-size: 0.85rem;
+}

@@ -150,7 +150,7 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
     sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
                 hue="source", palette=pal, legend=False, ax=ax)
     ax.set_xlabel("")
-    ax.set_ylabel("Estimation error (RMSE to true mean)")
+    ax.set_ylabel("Performance error vs ground truth (RMSE)")
     ax.tick_params(axis="x", rotation=45)
     sns.despine(ax=ax, top=True, right=True)
 
