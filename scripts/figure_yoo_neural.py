@@ -60,22 +60,39 @@ def _weight_on_cols(pid_enc: pd.DataFrame, neuron_cols: list[str]) -> list[str]:
 
 
 def _per_pid_metrics(nef_dir: Path) -> pd.DataFrame | None:
-    """Per-pid lambda, activity_decay (late-early), and mean delta response.
+    """Per-pid lambda, activity_decay, NEF delta_decay, and human delta_decay.
 
-    act_decay = mean(act[obs 26..30]) - mean(act[obs 2..5])
-      — negative sign convention: higher lambda -> steeper decay -> more negative.
-    mean_delta = mean |response(t) - response(t-1)| for obs >= 2 (human data).
+    act_decay   = mean(act[obs=1]) - mean(act[obs=30])  [positive = decay]
+    delta_decay = mean(|NEF delta|[obs 1-2]) - mean(|NEF delta|[obs 29-30])
+    hum_delta_decay = same metric computed from human responses (for reference lines)
     """
     acts_path   = nef_dir / "activities_error_yoo.pkl"
     encs_path   = nef_dir / "encoders_error_yoo.pkl"
     params_path = nef_dir / "NEF_yoo_params.pkl"
+    resp_path   = nef_dir / "NEF_yoo_responses.pkl"
     for p in [params_path]:
         if not p.exists(): return None
 
-    params = pd.read_pickle(params_path)[["pid", "lambda_"]].drop_duplicates()
-    yoo    = pd.read_pickle(data_path("yoo.pkl"))
+    params   = pd.read_pickle(params_path)[["pid", "lambda_"]].drop_duplicates()
+    yoo      = pd.read_pickle(data_path("yoo.pkl"))
+    nef_resp = pd.read_pickle(resp_path) if resp_path.exists() else None
 
-    # Activity decay — only if files exist
+    def compute_delta_decay(df):
+        rows = {}
+        for pid, g in df.groupby("pid"):
+            pieces = []
+            for trial, tg in g.groupby("trial"):
+                tg = tg.sort_values("observation").copy()
+                tg["delta"] = tg["response"].diff().abs()
+                tg.loc[tg["observation"] == 1, "delta"] = (
+                    tg.loc[tg["observation"] == 1, "response"].abs())
+                pieces.append(tg[["observation", "delta"]])
+            d = pd.concat(pieces).dropna(subset=["delta"])
+            early = float(d[d["observation"].isin([1, 2])]["delta"].mean())
+            late  = float(d[d["observation"].isin([29, 30])]["delta"].mean())
+            rows[int(pid)] = early - late
+        return pd.Series(rows)
+
     act_decay_map: dict[int, float] = {}
     if acts_path.exists() and encs_path.exists():
         acts = pd.read_pickle(acts_path)
@@ -87,27 +104,24 @@ def _per_pid_metrics(nef_dir: Path) -> pd.DataFrame | None:
             acts_pid = acts[acts["pid"] == pid].copy()
             acts_pid["mean_act"] = acts_pid[on_cols].mean(axis=1)
             obs_mean  = acts_pid.groupby("observation")["mean_act"].mean()
-            early_act = float(obs_mean[obs_mean.index.isin(range(2, 6))].mean())
-            late_act  = float(obs_mean[obs_mean.index.isin(range(26, 31))].mean())
-            act_decay_map[int(pid)] = late_act - early_act   # late - early → negative
+            act_early = float(obs_mean.get(1,  np.nan))
+            act_late  = float(obs_mean.get(30, np.nan))
+            act_decay_map[int(pid)] = act_early - act_late
+
+    nef_delta_s = compute_delta_decay(nef_resp) if nef_resp is not None else pd.Series(dtype=float)
+    hum_delta_s = compute_delta_decay(yoo)
 
     rows = []
     for pid in params["pid"].unique():
-        hum_pid = yoo[yoo["pid"] == pid]
-        pieces  = []
-        for trial, tg in hum_pid.groupby("trial"):
-            tg = tg.sort_values("observation").copy()
-            tg["delta"] = tg["response"].diff().abs()
-            pieces.append(tg)
-        d = pd.concat(pieces).dropna(subset=["delta"])
-        d = d[d["observation"] >= 2]
-        mean_delta = float(d["delta"].mean()) if len(d) > 0 else np.nan
-        rows.append({"pid": int(pid), "mean_delta": mean_delta,
-                     "act_decay": act_decay_map.get(int(pid), np.nan)})
+        rows.append({
+            "pid":            int(pid),
+            "delta_decay":    float(nef_delta_s.get(int(pid), np.nan)),
+            "hum_delta_decay":float(hum_delta_s.get(int(pid), np.nan)),
+            "act_decay":      act_decay_map.get(int(pid), np.nan),
+        })
 
     df = pd.DataFrame(rows).merge(params, on="pid")
     return df if not df.empty else None
-
 
 
 def _prepare_activity_delta(nef_dir: Path):
@@ -222,83 +236,171 @@ def _plot_panel_a(ax, nef_dir: Path) -> None:
 
 # ── Panel B (N2) ──────────────────────────────────────────────────────────────
 
-def _plot_panel_b(ax, nef_dir: Path) -> None:
-    prep = _prepare_activity_delta(nef_dir)
-    if prep is None:
-        _placeholder(ax, "No activity data"); return
-    _, mean_activity, mean_delta = prep
-    pal = get_palette(2)
-    mean_df = pd.DataFrame({"activity": mean_activity, "delta": mean_delta})
-    fin = np.isfinite(mean_df["activity"]) & np.isfinite(mean_df["delta"])
-    if fin.sum() < 2:
-        _placeholder(ax, "Insufficient data"); return
-    slope, _, r, p, _ = linregress(mean_df["activity"][fin], mean_df["delta"][fin])
-    ax.scatter(mean_df["activity"][fin], mean_df["delta"][fin],
-               color=pal[0], s=35, alpha=0.85, zorder=3,
-               label="Mean across trials for one observation")
-    sns.regplot(data=mean_df[fin], x="activity", y="delta", scatter=False,
-                line_kws={"color": pal[0], "linewidth": 1.8}, ci=95, truncate=True, ax=ax,
-                label=f"Group-level correlation, r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("Error neuron activity (Hz)"); ax.set_ylabel("Mean |Δresponse|")
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
-    sns.despine(ax=ax, top=True, right=True)
+def _prepare_per_pid_changes(nef_dir: Path) -> pd.DataFrame | None:
+    """Per-pid: NEF activity decay and NEF delta_decay for panel B."""
+    acts_path   = nef_dir / "activities_error_yoo.pkl"
+    encs_path   = nef_dir / "encoders_error_yoo.pkl"
+    params_path = nef_dir / "NEF_yoo_params.pkl"
+    resp_path   = nef_dir / "NEF_yoo_responses.pkl"
+    for p in [acts_path, encs_path, params_path, resp_path]:
+        if not p.exists(): return None
 
+    acts     = pd.read_pickle(acts_path)
+    encs     = pd.read_pickle(encs_path)
+    params   = pd.read_pickle(params_path)[["pid","lambda_"]].drop_duplicates()
+    nef_resp = pd.read_pickle(resp_path)
+    yoo      = pd.read_pickle(data_path("yoo.pkl"))
+    neuron_cols = [c for c in acts.columns if c.startswith("n") and c[1:].isdigit()]
+
+    rows = []
+    for pid, pid_enc in encs.groupby("pid"):
+        on_cols = _weight_on_cols(pid_enc, neuron_cols)
+        if not on_cols: continue
+
+        # Activity decay (NEF)
+        acts_pid = acts[acts["pid"]==pid].copy()
+        acts_pid["mean_act"] = acts_pid[on_cols].mean(axis=1)
+        act_by_obs = acts_pid.groupby("observation")["mean_act"].mean()
+        act_early  = act_by_obs.get(1,  np.nan)
+        act_late   = act_by_obs.get(30, np.nan)
+        if not (np.isfinite(act_early) and np.isfinite(act_late)): continue
+        act_decay = float(act_early) - float(act_late)  # positive = decay
+
+        # Delta decay from NEF responses
+        nef_pid = nef_resp[nef_resp["pid"]==pid]
+        pieces  = []
+        for trial, tg in nef_pid.groupby("trial"):
+            tg = tg.sort_values("observation").copy()
+            tg["delta"] = tg["response"].diff().abs()
+            tg.loc[tg["observation"]==1, "delta"] = tg.loc[tg["observation"]==1, "response"].abs()
+            pieces.append(tg[["observation","delta"]])
+        d = pd.concat(pieces).dropna(subset=["delta"])
+        nef_early = float(d[d["observation"].isin([1,2])]["delta"].mean())
+        nef_late  = float(d[d["observation"].isin([29,30])]["delta"].mean())
+        nef_decay = nef_early - nef_late
+
+        # Human delta decay for reference
+        hum_pid = yoo[yoo["pid"]==pid]
+        pieces_h = []
+        for trial, tg in hum_pid.groupby("trial"):
+            tg = tg.sort_values("observation").copy()
+            tg["delta"] = tg["response"].diff().abs()
+            tg.loc[tg["observation"]==1,"delta"] = tg.loc[tg["observation"]==1,"response"].abs()
+            pieces_h.append(tg[["observation","delta"]])
+        dh = pd.concat(pieces_h).dropna(subset=["delta"])
+        hum_early = float(dh[dh["observation"].isin([1,2])]["delta"].mean())
+        hum_late  = float(dh[dh["observation"].isin([29,30])]["delta"].mean())
+        hum_decay = hum_early - hum_late
+
+        rows.append({"pid": int(pid), "act_decay": act_decay,
+                     "nef_decay": nef_decay, "hum_decay": hum_decay})
+
+    df = pd.DataFrame(rows).dropna(subset=["act_decay","nef_decay"]).merge(params, on="pid")
+    return df if not df.empty else None
+
+
+def _plot_panel_b(ax, nef_dir: Path) -> None:
+    """Panel B (N6): NEF activity decay vs NEF |Δresponse| decay, per pid.
+
+    X: activity decay = mean(act[obs=1]) - mean(act[obs=30]) [Hz, positive = decay]
+    Y: NEF |Δresponse| decay = mean(|delta|[obs 1-2]) - mean(|delta|[obs 29-30])
+    Each point is one pid. Grey reference lines show per-pid human delta decay.
+    Partial r after removing lambda reported in legend.
+    """
+    from numpy.linalg import lstsq as nplstsq
+
+    df = _prepare_per_pid_changes(nef_dir)
+    if df is None or len(df) < 5:
+        _placeholder(ax, "No activity data"); return
+
+    pal   = get_palette(2)
+    color = pal[0]
+
+    r_raw, p_raw = pearsonr(df["act_decay"], df["nef_decay"])
+
+    def resid_of(y_col):
+        X = np.column_stack([df["lambda_"].values, np.ones(len(df))])
+        c, _, _, _ = nplstsq(X, df[y_col].values, rcond=None)
+        return df[y_col].values - X @ c
+
+    r_part, p_part = pearsonr(resid_of("act_decay"), resid_of("nef_decay"))
+
+    # Grey lines: human delta decay per pid
+    for _, row in df.iterrows():
+        ax.axhline(row["hum_decay"], color="0.78", lw=0.3, zorder=0)
+
+    ax.scatter(df["act_decay"], df["nef_decay"],
+               color=color, s=35, alpha=0.85, zorder=3,
+               label="Mean across trials for one participant")
+    sns.regplot(data=df, x="act_decay", y="nef_decay", scatter=False,
+                color=color, ci=95, ax=ax, line_kws={"lw": 1.8},
+                label=(f"r={r_raw:.2f}{pvalue_to_stars(p_raw)}"
+                       f" (partial r excl. \u03bb: {r_part:.2f}{pvalue_to_stars(p_part)})"))
+
+    handles, labels_leg = ax.get_legend_handles_labels()
+    handles.append(Line2D([0],[0], color="0.78", lw=0.8))
+    labels_leg.append("Human (individual)")
+
+    ax.set_xlabel("Activity decay (obs 1 \u2212 obs 30, Hz)")
+    ax.set_ylabel("|\u0394response| decay (early \u2212 late)")
+    ax.legend(handles, labels_leg, fontsize=7, frameon=True, framealpha=0.9, loc="upper left")
+    sns.despine(ax=ax, top=True, right=True)
 
 # ── Panel C (N3) — Lambda mediates activity decay and mean delta ──────────────
 
 def _plot_panel_c(ax, nef_dir: Path) -> None:
-    """Panel C (N3): Fitted λ mediates both neural activity change and |Δresponse|.
+    """Panel C (N7): Fitted lambda mediates both activity decay and |Deltaresponse| decay.
 
-    X-axis: fitted λ per pid.
-    Left y-axis (blue):  activity decay = mean(act[obs 26-30]) - mean(act[obs 2-5])
-      — negative value: activity decreases as sequence progresses; higher λ →
-      steeper decline → more negative decay.
-    Right y-axis (orange): mean |Δresponse| from human data (obs >= 2).
-      Higher λ → faster discounting → smaller mean behavioural updates.
-    Thin grey horizontal lines: per-pid human mean |Δresponse| (right y-scale).
+    X-axis: fitted lambda per pid.
+    Left y-axis (blue): delta_decay = mean(|delta|[obs 1-2]) - mean(|delta|[obs 29-30])
+      — positive: updating decays; higher lambda -> steeper decay.
+    Right y-axis (orange): act_decay = mean(act[obs=1]) - mean(act[obs=30])
+      — positive: activity decays; higher lambda -> steeper decay.
+    Thin grey horizontal lines: per-pid delta_decay as reference.
     """
     df = _per_pid_metrics(nef_dir)
     if df is None:
         _placeholder(ax, "No params data"); return
 
     pal     = get_palette(2)
-    c_del   = pal[0]   # mean delta — left axis
-    c_act   = pal[1]   # activity change — right axis
+    c_del   = pal[0]
+    c_act   = pal[1]
     c_human = "0.78"
 
     df_act = df.dropna(subset=["act_decay"])
     r_act, p_act = pearsonr(df_act["lambda_"], df_act["act_decay"])
-    r_del, p_del = pearsonr(df["lambda_"], df["mean_delta"])
+    r_del, p_del = pearsonr(df["lambda_"],     df["delta_decay"])
 
-    # ── Left axis: mean delta response ───────────────────────────────────────
+    # Left axis: NEF delta decay; grey lines = human reference
     for _, row in df.iterrows():
-        ax.axhline(row["mean_delta"], color=c_human, lw=0.3, zorder=0)
+        ax.axhline(row["hum_delta_decay"], color=c_human, lw=0.3, zorder=0)
 
-    ax.scatter(df["lambda_"], df["mean_delta"],
+    ax.scatter(df["lambda_"], df["delta_decay"],
                color=c_del, s=35, alpha=0.85, zorder=3,
-               label=f"Mean |Δresponse|, r={r_del:.2f}{pvalue_to_stars(p_del)}")
-    sns.regplot(data=df, x="lambda_", y="mean_delta", scatter=False,
+               label=f"|\u0394response| decay, r={r_del:.2f}{pvalue_to_stars(p_del)}")
+    sns.regplot(data=df, x="lambda_", y="delta_decay", scatter=False,
                 color=c_del, line_kws={"lw": 1.8}, ci=95, ax=ax, label="_nolegend_")
 
-    ax.set_xlabel("Fitted λ (discounting rate)")
-    ax.set_ylabel("Mean |Δresponse|", color=c_del)
+    ax.set_xlabel("Fitted \u03bb (discounting rate)")
+    ax.set_ylabel("|\u0394response| decay (early \u2212 late)", color=c_del)
     ax.tick_params(axis="y", labelcolor=c_del)
     ax.set_ylim(bottom=0)
 
-    # ── Right axis: activity change ───────────────────────────────────────────
+    # Right axis: activity decay
     ax2 = ax.twinx()
 
     ax2.scatter(df_act["lambda_"], df_act["act_decay"],
                 color=c_act, s=35, alpha=0.85, zorder=3,
-                label=f"Activity change, r={r_act:.2f}{pvalue_to_stars(p_act)}")
+                label=f"Activity decay, r={r_act:.2f}{pvalue_to_stars(p_act)}")
     sns.regplot(data=df_act, x="lambda_", y="act_decay", scatter=False,
                 color=c_act, line_kws={"lw": 1.8}, ci=95, ax=ax2, label="_nolegend_")
 
-    ax2.set_ylabel("Activity change (late − early, Hz)", color=c_act)
+    ax2.set_ylabel("Activity decay (early \u2212 late, Hz)", color=c_act)
     ax2.tick_params(axis="y", labelcolor=c_act)
+    ax2.set_ylim(bottom=0)
     sns.despine(ax=ax2, top=True)
 
-    # Combined legend — upper right, overlaying data
+    # Combined figure-level legend
     handles, labels = [], []
     for a in [ax, ax2]:
         h, l = a.get_legend_handles_labels()
@@ -306,13 +408,11 @@ def _plot_panel_c(ax, nef_dir: Path) -> None:
         labels  += [y for y in l if y != "_nolegend_"]
     handles.append(Line2D([0],[0], color=c_human, lw=0.8))
     labels.append("Human (individual)")
-    # Add legend to the figure so it composites above both ax and ax2
-    leg = ax.figure.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.95,
-                           loc="upper right",
-                           bbox_to_anchor=(ax.get_position().x1 - 0.01,
-                                           ax.get_position().y1 - 0.01),
-                           bbox_transform=ax.figure.transFigure)
-
+    ax.figure.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.95,
+                     loc="upper right",
+                     bbox_to_anchor=(ax.get_position().x1 - 0.01,
+                                     ax.get_position().y1 - 0.01),
+                     bbox_transform=ax.figure.transFigure)
     sns.despine(ax=ax, top=True, right=True)
 
 

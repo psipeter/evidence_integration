@@ -261,6 +261,24 @@ Never run NEF simulations through MCP tool calls (will time out).
         --n_neurons_list 50 100 150 200 250 300 --run_folder carrabin
     # Output: data/runs/carrabin/n_neurons_scan.pkl, n_neurons_scan_metrics.pkl
 
+### Lambda=0 ablation (yoo neural panel B control — figure_yoo_neural.py)
+
+    # Run all pids (on cluster or locally — ~3-6 min per pid)
+    for pid in $(venv/bin/python -c "import pandas as pd; from utils.paths import data_path; print(' '.join(str(p) for p in sorted(pd.read_pickle(data_path('yoo.pkl'))['pid'].unique())))"); do
+      venv/bin/python scripts/extras_yoo.py --experiment lambda0 \
+          --mode run --pid $pid --source_folder refit --run_folder yoo_lambda0
+    done
+
+    # Collect (combines responses + activities, copies encoders + params)
+    venv/bin/python scripts/extras_yoo.py --experiment lambda0 \
+        --mode collect --run_folder yoo_lambda0 --source_folder refit
+
+    # Use in figures: --nef_folder yoo_lambda0
+    # Output: data/runs/yoo_lambda0/
+    #   NEF_yoo_lambda0_responses.pkl, NEF_yoo_responses.pkl (alias)
+    #   activities_error_yoo.pkl, encoders_error_yoo.pkl
+    #   NEF_yoo_{pid}_params.pkl (copied from refit — lambda_ values for reference)
+
 ### Error ensemble activities (yoo neural panels A–C — figure_yoo_neural.py)
 
     # Collect after NEF yoo fitting is complete
