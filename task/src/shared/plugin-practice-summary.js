@@ -3,7 +3,7 @@
  * End-of-practice summary using the same performance canvas as trial summary.
  */
 
-import { drawPerformance } from './draw-performance.js';
+import { buildPerformanceSVG } from './draw-performance.js';
 
 const info = {
   name: 'practice-summary',
@@ -28,11 +28,12 @@ class PracticeSummaryPlugin {
 
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;">
-        <h2 style="margin-bottom:0.75rem;">Practice complete</h2>
-        <canvas id="summary-canvas" width="520" height="150"
-          style="display:block;margin:0 auto 0.75rem;border:1px solid #e5e7eb;
-                 border-radius:6px;background:#fff;padding:4px;">
-        </canvas>
+        <h2 style="margin-bottom:0.75rem;">Tutorial complete</h2>
+        <div id="summary-svg"
+          style="display:inline-block;margin-bottom:0.75rem;
+                 border:1px solid #e5e7eb;border-radius:6px;
+                 background:#fff;padding:4px;">
+        </div>
         <div class="summary-info-row">
           <p class="practice-info-block">
             In the experiment, the
@@ -51,10 +52,7 @@ class PracticeSummaryPlugin {
         </button>
       </div>`;
 
-    drawPerformance(
-      display_el.querySelector('#summary-canvas'),
-      true_mean, true_std, values, responses
-    );
+    display_el.querySelector('#summary-svg').innerHTML = buildPerformanceSVG(true_mean, true_std, values, responses);
 
     display_el.querySelector('#proceed-btn').addEventListener('pointerdown', (e) => {
       e.preventDefault();

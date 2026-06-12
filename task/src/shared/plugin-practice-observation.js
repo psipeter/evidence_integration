@@ -26,65 +26,57 @@ const info = {
   },
 };
 
-const drawDistribution = (canvas, mu, sigma, currentValue) => {
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-
+const buildDistSVG = (mu, sigma, currentValue) => {
+  const W = 220, H = 160;
   const xMin = 10, xMax = 99;
-  const pad  = { l: 20, r: 20, t: 12, b: 36 };
+  const pad  = { l: 20, r: 20, t: 26, b: 44 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
+  const axisY = pad.t + plotH;
+  const tickH = 12;
 
-  const xPx     = (x) => pad.l + (x - xMin) / (xMax - xMin) * plotW;
-  const peakPDF = normalPDF(mu, mu, sigma);
-  const yPx     = (p) => pad.t + plotH - (p / peakPDF) * plotH * 0.88;
-  const axisY   = pad.t + plotH;
-  const tickH   = 7;
+  const xPos  = (x) => pad.l + (x - xMin) / (xMax - xMin) * plotW;
+  const peakP = normalPDF(mu, mu, sigma);
+  const yPos  = (p) => pad.t + plotH - (p / peakP) * plotH * 0.88;
 
-  // Axis
-  ctx.beginPath();
-  ctx.moveTo(pad.l, axisY); ctx.lineTo(pad.l + plotW, axisY);
-  ctx.strokeStyle = '#bbb'; ctx.lineWidth = 1; ctx.stroke();
+  const steps = 200;
+  const curvePoints = Array.from({ length: steps + 1 }, (_, i) => {
+    const x = xMin + (i / steps) * (xMax - xMin);
+    return `${xPos(x).toFixed(2)},${yPos(normalPDF(x, mu, sigma)).toFixed(2)}`;
+  }).join(' ');
+  const fillPoints = curvePoints
+    + ` ${xPos(xMax).toFixed(2)},${axisY} ${xPos(xMin).toFixed(2)},${axisY}`;
 
-  // Green filled curve
-  ctx.beginPath();
-  for (let px = 0; px <= plotW; px++) {
-    const x = xMin + (px / plotW) * (xMax - xMin);
-    const p = normalPDF(x, mu, sigma);
-    px === 0 ? ctx.moveTo(pad.l + px, yPx(p)) : ctx.lineTo(pad.l + px, yPx(p));
-  }
-  ctx.lineTo(pad.l + plotW, axisY);
-  ctx.lineTo(pad.l, axisY);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(22,163,74,0.15)'; ctx.fill();
+  const curveTopY = pad.t;
+  const meanTick = `
+    <line x1="${xPos(mu).toFixed(2)}" y1="${curveTopY}"
+          x2="${xPos(mu).toFixed(2)}" y2="${axisY}"
+          stroke="${GOAL_COLOR}" stroke-width="2"
+          stroke-dasharray="5 3" stroke-linecap="round"/>
+    <text x="${xPos(mu).toFixed(2)}" y="${curveTopY - 12}"
+          text-anchor="middle" font-family="Arial" font-size="14"
+          font-weight="bold" fill="${GOAL_COLOR}">???</text>`;
 
-  // Green curve outline
-  ctx.beginPath();
-  for (let px = 0; px <= plotW; px++) {
-    const x = xMin + (px / plotW) * (xMax - xMin);
-    const p = normalPDF(x, mu, sigma);
-    px === 0 ? ctx.moveTo(pad.l + px, yPx(p)) : ctx.lineTo(pad.l + px, yPx(p));
-  }
-  ctx.strokeStyle = DIST_COLOR; ctx.lineWidth = 2; ctx.stroke();
+  const obsTick = currentValue !== null ? `
+    <line x1="${xPos(currentValue).toFixed(2)}" y1="${axisY}"
+          x2="${xPos(currentValue).toFixed(2)}" y2="${axisY + tickH}"
+          stroke="${SAMPLE_COLOR}" stroke-width="3" stroke-linecap="round"/>
+    <text x="${xPos(currentValue).toFixed(2)}" y="${axisY + tickH + 12}"
+          text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="${SAMPLE_COLOR}">${currentValue}</text>` : '';
 
-  // True mean: blue tick on axis + ??? label
-  ctx.beginPath();
-  ctx.moveTo(xPx(mu), axisY);
-  ctx.lineTo(xPx(mu), axisY + tickH);
-  ctx.strokeStyle = GOAL_COLOR; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = GOAL_COLOR; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
-  ctx.fillText('???', xPx(mu), axisY + tickH + 24);
-
-  // Current observation: red tick on axis + value label
-  if (currentValue !== null) {
-    ctx.beginPath();
-    ctx.moveTo(xPx(currentValue), axisY);
-    ctx.lineTo(xPx(currentValue), axisY + tickH);
-    ctx.strokeStyle = SAMPLE_COLOR; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = SAMPLE_COLOR; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
-    ctx.fillText(String(currentValue), xPx(currentValue), axisY + tickH + 12);
-  }
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
+      stroke="#bbb" stroke-width="1"/>
+    <text x="${pad.l}" y="${axisY + 14}" text-anchor="middle"
+      font-family="Arial" font-size="13" fill="#999">10</text>
+    <text x="${pad.l + plotW}" y="${axisY + 14}" text-anchor="middle"
+      font-family="Arial" font-size="13" fill="#999">99</text>
+    <polygon points="${fillPoints}" fill="rgba(22,163,74,0.15)" stroke="none"/>
+    <polyline points="${curvePoints}"
+      fill="none" stroke="${DIST_COLOR}" stroke-width="2" stroke-linejoin="round"/>
+    ${meanTick}
+    ${obsTick}
+  </svg>`;
 };
 
 class PracticeObservationPlugin {
@@ -103,10 +95,7 @@ class PracticeObservationPlugin {
     const unset = slider_default === 'none';
 
     display_el.innerHTML = `
-      <div class="practice-counter">
-        <div>Practice trial</div>
-        <div>Observation ${obs_num} / ${n_obs}</div>
-      </div>
+      <div class="tutorial-title">Tutorial &nbsp;·&nbsp; Observation ${obs_num} / ${n_obs}</div>
 
       <div class="practice-wrap">
 
@@ -139,7 +128,7 @@ class PracticeObservationPlugin {
 
           <!-- RIGHT: distribution -->
           <div class="practice-panel practice-panel-right">
-            <canvas id="dist-canvas" class="dist-canvas" width="220" height="160"></canvas>
+            <div id="dist-svg" class="dist-canvas" style="line-height:0;"></div>
           </div>
 
         </div>
@@ -170,10 +159,7 @@ class PracticeObservationPlugin {
       </div>`;
 
     // Draw distribution
-    drawDistribution(
-      display_el.querySelector('#dist-canvas'),
-      true_mean, true_std, value
-    );
+    display_el.querySelector('#dist-svg').innerHTML = buildDistSVG(true_mean, true_std, value);
 
     const slider = display_el.querySelector('#response-slider');
     const lbl    = display_el.querySelector('#slider-float-label');

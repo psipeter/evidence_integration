@@ -86,18 +86,18 @@ input[type="range"] {
   flex: 1;
   cursor: pointer;
   background: transparent;
-  height: 48px;             /* hit area */
+  height: 96px;             /* hit area */
 }
 
 /* Track: thin flat line */
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px;
-  border-radius: 0;
+  height: 16px;
+  border-radius: 8px;
   background: #aaa;
 }
 input[type="range"]::-moz-range-track {
-  height: 3px;
-  border-radius: 0;
+  height: 16px;
+  border-radius: 8px;
   background: #aaa;
 }
 
@@ -111,7 +111,7 @@ input[type="range"]::-webkit-slider-thumb {
   background: #222;
   border: none;
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  margin-top: -18px;        /* centres thumb: (40-3)/2 ≈ 18 */
+  margin-top: -12px;        /* centres thumb: (40-16)/2 = 12 */
   cursor: ew-resize;
 }
 input[type="range"]::-moz-range-thumb {
@@ -280,16 +280,15 @@ input[type="range"].slider-unset::-moz-range-thumb {
   width: 50vw;
 }
 
-/* ── Practice counter (two lines) ───────────────────────────────────────── */
-.practice-counter {
-  position: fixed;
-  top: 1.2rem;
-  left: 1.5rem;
-  font-size: 0.9rem;
-  color: #888;
+/* ── Tutorial title (top-center) ─────────────────────────────────────────── */
+.tutorial-title {
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #555;
   letter-spacing: 0.03em;
-  line-height: 1.5;
-  z-index: 100;
+  padding: 0.6rem 0 0.2rem;
+  width: 100%;
 }
 
 /* ── Keyboard shortcut badge ─────────────────────────────────────────────── */
@@ -323,4 +322,122 @@ input[type="range"].slider-unset::-moz-range-thumb {
   flex: 1;
   text-align: left;
   font-size: 0.85rem;
+}
+
+/* ── Binary stimulus circle ──────────────────────────────────────────────── */
+.binary-circle {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* ── Binary slider ───────────────────────────────────────────────────────── */
+.binary-slider-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  width: 50vw;
+}
+
+.binary-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+/* Ball icons at ends */
+.binary-ball {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.binary-ball-blue { background: #2563eb; }
+.binary-ball-red  { background: #ef4444; }
+
+/* Gradient-fill slider — CSS custom property --pct drives the fill */
+input[type="range"].binary-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  cursor: pointer;
+  background: transparent;
+  height: 96px;
+}
+
+input[type="range"].binary-slider::-webkit-slider-runnable-track {
+  height: 16px;
+  border-radius: 8px;
+  /* blue on left up to thumb, red on right */
+  background: linear-gradient(
+    to right,
+    #2563eb 0%,
+    #2563eb var(--pct, 50%),
+    #ef4444 var(--pct, 50%),
+    #ef4444 100%
+  );
+}
+input[type="range"].binary-slider::-moz-range-track {
+  height: 16px;
+  border-radius: 8px;
+  background: linear-gradient(
+    to right,
+    #2563eb 0%,
+    #2563eb var(--pct, 50%),
+    #ef4444 var(--pct, 50%),
+    #ef4444 100%
+  );
+}
+
+input[type="range"].binary-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  margin-top: -18px;
+  cursor: ew-resize;
+}
+input[type="range"].binary-slider::-moz-range-thumb {
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: ew-resize;
+}
+
+/* Unset state: hide thumb */
+input[type="range"].binary-slider.slider-unset::-webkit-slider-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+input[type="range"].binary-slider.slider-unset::-moz-range-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Unset: grey track, no fill */
+input[type="range"].binary-slider.slider-unset::-webkit-slider-runnable-track {
+  background: #ccc;
+}
+input[type="range"].binary-slider.slider-unset::-moz-range-track {
+  background: #ccc;
+}
+
+/* ── Urn dot grid ─────────────────────────────────────────────────────────── */
+.urn-canvas {
+  display: block;
+  border: 2px solid #16a34a;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
 }
