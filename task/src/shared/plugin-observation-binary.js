@@ -40,7 +40,7 @@ class ObservationBinaryPlugin {
             slider_default, init_pos, show_value } = trial;
     const trialStart = performance.now();
     const unset    = slider_default === 'none';
-    const ballCol  = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
+    const ballCol  = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
 
     display_el.innerHTML = `
       <div class="trial-counter">Trial ${trial_num} / ${n_trials}</div>

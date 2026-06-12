@@ -44,8 +44,8 @@ export const buildSummaryBarSVG = (true_p, values, responses) => {
       stroke="#222" stroke-width="2" stroke-linecap="round"/>`;
   }).join('');
 
-  const blueVals = (values || []).filter(v => v === 1);
-  const redVals  = (values || []).filter(v => v === 0);
+  const blueVals = (values || []).filter(v => v === 1);   // +1 = blue
+  const redVals  = (values || []).filter(v => v === -1);  // -1 = red
   const dotCY    = dotsRowY + dotR;
 
   const blueDots = blueVals.map((_, i) => {

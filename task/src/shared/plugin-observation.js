@@ -52,9 +52,9 @@ class ObservationPlugin {
           <div class="slider-wrap">
             <span class="slider-label">10</span>
             <input type="range" id="response-slider"
-              min="10" max="99" value="${init_pos}" step="1"
+              min="-100" max="100" value="${init_pos}" step="1"
               class="${unset ? 'slider-unset' : ''}">
-            <span class="slider-label">99</span>
+            <span class="slider-label">100</span>
           </div>
         </div>
       </div>

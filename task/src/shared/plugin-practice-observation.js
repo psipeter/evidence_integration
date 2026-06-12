@@ -28,7 +28,7 @@ const info = {
 
 const buildDistSVG = (mu, sigma, currentValue) => {
   const W = 220, H = 160;
-  const xMin = 10, xMax = 99;
+  const xMin = -100, xMax = 100;
   const pad  = { l: 20, r: 20, t: 26, b: 44 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
@@ -68,9 +68,9 @@ const buildDistSVG = (mu, sigma, currentValue) => {
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
       stroke="#bbb" stroke-width="1"/>
     <text x="${pad.l}" y="${axisY + 14}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">10</text>
+      font-family="Arial" font-size="13" fill="#999">-100</text>
     <text x="${pad.l + plotW}" y="${axisY + 14}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">99</text>
+      font-family="Arial" font-size="13" fill="#999">100</text>
     <polygon points="${fillPoints}" fill="rgba(22,163,74,0.15)" stroke="none"/>
     <polyline points="${curvePoints}"
       fill="none" stroke="${DIST_COLOR}" stroke-width="2" stroke-linejoin="round"/>
@@ -142,11 +142,11 @@ class PracticeObservationPlugin {
             </div>
           </div>
           <div class="slider-wrap">
-            <span class="slider-label">10</span>
+            <span class="slider-label">-100</span>
             <input type="range" id="response-slider"
-              min="10" max="99" value="${init_pos}" step="1"
+              min="-100" max="100" value="${init_pos}" step="1"
               class="${unset ? 'slider-unset' : ''}">
-            <span class="slider-label">99</span>
+            <span class="slider-label">100</span>
           </div>
         </div>
 

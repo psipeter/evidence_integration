@@ -51,7 +51,7 @@ const buildUrnSVG = (p, currentValue, obsNum) => {
 
   // Pick a different dot of the matching colour each observation
   // obsNum is passed in; we cycle through all matching indices
-  const matchColor   = currentValue === 1 ? SAMPLE_BLUE : SAMPLE_RED;
+  const matchColor   = currentValue === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
   const matchIndices = colours.reduce((acc, c, i) => { if (c === matchColor) acc.push(i); return acc; }, []);
   const matchIdx     = matchIndices[(obsNum - 1) % matchIndices.length];
 
@@ -93,7 +93,7 @@ class PracticeObservationBinaryPlugin {
     const { value, obs_num, n_obs, true_p,
             slider_default, init_pos, show_value } = trial;
     const unset   = slider_default === 'none';
-    const ballCol = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
+    const ballCol = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial &nbsp;·&nbsp; Observation ${obs_num} / ${n_obs}</div>

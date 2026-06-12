@@ -13,8 +13,8 @@ export const drawPerformance = (container, mu, sigma, values, responses) => {
 
 export const buildPerformanceSVG = (mu, sigma, values, responses) => {
   const W = 520, H = 170;
-  const xMin = 10, xMax = 99;
-  const pad  = { l: 36, r: 36, t: 22, b: 36 };
+  const xMin = -100, xMax = 100;
+  const pad  = { l: 44, r: 44, t: 22, b: 36 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
   const axisY = pad.t + plotH;
@@ -79,9 +79,9 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
       stroke="#ccc" stroke-width="1"/>
     <text x="${pad.l}" y="${axisY + 12}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">10</text>
+      font-family="Arial" font-size="13" fill="#999">-100</text>
     <text x="${pad.l + plotW}" y="${axisY + 12}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">99</text>
+      font-family="Arial" font-size="13" fill="#999">100</text>
     ${obsTicks}
     ${estTicks}
     ${obsLegend}
