@@ -38,6 +38,7 @@ class ObservationBinaryPlugin {
 
     const { value, trial_num, n_trials, t_obs_ms,
             slider_default, init_pos, show_value } = trial;
+    const trialStart = performance.now();
     const unset    = slider_default === 'none';
     const ballCol  = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
 
@@ -99,7 +100,8 @@ class ObservationBinaryPlugin {
       document.removeEventListener('keydown', spaceHandler);
       const hadUnset = slider.classList.contains('slider-unset');
       const response = (!timed_out && !hadUnset) ? parseInt(slider.value) : null;
-      this.jsPsych.finishTrial({ response, timed_out });
+      const rt = timed_out ? null : Math.round(performance.now() - trialStart);
+      this.jsPsych.finishTrial({ response, timed_out, rt });
     };
 
     const attachListeners = () => {

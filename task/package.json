@@ -8,7 +8,8 @@
     "dev:binary": "vite --mode binary",
     "build:continuous": "vite build --mode continuous",
     "build:binary": "vite build --mode binary",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:server": "node dev-server.js"
   },
   "keywords": [],
   "author": "",
@@ -22,5 +23,9 @@
     "@jspsych/plugin-survey-text": "^2.1.0",
     "jspsych": "^8.2.3",
     "vite": "^6.4.3"
+  },
+  "devDependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
   }
 }

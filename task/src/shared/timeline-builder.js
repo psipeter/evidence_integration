@@ -71,7 +71,7 @@ export function buildAndRun(cfg) {
     },
   });
 
-  jsPsych.data.addProperties({ prolific_pid: prolificPID });
+  jsPsych.data.addProperties({ prolific_pid: prolificPID, task: taskType });
 
   // Helpers
   const makeButton = (label, extraStyle = '') =>
@@ -206,6 +206,7 @@ export function buildAndRun(cfg) {
   for (let t = 0; t < sequences.length; t++) {
     const seq = sequences[t];
     lastResponse = defaultValue;
+    lastTimedOut  = false;
     const trialResponses = [];
     lastTrialResponses   = trialResponses;
 

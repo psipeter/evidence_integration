@@ -126,10 +126,13 @@ Pickles: data/carrabin.pkl, data/yoo.pkl.
 Required columns: pid, trial, observation, value, response.
 Carrabin adds: qid, true_p (from carrabin_original.csv).
 
-Proposed new task: combines repeated sequences (carrabin) with long sequences
-and continuous values (yoo). Unlocks all PTN metrics simultaneously.
-Target: ~15–20 observations per trial for U-shape detection at individual level
-(15 obs is marginal; 20+ observations recommended for reliable per-pid λ).
+New task (task/): Two online experiments deployed on Prolific via MindProbe/JATOS.
+- Continuous task: Normal(mean, std) stimulus; slider response (10–99); 100 trials × 15 obs
+- Binary task: Bernoulli(p) stimulus (blue/red circle); slider response (0–100%); 100 trials × 15 obs
+Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
+Data pipeline: JATOS JSON → task/parse_results.py → data/task_results.pkl
+Target: ~50–80 participants per task; within-subject across both tasks via Prolific allowlist.
+See task/README section in README.md for full details.
 
 Archived (do not reactivate): diederen, jiang, usher.
 
