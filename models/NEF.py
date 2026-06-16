@@ -321,10 +321,11 @@ def run(
     # carrabin/yoo but with a dummy pid column added here.
     _TASK_DATASETS = frozenset({"task_continuous", "task_binary"})
     if dataset in _TASK_DATASETS:
-        _seq_path = data_path(f"{dataset.replace('task_', '')}_sequences.pkl")
-        if not _seq_path.exists():
-            # Fall back to task/sequences/ directory
-            _seq_path = Path(__file__).resolve().parents[1] / "task" / "sequences" / f"{dataset.replace('task_', '')}_sequences.pkl"
+        # Load directly from task/sequences/ — no separate data file needed.
+        # The sequence pkl is the canonical input for these datasets.
+        _seq_path = (Path(__file__).resolve().parents[1]
+                     / "task" / "sequences"
+                     / f"{dataset.replace('task_', '')}_sequences.pkl")
         human_pid = pd.read_pickle(_seq_path)
         if "pid" not in human_pid.columns:
             human_pid = human_pid.copy()

@@ -2,28 +2,26 @@
 scripts/submit_nef_sequences.py
 ================================
 Submit NEF sequence runs as individual SLURM jobs on the cluster.
-Each job runs one (alpha_0, lambda_) param set across all trials and tasks,
-saving to data/runs/test_sequences/nef_runs/nef_a{...}_l{...}.pkl
+Each job runs one lambda_ index (fixed alpha_0=0.5), matching the RL_lambda
+simulation approach. One job per lambda, results collected afterwards.
 
 Usage:
-    # Submit 20 random param sets
-    python scripts/submit_nef_sequences.py --n_params 20
+    # Submit all 100 lambda jobs
+    python scripts/submit_nef_sequences.py
 
-    # Dry run — print job scripts without submitting
-    python scripts/submit_nef_sequences.py --n_params 20 --dry_run
+    # Submit a subset
+    python scripts/submit_nef_sequences.py --lambda_indices 0 10 20 50 99
 
-    # Submit specific params
-    python scripts/submit_nef_sequences.py \
-        --params 0.5,0.15 0.5,0.40 0.5,0.67 0.5,0.88
+    # Dry run
+    python scripts/submit_nef_sequences.py --dry_run
 
-    # After jobs complete, collect results:
+    # After all jobs complete:
     python scripts/collect_nef_sequences.py
 """
 
 from __future__ import annotations
 
-import argparse
-import sys
+import argparse, sys
 from pathlib import Path
 
 import numpy as np
@@ -33,137 +31,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utils.slurm import make_job_script, submit_script
 from utils.paths import RUNS_DIR, PROJECT_ROOT
 
-
 CLUSTER_ROOT = "/dartfs-hpc/rc/home/n/f007qzn/evidence_integration"
 JOBS_DIR     = PROJECT_ROOT / "jobs" / "nef_sequences"
-
-
-def param_tag(alpha_0: float, lambda_: float) -> str:
-    return f"a{alpha_0:.3f}_l{lambda_:.3f}".replace(".", "p")
+N_LAMBDAS    = 100
 
 
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--n_params", type=int, default=20,
-                        help="Number of random (alpha_0, lambda_) pairs to sample")
-    parser.add_argument("--alpha_0_min", type=float, default=0.2)
-    parser.add_argument("--alpha_0_max", type=float, default=1.0)
-    parser.add_argument("--lambda_min",  type=float, default=0.01)
-    parser.add_argument("--lambda_max",  type=float, default=1.0)
-    parser.add_argument("--seed",        type=int,   default=42)
-    parser.add_argument("--tasks",       nargs="+",
-                        default=["task_continuous", "task_binary"])
-    parser.add_argument("--from_yoo", action="store_true",
-                        help="Sample from fitted yoo NEF params + small perturbation")
-    parser.add_argument("--perturb_scale", type=float, default=0.05,
-                        help="Std of Gaussian perturbation applied to yoo params (default 0.05)")
-    parser.add_argument("--yoo_params_path", default=None,
-                        help="Path to fitted yoo NEF params pkl (default: auto)")
-    parser.add_argument("--params", nargs="+", default=None,
-                        help="Explicit param pairs as alpha_0,lambda_ e.g. 0.5,0.15")
-    parser.add_argument("--dry_run", action="store_true")
+    parser.add_argument('--n_lambdas', type=int, default=N_LAMBDAS,
+                        help='Total number of lambda values in grid')
+    parser.add_argument('--lambda_indices', type=int, nargs='+', default=None,
+                        help='Specific indices to submit (default: all)')
+    parser.add_argument('--tasks', nargs='+',
+                        default=['task_continuous', 'task_binary'])
+    parser.add_argument('--dry_run', action='store_true')
     args = parser.parse_args()
 
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    log_dir = CLUSTER_ROOT + "/logs"
-
-    # ── Build param list ─────────────────────────────────────────────────────
-    if args.params:
-        param_list = []
-        for p in args.params:
-            a, l = p.split(",")
-            param_list.append((float(a), float(l)))
-
-    elif args.from_yoo:
-        # Load fitted yoo NEF params and sample with small perturbation
-        import pandas as pd
-        if args.yoo_params_path:
-            yoo_params_path = Path(args.yoo_params_path)
-        else:
-            yoo_params_path = RUNS_DIR / "refit" / "NEF_yoo_params.pkl"
-            if not yoo_params_path.exists():
-                yoo_params_path = RUNS_DIR / "yoo" / "NEF_yoo_params.pkl"
-        yoo_p = pd.read_pickle(yoo_params_path)
-        print(f"Loaded yoo params: {len(yoo_p)} pids from {yoo_params_path.name}")
-        print(f"  alpha_0: [{yoo_p['alpha_0'].min():.3f}, {yoo_p['alpha_0'].max():.3f}]")
-        print(f"  lambda_: [{yoo_p['lambda_'].min():.3f}, {yoo_p['lambda_'].max():.3f}]")
-
-        rng = np.random.default_rng(args.seed)
-        param_list = []
-        # Shuffle pids so sampling order is random; sample with replacement
-        # if n_params > n_yoo
-        shuffled = yoo_p.sample(frac=1, random_state=args.seed).reset_index(drop=True)
-        n_yoo = len(shuffled)
-        for i in range(args.n_params):
-            # Take the actual fitted values for a random yoo pid
-            base = shuffled.iloc[i % n_yoo]
-            # Add small Gaussian perturbation to generate a unique nearby param set
-            a0 = float(np.clip(
-                base['alpha_0'] + rng.normal(0, args.perturb_scale),
-                0.01, 1.0))
-            lam = float(np.clip(
-                base['lambda_'] + rng.normal(0, args.perturb_scale),
-                0.01, 1.0))
-            param_list.append((a0, lam))
-        print(f"Generated {len(param_list)} perturbed param sets "
-              f"(perturb_scale={args.perturb_scale})")
-
-    else:
-        rng = np.random.default_rng(args.seed)
-        alpha_0s = rng.uniform(args.alpha_0_min, args.alpha_0_max, args.n_params)
-        lambdas  = rng.uniform(args.lambda_min,  args.lambda_max,  args.n_params)
-        param_list = list(zip(alpha_0s.tolist(), lambdas.tolist()))
-
-    # ── Skip already-completed runs ──────────────────────────────────────────
-    nef_dir = RUNS_DIR / "test_sequences" / "nef_runs"
+    log_dir  = CLUSTER_ROOT + "/logs"
+    nef_dir  = RUNS_DIR / "test_sequences" / "nef_runs"
     nef_dir.mkdir(parents=True, exist_ok=True)
 
-    to_submit = []
-    for alpha_0, lambda_ in param_list:
-        tag      = param_tag(alpha_0, lambda_)
-        out_path = nef_dir / f"nef_{tag}.pkl"
-        if out_path.exists():
-            print(f"  [skip] already done: {tag}")
-        else:
-            to_submit.append((alpha_0, lambda_))
+    indices = args.lambda_indices if args.lambda_indices else list(range(args.n_lambdas))
 
-    print(f"Submitting {len(to_submit)}/{len(param_list)} param sets "
+    # Skip already-completed runs
+    to_submit = [i for i in indices
+                 if not (nef_dir / f'nef_l{i:03d}.pkl').exists()]
+
+    lambdas = np.linspace(0.01, 0.99, args.n_lambdas)
+    print(f"Submitting {len(to_submit)}/{len(indices)} lambda jobs "
           f"({'dry run' if args.dry_run else 'live'})")
 
-    # ── Write and submit one job per param set ───────────────────────────────
     submitted = 0
-    for alpha_0, lambda_ in to_submit:
-        tag = param_tag(alpha_0, lambda_)
-        cmd = (
-            f"venv/bin/python scripts/run_nef_sequences.py "
-            f"--alpha_0 {alpha_0:.6f} --lambda_ {lambda_:.6f} "
-            f"--tasks {' '.join(args.tasks)}"
-        )
+    for idx in to_submit:
+        lam = lambdas[idx]
+        cmd = (f"venv/bin/python scripts/run_nef_sequences.py "
+               f"--lambda_index {idx} "
+               f"--tasks {' '.join(args.tasks)}")
+
         script = make_job_script(
-            root      = CLUSTER_ROOT,
-            commands  = [cmd],
+            root       = CLUSTER_ROOT,
+            commands   = [cmd],
             time_limit = "4:0:0",
-            mem       = "32G",
-            log_dir   = log_dir,
+            mem        = "32G",
+            log_dir    = log_dir,
         )
-        script_path = JOBS_DIR / f"nef_{tag}.sh"
+        script_path = JOBS_DIR / f"nef_l{idx:03d}.sh"
         script_path.write_text(script)
 
         if args.dry_run:
-            print(f"  [dry_run] {script_path.name}: alpha_0={alpha_0:.3f} lambda_={lambda_:.3f}")
-            print(f"    cmd: {cmd}")
+            print(f"  [dry_run] {script_path.name}: lambda_={lam:.4f}")
         else:
-            print(f"  Submitting {script_path.name}: "
-                  f"alpha_0={alpha_0:.3f} lambda_={lambda_:.3f}")
+            print(f"  Submitting {script_path.name}: lambda_={lam:.4f}")
             submit_script(script_path, dry_run=False)
             submitted += 1
 
     print(f"\nDone. {submitted} jobs submitted.")
     if not args.dry_run:
-        print(f"Job scripts in: {JOBS_DIR}")
-        print(f"Results will appear in: {nef_dir}")
-        print(f"\nAfter completion, collect with:")
+        print(f"Job scripts: {JOBS_DIR}")
+        print(f"Results:     {nef_dir}")
+        print(f"\nAfter completion:")
         print(f"  python scripts/collect_nef_sequences.py")
 
 

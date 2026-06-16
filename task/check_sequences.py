@@ -222,7 +222,8 @@ def main():
     parser.add_argument('--seq_length',         type=int, default=20)
     parser.add_argument('--prefix_length',      type=int, default=3)
     parser.add_argument('--mean_range', type=float, nargs=2, default=[-60., 60.])
-    parser.add_argument('--std_range',  type=float, nargs=2, default=[10., 20.])
+    parser.add_argument('--std_low',    type=float, default=10.0)
+    parser.add_argument('--std_high',   type=float, default=40.0)
     parser.add_argument('--p_range',    type=float, nargs=2, default=[0.2,  0.8])
     parser.add_argument('--max_outliers', type=int, default=2)
     parser.add_argument('--output_dir', default='task/sequences',
@@ -237,7 +238,8 @@ def main():
 
     print(f"Checking {args.n_tries} sequence sets per task")
     print(f"Config: u{args.n_unique_sequences}_r{args.n_repeats}_"
-          f"rnd{args.n_random}_o{args.seq_length}_p{args.prefix_length}")
+          f"rnd{args.n_random}_o{args.seq_length}_p{args.prefix_length}"
+          f" std=[{args.std_low},{args.std_high}]")
 
     for task in tasks:
         print(f"\n{'='*55}\nTask: {task.upper()}")
@@ -262,7 +264,8 @@ def main():
                     '--seq_length',         str(args.seq_length),
                     '--prefix_length',      str(args.prefix_length),
                     '--mean_range'] + [str(v) for v in args.mean_range] + [
-                    '--std_range']  + [str(v) for v in args.std_range]  + [
+                    '--std_low',  str(args.std_low),
+                    '--std_high', str(args.std_high),]  + [
                     '--p_range']    + [str(v) for v in args.p_range]    + [
                     '--max_outliers', str(args.max_outliers),
                     '--seed',         str(seed),

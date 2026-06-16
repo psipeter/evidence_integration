@@ -81,3 +81,7 @@ scripts/sweep_sequences.py
 scripts/test_sequences_subsampling.py
 task/sequences/sequences.json
 task/sequences/sequences.pkl
+
+# Task sequence data files (superseded by task/sequences/*.pkl)
+data/task_continuous.pkl
+data/task_binary.pkl

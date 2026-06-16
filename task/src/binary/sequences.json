@@ -6,6 +6,7 @@
     "true_mean": 0.6269,
     "true_std": null,
     "true_p": 0.6269,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -32,6 +33,7 @@
     "true_mean": 0.368,
     "true_std": null,
     "true_p": 0.368,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -58,6 +60,7 @@
     "true_mean": 0.368,
     "true_std": null,
     "true_p": 0.368,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -84,6 +87,7 @@
     "true_mean": 0.4466,
     "true_std": null,
     "true_p": 0.4466,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -110,6 +114,7 @@
     "true_mean": 0.2618,
     "true_std": null,
     "true_p": 0.2618,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -136,6 +141,7 @@
     "true_mean": 0.5005,
     "true_std": null,
     "true_p": 0.5005,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -162,6 +168,7 @@
     "true_mean": 0.5005,
     "true_std": null,
     "true_p": 0.5005,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -188,6 +195,7 @@
     "true_mean": 0.3006,
     "true_std": null,
     "true_p": 0.3006,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -214,6 +222,7 @@
     "true_mean": 0.7839,
     "true_std": null,
     "true_p": 0.7839,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -240,6 +249,7 @@
     "true_mean": 0.3006,
     "true_std": null,
     "true_p": 0.3006,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -266,6 +276,7 @@
     "true_mean": 0.4466,
     "true_std": null,
     "true_p": 0.4466,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -292,6 +303,7 @@
     "true_mean": 0.368,
     "true_std": null,
     "true_p": 0.368,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -318,6 +330,7 @@
     "true_mean": 0.695,
     "true_std": null,
     "true_p": 0.695,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -344,6 +357,7 @@
     "true_mean": 0.7839,
     "true_std": null,
     "true_p": 0.7839,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -370,6 +384,7 @@
     "true_mean": 0.2618,
     "true_std": null,
     "true_p": 0.2618,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -396,6 +411,7 @@
     "true_mean": 0.4466,
     "true_std": null,
     "true_p": 0.4466,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -422,6 +438,7 @@
     "true_mean": 0.5005,
     "true_std": null,
     "true_p": 0.5005,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -448,6 +465,7 @@
     "true_mean": 0.695,
     "true_std": null,
     "true_p": 0.695,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -474,6 +492,7 @@
     "true_mean": 0.5005,
     "true_std": null,
     "true_p": 0.5005,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -500,6 +519,7 @@
     "true_mean": 0.3006,
     "true_std": null,
     "true_p": 0.3006,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -526,6 +546,7 @@
     "true_mean": 0.368,
     "true_std": null,
     "true_p": 0.368,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -552,6 +573,7 @@
     "true_mean": 0.7839,
     "true_std": null,
     "true_p": 0.7839,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -578,6 +600,7 @@
     "true_mean": 0.6269,
     "true_std": null,
     "true_p": 0.6269,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -604,6 +627,7 @@
     "true_mean": 0.695,
     "true_std": null,
     "true_p": 0.695,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -630,6 +654,7 @@
     "true_mean": 0.7839,
     "true_std": null,
     "true_p": 0.7839,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -656,6 +681,7 @@
     "true_mean": 0.3006,
     "true_std": null,
     "true_p": 0.3006,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -682,6 +708,7 @@
     "true_mean": 0.4466,
     "true_std": null,
     "true_p": 0.4466,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -708,6 +735,7 @@
     "true_mean": 0.2618,
     "true_std": null,
     "true_p": 0.2618,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -734,6 +762,7 @@
     "true_mean": 0.695,
     "true_std": null,
     "true_p": 0.695,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -760,6 +789,7 @@
     "true_mean": 0.368,
     "true_std": null,
     "true_p": 0.368,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -786,6 +816,7 @@
     "true_mean": 0.3006,
     "true_std": null,
     "true_p": 0.3006,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -812,6 +843,7 @@
     "true_mean": 0.6269,
     "true_std": null,
     "true_p": 0.6269,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -838,6 +870,7 @@
     "true_mean": 0.7839,
     "true_std": null,
     "true_p": 0.7839,
+    "std_condition": null,
     "values": [
       -1,
       1,
@@ -864,6 +897,7 @@
     "true_mean": 0.6269,
     "true_std": null,
     "true_p": 0.6269,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -890,6 +924,7 @@
     "true_mean": 0.5005,
     "true_std": null,
     "true_p": 0.5005,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -916,6 +951,7 @@
     "true_mean": 0.4466,
     "true_std": null,
     "true_p": 0.4466,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -942,6 +978,7 @@
     "true_mean": 0.6269,
     "true_std": null,
     "true_p": 0.6269,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -968,6 +1005,7 @@
     "true_mean": 0.2618,
     "true_std": null,
     "true_p": 0.2618,
+    "std_condition": null,
     "values": [
       -1,
       -1,
@@ -994,6 +1032,7 @@
     "true_mean": 0.695,
     "true_std": null,
     "true_p": 0.695,
+    "std_condition": null,
     "values": [
       1,
       1,
@@ -1020,6 +1059,7 @@
     "true_mean": 0.2618,
     "true_std": null,
     "true_p": 0.2618,
+    "std_condition": null,
     "values": [
       -1,
       -1,

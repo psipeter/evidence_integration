@@ -21,8 +21,11 @@ Generative distributions
 ------------------------
   continuous : Normal(true_mean, true_std)
                true_mean ~ Uniform(mean_range)
-               true_std  ~ Uniform(std_range)
+               true_std  : one of two fixed values (std_low, std_high),
+                           with n_unique_sequences split 50/50 between them.
                values clipped/redrawn to [value_min, value_max] (integers)
+               The 'std_condition' column stores the numeric std value so
+               panels can be split by low vs high std in analysis.
 
   binary     : Bernoulli(true_p)
                true_p ~ Uniform(p_range)
@@ -30,11 +33,13 @@ Generative distributions
 
 Rejection sampling criteria (applied to structured sequences only)
 -------------------------------------------------------------------
-  1. Prefix plausibility
-       continuous : |mean(prefix) - true_mean| <= plausibility_k * true_std
-       binary     : log P(prefix | true_p) >= log(plausibility_threshold)
-                    (i.e. P(prefix|true_p) >= plausibility_threshold)
-  2. Outlier cap
+  Prefix plausibility check is removed for continuous — with only 3 prefix
+  obs and two distinct std values, the variance is too high for the check
+  to be reliable, and check_sequences.py optimisation implicitly guards
+  against misleading prefixes via the RMSE shape score.
+  Binary retains the log-probability check.
+
+  Outlier cap
        continuous : count(|obs - true_mean| > outlier_sigma * true_std)
                     <= max_outliers  (applied over full sequence)
        binary     : not applicable (no concept of outlier for Bernoulli)
@@ -73,9 +78,6 @@ Usage examples
   python task/generate_sequences.py --task both --prefix_length 0 \\
       --output_dir task/sequences/
 
-  # Relaxed rejection sampling
-  python task/generate_sequences.py --task continuous \\
-      --plausibility_k 2.0 --max_outliers 4
 """
 
 import argparse
@@ -106,24 +108,27 @@ def make_rng(seed: int) -> np.random.Generator:
 # ---------------------------------------------------------------------------
 # Parameter grids (for even coverage)
 # ---------------------------------------------------------------------------
-def continuous_param_grid(n: int, mean_range, std_range, rng):
+def continuous_param_grid(n: int, mean_range, std_low, std_high, rng):
     """
-    Tile (true_mean, true_std) space into n cells and sample one point per cell.
-    Uses a 2D grid; if n is not a perfect square, uses ceil(sqrt(n)) × ceil(n/cols).
+    Generate n (true_mean, true_std) parameter sets, split 50/50 between
+    std_low and std_high. true_mean is tiled evenly across mean_range within
+    each std condition so both conditions cover the full mean range.
     """
-    cols = math.ceil(math.sqrt(n))
-    rows = math.ceil(n / cols)
+    n_low  = n // 2
+    n_high = n - n_low  # handles odd n
 
-    mean_edges = np.linspace(mean_range[0], mean_range[1], cols + 1)
-    std_edges  = np.linspace(std_range[0],  std_range[1],  rows + 1)
+    def mean_grid(k):
+        edges = np.linspace(mean_range[0], mean_range[1], k + 1)
+        return [round(rng.uniform(edges[i], edges[i+1]), 4) for i in range(k)]
 
-    params = []
-    indices = [(r, c) for r in range(rows) for c in range(cols)]
-    rng.shuffle(indices)
-    for r, c in indices[:n]:
-        mu  = rng.uniform(mean_edges[c], mean_edges[c + 1])
-        sig = rng.uniform(std_edges[r],  std_edges[r + 1])
-        params.append((round(mu, 4), round(sig, 4)))
+    means_low  = mean_grid(n_low)
+    means_high = mean_grid(n_high)
+    rng.shuffle(means_low)
+    rng.shuffle(means_high)
+
+    params = ([(mu, std_low)  for mu in means_low] +
+              [(mu, std_high) for mu in means_high])
+    rng.shuffle(params)
     return params
 
 
@@ -170,28 +175,16 @@ def draw_binary_obs(rng, true_p, n):
 # ---------------------------------------------------------------------------
 # Rejection sampling checks
 # ---------------------------------------------------------------------------
-def check_prefix_plausibility(prefix, true_mean, true_std, true_p,
-                               task, plausibility_k, plausibility_threshold):
-    """
-    Returns True if the prefix is plausible given the generative parameters.
+def check_prefix_plausibility_binary(prefix, true_p, plausibility_threshold=1e-4):
+    """Binary: P(prefix | true_p) >= plausibility_threshold."""
+    if len(prefix) == 0:
+        return True
+    n_blue = sum(v == 1 for v in prefix)
+    n_red  = len(prefix) - n_blue
+    log_p = (n_blue * math.log(true_p + 1e-12) +
+             n_red  * math.log(1 - true_p + 1e-12))
+    return log_p >= math.log(plausibility_threshold + 1e-12)
 
-    Continuous: |mean(prefix) - true_mean| <= plausibility_k * true_std
-    Binary:     P(prefix | true_p) >= plausibility_threshold
-    """
-    if task == 'continuous':
-        if len(prefix) == 0:
-            return True
-        prefix_mean = np.mean(prefix)
-        return abs(prefix_mean - true_mean) <= plausibility_k * true_std
-    else:  # binary
-        if len(prefix) == 0:
-            return True
-        n_blue = sum(prefix)
-        n_red  = len(prefix) - n_blue
-        # Probability of this exact prefix given true_p
-        log_p = (n_blue * math.log(true_p + 1e-12) +
-                 n_red  * math.log(1 - true_p + 1e-12))
-        return log_p >= math.log(plausibility_threshold + 1e-12)
 
 
 def check_outlier_cap(sequence, true_mean, true_std, outlier_sigma, max_outliers, task):
@@ -212,7 +205,6 @@ def check_outlier_cap(sequence, true_mean, true_std, outlier_sigma, max_outliers
 # ---------------------------------------------------------------------------
 def build_structured_sequence(rng, task, true_mean, true_std, true_p,
                                seq_length, prefix_length,
-                               plausibility_k, plausibility_threshold,
                                outlier_sigma, max_outliers):
     """
     Build one structured sequence with rejection sampling.
@@ -228,10 +220,9 @@ def build_structured_sequence(rng, task, true_mean, true_std, true_p,
         else:
             prefix = draw_binary_obs(rng, true_p, effective_prefix_len)
 
-        # Check prefix plausibility
-        if not check_prefix_plausibility(
-                prefix, true_mean, true_std, true_p,
-                task, plausibility_k, plausibility_threshold):
+        # Binary only: check prefix plausibility (continuous: always accept)
+        if task == 'binary' and not check_prefix_plausibility_binary(
+                prefix, true_p, 1e-4):
             continue
 
         if full_repeat:
@@ -306,17 +297,18 @@ def generate_task_sequences(task, args, rng):
     print(f"  Sequence length    : {seq_length}")
     print(f"  Prefix length      : {'full' if full_repeat else effective_prefix_len}")
     print(f"  Rejection criteria :")
-    print(f"    plausibility_k   : {args.plausibility_k}")
-    print(f"    plausibility_thr : {args.plausibility_threshold}")
     print(f"    outlier_sigma    : {args.outlier_sigma}")
     print(f"    max_outliers     : {args.max_outliers}")
 
     # ── Generate generative parameter sets ──────────────────────────────────
     if task == 'continuous':
         param_sets = continuous_param_grid(
-            n_unique, args.mean_range, args.std_range, rng)
+            n_unique, args.mean_range, args.std_low, args.std_high, rng)
+        n_low  = sum(1 for _, s in param_sets if s == args.std_low)
+        n_high = sum(1 for _, s in param_sets if s == args.std_high)
         print(f"  Mean range         : {args.mean_range}")
-        print(f"  Std range          : {args.std_range}")
+        print(f"  Std values         : low={args.std_low} ({n_low} seqs), "
+              f"high={args.std_high} ({n_high} seqs)")
     else:
         param_sets = binary_param_grid(n_unique, args.p_range, rng)
         print(f"  true_p range       : {args.p_range}")
@@ -335,16 +327,16 @@ def generate_task_sequences(task, args, rng):
         sequence, prefix = build_structured_sequence(
             rng, task, true_mean, true_std, true_p,
             seq_length, prefix_length,
-            args.plausibility_k, args.plausibility_threshold,
             args.outlier_sigma, args.max_outliers,
         )
         structured_templates.append({
-            'qid':       qid,
-            'true_mean': true_mean,
-            'true_std':  true_std,
-            'true_p':    true_p,
-            'prefix':    prefix,
-            'sequence':  sequence,  # the fixed part (prefix or full)
+            'qid':           qid,
+            'true_mean':     true_mean,
+            'true_std':      true_std,
+            'std_condition': float(true_std) if task == 'continuous' and not math.isnan(true_std) else float('nan'),
+            'true_p':        true_p,
+            'prefix':        prefix,
+            'sequence':      sequence,
         })
         print(f"  qid {qid:3d}: params={'mean={:.1f} std={:.1f}'.format(true_mean,true_std) if task=='continuous' else 'p={:.3f}'.format(true_p)}"
               f"  prefix=[{','.join(map(str,prefix[:5]))}{'...' if len(prefix)>5 else ''}]")
@@ -367,12 +359,13 @@ def generate_task_sequences(task, args, rng):
                         seq_length - effective_prefix_len)
                 values = tmpl['prefix'] + tail
             structured_trials.append({
-                'qid':        tmpl['qid'],
-                'trial_type': 'structured',
-                'true_mean':  tmpl['true_mean'],
-                'true_std':   tmpl['true_std'],
-                'true_p':     tmpl['true_p'],
-                'values':     values,
+                'qid':           tmpl['qid'],
+                'trial_type':    'structured',
+                'true_mean':     tmpl['true_mean'],
+                'true_std':      tmpl['true_std'],
+                'std_condition': tmpl['std_condition'],
+                'true_p':        tmpl['true_p'],
+                'values':        values,
             })
 
     # ── Generate random trials ────────────────────────────────────────────────
@@ -392,12 +385,13 @@ def generate_task_sequences(task, args, rng):
             seq_length, args.outlier_sigma, args.max_outliers)
 
         random_trials.append({
-            'qid':        None,
-            'trial_type': 'random',
-            'true_mean':  true_mean,
-            'true_std':   true_std,
-            'true_p':     true_p,
-            'values':     values,
+            'qid':           None,
+            'trial_type':    'random',
+            'true_mean':     true_mean,
+            'true_std':      true_std,
+            'std_condition': float(true_std) if task == 'continuous' and not math.isnan(true_std) else float('nan'),
+            'true_p':        true_p,
+            'values':        values,
         })
 
     # ── Shuffle and assign trial numbers ─────────────────────────────────────
@@ -411,18 +405,20 @@ def generate_task_sequences(task, args, rng):
     for t, trial in enumerate(all_trials):
         for o, v in enumerate(trial['values'], start=1):
             records.append({
-                'task':         task,
-                'trial':        t,
-                'qid':          trial['qid'],
-                'trial_type':   trial['trial_type'],
-                'observation':  o,
-                'value':        v,
-                'true_mean':    trial['true_mean'],
-                'true_std':     trial['true_std'],
-                'true_p':       trial['true_p'],
+                'task':           task,
+                'trial':          t,
+                'qid':            trial['qid'],
+                'trial_type':     trial['trial_type'],
+                'observation':    o,
+                'value':          v,
+                'true_mean':      trial['true_mean'],
+                'true_std':       trial['true_std'],
+                'std_condition':  trial.get('std_condition', float('nan')),
+                'true_p':         trial['true_p'],
                 'prefix_length': effective_prefix_len if trial['trial_type'] == 'structured' else 0,
             })
 
+        sc = trial.get('std_condition', float('nan'))
         json_trial = {
             'trial':        t,
             'qid':          trial['qid'],
@@ -430,6 +426,7 @@ def generate_task_sequences(task, args, rng):
             'true_mean':    None if math.isnan(trial['true_mean']) else trial['true_mean'],
             'true_std':     None if math.isnan(trial['true_std'])  else trial['true_std'],
             'true_p':       None if math.isnan(trial['true_p'])    else trial['true_p'],
+            'std_condition': None if (sc != sc) else sc,
             'values':       trial['values'],
             'prefix_length': effective_prefix_len if trial['trial_type'] == 'structured' else 0,
         }
@@ -500,22 +497,18 @@ def parse_args():
     p.add_argument('--mean_range', type=float, nargs=2, default=[-60.0, 60.0],
                    metavar=('LO', 'HI'),
                    help='Range of true_mean for continuous task')
-    p.add_argument('--std_range', type=float, nargs=2, default=[10.0, 20.0],
-                   metavar=('LO', 'HI'),
-                   help='Range of true_std for continuous task')
+    p.add_argument('--std_low',  type=float, default=10.0,
+                   help='Low std value for continuous task (half of unique sequences)')
+    p.add_argument('--std_high', type=float, default=40.0,
+                   help='High std value for continuous task (half of unique sequences)')
 
     # Generative parameters — binary
     p.add_argument('--p_range', type=float, nargs=2, default=[0.25, 0.75],
                    metavar=('LO', 'HI'),
                    help='Range of true_p for binary task')
 
-    # Rejection sampling
-    p.add_argument('--plausibility_k', type=float, default=1.5,
-                   help='Continuous: max |prefix_mean - true_mean| / true_std')
-    p.add_argument('--plausibility_threshold', type=float, default=1e-4,
-                   help='Binary: minimum P(prefix | true_p) to accept. '
-                        'Default 1e-4 allows rare-but-valid prefixes for near-0.5 true_p. '
-                        'Scales naturally: stricter values (e.g. 0.01) work for short prefixes.')
+    # Rejection sampling (prefix plausibility removed — covered by outlier cap
+    # and check_sequences.py optimisation)
     p.add_argument('--outlier_sigma', type=float, default=2.0,
                    help='Outlier threshold in units of true_std')
     p.add_argument('--max_outliers', type=int, default=3,
@@ -545,7 +538,8 @@ def main():
     assert 0 <= args.prefix_length <= args.seq_length, \
         f"--prefix_length must be in [0, seq_length={args.seq_length}]"
     assert args.mean_range[0] < args.mean_range[1], "--mean_range lo must be < hi"
-    assert args.std_range[0]  < args.std_range[1],  "--std_range lo must be < hi"
+    assert args.std_low > 0, "--std_low must be > 0"
+    assert args.std_high > args.std_low, "--std_high must be > std_low"
     assert 0 < args.p_range[0] < args.p_range[1] < 1, \
         "--p_range must be strictly within (0, 1)"
 
