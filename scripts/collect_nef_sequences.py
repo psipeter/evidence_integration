@@ -44,12 +44,15 @@ def main():
     df_nef['param_set_id'] = df_nef['params_str'].map(
         {ps: i for i, ps in enumerate(sorted(param_sets))})
 
-    # Load existing and strip any old NEF rows to avoid duplicates
-    df_existing = pd.read_pickle(pkl_path)
-    df_existing = df_existing[df_existing['model_type'] != 'NEF'].copy()
-    print(f"\nExisting (non-NEF) rows: {len(df_existing)}")
-
-    df_combined = pd.concat([df_existing, df_nef], ignore_index=True)
+    # Load existing (if present) and strip any old NEF rows to avoid duplicates
+    if pkl_path.exists():
+        df_existing = pd.read_pickle(pkl_path)
+        df_existing = df_existing[df_existing['model_type'] != 'NEF'].copy()
+        print(f"\nExisting (non-NEF) rows: {len(df_existing)}")
+        df_combined = pd.concat([df_existing, df_nef], ignore_index=True)
+    else:
+        print(f"\nNo existing pkl found — saving NEF-only results.")
+        df_combined = df_nef
     df_combined.to_pickle(pkl_path)
     print(f"Saved {len(df_combined)} total rows "
           f"({len(df_nef)} NEF) to {pkl_path}")
