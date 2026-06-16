@@ -409,7 +409,7 @@ def generate_task_sequences(task, args, rng):
     json_trials = []
 
     for t, trial in enumerate(all_trials):
-        for o, v in enumerate(trial['values']):
+        for o, v in enumerate(trial['values'], start=1):
             records.append({
                 'task':         task,
                 'trial':        t,

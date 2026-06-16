@@ -69,3 +69,15 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+# Sequence generation scratch files
+task/sequences/sweep/
+task/sequences/diagnostics/
+task/sequences/all_sequences.pkl
+/tmp/seq_pool/
+/tmp/seq_pool_cont/
+/tmp/test_prefix3/
+/tmp/test_prefix3_runs/
+scripts/sweep_sequences.py
+scripts/test_sequences_subsampling.py
+task/sequences/sequences.json
+task/sequences/sequences.pkl

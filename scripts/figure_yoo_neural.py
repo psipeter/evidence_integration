@@ -4,10 +4,9 @@
 Layout: 1×4
   Panel A (N1): Error-ensemble weight-neuron activity vs observation,
                 split by high vs low lambda group
-  Panel B (N2): Mean weight-neuron activity vs mean |delta response| across obs
-                (regplot, population means per observation)
-  Panel C (N3): Fitted lambda vs mean |delta response| — model scatter/line
-                with per-pid human reference lines
+  Panel B (N3): Fitted lambda mediates activity decay and |delta response| decay
+                (twin-axis, per-pid scatter, human reference lines)
+  Panel C (N6): Activity decay vs |delta response| decay (fitted vs lambda=0 ablation)
   Panel D (N4): Mean |Δresponse| vs estimation error in last 5 obs (Human and NEF)
 
 Run:
@@ -309,7 +308,7 @@ def _prepare_per_pid_changes(nef_dir: Path,
     return df if not df.empty else None
 
 
-def _plot_panel_b(ax, nef_dir: Path, ablation_dir: Path | None = None) -> None:
+def _plot_panel_c(ax, nef_dir: Path, ablation_dir: Path | None = None) -> None:
     """Panel B (N6): NEF activity decay vs NEF |Δresponse| decay, per pid.
 
     X: activity decay = mean(act[obs=1]) - mean(act[obs=30]) [Hz, positive = decay]
@@ -380,7 +379,7 @@ def _plot_panel_b(ax, nef_dir: Path, ablation_dir: Path | None = None) -> None:
 
 # ── Panel C (N3) — Lambda mediates activity decay and mean delta ──────────────
 
-def _plot_panel_c(ax, nef_dir: Path) -> None:
+def _plot_panel_b(ax, nef_dir: Path) -> None:
     """Panel C (N7): Fitted lambda mediates both activity decay and |Deltaresponse| decay.
 
     X-axis: fitted lambda per pid.
@@ -448,72 +447,105 @@ def _plot_panel_c(ax, nef_dir: Path) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-# ── Panel D (N4) — Late delta response vs late estimation error ───────────────
+# ── Panel D (N8) — Late delta group comparison ───────────────────────────────
 
 def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
-    """Panel D (N4): Mean |Δresponse| vs estimation error in the last 5 obs.
+    """Panel D (N8): Late performance error grouped by Q1 vs Q4 of late |delta response|.
 
-    X-axis: mean |Δresponse| (obs 26-30) per pid — how much a pid is still
-    updating their estimate near the end of the sequence.
-    Y-axis: mean estimation error (RMSE to true mean, obs 26-30) per pid —
-    how accurate they are at the end.
-
-    Pids that keep updating late (high x) have higher late error (positive r
-    for NEF: r=0.87****). Humans show the same trend but noisier (r=0.31 ns).
-    One point per pid; separate scatter+regline for Human (grey) and NEF (colour).
+    Pids are split into Q1 (bottom 25%) and Q4 (top 25%) by mean |delta response|
+    in obs 21-30, separately for Human and NEF. Boxplots compare late performance
+    error between groups. Both sources show significantly higher late error in Q4.
+    Seaborn hue on model_type (Human/NEF) with group on x-axis.
     """
+    from scipy.stats import ttest_ind
     LATE_OBS = range(21, 31)
     yoo      = pd.read_pickle(data_path("yoo.pkl"))
     yoo_s    = yoo.sort_values(["pid","trial","observation"]).copy()
     yoo_s["true_mean"] = yoo_s.groupby(["pid","trial"])["value"].expanding().mean().values
     true_map = yoo_s[["pid","trial","observation","true_mean"]].drop_duplicates()
 
-    pal        = get_palette(2)
-    nef_color  = pal[0]
-    hum_color  = "0.4"
+    pal = get_palette(2)
 
-    def late_per_pid(df):
-        df = df.sort_values(["pid","trial","observation"]).copy()
-        # delta
+    def late_metrics(df):
         delta_rows = []
         for (pid, trial), g in df.groupby(["pid","trial"]):
             g = g.sort_values("observation").copy()
             g["delta"] = g["response"].diff().abs()
-            delta_rows.append(g[g["observation"].isin(LATE_OBS)][["pid","observation","delta"]])
-        delta_df   = pd.concat(delta_rows).dropna()
-        mean_delta = delta_df.groupby("pid")["delta"].mean()
-        # rmse
-        m    = df.drop(columns=["true_mean"], errors="ignore").merge(
+            delta_rows.append(g[g["observation"].isin(LATE_OBS)][["pid","delta"]])
+        mean_delta = pd.concat(delta_rows).dropna().groupby("pid")["delta"].mean()
+        m = df.drop(columns=["true_mean"], errors="ignore").merge(
             true_map, on=["pid","trial","observation"], how="left")
-        m    = m[m["observation"].isin(LATE_OBS)]
+        m = m[m["observation"].isin(LATE_OBS)]
         rmse = (m.assign(sq=(m["response"] - m["true_mean"])**2)
                  .groupby("pid")["sq"].mean().apply(np.sqrt))
         return pd.DataFrame({"delta": mean_delta, "rmse": rmse}).dropna()
 
-    # Human
-    h = late_per_pid(yoo)
-    r_h, p_h = pearsonr(h["delta"], h["rmse"])
-    ax.scatter(h["delta"], h["rmse"], color=hum_color, s=30, alpha=0.7, zorder=3,
-               label=f"Human, r={r_h:.2f}{pvalue_to_stars(p_h)}")
-    sns.regplot(data=h, x="delta", y="rmse", scatter=False,
-                color=hum_color, line_kws={"lw": 1.5}, ci=95, ax=ax, label="_nolegend_")
-
-    # NEF
     nef_resp_path = nef_dir / "NEF_yoo_responses.pkl"
+    sources = [("Human", yoo, "0.4")]
     if nef_resp_path.exists():
-        n = late_per_pid(pd.read_pickle(nef_resp_path))
-        r_n, p_n = pearsonr(n["delta"], n["rmse"])
-        ax.scatter(n["delta"], n["rmse"], color=nef_color, s=30, alpha=0.7, zorder=3,
-                   label=f"NEF, r={r_n:.2f}{pvalue_to_stars(p_n)}")
-        sns.regplot(data=n, x="delta", y="rmse", scatter=False,
-                    color=nef_color, line_kws={"lw": 1.5}, ci=95, ax=ax, label="_nolegend_")
+        sources.append(("NEF", pd.read_pickle(nef_resp_path), pal[0]))
 
-    ax.set_xlabel("Mean |Δresponse| (obs 21-30)")
+    # Build long-format DataFrame
+    rows = []
+    sig_annotations = []
+    for src_name, df, _ in sources:
+        m = late_metrics(df)
+        q1_cut = m["delta"].quantile(0.25)
+        q3_cut = m["delta"].quantile(0.75)
+        q1_pids = m[m["delta"] <= q1_cut].index.tolist()
+        q4_pids = m[m["delta"] >= q3_cut].index.tolist()
+        for pid in q1_pids:
+            rows.append({"model_type": src_name,
+                         "group": "Q1 (low)",
+                         "rmse": float(m.loc[pid, "rmse"])})
+        for pid in q4_pids:
+            rows.append({"model_type": src_name,
+                         "group": "Q4 (high)",
+                         "rmse": float(m.loc[pid, "rmse"])})
+        # Significance test Q1 vs Q4
+        t, p = ttest_ind(m.loc[m.index.isin(q1_pids), "rmse"].values,
+                         m.loc[m.index.isin(q4_pids), "rmse"].values)
+        sig_annotations.append((src_name, p))
+
+    plot_df = pd.DataFrame(rows)
+    src_order   = [s for s, *_ in sources]
+    group_order = ["Q1 (low)", "Q4 (high)"]
+    palette_map = {"Human": "0.5", "NEF": pal[0]}
+
+    sns.boxplot(data=plot_df, x="group", y="rmse",
+                hue="model_type", hue_order=src_order,
+                order=group_order,
+                palette=palette_map,
+                width=0.5, gap=0.1, fliersize=3, ax=ax)
+
+    # Significance bars — one per source, between Q1 and Q4
+    # get x positions: seaborn places dodged boxes at x +/- dodge_offset
+    n_hue = len(src_order)
+    dodge = 0.4 / n_hue                 # approximate half-dodge width
+    x_positions = {}                     # (src, group) -> x_data_coord
+    for g_idx, group in enumerate(group_order):
+        for h_idx, src in enumerate(src_order):
+            offset = (h_idx - (n_hue - 1) / 2) * (0.8 / n_hue)
+            x_positions[(src, group)] = g_idx + offset
+
+    y_max  = plot_df["rmse"].max()
+    y_step = y_max * 0.14
+    for i, (src_name, p) in enumerate(sig_annotations):
+        x_lo = x_positions[(src_name, "Q1 (low)")]
+        x_hi = x_positions[(src_name, "Q4 (high)")]
+        y    = y_max + y_step * (i + 0.7)
+        ax.plot([x_lo, x_lo, x_hi, x_hi],
+                [y - y_step * 0.2, y, y, y - y_step * 0.2],
+                color="0.3", lw=1.2)
+        ax.text((x_lo + x_hi) / 2, y + y_step * 0.05,
+                pvalue_to_stars(p), ha="center", va="bottom",
+                fontsize=9, color="0.3")
+
+    ax.set_xlabel("Late |" + "\u0394" + "response| group (obs 21-30)")
     ax.set_ylabel("Performance error vs ground truth (obs 21-30)")
-    ax.set_ylim(bottom=0); ax.set_xlim(left=0)
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9)
+    ax.set_ylim(bottom=0)
+    ax.legend(title="", fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
-
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
@@ -537,8 +569,8 @@ def main() -> None:
     )
 
     _plot_panel_a(axes[0], nef_dir)
-    _plot_panel_b(axes[1], nef_dir, ablation_dir=ablation_dir)
-    _plot_panel_c(axes[2], nef_dir)
+    _plot_panel_b(axes[1], nef_dir)
+    _plot_panel_c(axes[2], nef_dir, ablation_dir=ablation_dir)
     _plot_panel_d(axes[3], nef_dir, args.run_folder)
 
     label_panels(axes.reshape(1, -1))

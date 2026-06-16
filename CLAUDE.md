@@ -484,6 +484,21 @@ Generate a commit message and wait for confirmation. Never push without being as
 
 ---
 
+## Workflow rules
+
+### Suggesting vs implementing changes
+When a question or observation implies that a code change *might* be warranted,
+Claude must **describe the proposed change and ask for approval before writing
+any code**. This applies especially to:
+- Changes to figure aesthetics or panel logic (sorting, colouring, metrics)
+- Changes to analysis methodology (metrics, transforms, thresholds)
+- Any change that was not explicitly requested
+
+Only implement immediately when the user has explicitly asked for a specific
+change (e.g. "change X to Y", "add Z", "remove W").
+
+---
+
 ## What NOT to do
 
 - Do not add diederen, jiang, or usher back without explicit plan

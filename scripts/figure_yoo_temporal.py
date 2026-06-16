@@ -154,9 +154,10 @@ def _u_strength(te_df: pd.DataFrame) -> pd.Series:
 def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
     """Panel A (T1): Estimation error vs observation.
 
-    For each source, shaded band spans from the weak-U subgroup mean
-    (bottom N_GROUP pids by U-strength) to the strong-U subgroup mean
-    (top N_GROUP). Thin edge lines at each boundary. No center mean line.
+    For each source, pids are split into Q1 (bottom 25% late delta) and
+    Q4 (top 25% late delta) using the same quartile split as neural panel D.
+    Q1 shown as dashed line, Q4 as solid line, fill between.
+    No legend entry for the band itself.
     """
     run_dir = RUNS_DIR / run_folder
     nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
@@ -164,8 +165,9 @@ def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
     yoo_s   = yoo.sort_values(["pid","trial","observation"]).copy()
     yoo_s["true_mean"] = (yoo_s.groupby(["pid","trial"])["value"]
                                .expanding().mean().values)
-    true_map  = yoo_s[["pid","trial","observation","true_mean"]].drop_duplicates()
-    value_map = yoo[["pid","trial","observation","value"]].drop_duplicates()
+    true_map = yoo_s[["pid","trial","observation","true_mean"]].drop_duplicates()
+
+    LATE_OBS = range(21, 31)
 
     def task_rmse_per_pid_obs(df):
         m = df.drop(columns=["true_mean"], errors="ignore").merge(
@@ -174,13 +176,20 @@ def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
                  .groupby(["pid","observation"])["sq_err"].mean()
                  .apply(np.sqrt).reset_index(name="rmse"))
 
-    def u_split_pids(df):
-        te = _task_error_per_pid_obs(df, value_map)
-        us = _u_strength(te).sort_values()
-        if len(us) < N_GROUP * 2:
-            return set(), set()
-        return (set(int(p) for p in us.index[:N_GROUP]),
-                set(int(p) for p in us.index[-N_GROUP:]))
+    def quartile_split(df):
+        """Return (q1_pids, q4_pids) based on mean |delta response| in obs 21-30."""
+        delta_rows = []
+        for (pid, trial), g in df.groupby(["pid","trial"]):
+            g = g.sort_values("observation").copy()
+            g["delta"] = g["response"].diff().abs()
+            delta_rows.append(g[g["observation"].isin(LATE_OBS)][["pid","delta"]])
+        d = pd.concat(delta_rows).dropna()
+        mean_delta = d.groupby("pid")["delta"].mean().sort_values()
+        q1_cut = mean_delta.quantile(0.25)
+        q3_cut = mean_delta.quantile(0.75)
+        q1 = set(mean_delta[mean_delta <= q1_cut].index.astype(int).tolist())
+        q4 = set(mean_delta[mean_delta >= q3_cut].index.astype(int).tolist())
+        return q1, q4
 
     handles, labels = [], []
 
@@ -192,22 +201,24 @@ def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
     ]
 
     for source_name, df, color in all_sources:
-        weak_pids, strong_pids = u_split_pids(df)
-        if not weak_pids:
+        q1_pids, q4_pids = quartile_split(df)
+        if not q1_pids or not q4_pids:
             continue
         rm  = task_rmse_per_pid_obs(df)
         obs = sorted(rm["observation"].unique())
-        weak_mean   = rm[rm["pid"].isin(weak_pids)  ].groupby("observation")["rmse"].mean().reindex(obs)
-        strong_mean = rm[rm["pid"].isin(strong_pids)].groupby("observation")["rmse"].mean().reindex(obs)
-        ax.fill_between(obs, weak_mean.values, strong_mean.values,
+        q1_mean = rm[rm["pid"].isin(q1_pids)].groupby("observation")["rmse"].mean().reindex(obs)
+        q4_mean = rm[rm["pid"].isin(q4_pids)].groupby("observation")["rmse"].mean().reindex(obs)
+        ax.fill_between(obs, q1_mean.values, q4_mean.values,
                         color=color, alpha=0.18, zorder=1, linewidth=0)
-        ax.plot(obs, weak_mean.values,   color=color, lw=1.8, zorder=2)
-        ax.plot(obs, strong_mean.values, color=color, lw=1.8, zorder=2)
+        ax.plot(obs, q1_mean.values, color=color, lw=1.8, ls="--", zorder=2)
+        ax.plot(obs, q4_mean.values, color=color, lw=1.8, ls="-",  zorder=2)
         handles.append(Line2D([0],[0], color=color, lw=1.8))
         labels.append(source_name)
 
-    handles.append(Patch(facecolor="0.5", alpha=0.25, linewidth=0))
-    labels.append(f"weak-strong U range (n={N_GROUP} each)")
+    # Linestyle key
+    handles += [Line2D([0],[0], color="0.4", lw=1.4, ls="--"),
+                Line2D([0],[0], color="0.4", lw=1.4, ls="-")]
+    labels  += ["Q1 (low late Δresponse)", "Q4 (high late Δresponse)"]
 
     ax.set_xlabel("Observation"); ax.set_ylabel("Performance error vs ground truth (RMSE)")
     ax.set_xticks(OBS_TICKS); ax.set_ylim(bottom=0)
@@ -252,8 +263,10 @@ def _plot_panel_c(ax, run_folder: str, nef_folder: str | None,
     nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
     yoo     = pd.read_pickle(data_path("yoo.pkl"))
 
+    EXCLUDE_C = {"Mean", "LeakyIntegrator"}
     sources = [("Human", yoo, HUMAN_COLOR)]
     for mt in model_order:
+        if _display(mt) in EXCLUDE_C: continue
         rp = _resp_path(mt, run_dir, nef_dir)
         if rp.exists():
             sources.append((_display(mt), pd.read_pickle(rp),
@@ -286,8 +299,10 @@ def _plot_panel_d(ax, run_folder, palette, model_order, nef_folder):
     yoo     = pd.read_pickle(data_path("yoo.pkl"))
     lam_h   = _fit_lambda_curve_fit(yoo)
 
+    EXCLUDE_D = {"Mean", "LeakyIntegrator"}
     handles, labels = [], []
     for mt in model_order:
+        if _display(mt) in EXCLUDE_D: continue
         rp = _resp_path(mt, run_dir, nef_dir)
         if not rp.exists(): continue
         lam_m  = _fit_lambda_curve_fit(pd.read_pickle(rp))
