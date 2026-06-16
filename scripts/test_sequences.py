@@ -352,30 +352,36 @@ def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None):
     sns.despine(ax=ax, top=True, right=True)
 
 def plot_B(ax, df, palette, sub_df=None, sub_label=None):
-    """B/G: KDE distribution of per-pid mean response variability
-    (std across qid repeats within prefix region), like carrabin figure A.
-    Zero for deterministic models — shown as spike at 0 (placeholder)."""
+    """B/I: KDE of per-pid mean response variability for noisy models (NEF only).
+    RL_lambda is deterministic so excluded — shows zero and clutters the plot."""
     pdf = df[(df.trial_type=='structured') &
              (df.observation < df.prefix_length)].copy()
     if pdf.empty: _blank(ax); return
-    # Per-pid variability: for each (model_id, qid, obs) group, std across trials
-    pv = (pdf.groupby(['model_id', 'qid', 'observation'])['response']
-           .std().reset_index(name='resp_var'))
-    # Mean per-pid: average over qid and obs
-    pv_pid = pv.groupby('model_id')['resp_var'].mean().reset_index()
-    if pv_pid.empty: _blank(ax); return
 
-    vals = pv_pid['resp_var'].dropna().values
-    if vals.std() < 1e-9:
-        # All zero — deterministic model, show annotation
-        ax.axvline(0, color=palette.get('RL_lambda', '0.5'), lw=2)
-        ax.text(0.5, 0.6, 'zero (deterministic)', transform=ax.transAxes,
-                ha='center', va='center', fontsize=7, color='0.5', style='italic')
-    else:
-        color = palette.get('RL_lambda', '0.5')
-        sns.kdeplot(vals, ax=ax, color=color, lw=1.8, fill=True, alpha=0.2)
+    handles, labels = [], []
+    any_plotted = False
+    for mt in [m for m in ALL_MODELS if m in pdf['model_type'].unique()]:
+        color = palette.get(mt, '0.5')
+        pv = (pdf[pdf.model_type==mt]
+              .groupby(['model_id', 'qid', 'observation'])['response']
+              .std().reset_index(name='resp_var'))
+        pv_pid = pv.groupby('model_id')['resp_var'].mean().dropna().values
+        if len(pv_pid) == 0: continue
+        if pv_pid.std() < 1e-9:
+            # Deterministic — skip rather than cluttering with a spike at 0
+            continue
+        sns.kdeplot(pv_pid, ax=ax, color=color, lw=1.8, fill=True, alpha=0.2)
+        handles.append(Line2D([0],[0], color=color, lw=1.8))
+        labels.append(mt)
+        any_plotted = True
+
+    if not any_plotted:
+        _blank(ax, 'No noisy models')
+        return
     ax.set_xlabel('Mean response variability')
     ax.set_ylabel('Density')
+    if handles:
+        ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -458,14 +464,7 @@ def plot_D(ax, df, palette, sub_df=None, sub_label=None):
             handles.append(Line2D([0],[0], color=color, lw=2.0))
             labels.append(f'{mt} r={r:.2f}{pvalue_to_stars(p)}')
             any_plotted = True
-        elif len(g) >= 1:
-            ax.scatter([g['first'].mean()], [g['second'].mean()],
-                       color=color, s=60, zorder=5, marker='D',
-                       edgecolors='white', lw=0.5)
-            handles.append(Line2D([0],[0], color=color, lw=0, marker='D',
-                                  ms=6, markeredgecolor='white'))
-            labels.append(f'{mt} (var≈0)')
-            any_plotted = True
+        # skip deterministic models (var/λ≈0) — no point to plot
     if not any_plotted: _blank(ax); return
     all_v = pd.concat([wide['first'], wide['second']])
     lo, hi = max(0, all_v.min()-0.005), all_v.max()+0.005
@@ -480,10 +479,7 @@ def plot_D(ax, df, palette, sub_df=None, sub_label=None):
                     sns.regplot(data=g, x='first', y='second', ax=ax,
                                 color=color, ci=None, scatter=False,
                                 line_kws={'lw': 1.5, 'ls': '--', 'alpha': 0.7})
-                else:
-                    ax.scatter([g['first'].mean()], [g['second'].mean()],
-                               color=color, s=30, marker='D', alpha=0.5,
-                               edgecolors='white', lw=0.5)
+                # skip deterministic models in sub overlay
     ax.set_xlabel('Var (1st half)'); ax.set_ylabel('Var (2nd half)')
     ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -508,14 +504,7 @@ def plot_E(ax, df, palette, sub_df=None, sub_label=None):
             handles.append(Line2D([0],[0], color=color, lw=2.0))
             labels.append(f'{mt} r={r:.2f}{pvalue_to_stars(p)}')
             any_plotted = True
-        elif len(g) >= 1:
-            ax.scatter([g['first'].mean()], [g['second'].mean()],
-                       color=color, s=60, zorder=5, marker='D',
-                       edgecolors='white', lw=0.5)
-            handles.append(Line2D([0],[0], color=color, lw=0, marker='D',
-                                  ms=6, markeredgecolor='white'))
-            labels.append(f'{mt} (λ≈0)')
-            any_plotted = True
+        # skip deterministic models (var/λ≈0) — no point to plot
     if not any_plotted: _blank(ax); return
     all_v = pd.concat([wide['first'], wide['second']])
     lo, hi = max(0, all_v.min()-0.05), all_v.max()+0.05
@@ -530,10 +519,7 @@ def plot_E(ax, df, palette, sub_df=None, sub_label=None):
                     sns.regplot(data=g, x='first', y='second', ax=ax,
                                 color=color, ci=None, scatter=False,
                                 line_kws={'lw': 1.5, 'ls': '--', 'alpha': 0.7})
-                else:
-                    ax.scatter([g['first'].mean()], [g['second'].mean()],
-                               color=color, s=30, marker='D', alpha=0.5,
-                               edgecolors='white', lw=0.5)
+                # skip deterministic models in sub overlay
     ax.set_xlabel('λ (1st half)'); ax.set_ylabel('λ (2nd half)')
     ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -728,13 +714,7 @@ def plot_K(ax, df_bin, df_cont, palette, sub_bin=None, sub_cont=None, sub_label=
             handles.append(Line2D([0],[0], color=color, lw=2.0))
             labels.append(f'{mt} r={r:.2f}{pvalue_to_stars(p)}')
             any_plotted = True
-        else:
-            ax.scatter([xv.mean()], [yv.mean()], color=color, s=60, zorder=5,
-                       marker='D', edgecolors='white', lw=0.5)
-            handles.append(Line2D([0],[0], color=color, lw=0, marker='D',
-                                  ms=6, markeredgecolor='white'))
-            labels.append(f'{mt} (λ≈0)')
-            any_plotted = True
+        # skip models with near-zero lambda variance (deterministic)
     if not any_plotted: _blank(ax, 'No cross-task data'); return
     if sub_bin is not None and sub_cont is not None:
         for mt in [m for m in ALL_MODELS
@@ -780,13 +760,7 @@ def plot_L(ax, df_bin, df_cont, palette, sub_bin=None, sub_cont=None, sub_label=
             handles.append(Line2D([0],[0], color=color, lw=2.0))
             labels.append(f'{mt} r={r:.2f}{pvalue_to_stars(p)}')
             any_plotted = True
-        else:
-            ax.scatter([xv.mean()], [yv.mean()], color=color, s=60, zorder=5,
-                       marker='D', edgecolors='white', lw=0.5)
-            handles.append(Line2D([0],[0], color=color, lw=0, marker='D',
-                                  ms=6, markeredgecolor='white'))
-            labels.append(f'{mt} (var≈0)')
-            any_plotted = True
+        # skip models with near-zero variability (deterministic)
     if not any_plotted: _blank(ax, 'No cross-task data'); return
     if sub_bin is not None and sub_cont is not None:
         for mt in [m for m in ALL_MODELS
@@ -834,13 +808,7 @@ def plot_M(ax, df_task, palette, task_label='continuous', sub_df=None, sub_label
             handles.append(Line2D([0],[0], color=color, lw=2.0))
             labels.append(f'{mt} r={r:.2f}{pvalue_to_stars(p)}')
             any_plotted = True
-        else:
-            ax.scatter([xv.mean()], [yv.mean()], color=color, s=60, zorder=5,
-                       marker='D', edgecolors='white', lw=0.5)
-            handles.append(Line2D([0],[0], color=color, lw=0, marker='D',
-                                  ms=6, markeredgecolor='white'))
-            labels.append(f'{mt} (λ≈0)')
-            any_plotted = True
+        # skip models with near-zero lambda variance (deterministic)
     if not any_plotted: _blank(ax, 'No data'); return
     if sub_df is not None:
         sub_err = compute_task_error(sub_df)

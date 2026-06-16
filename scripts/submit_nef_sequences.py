@@ -54,6 +54,12 @@ def main():
     parser.add_argument("--seed",        type=int,   default=42)
     parser.add_argument("--tasks",       nargs="+",
                         default=["task_continuous", "task_binary"])
+    parser.add_argument("--from_yoo", action="store_true",
+                        help="Sample from fitted yoo NEF params + small perturbation")
+    parser.add_argument("--perturb_scale", type=float, default=0.05,
+                        help="Std of Gaussian perturbation applied to yoo params (default 0.05)")
+    parser.add_argument("--yoo_params_path", default=None,
+                        help="Path to fitted yoo NEF params pkl (default: auto)")
     parser.add_argument("--params", nargs="+", default=None,
                         help="Explicit param pairs as alpha_0,lambda_ e.g. 0.5,0.15")
     parser.add_argument("--dry_run", action="store_true")
@@ -68,6 +74,41 @@ def main():
         for p in args.params:
             a, l = p.split(",")
             param_list.append((float(a), float(l)))
+
+    elif args.from_yoo:
+        # Load fitted yoo NEF params and sample with small perturbation
+        import pandas as pd
+        if args.yoo_params_path:
+            yoo_params_path = Path(args.yoo_params_path)
+        else:
+            yoo_params_path = RUNS_DIR / "refit" / "NEF_yoo_params.pkl"
+            if not yoo_params_path.exists():
+                yoo_params_path = RUNS_DIR / "yoo" / "NEF_yoo_params.pkl"
+        yoo_p = pd.read_pickle(yoo_params_path)
+        print(f"Loaded yoo params: {len(yoo_p)} pids from {yoo_params_path.name}")
+        print(f"  alpha_0: [{yoo_p['alpha_0'].min():.3f}, {yoo_p['alpha_0'].max():.3f}]")
+        print(f"  lambda_: [{yoo_p['lambda_'].min():.3f}, {yoo_p['lambda_'].max():.3f}]")
+
+        rng = np.random.default_rng(args.seed)
+        param_list = []
+        # Shuffle pids so sampling order is random; sample with replacement
+        # if n_params > n_yoo
+        shuffled = yoo_p.sample(frac=1, random_state=args.seed).reset_index(drop=True)
+        n_yoo = len(shuffled)
+        for i in range(args.n_params):
+            # Take the actual fitted values for a random yoo pid
+            base = shuffled.iloc[i % n_yoo]
+            # Add small Gaussian perturbation to generate a unique nearby param set
+            a0 = float(np.clip(
+                base['alpha_0'] + rng.normal(0, args.perturb_scale),
+                0.01, 1.0))
+            lam = float(np.clip(
+                base['lambda_'] + rng.normal(0, args.perturb_scale),
+                0.01, 1.0))
+            param_list.append((a0, lam))
+        print(f"Generated {len(param_list)} perturbed param sets "
+              f"(perturb_scale={args.perturb_scale})")
+
     else:
         rng = np.random.default_rng(args.seed)
         alpha_0s = rng.uniform(args.alpha_0_min, args.alpha_0_max, args.n_params)
