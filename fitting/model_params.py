@@ -122,7 +122,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
         },
     },
     "task_binary": {
@@ -145,7 +145,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
         },
     },
     "task_binary": {
@@ -156,7 +156,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
         },
     },
 }

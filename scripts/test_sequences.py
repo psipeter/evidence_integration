@@ -121,8 +121,15 @@ def run_models_on_sequences(seq_dir, output_dir, tasks, models,
 
 
 STD_STYLES = {
-    'low':  {'ls': '--', 'alpha': 0.6, 'label_suffix': ' (low σ)'},
-    'high': {'ls': '-',  'alpha': 1.0, 'label_suffix': ' (high σ)'},
+    'low':  {'ls': ':',  'alpha': 0.85, 'label_suffix': ', low σ'},
+    'high': {'ls': '-',  'alpha': 1.0,  'label_suffix': ', high σ'},
+    None:   {'ls': '-',  'alpha': 1.0,  'label_suffix': ''},
+}
+
+# (q=0 → low late Δ, q=3 → high late Δ)
+DELTA_STYLES = {
+    'low':  {'lw': 1.2, 'label': 'low Δ'},
+    'high': {'lw': 2.2, 'label': 'high Δ'},
 }
 
 def std_condition_label(val):
@@ -308,29 +315,30 @@ def _blank(ax, msg='No data\n(noisy models only)'):
 
 
 def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None):
-    """A/H: RMSE vs obs, Q1 vs Q4 split by mean late |Δresponse|.
-    For continuous task, overlays low-σ (dashed) and high-σ (solid) sequences."""
+    """A/H: RMSE vs obs.
+    Line weight → late Δ group (thin=low, thick=high).
+    Linestyle   → σ condition (solid=high σ, dotted=low σ).
+    Colour      → model type."""
     err_df = compute_task_error(df)
     if err_df.empty: _blank(ax, 'No data'); return
 
-    has_std = ('std_condition' in df.columns and df['std_condition'].notna().any())
+    has_std  = ('std_condition' in df.columns and df['std_condition'].notna().any())
     std_vals = sorted(df['std_condition'].dropna().unique()) if has_std else [None]
 
     handles, labels = [], []
     for mt in [m for m in ALL_MODELS if m in err_df['model_type'].unique()]:
         color = palette.get(mt, '0.5')
         for std_val in std_vals:
+            scond = std_condition_label(std_val) if std_val is not None else None
+            sty   = STD_STYLES[scond]
             if std_val is not None:
-                df_s     = df[(df.model_type == mt) & (df['std_condition'] == std_val)]
+                df_s      = df[(df.model_type == mt) & (df['std_condition'] == std_val)]
                 trial_ids = df_s['trial'].unique()
-                err_s    = err_df[(err_df['model_id'].isin(df_s['model_id'].unique())) &
-                                  (err_df['trial'].isin(trial_ids))]
-                scond    = std_condition_label(std_val)
-                sty      = STD_STYLES[scond]
+                err_s     = err_df[(err_df['model_id'].isin(df_s['model_id'].unique())) &
+                                   (err_df['trial'].isin(trial_ids))]
             else:
-                df_s      = df[df.model_type == mt]
-                err_s     = err_df[err_df['model_type'] == mt]
-                sty       = {'ls': '-', 'alpha': 1.0, 'label_suffix': ''}
+                df_s  = df[df.model_type == mt]
+                err_s = err_df[err_df['model_type'] == mt]
 
             bins_dict = late_delta_quartiles(df_s)
             if len(bins_dict) < 4:
@@ -340,23 +348,23 @@ def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None):
                              ax=ax, legend=False)
                 handles.append(Line2D([0],[0], color=color, lw=1.8,
                                       ls=sty['ls'], alpha=sty['alpha']))
-                labels.append(mt + sty['label_suffix'])
+                labels.append(f"{mt}{sty['label_suffix']}")
                 continue
 
             bins = pd.Series(bins_dict)
-            for q, base_lw, base_alpha, base_ls in [(0, 1.5, 0.4, '--'),
-                                                     (3, 1.8, 1.0, '-')]:
+            for q, dsty_key in [(0, 'low'), (3, 'high')]:
                 q_mids = bins[bins == q].index.tolist()
                 if not q_mids: continue
                 q_data = err_s[err_s['model_id'].isin(q_mids)]
                 if q_data.empty: continue
-                ls    = sty['ls'] if (q == 3 and sty['ls'] == '--') else base_ls if std_val is None else (sty['ls'] if q == 3 else '--')
-                alpha = base_alpha * sty['alpha']
+                dsty  = DELTA_STYLES[dsty_key]
                 sns.lineplot(data=q_data, x='observation', y='err',
-                             color=color, lw=base_lw, alpha=alpha,
-                             linestyle=ls, errorbar='ci', ax=ax, legend=False)
-                lbl = ('Q1 (low Δ)' if q == 0 else 'Q4 (high Δ)') + sty['label_suffix']
-                handles.append(Line2D([0],[0], color=color, lw=base_lw, alpha=alpha, ls=ls))
+                             color=color, lw=dsty['lw'], alpha=sty['alpha'],
+                             linestyle=sty['ls'], errorbar='ci',
+                             ax=ax, legend=False)
+                lbl = f"{mt}: {dsty['label']}{sty['label_suffix']}"
+                handles.append(Line2D([0],[0], color=color, lw=dsty['lw'],
+                                      alpha=sty['alpha'], ls=sty['ls']))
                 labels.append(lbl)
 
     ax.set_xlabel('Observation'); ax.set_ylabel('RMSE vs true mean')
@@ -401,8 +409,10 @@ def plot_B(ax, df, palette, sub_df=None, sub_label=None):
 
 
 def plot_C(ax, df, palette, sub_df=None, sub_label=None):
-    """C/J: |Δresponse| vs obs, Q1 vs Q4 split by mean late |Δresponse|.
-    For continuous task, overlays low-σ (dashed) and high-σ (solid) sequences."""
+    """C/J: |Δresponse| vs obs.
+    Line weight → late Δ group (thin=low, thick=high).
+    Linestyle   → σ condition (solid=high σ, dotted=low σ).
+    Colour      → model type."""
     dlt_all = compute_abs_delta(df)
     if dlt_all.empty: _blank(ax, 'No data'); return
 
@@ -413,17 +423,16 @@ def plot_C(ax, df, palette, sub_df=None, sub_label=None):
     for mt in [m for m in ALL_MODELS if m in dlt_all['model_type'].unique()]:
         color = palette.get(mt, '0.5')
         for std_val in std_vals:
+            scond = std_condition_label(std_val) if std_val is not None else None
+            sty   = STD_STYLES[scond]
             if std_val is not None:
                 df_s      = df[(df.model_type == mt) & (df['std_condition'] == std_val)]
                 trial_ids = df_s['trial'].unique()
                 dlt_s     = dlt_all[(dlt_all['model_id'].isin(df_s['model_id'].unique())) &
                                     (dlt_all['trial'].isin(trial_ids))]
-                scond     = std_condition_label(std_val)
-                sty       = STD_STYLES[scond]
             else:
                 df_s  = df[df.model_type == mt]
                 dlt_s = dlt_all[dlt_all['model_type'] == mt]
-                sty   = {'ls': '-', 'alpha': 1.0, 'label_suffix': ''}
 
             bins_dict = late_delta_quartiles(df_s)
             if len(bins_dict) < 4:
@@ -433,23 +442,23 @@ def plot_C(ax, df, palette, sub_df=None, sub_label=None):
                              ax=ax, legend=False)
                 handles.append(Line2D([0],[0], color=color, lw=1.8,
                                       ls=sty['ls'], alpha=sty['alpha']))
-                labels.append(mt + sty['label_suffix'])
+                labels.append(f"{mt}{sty['label_suffix']}")
                 continue
 
             bins = pd.Series(bins_dict)
-            for q, base_lw, base_alpha, base_ls in [(0, 1.5, 0.4, '--'),
-                                                     (3, 1.8, 1.0, '-')]:
+            for q, dsty_key in [(0, 'low'), (3, 'high')]:
                 q_mids = bins[bins == q].index.tolist()
                 if not q_mids: continue
                 q_data = dlt_s[dlt_s['model_id'].isin(q_mids)]
                 if q_data.empty: continue
-                ls    = sty['ls'] if q == 3 and sty['ls'] == '--' else base_ls if std_val is None else (sty['ls'] if q == 3 else '--')
-                alpha = base_alpha * sty['alpha']
+                dsty  = DELTA_STYLES[dsty_key]
                 sns.lineplot(data=q_data, x='observation', y='delta',
-                             color=color, lw=base_lw, alpha=alpha,
-                             linestyle=ls, errorbar='ci', ax=ax, legend=False)
-                lbl = ('Q1 (low Δ)' if q == 0 else 'Q4 (high Δ)') + sty['label_suffix']
-                handles.append(Line2D([0],[0], color=color, lw=base_lw, alpha=alpha, ls=ls))
+                             color=color, lw=dsty['lw'], alpha=sty['alpha'],
+                             linestyle=sty['ls'], errorbar='ci',
+                             ax=ax, legend=False)
+                lbl = f"{mt}: {dsty['label']}{sty['label_suffix']}"
+                handles.append(Line2D([0],[0], color=color, lw=dsty['lw'],
+                                      alpha=sty['alpha'], ls=sty['ls']))
                 labels.append(lbl)
 
     ax.set_xlabel('Observation'); ax.set_ylabel('Mean |Δresponse|')
@@ -594,10 +603,10 @@ def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
 
             for pid in q1_ids:
                 rows.append({'model_type': mt, 'std_condition': scond,
-                             'group': f'Q1{grp_pfx}', 'rmse': m.loc[pid, 'rmse']})
+                             'group': f'low Δ{grp_pfx}', 'rmse': m.loc[pid, 'rmse']})
             for pid in q4_ids:
                 rows.append({'model_type': mt, 'std_condition': scond,
-                             'group': f'Q4{grp_pfx}', 'rmse': m.loc[pid, 'rmse']})
+                             'group': f'high Δ{grp_pfx}', 'rmse': m.loc[pid, 'rmse']})
 
             q1_rmse = m.loc[q1_ids, 'rmse'].values
             q4_rmse = m.loc[q4_ids, 'rmse'].values
@@ -613,7 +622,7 @@ def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
     plot_df  = pd.DataFrame(rows)
     # Order groups: Q1 low, Q4 low, Q1 high, Q4 high (or just Q1, Q4 if no std split)
     grp_order = sorted(plot_df['group'].unique(),
-                       key=lambda s: ('high' in s, 'Q4' in s))
+                       key=lambda s: ('high σ' in s, s.startswith('high Δ')))
     mt_order  = [m for m in ALL_MODELS if m in plot_df['model_type'].unique()]
     pal_map   = {mt: palette.get(mt, '0.5') for mt in mt_order}
 
@@ -627,8 +636,8 @@ def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
     for i, ann in enumerate(sig_annotations):
         stars = pvalue_to_stars(ann['p'])
         grp_pfx = ann['grp_pfx']
-        q1_lbl  = f'Q1{grp_pfx}'
-        q4_lbl  = f'Q4{grp_pfx}'
+        q1_lbl  = f'low Δ{grp_pfx}'
+        q4_lbl  = f'high Δ{grp_pfx}'
         if q1_lbl not in grp_order or q4_lbl not in grp_order: continue
         n_hue  = len(mt_order)
         offset = (mt_order.index(ann['mt']) - (n_hue - 1) / 2) * (0.8 / n_hue)
@@ -640,8 +649,9 @@ def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
         ax.text((x_lo + x_hi) / 2, y + y_step * 0.05,
                 stars, ha='center', va='bottom', fontsize=9, color='0.3')
 
-    ax.set_xlabel(f'Late |Δresponse| group (obs {late_start}–{n_obs})')
-    ax.set_ylabel(f'RMSE vs true mean (obs {late_start}-{n_obs})')
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    ax.tick_params(axis='x', rotation=45)
     ax.set_ylim(bottom=0)
     leg = ax.get_legend()
     if leg: leg.remove()
