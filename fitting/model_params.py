@@ -91,6 +91,74 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons": 200, "n_neurons_counting": 1000},  # 30 obs/trial
         },
     },
+    "task_continuous": {
+        "Mean": {},
+        "RL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},
+        },
+    },
+    "task_binary": {
+        "Mean": {},
+        "RL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},
+        },
+    },
+
+    "task_continuous": {
+        "Mean": {},
+        "RL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+        },
+    },
+    "task_binary": {
+        "Mean": {},
+        "RL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+        },
+    },
+
+    "task_continuous": {
+        "Mean": {},
+        "RL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+        },
+    },
+    "task_binary": {
+        "Mean": {},
+        "RL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NEF": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+        },
+    },
 }
 
 # Parameter ranges for MLE fitting (sim_db / fit_mle.py).

@@ -57,7 +57,7 @@ from models.counting_integrator import (
 from utils.paths import data_path
 
 from fitting.model_params import _NEF_FIXED
-from utils.carrabin_transform import apply_carrabin_transform
+from utils.binary_transform import apply_binary_transform
 
 PARAM_DEFAULTS: dict = {
     **_NEF_FIXED,
@@ -316,7 +316,22 @@ def run(
     dataset = pfull["dataset"]
     pid = int(pfull["pid"])
 
-    human_pid = pd.read_pickle(data_path(f"{dataset}.pkl")).query("pid == @pid")
+    # For new task datasets, load from sequence pkl (no real human data yet).
+    # The sequence pkl has the same trial/observation/value structure as
+    # carrabin/yoo but with a dummy pid column added here.
+    _TASK_DATASETS = frozenset({"task_continuous", "task_binary"})
+    if dataset in _TASK_DATASETS:
+        _seq_path = data_path(f"{dataset.replace('task_', '')}_sequences.pkl")
+        if not _seq_path.exists():
+            # Fall back to task/sequences/ directory
+            _seq_path = Path(__file__).resolve().parents[1] / "task" / "sequences" / f"{dataset.replace('task_', '')}_sequences.pkl"
+        human_pid = pd.read_pickle(_seq_path)
+        if "pid" not in human_pid.columns:
+            human_pid = human_pid.copy()
+            human_pid["pid"] = 0  # dummy pid
+        human_pid = human_pid[human_pid["pid"] == min(human_pid["pid"].unique())]
+    else:
+        human_pid = pd.read_pickle(data_path(f"{dataset}.pkl")).query("pid == @pid")
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
@@ -341,6 +356,9 @@ def run(
         t_trial = time.time()
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
+        # Normalise continuous task values from [-100,100] to [-1,1]
+        if dataset == "task_continuous":
+            obs_values = obs_values / 100.0
         # seed = trial number directly
         p = {**pfull, "seed": int(trial)}
         if _activity_map is not None:
@@ -374,7 +392,7 @@ def run(
             }
             rows.append(entry)
 
-    out = apply_carrabin_transform(pd.DataFrame(rows), dataset)
+    out = apply_binary_transform(pd.DataFrame(rows), dataset)
     if save_probes and all_probe_data:
         fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
         pd.to_pickle(all_probe_data, data_path(fname))
@@ -390,7 +408,7 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         type=str,
         default="carrabin",
-        choices=("carrabin", "yoo"),
+        choices=("carrabin", "yoo", "task_continuous", "task_binary"),
     )
     p.add_argument("--pid", type=int, default=1)
     p.add_argument("--model_type", type=str, default="NEF")

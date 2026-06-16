@@ -134,7 +134,7 @@ def run_models_on_sequences(seq_dir, output_dir, tasks, models,
 N_GROUP       = 10
 SMOOTH        = 3       # window for U-shape detection
 SMOOTH_WINDOW = 3       # window for response smoothing before all metrics
-ALL_MODELS = ['RL_lambda']
+ALL_MODELS = ['RL_lambda', 'NEF']
 
 
 def subsample_df(df, n_trials, n_obs, seed=42):
@@ -916,8 +916,8 @@ def main():
 
     print(f"Loading {pkl}...")
     df = pd.read_pickle(pkl)
-    df = df[df['model_type'] == 'RL_lambda'].copy()
-    print(f"  {len(df)} rows after filtering to RL_lambda, "
+    df = df[df['model_type'].isin(ALL_MODELS)].copy()
+    print(f"  {len(df)} rows, models={df['model_type'].unique().tolist()}, "
           f"tasks={df['task'].unique().tolist()}, "
           f"model_ids={df['model_id'].nunique()}")
 
@@ -952,10 +952,11 @@ def main():
         sub_bin = sub_cont = None
         sub_label = None
 
-    # Palette keyed by model_type
-    models  = sorted(df['model_type'].unique().tolist())
-    pal     = get_palette(len(models) + 1)
-    palette = {m: pal[i] for i, m in enumerate(models)}
+    # Palette keyed by model_type — RL_lambda first, NEF second
+    model_order = ['RL_lambda', 'NEF'] + [m for m in sorted(df['model_type'].unique()) if m not in ('RL_lambda','NEF')]
+    model_order = [m for m in model_order if m in df['model_type'].unique()]
+    pal     = get_palette(len(model_order) + 1)
+    palette = {m: pal[i] for i, m in enumerate(model_order)}
 
     # ── Layout: 3 rows × 6 cols
     # Row 1 (A–F): Binary task

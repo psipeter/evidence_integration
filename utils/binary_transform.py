@@ -60,7 +60,7 @@ def apply_binary_transform(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
     DataFrame with `response_raw` added and `response` transformed where
     appropriate.
     """
-    _TRANSFORM_DATASETS = frozenset({'carrabin', 'task_continuous', 'task_binary'})
+    _TRANSFORM_DATASETS = frozenset({'carrabin', 'task_binary'})  # task_continuous uses raw responses like yoo
 
     df = df.copy()
     df["response_raw"] = df["response"]
