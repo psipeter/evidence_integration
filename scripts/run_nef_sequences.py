@@ -1,7 +1,7 @@
 """
 scripts/run_nef_sequences.py
 ============================
-Run NEF on test sequences for one lambda_ value (fixed alpha_0=0.5).
+Run NEF on test sequences for one lambda_ value (fixed alpha_0=1.0).
 Lambda is specified by index into a uniform grid matching RL_lambda simulation.
 Saves to a separate per-index pkl so parallel runs don't conflict.
 Collect results with scripts/collect_nef_sequences.py afterwards.
@@ -25,7 +25,7 @@ from models.NEF import run as nef_run
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import resolve_run_folder
 
-ALPHA_0   = 0.5
+ALPHA_0   = 1.0
 N_LAMBDAS = 100
 LAMBDAS   = np.linspace(0.01, 0.99, N_LAMBDAS)
 

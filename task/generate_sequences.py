@@ -21,11 +21,8 @@ Generative distributions
 ------------------------
   continuous : Normal(true_mean, true_std)
                true_mean ~ Uniform(mean_range)
-               true_std  : one of two fixed values (std_low, std_high),
-                           with n_unique_sequences split 50/50 between them.
-               values clipped/redrawn to [value_min, value_max] (integers)
-               The 'std_condition' column stores the numeric std value so
-               panels can be split by low vs high std in analysis.
+               true_std  : fixed value (--std_fixed, default 20)
+               values clipped to [value_min, value_max] (integers)
 
   binary     : Bernoulli(true_p)
                true_p ~ Uniform(p_range)
@@ -33,16 +30,10 @@ Generative distributions
 
 Rejection sampling criteria (applied to structured sequences only)
 -------------------------------------------------------------------
-  Prefix plausibility check is removed for continuous — with only 3 prefix
-  obs and two distinct std values, the variance is too high for the check
-  to be reliable, and check_sequences.py optimisation implicitly guards
-  against misleading prefixes via the RMSE shape score.
-  Binary retains the log-probability check.
-
-  Outlier cap
-       continuous : count(|obs - true_mean| > outlier_sigma * true_std)
-                    <= max_outliers  (applied over full sequence)
-       binary     : not applicable (no concept of outlier for Bernoulli)
+  Continuous: no rejection sampling. Observations are clipped to
+  [value_min, value_max]; check_sequences.py scores seeds on RMSE shape
+  and decay quality, implicitly rejecting bad seeds.
+  Binary: prefix log-probability check retained.
 
 Parameter distribution coverage
 ---------------------------------
@@ -108,30 +99,16 @@ def make_rng(seed: int) -> np.random.Generator:
 # ---------------------------------------------------------------------------
 # Parameter grids (for even coverage)
 # ---------------------------------------------------------------------------
-def continuous_param_grid(n: int, mean_range, std_low, std_high, rng):
+def continuous_param_grid(n: int, mean_range, std_fixed, rng):
     """
-    Generate n (true_mean, true_std) parameter sets, split 50/50 between
-    std_low and std_high. true_mean is tiled evenly across mean_range within
-    each std condition so both conditions cover the full mean range.
+    Generate n (true_mean, true_std) parameter sets with a single fixed std.
+    true_mean is tiled evenly across mean_range.
     """
-    n_low  = n // 2
-    n_high = n - n_low  # handles odd n
-
-    def mean_grid(k):
-        edges = np.linspace(mean_range[0], mean_range[1], k + 1)
-        return [round(rng.uniform(edges[i], edges[i+1]), 4) for i in range(k)]
-
-    means_low  = mean_grid(n_low)
-    means_high = mean_grid(n_high)
-    rng.shuffle(means_low)
-    rng.shuffle(means_high)
-
-    params = ([(mu, std_low)  for mu in means_low] +
-              [(mu, std_high) for mu in means_high])
+    edges = np.linspace(mean_range[0], mean_range[1], n + 1)
+    means = [round(rng.uniform(edges[i], edges[i+1]), 4) for i in range(n)]
+    params = [(mu, std_fixed) for mu in means]
     rng.shuffle(params)
     return params
-
-
 def binary_param_grid(n: int, p_range, rng):
     """
     Tile true_p space into n equal bins and sample one point per bin.
@@ -187,40 +164,25 @@ def check_prefix_plausibility_binary(prefix, true_p, plausibility_threshold=1e-4
 
 
 
-def check_outlier_cap(sequence, true_mean, true_std, outlier_sigma, max_outliers, task):
-    """
-    Returns True if the number of outliers in the full sequence <= max_outliers.
-    Only meaningful for continuous task.
-    """
-    if task == 'binary':
-        return True
-    n_outliers = sum(
-        abs(v - true_mean) > outlier_sigma * true_std for v in sequence
-    )
-    return n_outliers <= max_outliers
 
 
-# ---------------------------------------------------------------------------
-# Sequence builders
-# ---------------------------------------------------------------------------
 def build_structured_sequence(rng, task, true_mean, true_std, true_p,
-                               seq_length, prefix_length,
-                               outlier_sigma, max_outliers):
+                               seq_length, prefix_length):
     """
-    Build one structured sequence with rejection sampling.
-    Returns list of values of length seq_length, or raises RuntimeError.
+    Build one structured sequence with rejection sampling (binary only).
+    Returns (sequence, prefix) of length seq_length and prefix_length.
+    Continuous sequences are never rejected — observations are simply clipped.
     """
     full_repeat = (prefix_length == 0 or prefix_length >= seq_length)
     effective_prefix_len = seq_length if full_repeat else prefix_length
 
     for attempt in range(MAX_REJECTION_ATTEMPTS):
-        # Draw the prefix
         if task == 'continuous':
             prefix = draw_continuous_obs(rng, true_mean, true_std, effective_prefix_len)
         else:
             prefix = draw_binary_obs(rng, true_p, effective_prefix_len)
 
-        # Binary only: check prefix plausibility (continuous: always accept)
+        # Binary only: check prefix plausibility
         if task == 'binary' and not check_prefix_plausibility_binary(
                 prefix, true_p, 1e-4):
             continue
@@ -228,7 +190,6 @@ def build_structured_sequence(rng, task, true_mean, true_std, true_p,
         if full_repeat:
             sequence = prefix
         else:
-            # Draw the random tail
             tail_len = seq_length - effective_prefix_len
             if task == 'continuous':
                 tail = draw_continuous_obs(rng, true_mean, true_std, tail_len)
@@ -236,35 +197,16 @@ def build_structured_sequence(rng, task, true_mean, true_std, true_p,
                 tail = draw_binary_obs(rng, true_p, tail_len)
             sequence = prefix + tail
 
-        # Check outlier cap on full sequence
-        if not check_outlier_cap(sequence, true_mean, true_std,
-                                  outlier_sigma, max_outliers, task):
-            continue
-
         return sequence, prefix
 
     raise RuntimeError(
         f"Could not generate a valid structured sequence after "
         f"{MAX_REJECTION_ATTEMPTS} attempts "
-        f"(task={task}, true_mean={true_mean}, true_std={true_std}, "
-        f"true_p={true_p}). Consider relaxing rejection criteria."
+        f"(task={task}, true_mean={true_mean}, true_p={true_p})."
     )
 
-
-def build_random_sequence(rng, task, true_mean, true_std, true_p,
-                          seq_length, outlier_sigma, max_outliers):
-    """Build one fully random sequence (no prefix constraints, light outlier check)."""
-    for attempt in range(MAX_REJECTION_ATTEMPTS):
-        if task == 'continuous':
-            sequence = draw_continuous_obs(rng, true_mean, true_std, seq_length)
-        else:
-            sequence = draw_binary_obs(rng, true_p, seq_length)
-
-        if check_outlier_cap(sequence, true_mean, true_std,
-                              outlier_sigma, max_outliers, task):
-            return sequence
-
-    # Fallback without outlier cap
+def build_random_sequence(rng, task, true_mean, true_std, true_p, seq_length):
+    """Build one fully random sequence (no prefix constraints)."""
     if task == 'continuous':
         return draw_continuous_obs(rng, true_mean, true_std, seq_length)
     else:
@@ -297,18 +239,13 @@ def generate_task_sequences(task, args, rng):
     print(f"  Sequence length    : {seq_length}")
     print(f"  Prefix length      : {'full' if full_repeat else effective_prefix_len}")
     print(f"  Rejection criteria :")
-    print(f"    outlier_sigma    : {args.outlier_sigma}")
-    print(f"    max_outliers     : {args.max_outliers}")
 
     # ── Generate generative parameter sets ──────────────────────────────────
     if task == 'continuous':
         param_sets = continuous_param_grid(
-            n_unique, args.mean_range, args.std_low, args.std_high, rng)
-        n_low  = sum(1 for _, s in param_sets if s == args.std_low)
-        n_high = sum(1 for _, s in param_sets if s == args.std_high)
+            n_unique, args.mean_range, args.std_fixed, rng)
+        print(f"  Std fixed          : {args.std_fixed}")
         print(f"  Mean range         : {args.mean_range}")
-        print(f"  Std values         : low={args.std_low} ({n_low} seqs), "
-              f"high={args.std_high} ({n_high} seqs)")
     else:
         param_sets = binary_param_grid(n_unique, args.p_range, rng)
         print(f"  true_p range       : {args.p_range}")
@@ -327,7 +264,6 @@ def generate_task_sequences(task, args, rng):
         sequence, prefix = build_structured_sequence(
             rng, task, true_mean, true_std, true_p,
             seq_length, prefix_length,
-            args.outlier_sigma, args.max_outliers,
         )
         structured_templates.append({
             'qid':           qid,
@@ -382,7 +318,7 @@ def generate_task_sequences(task, args, rng):
 
         values = build_random_sequence(
             rng, task, true_mean, true_std, true_p,
-            seq_length, args.outlier_sigma, args.max_outliers)
+            seq_length)
 
         random_trials.append({
             'qid':           None,
@@ -497,22 +433,16 @@ def parse_args():
     p.add_argument('--mean_range', type=float, nargs=2, default=[-60.0, 60.0],
                    metavar=('LO', 'HI'),
                    help='Range of true_mean for continuous task')
-    p.add_argument('--std_low',  type=float, default=10.0,
-                   help='Low std value for continuous task (half of unique sequences)')
-    p.add_argument('--std_high', type=float, default=40.0,
-                   help='High std value for continuous task (half of unique sequences)')
+    p.add_argument('--std_fixed', type=float, default=20.0,
+                   help='Fixed std value for all continuous sequences')
 
     # Generative parameters — binary
     p.add_argument('--p_range', type=float, nargs=2, default=[0.25, 0.75],
                    metavar=('LO', 'HI'),
                    help='Range of true_p for binary task')
 
-    # Rejection sampling (prefix plausibility removed — covered by outlier cap
-    # and check_sequences.py optimisation)
-    p.add_argument('--outlier_sigma', type=float, default=2.0,
-                   help='Outlier threshold in units of true_std')
-    p.add_argument('--max_outliers', type=int, default=3,
-                   help='Maximum outliers allowed per sequence')
+    # No rejection sampling for continuous (clip + check_sequences.py suffice)
+    # Binary retains prefix plausibility check only
 
     # Output
     p.add_argument('--output_dir', type=str, default='task/sequences',
@@ -538,8 +468,7 @@ def main():
     assert 0 <= args.prefix_length <= args.seq_length, \
         f"--prefix_length must be in [0, seq_length={args.seq_length}]"
     assert args.mean_range[0] < args.mean_range[1], "--mean_range lo must be < hi"
-    assert args.std_low > 0, "--std_low must be > 0"
-    assert args.std_high > args.std_low, "--std_high must be > std_low"
+    assert args.std_fixed > 0, "--std_fixed must be positive"
     assert 0 < args.p_range[0] < args.p_range[1] < 1, \
         "--p_range must be strictly within (0, 1)"
 

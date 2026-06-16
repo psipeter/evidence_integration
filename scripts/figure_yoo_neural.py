@@ -36,6 +36,7 @@ from utils.plot_style import (
     label_panels,
     pvalue_to_stars,
 )
+from scripts.figure_yoo_temporal import _fit_lambda_curve_fit
 
 ENCODER_THRESHOLD = 0.5
 LAMBDA_N          = 10
@@ -447,18 +448,17 @@ def _plot_panel_b(ax, nef_dir: Path) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-# ── Panel D (N8) — Late delta group comparison ───────────────────────────────
+# ── Panel D (N8) — Lambda quartile group comparison ─────────────────────────
 
-def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
-    """Panel D (N8): Late performance error grouped by Q1 vs Q4 of late |delta response|.
+def _plot_panel_d_boxplot(ax, nef_dir: Path, run_folder: str) -> None:
+    """Panel D (N8) BACKUP — boxplot version: Late performance error for top vs bottom quartile of fitted λ.
 
-    Pids are split into Q1 (bottom 25%) and Q4 (top 25%) by mean |delta response|
-    in obs 21-30, separately for Human and NEF. Boxplots compare late performance
-    error between groups. Both sources show significantly higher late error in Q4.
-    Seaborn hue on model_type (Human/NEF) with group on x-axis.
+    Pids split into top quartile (high fitted λ, fast convergence, lower late error)
+    and bottom quartile (low fitted λ, slow convergence, higher late error),
+    separately for Human and NEF. Same λ fits as panels B/C.
     """
     from scipy.stats import ttest_ind
-    LATE_OBS = range(21, 31)
+    LATE_OBS = range(16, 31)
     yoo      = pd.read_pickle(data_path("yoo.pkl"))
     yoo_s    = yoo.sort_values(["pid","trial","observation"]).copy()
     yoo_s["true_mean"] = yoo_s.groupby(["pid","trial"])["value"].expanding().mean().values
@@ -466,50 +466,58 @@ def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
 
     pal = get_palette(2)
 
-    def late_metrics(df):
-        delta_rows = []
-        for (pid, trial), g in df.groupby(["pid","trial"]):
-            g = g.sort_values("observation").copy()
-            g["delta"] = g["response"].diff().abs()
-            delta_rows.append(g[g["observation"].isin(LATE_OBS)][["pid","delta"]])
-        mean_delta = pd.concat(delta_rows).dropna().groupby("pid")["delta"].mean()
+    def late_rmse(df):
         m = df.drop(columns=["true_mean"], errors="ignore").merge(
             true_map, on=["pid","trial","observation"], how="left")
         m = m[m["observation"].isin(LATE_OBS)]
-        rmse = (m.assign(sq=(m["response"] - m["true_mean"])**2)
+        return (m.assign(sq=(m["response"] - m["true_mean"])**2)
                  .groupby("pid")["sq"].mean().apply(np.sqrt))
-        return pd.DataFrame({"delta": mean_delta, "rmse": rmse}).dropna()
+
+    def lambda_quartile_split(df):
+        lam = _fit_lambda_curve_fit(df)
+        if len(lam) < 4:
+            return [], [], 0, 0
+        q1_cut = lam.quantile(0.25)
+        q4_cut = lam.quantile(0.75)
+        top_pids = lam[lam >= q4_cut].index.tolist()   # high λ → better
+        bot_pids = lam[lam <= q1_cut].index.tolist()   # low λ  → worse
+        return top_pids, bot_pids, len(top_pids), len(bot_pids)
 
     nef_resp_path = nef_dir / "NEF_yoo_responses.pkl"
     sources = [("Human", yoo, "0.4")]
     if nef_resp_path.exists():
         sources.append(("NEF", pd.read_pickle(nef_resp_path), pal[0]))
 
-    # Build long-format DataFrame
-    rows = []
-    sig_annotations = []
+    rows, sig_annotations = [], []
+    n_top_human = n_bot_human = 0
     for src_name, df, _ in sources:
-        m = late_metrics(df)
-        q1_cut = m["delta"].quantile(0.25)
-        q3_cut = m["delta"].quantile(0.75)
-        q1_pids = m[m["delta"] <= q1_cut].index.tolist()
-        q4_pids = m[m["delta"] >= q3_cut].index.tolist()
-        for pid in q1_pids:
-            rows.append({"model_type": src_name,
-                         "group": "Q1 (low)",
-                         "rmse": float(m.loc[pid, "rmse"])})
-        for pid in q4_pids:
-            rows.append({"model_type": src_name,
-                         "group": "Q4 (high)",
-                         "rmse": float(m.loc[pid, "rmse"])})
-        # Significance test Q1 vs Q4
-        t, p = ttest_ind(m.loc[m.index.isin(q1_pids), "rmse"].values,
-                         m.loc[m.index.isin(q4_pids), "rmse"].values)
+        top_pids, bot_pids, n_top, n_bot = lambda_quartile_split(df)
+        if src_name == "Human":
+            n_top_human, n_bot_human = n_top, n_bot
+        if not top_pids or not bot_pids:
+            continue
+        rmse = late_rmse(df)
+        for pid in top_pids:
+            if pid in rmse.index:
+                rows.append({"model_type": src_name,
+                             "group": "top quartile λ",
+                             "rmse": float(rmse.loc[pid])})
+        for pid in bot_pids:
+            if pid in rmse.index:
+                rows.append({"model_type": src_name,
+                             "group": "bottom quartile λ",
+                             "rmse": float(rmse.loc[pid])})
+        top_rmse = rmse[rmse.index.isin(top_pids)].values
+        bot_rmse = rmse[rmse.index.isin(bot_pids)].values
+        t, p = ttest_ind(top_rmse, bot_rmse)
         sig_annotations.append((src_name, p))
 
-    plot_df = pd.DataFrame(rows)
-    src_order   = [s for s, *_ in sources]
-    group_order = ["Q1 (low)", "Q4 (high)"]
+    if not rows:
+        _placeholder(ax, "No data"); return
+
+    plot_df     = pd.DataFrame(rows)
+    src_order   = [s for s, *_ in sources if s in plot_df["model_type"].unique()]
+    group_order = ["bottom quartile λ", "top quartile λ"]
     palette_map = {"Human": "0.5", "NEF": pal[0]}
 
     sns.boxplot(data=plot_df, x="group", y="rmse",
@@ -518,11 +526,8 @@ def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
                 palette=palette_map,
                 width=0.5, gap=0.1, fliersize=3, ax=ax)
 
-    # Significance bars — one per source, between Q1 and Q4
-    # get x positions: seaborn places dodged boxes at x +/- dodge_offset
     n_hue = len(src_order)
-    dodge = 0.4 / n_hue                 # approximate half-dodge width
-    x_positions = {}                     # (src, group) -> x_data_coord
+    x_positions = {}
     for g_idx, group in enumerate(group_order):
         for h_idx, src in enumerate(src_order):
             offset = (h_idx - (n_hue - 1) / 2) * (0.8 / n_hue)
@@ -531,8 +536,8 @@ def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
     y_max  = plot_df["rmse"].max()
     y_step = y_max * 0.14
     for i, (src_name, p) in enumerate(sig_annotations):
-        x_lo = x_positions[(src_name, "Q1 (low)")]
-        x_hi = x_positions[(src_name, "Q4 (high)")]
+        x_lo = x_positions.get((src_name, "top quartile λ"),    0)
+        x_hi = x_positions.get((src_name, "bottom quartile λ"), 1)
         y    = y_max + y_step * (i + 0.7)
         ax.plot([x_lo, x_lo, x_hi, x_hi],
                 [y - y_step * 0.2, y, y, y - y_step * 0.2],
@@ -541,11 +546,66 @@ def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
                 pvalue_to_stars(p), ha="center", va="bottom",
                 fontsize=9, color="0.3")
 
-    ax.set_xlabel("Late |" + "\u0394" + "response| group (obs 21-30)")
-    ax.set_ylabel("Performance error vs ground truth (obs 21-30)")
+    ax.tick_params(axis="x", rotation=30)
+    ax.set_xlabel("")
+    ax.set_ylabel("Performance error vs ground truth (obs 16-30)")
     ax.set_ylim(bottom=0)
     ax.legend(title="", fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_panel_d(ax, nef_dir: Path, run_folder: str) -> None:
+    """Panel D (N8): Fitted λ vs late performance error, scatter + regplot.
+
+    X: fitted λ per pid (same as panels B/C).
+    Y: mean RMSE vs cumulative mean (obs 16-30).
+    One scatter+regplot per source (Human, NEF), with r and p in legend.
+    """
+    LATE_OBS = range(16, 31)
+    yoo   = pd.read_pickle(data_path("yoo.pkl"))
+    yoo_s = yoo.sort_values(["pid","trial","observation"]).copy()
+    yoo_s["true_mean"] = yoo_s.groupby(["pid","trial"])["value"].expanding().mean().values
+    true_map = yoo_s[["pid","trial","observation","true_mean"]].drop_duplicates()
+
+    pal = get_palette(2)
+
+    def late_rmse(df):
+        m = df.drop(columns=["true_mean"], errors="ignore").merge(
+            true_map, on=["pid","trial","observation"], how="left")
+        m = m[m["observation"].isin(LATE_OBS)]
+        return (m.assign(sq=(m["response"] - m["true_mean"])**2)
+                 .groupby("pid")["sq"].mean().apply(np.sqrt))
+
+    nef_resp_path = nef_dir / "NEF_yoo_responses.pkl"
+    sources = [("Human", yoo, "0.4")]
+    if nef_resp_path.exists():
+        sources.append(("NEF", pd.read_pickle(nef_resp_path), pal[0]))
+
+    handles, labels_leg = [], []
+    for src_name, df, color in sources:
+        lam  = _fit_lambda_curve_fit(df)
+        rmse = late_rmse(df)
+        common = lam.index.intersection(rmse.index)
+        if len(common) < 5:
+            continue
+        plot_df = pd.DataFrame({"lambda_": lam[common], "rmse": rmse[common]})
+        r, p = pearsonr(plot_df["lambda_"], plot_df["rmse"])
+        ax.scatter(plot_df["lambda_"], plot_df["rmse"],
+                   color=color, s=30, alpha=0.75, zorder=3)
+        sns.regplot(data=plot_df, x="lambda_", y="rmse", scatter=False,
+                    color=color, ci=95, ax=ax, line_kws={"lw": 1.8})
+        handles.append(Line2D([0],[0], color=color, lw=1.8))
+        labels_leg.append(f"{src_name}, r={r:.2f}{pvalue_to_stars(p)}")
+
+    if not handles:
+        _placeholder(ax, "No data"); return
+
+    ax.set_xlabel("Fitted λ")
+    ax.set_ylabel("Performance error vs ground truth (obs 16-30)")
+    ax.set_ylim(bottom=0)
+    ax.legend(handles, labels_leg, fontsize=7, frameon=True, framealpha=0.9)
+    sns.despine(ax=ax, top=True, right=True)
+
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
@@ -553,8 +613,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder",     type=str, default="yoo")
     parser.add_argument("--nef_folder",     type=str, default="refit")
-    parser.add_argument("--ablation_folder",type=str, default=None,
-                        help="Folder with fitted/lambda0 ablation data for panel B")
+    parser.add_argument("--ablation_folder",type=str, default="yoo_ablation",
+                        help="Folder with fitted/lambda0 ablation data for panel C")
     args = parser.parse_args()
 
     nef_dir      = RUNS_DIR / args.nef_folder

@@ -120,16 +120,13 @@ def run_models_on_sequences(seq_dir, output_dir, tasks, models,
     return df
 
 
-STD_STYLES = {
-    'low':  {'ls': ':',  'alpha': 0.85, 'label_suffix': ', low σ'},
-    'high': {'ls': '-',  'alpha': 1.0,  'label_suffix': ', high σ'},
-    None:   {'ls': '-',  'alpha': 1.0,  'label_suffix': ''},
-}
-
-# (q=0 → low late Δ, q=3 → high late Δ)
-DELTA_STYLES = {
-    'low':  {'lw': 1.2, 'label': 'low Δ'},
-    'high': {'lw': 2.2, 'label': 'high Δ'},
+# 4 lambda quartile styles: Q1 (lowest λ) → Q4 (highest λ)
+# Colour encodes model type; linestyle+weight encode quartile
+LAMBDA_Q_STYLES = {
+    0: {'lw': 0.8,  'ls': ':',  'alpha': 0.5,  'label': 'Q1 (low λ)'},
+    1: {'lw': 1.2,  'ls': '--', 'alpha': 0.7,  'label': 'Q2'},
+    2: {'lw': 1.6,  'ls': '-.', 'alpha': 0.85, 'label': 'Q3'},
+    3: {'lw': 2.2,  'ls': '-',  'alpha': 1.0,  'label': 'Q4 (high λ)'},
 }
 
 def std_condition_label(val):
@@ -229,6 +226,23 @@ def late_delta_quartiles(df, n_late=3):
     bins = pd.qcut(late_dlt, q=4, labels=False, duplicates='drop')
     return bins.to_dict()
 
+def true_lambda_quartiles(df):
+    """Per-model_id true lambda from params_str → quartile (0=Q1 lowest, 3=Q4 highest)."""
+    lam_map = {}
+    for mid, g in df.groupby('model_id'):
+        ps = g['params_str'].iloc[0]
+        try:
+            lam = float(ps.split('lambda_=')[1].split()[0])
+            lam_map[mid] = lam
+        except (IndexError, ValueError):
+            pass
+    if len(lam_map) < 4:
+        return {}
+    lam_s = pd.Series(lam_map)
+    bins  = pd.qcut(lam_s, q=4, labels=False, duplicates='drop')
+    return bins.to_dict()
+
+
 def fit_lambda_mid(g, min_obs=2):
     """Fit power-law to |Δresponse| curve for one model_id. Returns (lambda, p)."""
     rows = []
@@ -315,57 +329,37 @@ def _blank(ax, msg='No data\n(noisy models only)'):
 
 
 def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None):
-    """A/H: RMSE vs obs.
-    Line weight → late Δ group (thin=low, thick=high).
-    Linestyle   → σ condition (solid=high σ, dotted=low σ).
-    Colour      → model type."""
+    """A/H: RMSE vs obs, split by true lambda quartile (Q1=lowest, Q4=highest).
+    Linestyle+weight → quartile. Colour → model type."""
     err_df = compute_task_error(df)
     if err_df.empty: _blank(ax, 'No data'); return
 
-    has_std  = ('std_condition' in df.columns and df['std_condition'].notna().any())
-    std_vals = sorted(df['std_condition'].dropna().unique()) if has_std else [None]
-
     handles, labels = [], []
     for mt in [m for m in ALL_MODELS if m in err_df['model_type'].unique()]:
-        color = palette.get(mt, '0.5')
-        for std_val in std_vals:
-            scond = std_condition_label(std_val) if std_val is not None else None
-            sty   = STD_STYLES[scond]
-            if std_val is not None:
-                df_s      = df[(df.model_type == mt) & (df['std_condition'] == std_val)]
-                trial_ids = df_s['trial'].unique()
-                err_s     = err_df[(err_df['model_id'].isin(df_s['model_id'].unique())) &
-                                   (err_df['trial'].isin(trial_ids))]
-            else:
-                df_s  = df[df.model_type == mt]
-                err_s = err_df[err_df['model_type'] == mt]
+        color    = palette.get(mt, '0.5')
+        df_mt    = df[df.model_type == mt]
+        err_mt   = err_df[err_df['model_type'] == mt]
+        bins_dict = true_lambda_quartiles(df_mt)
+        if len(bins_dict) < 4:
+            sns.lineplot(data=err_mt, x='observation', y='err',
+                         color=color, lw=1.8, errorbar='ci', ax=ax, legend=False)
+            handles.append(Line2D([0],[0], color=color, lw=1.8))
+            labels.append(mt); continue
 
-            bins_dict = late_delta_quartiles(df_s)
-            if len(bins_dict) < 4:
-                sns.lineplot(data=err_s, x='observation', y='err',
-                             color=color, lw=1.8, errorbar='ci',
-                             linestyle=sty['ls'], alpha=sty['alpha'],
-                             ax=ax, legend=False)
-                handles.append(Line2D([0],[0], color=color, lw=1.8,
-                                      ls=sty['ls'], alpha=sty['alpha']))
-                labels.append(f"{mt}{sty['label_suffix']}")
-                continue
-
-            bins = pd.Series(bins_dict)
-            for q, dsty_key in [(0, 'low'), (3, 'high')]:
-                q_mids = bins[bins == q].index.tolist()
-                if not q_mids: continue
-                q_data = err_s[err_s['model_id'].isin(q_mids)]
-                if q_data.empty: continue
-                dsty  = DELTA_STYLES[dsty_key]
-                sns.lineplot(data=q_data, x='observation', y='err',
-                             color=color, lw=dsty['lw'], alpha=sty['alpha'],
-                             linestyle=sty['ls'], errorbar='ci',
-                             ax=ax, legend=False)
-                lbl = f"{mt}: {dsty['label']}{sty['label_suffix']}"
-                handles.append(Line2D([0],[0], color=color, lw=dsty['lw'],
-                                      alpha=sty['alpha'], ls=sty['ls']))
-                labels.append(lbl)
+        bins = pd.Series(bins_dict)
+        for q in range(4):
+            q_mids = bins[bins == q].index.tolist()
+            if not q_mids: continue
+            q_data = err_mt[err_mt['model_id'].isin(q_mids)]
+            if q_data.empty: continue
+            sty = LAMBDA_Q_STYLES[q]
+            sns.lineplot(data=q_data, x='observation', y='err',
+                         color=color, lw=sty['lw'], alpha=sty['alpha'],
+                         linestyle=sty['ls'], errorbar='ci', ax=ax, legend=False)
+            lbl = f"{mt}: {sty['label']}"
+            handles.append(Line2D([0],[0], color=color, lw=sty['lw'],
+                                  alpha=sty['alpha'], ls=sty['ls']))
+            labels.append(lbl)
 
     ax.set_xlabel('Observation'); ax.set_ylabel('RMSE vs true mean')
     ax.set_ylim(bottom=0)
@@ -409,57 +403,37 @@ def plot_B(ax, df, palette, sub_df=None, sub_label=None):
 
 
 def plot_C(ax, df, palette, sub_df=None, sub_label=None):
-    """C/J: |Δresponse| vs obs.
-    Line weight → late Δ group (thin=low, thick=high).
-    Linestyle   → σ condition (solid=high σ, dotted=low σ).
-    Colour      → model type."""
+    """C/J: |Δresponse| vs obs, split by true lambda quartile (Q1=lowest, Q4=highest).
+    Linestyle+weight → quartile. Colour → model type."""
     dlt_all = compute_abs_delta(df)
     if dlt_all.empty: _blank(ax, 'No data'); return
 
-    has_std  = ('std_condition' in df.columns and df['std_condition'].notna().any())
-    std_vals = sorted(df['std_condition'].dropna().unique()) if has_std else [None]
-
     handles, labels = [], []
     for mt in [m for m in ALL_MODELS if m in dlt_all['model_type'].unique()]:
-        color = palette.get(mt, '0.5')
-        for std_val in std_vals:
-            scond = std_condition_label(std_val) if std_val is not None else None
-            sty   = STD_STYLES[scond]
-            if std_val is not None:
-                df_s      = df[(df.model_type == mt) & (df['std_condition'] == std_val)]
-                trial_ids = df_s['trial'].unique()
-                dlt_s     = dlt_all[(dlt_all['model_id'].isin(df_s['model_id'].unique())) &
-                                    (dlt_all['trial'].isin(trial_ids))]
-            else:
-                df_s  = df[df.model_type == mt]
-                dlt_s = dlt_all[dlt_all['model_type'] == mt]
+        color  = palette.get(mt, '0.5')
+        df_mt  = df[df.model_type == mt]
+        dlt_mt = dlt_all[dlt_all['model_type'] == mt]
+        bins_dict = true_lambda_quartiles(df_mt)
+        if len(bins_dict) < 4:
+            sns.lineplot(data=dlt_mt, x='observation', y='delta',
+                         color=color, lw=1.8, errorbar='ci', ax=ax, legend=False)
+            handles.append(Line2D([0],[0], color=color, lw=1.8))
+            labels.append(mt); continue
 
-            bins_dict = late_delta_quartiles(df_s)
-            if len(bins_dict) < 4:
-                sns.lineplot(data=dlt_s, x='observation', y='delta',
-                             color=color, lw=1.8, errorbar='ci',
-                             linestyle=sty['ls'], alpha=sty['alpha'],
-                             ax=ax, legend=False)
-                handles.append(Line2D([0],[0], color=color, lw=1.8,
-                                      ls=sty['ls'], alpha=sty['alpha']))
-                labels.append(f"{mt}{sty['label_suffix']}")
-                continue
-
-            bins = pd.Series(bins_dict)
-            for q, dsty_key in [(0, 'low'), (3, 'high')]:
-                q_mids = bins[bins == q].index.tolist()
-                if not q_mids: continue
-                q_data = dlt_s[dlt_s['model_id'].isin(q_mids)]
-                if q_data.empty: continue
-                dsty  = DELTA_STYLES[dsty_key]
-                sns.lineplot(data=q_data, x='observation', y='delta',
-                             color=color, lw=dsty['lw'], alpha=sty['alpha'],
-                             linestyle=sty['ls'], errorbar='ci',
-                             ax=ax, legend=False)
-                lbl = f"{mt}: {dsty['label']}{sty['label_suffix']}"
-                handles.append(Line2D([0],[0], color=color, lw=dsty['lw'],
-                                      alpha=sty['alpha'], ls=sty['ls']))
-                labels.append(lbl)
+        bins = pd.Series(bins_dict)
+        for q in range(4):
+            q_mids = bins[bins == q].index.tolist()
+            if not q_mids: continue
+            q_data = dlt_mt[dlt_mt['model_id'].isin(q_mids)]
+            if q_data.empty: continue
+            sty = LAMBDA_Q_STYLES[q]
+            sns.lineplot(data=q_data, x='observation', y='delta',
+                         color=color, lw=sty['lw'], alpha=sty['alpha'],
+                         linestyle=sty['ls'], errorbar='ci', ax=ax, legend=False)
+            lbl = f"{mt}: {sty['label']}"
+            handles.append(Line2D([0],[0], color=color, lw=sty['lw'],
+                                  alpha=sty['alpha'], ls=sty['ls']))
+            labels.append(lbl)
 
     ax.set_xlabel('Observation'); ax.set_ylabel('Mean |Δresponse|')
     ax.set_ylim(bottom=0)
@@ -550,111 +524,47 @@ def plot_E(ax, df, palette, sub_df=None, sub_label=None):
 # ── Cross-task panels ───────────────────────────────────────────────────────
 
 def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
-    """F/M: Boxplot of late RMSE for Q1 vs Q4 of mean late |Δresponse|.
-    For continuous task, overlays low-σ and high-σ conditions side by side."""
-    from scipy.stats import ttest_ind
-
+    """F/M: True λ vs late RMSE — scatter + regplot per model type.
+    X: true lambda (from params_str). Y: mean RMSE in last 3 obs."""
     err_df = compute_task_error(df)
-    dlt_df = compute_abs_delta(df)
-    if err_df.empty or dlt_df.empty: _blank(ax, 'No data'); return
+    if err_df.empty: _blank(ax, 'No data'); return
 
     n_obs      = df['observation'].max()
     late_start = n_obs - 2  # last 3 obs
 
-    has_std  = ('std_condition' in df.columns and df['std_condition'].notna().any())
-    std_vals = sorted(df['std_condition'].dropna().unique()) if has_std else [None]
-
-    # Build rows for boxplot — one entry per (model_id, std_condition, Q group)
-    rows, sig_annotations = [], []
     handles, labels = [], []
-
     for mt in [m for m in ALL_MODELS if m in df['model_type'].unique()]:
-        color = palette.get(mt, '0.5')
-        for std_val in std_vals:
-            if std_val is not None:
-                df_s    = df[(df.model_type == mt) & (df['std_condition'] == std_val)]
-                scond   = std_condition_label(std_val)
-                sty     = STD_STYLES[scond]
-                grp_pfx = sty['label_suffix']   # ' (low σ)' or ' (high σ)'
-            else:
-                df_s    = df[df.model_type == mt]
-                scond   = 'all'
-                sty     = {'alpha': 1.0}
-                grp_pfx = ''
+        color  = palette.get(mt, '0.5')
+        df_mt  = df[df.model_type == mt]
 
-            trial_ids = df_s['trial'].unique()
-            pid_rows  = []
-            for mid in df_s['model_id'].unique():
-                ld = dlt_df[(dlt_df.model_id == mid) &
-                            (dlt_df.observation >= late_start) &
-                            (dlt_df['trial'].isin(trial_ids))]['delta'].mean()
-                le = err_df[(err_df.model_id == mid) &
-                            (err_df.observation >= late_start) &
-                            (err_df['trial'].isin(trial_ids))]['err'].mean()
-                if np.isfinite(ld) and np.isfinite(le):
-                    pid_rows.append({'model_id': mid, 'delta': ld, 'rmse': le})
-            if len(pid_rows) < 8: continue
+        # Build per-model_id (true_lambda, late_rmse) pairs
+        rows = []
+        for mid, g in df_mt.groupby('model_id'):
+            ps = g['params_str'].iloc[0]
+            try:
+                lam = float(ps.split('lambda_=')[1].split()[0])
+            except (IndexError, ValueError):
+                continue
+            late_err = (err_df[(err_df.model_id == mid) &
+                               (err_df.observation >= late_start)]['err'].mean())
+            if np.isfinite(late_err):
+                rows.append({'lambda_': lam, 'late_rmse': late_err})
+        if len(rows) < 5: continue
+        plot_df = pd.DataFrame(rows)
 
-            m = pd.DataFrame(pid_rows).set_index('model_id')
-            q1_cut = m['delta'].quantile(0.25)
-            q4_cut = m['delta'].quantile(0.75)
-            q1_ids = m[m['delta'] <= q1_cut].index.tolist()
-            q4_ids = m[m['delta'] >= q4_cut].index.tolist()
+        r, p = pearsonr(plot_df['lambda_'], plot_df['late_rmse'])
+        ax.scatter(plot_df['lambda_'], plot_df['late_rmse'],
+                   color=color, s=12, alpha=0.5, zorder=3)
+        sns.regplot(data=plot_df, x='lambda_', y='late_rmse', scatter=False,
+                    color=color, ci=95, ax=ax, line_kws={'lw': 1.8})
+        handles.append(Line2D([0],[0], color=color, lw=1.8))
+        labels.append(f"{mt}, r={r:.2f}{pvalue_to_stars(p)}")
 
-            for pid in q1_ids:
-                rows.append({'model_type': mt, 'std_condition': scond,
-                             'group': f'low Δ{grp_pfx}', 'rmse': m.loc[pid, 'rmse']})
-            for pid in q4_ids:
-                rows.append({'model_type': mt, 'std_condition': scond,
-                             'group': f'high Δ{grp_pfx}', 'rmse': m.loc[pid, 'rmse']})
-
-            q1_rmse = m.loc[q1_ids, 'rmse'].values
-            q4_rmse = m.loc[q4_ids, 'rmse'].values
-            t, p    = ttest_ind(q1_rmse, q4_rmse)
-            sig_annotations.append({'mt': mt, 'scond': scond, 'grp_pfx': grp_pfx,
-                                     'p': p, 'color': color,
-                                     'q1_mean': q1_rmse.mean(), 'q4_mean': q4_rmse.mean()})
-            handles.append(Line2D([0],[0], color=color, lw=2.0, alpha=sty['alpha']))
-            lbl = mt + grp_pfx
-            if lbl not in labels: labels.append(lbl)
-
-    if not rows: _blank(ax, 'No data'); return
-    plot_df  = pd.DataFrame(rows)
-    # Order groups: Q1 low, Q4 low, Q1 high, Q4 high (or just Q1, Q4 if no std split)
-    grp_order = sorted(plot_df['group'].unique(),
-                       key=lambda s: ('high σ' in s, s.startswith('high Δ')))
-    mt_order  = [m for m in ALL_MODELS if m in plot_df['model_type'].unique()]
-    pal_map   = {mt: palette.get(mt, '0.5') for mt in mt_order}
-
-    sns.boxplot(data=plot_df, x='group', y='rmse', order=grp_order,
-                hue='model_type', hue_order=mt_order, palette=pal_map,
-                width=0.5, gap=0.1, fliersize=3, ax=ax)
-
-    # Significance bars
-    y_max  = plot_df['rmse'].max()
-    y_step = y_max * 0.14
-    for i, ann in enumerate(sig_annotations):
-        stars = pvalue_to_stars(ann['p'])
-        grp_pfx = ann['grp_pfx']
-        q1_lbl  = f'low Δ{grp_pfx}'
-        q4_lbl  = f'high Δ{grp_pfx}'
-        if q1_lbl not in grp_order or q4_lbl not in grp_order: continue
-        n_hue  = len(mt_order)
-        offset = (mt_order.index(ann['mt']) - (n_hue - 1) / 2) * (0.8 / n_hue)
-        x_lo   = grp_order.index(q1_lbl) + offset
-        x_hi   = grp_order.index(q4_lbl) + offset
-        y      = y_max + y_step * (i + 0.7)
-        ax.plot([x_lo, x_lo, x_hi, x_hi],
-                [y - y_step*0.2, y, y, y - y_step*0.2], color='0.3', lw=1.2)
-        ax.text((x_lo + x_hi) / 2, y + y_step * 0.05,
-                stars, ha='center', va='bottom', fontsize=9, color='0.3')
-
-    ax.set_xlabel('')
-    ax.set_ylabel('')
-    ax.tick_params(axis='x', rotation=45)
+    if not handles: _blank(ax, 'No data'); return
+    ax.set_xlabel('True λ')
+    ax.set_ylabel('Late RMSE')
     ax.set_ylim(bottom=0)
-    leg = ax.get_legend()
-    if leg: leg.remove()
+    ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -892,7 +802,7 @@ def main():
     parser.add_argument('--tasks', nargs='+', default=['continuous','binary'])
     parser.add_argument('--models', nargs='+', default=['RL_lambda'])
     parser.add_argument('--seq_dir', default='task/sequences')
-    parser.add_argument('--alpha_0',    type=float, default=0.5,
+    parser.add_argument('--alpha_0',    type=float, default=1.0,
                         help='Fixed alpha_0 for RL_lambda scan')
     parser.add_argument('--n_lambdas',  type=int,   default=50,
                         help='Number of lambda_ values in uniform grid 0.01-0.99')
