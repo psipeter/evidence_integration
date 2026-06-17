@@ -85,3 +85,9 @@ task/sequences/sequences.pkl
 # Task sequence data files (superseded by task/sequences/*.pkl)
 data/task_continuous.pkl
 data/task_binary.pkl
+
+# Vite build output and npm dependencies
+task/node_modules/
+task/dist-continuous/
+task/dist-binary/
+task/dist/
