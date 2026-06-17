@@ -45,8 +45,8 @@ theory that the NEF realises biophysically, not a point of direct comparison.
 |------|---|-------------|--------|
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
-| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean,std); repeated sequences | **Under development** |
-| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); same participants | **Under development** |
+| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std_fixed=20); 40 trials; prefix_length=4 | **Under development** |
+| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 40 trials; prefix_length=4 | **Under development** |
 
 task-continuous and task-binary are designed to be completed within-subject
 (same participants recruited via Prolific allowlist). Together they unlock all
@@ -310,11 +310,11 @@ Prolific via MindProbe/JATOS. Both use jsPsych 8 + Vite 6.
 
 | Task | Stimulus | Response | Generative model |
 |------|----------|----------|-----------------|
-| Continuous | Integer 10–99 | Slider 10–99 | Normal(mean, std) |
+| Continuous | Integer -100..100 | Slider -100..100 | Normal(mean, std_fixed=20) |
 | Binary | Blue/red circle | Slider 0–100% | Bernoulli(p) |
 
-Both: 100 trials × 15 observations, response deadline per obs, ITI clock,
-5-observation tutorial, post-trial summary plot.
+Both: 40 trials × 15 observations (u8_r5, prefix_length=4), response deadline per obs,
+ITI clock, 5-observation interactive tutorial, post-trial summary plot.
 
 ### Design goals
 - Continuous: repeated sequences + long sequences + continuous values — unlocks
@@ -333,8 +333,10 @@ task/
       plugin-observation.js        — continuous obs (number + slider + timeout)
       plugin-observation-binary.js — binary obs (circle + gradient slider + timeout)
       plugin-iti-clock.js          — inter-obs ITI clock
-      plugin-practice-observation.js        — continuous tutorial obs
-      plugin-practice-observation-binary.js — binary tutorial obs (urn dot grid)
+      plugin-tutorial-intro-continuous.js   — continuous interactive intro (3-stage reveal)
+      plugin-tutorial-intro-binary.js       — binary interactive intro (3-stage reveal)
+      plugin-practice-observation.js        — continuous tutorial obs 2–5
+      plugin-practice-observation-binary.js — binary tutorial obs 2–5
       plugin-practice-summary.js            — continuous tutorial summary
       plugin-practice-summary-binary.js     — binary tutorial summary (bar chart)
       plugin-trial-summary.js               — continuous trial summary
@@ -343,21 +345,22 @@ task/
       bar-chart.js                 — SVG bar chart (binary summary)
       style.css                    — all shared styles
     continuous/
-      config.js                    — continuous task parameters
-      sequences.json               — 100 × 15 stimulus sequences
+      config.js                    — continuous task parameters (N_TRIALS_TO_RUN=2 dev; SET TO 40)
     binary/
-      config.js                    — binary task parameters (placeholder sequences)
+      config.js                    — binary task parameters (N_TRIALS_TO_RUN=2 dev; SET TO 40)
     experiment-continuous.js       — entry point
     experiment-binary.js           — entry point
   sequences/
-    sequences.json                 — canonical continuous sequence file
-    sequences.pkl                  — binary version for analysis (gitignored)
-  generate_sequences.py            — continuous sequence generation (seed=42)
+    continuous_sequences.json      — master stimulus sequences (imported by config.js)
+    continuous_sequences.pkl       — analysis version
+    binary_sequences.json          — master stimulus sequences (imported by config.js)
+    binary_sequences.pkl           — analysis version
+  generate_sequences.py            — sequence generation + seed search (--n_tries N)
   parse_results.py                 — JATOS JSON → tidy DataFrame → .pkl
   dev-server.js                    — local result capture server (port 3099)
   index-continuous.html            — Vite entry
   index-binary.html                — Vite entry
-  index-dev.html                   — dev launcher (both tasks, no restart needed)
+  index-dev.html                   — dev launcher (both tasks)
   package.json
   vite.config.js                   — mode-based multi-entry build
 ```
@@ -365,35 +368,35 @@ task/
 ### Key parameters (src/continuous/config.js and src/binary/config.js)
 
 ```js
-const N_TRIALS_TO_RUN        = 100;    // set low for dev (default 2 in dev)
-const SHOW_SLIDER_VALUE      = true;   // numeric label above thumb
+const N_TRIALS_TO_RUN        = 2;      // ← SET TO 40 BEFORE DEPLOYMENT
+const SHOW_SLIDER_VALUE      = true;   // numeric label above slider thumb
 const SLIDER_DEFAULT         = 'none'; // 'none' | 'last' | 'value'
 const ITI_MS                 = 1000;
 const T_OBS_MS               = 5000;
-const SHOW_TRIAL_PERFORMANCE = false;  // post-trial summary plot
-const PRACTICE_N_OBS         = 5;
+const SHOW_TRIAL_PERFORMANCE = true;   // post-trial summary plot
+// Practice: 5 fixed observations hardcoded in config.js
 ```
 
 ### Commands
 
 ```bash
 cd task
-npm install             # first time only
-npm run dev             # launcher at http://localhost:5173/index-dev.html
-npm run dev:continuous  # continuous task directly
-npm run dev:binary      # binary task directly
-npm run dev:server      # local result capture (port 3099) — run in separate terminal
-npm run build:continuous  # → dist-continuous/
-npm run build:binary      # → dist-binary/
+npm install               # first time only
+npm run dev               # ← USE THIS for local testing (serves both tasks)
+npm run dev:server        # local result capture (port 3099) — separate terminal
+npm run build:continuous  # production build → dist-continuous/
+npm run build:binary      # production build → dist-binary/
+# Note: npm run dev:continuous / dev:binary use a different Vite config
+# and will NOT work correctly for local testing
 ```
 
 ### Local testing pipeline
 
 ```bash
-# Terminal 1
+# Terminal 1: local result server
 npm run dev:server
 
-# Terminal 2
+# Terminal 2: task
 npm run dev
 # Complete a task in browser → data saved to task/dev-results/
 
@@ -422,9 +425,14 @@ python task/parse_results.py --input_dir task/dev-results/ \
 | `task` | str | `'continuous'` or `'binary'` |
 | `trial` | int | 0-indexed trial number |
 | `observation` | int | 0-indexed observation within trial |
-| `value` | int | Stimulus (10–99 continuous; 0/1 binary) |
-| `true_mean` | float | Generative mean / true probability |
+| `value` | int | Stimulus (-100..100 continuous; -1/1 binary) |
+| `true_mean` | float | Generative mean (continuous); NaN for binary |
 | `true_std` | float | Generative std (continuous); NaN for binary |
+| `true_p` | float | True Bernoulli probability (binary); NaN for continuous |
+| `qid` | int | Unique sequence ID (structured trials); NaN for random |
+| `trial_type` | str | `'structured'` or `'random'` |
+| `prefix_length` | int | Number of fixed prefix observations |
+| `std_condition` | float | Observation std (continuous); NaN for binary |
 | `response` | float | Participant estimate (NaN if timed out) |
 | `timed_out` | bool | True if response deadline elapsed |
 | `rt` | float | Response time in ms (NaN if timed out) |

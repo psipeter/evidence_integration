@@ -21,7 +21,6 @@
  */
 
 import { initJsPsych } from 'jspsych';
-import jsPsychHtmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
 import jsPsychHtmlButtonResponse   from '@jspsych/plugin-html-button-response';
 import ItiClockPlugin              from './plugin-iti-clock.js';
 import ObservationPlugin           from './plugin-observation.js';
@@ -270,12 +269,17 @@ export function buildAndRun(cfg) {
         init_pos:       initPos,
         show_value:     showSliderValue,
         data: {
-          screen:      'observation',
-          trial:       t,
-          observation: o,
-          value:       seq.values[o],
-          true_mean:   seq.true_mean,
-          true_std:    seq.true_std,
+          screen:        'observation',
+          trial:         t,
+          observation:   o,
+          value:         seq.values[o],
+          true_mean:     seq.true_mean,
+          true_std:      seq.true_std,
+          true_p:        seq.true_p   ?? null,
+          qid:           seq.qid      ?? null,
+          trial_type:    seq.trial_type ?? null,
+          prefix_length: seq.prefix_length ?? null,
+          std_condition: seq.std_condition ?? null,
         },
         on_finish: (data) => {
           lastTimedOut = data.timed_out;
@@ -299,7 +303,7 @@ export function buildAndRun(cfg) {
         trial_num:        _t + 1,
         true_mean:        _trueMean,
         true_std:         _trueStd,
-        true_p:           _trueMean,  // for binary task
+        true_p:           seq.true_p ?? null,
         values:           _values,
         responses:        () => _responses.map(r => r.response),
         show_performance: showTrialPerformance,

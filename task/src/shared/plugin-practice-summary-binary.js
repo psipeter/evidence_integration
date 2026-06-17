@@ -5,8 +5,6 @@
 
 import { buildSummaryBarSVG } from './bar-chart.js';
 
-const DIST_COLOR = '#16a34a';
-
 const info = {
   name: 'practice-summary-binary',
   parameters: {
@@ -34,7 +32,7 @@ class PracticeSummaryBinaryPlugin {
                  background:#fff;padding:4px;">
         </div>
         <div style="margin-bottom:0.75rem;">
-          <p class="practice-info-block" style="text-align:center;white-space:nowrap;display:inline-block;">
+          <p class="practice-info-block" style="text-align:center;max-width:clamp(280px,50vw,600px);margin:0 auto;">
             In the experiment, you will not see the
             <span style="color:#16a34a;font-weight:bold;">distribution</span>,
             the <span style="color:#2563eb;font-weight:bold;">probability</span>,

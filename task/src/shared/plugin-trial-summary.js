@@ -1,3 +1,9 @@
+/**
+ * plugin-trial-summary.js
+ * Inter-trial summary for the continuous task.
+ * Shows performance SVG and Next trial / Finish button.
+ */
+
 import { buildPerformanceSVG } from './draw-performance.js';
 
 const info = {

@@ -127,12 +127,20 @@ Required columns: pid, trial, observation, value, response.
 Carrabin adds: qid, true_p (from carrabin_original.csv).
 
 New task (task/): Two online experiments deployed on Prolific via MindProbe/JATOS.
-- Continuous task: Normal(mean, std) stimulus; slider response (10–99); 100 trials × 15 obs
-- Binary task: Bernoulli(p) stimulus (blue/red circle); slider response (0–100%); 100 trials × 15 obs
+- Continuous task: Normal(mean, std) stimulus; slider response (-100..100); 40 trials × 15 obs
+- Binary task: Bernoulli(p) stimulus (blue/red circle); slider response (0–100%); 40 trials × 15 obs
 Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
 Data pipeline: JATOS JSON → task/parse_results.py → data/task_results.pkl
 Target: ~50–80 participants per task; within-subject across both tasks via Prolific allowlist.
 See task/README section in README.md for full details.
+
+Sequence design: u8_r5_o15_p4 (8 unique × 5 repeats, 15 obs, prefix_length=4), std_fixed=20.
+Single master copy in task/sequences/{task}_sequences.{pkl,json}.
+task/src/{task}/config.js imports directly from task/sequences/ — no copy step needed.
+Both RL_lambda and NEF simulations use alpha_0=1.0.
+
+Local dev: always use npm run dev (opens index-dev.html). Do NOT use npm run dev:continuous
+or npm run dev:binary for local testing — these serve a different Vite config.
 
 Archived (do not reactivate): diederen, jiang, usher.
 
@@ -288,6 +296,54 @@ Never run NEF simulations through MCP tool calls (will time out).
     venv/bin/python -m fitting.collect yoo --type activities \
         --ensembles error --timing once_per_obs
     # Output: data/runs/{folder}/activities_error_yoo.pkl, encoders_error_yoo.pkl
+
+---
+
+## Task simulation pipeline (scripts/test_sequences.py)
+
+Simulates RL_lambda and NEF models on the task sequences for validation figures.
+
+### Generate sequences (seed search)
+
+    venv/bin/python task/generate_sequences.py \
+        --task both --n_tries 500 \
+        --n_unique_sequences 8 --n_repeats 5 \
+        --seq_length 15 --prefix_length 4 \
+        --mean_range -60 60 --std_fixed 20 \
+        --p_range 0.2 0.8
+    # Single seed (fast, for testing): omit --n_tries or use --n_tries 1 --seed 42
+
+### Run RL_lambda simulation (local)
+
+    rm data/runs/test_sequences/test_sequences_responses.pkl
+    venv/bin/python scripts/test_sequences.py \
+        --run_models --tasks continuous binary \
+        --alpha_0 1.0 --n_lambdas 100
+    venv/bin/python scripts/test_sequences.py   # plot only
+
+### Run NEF simulation (cluster)
+
+    # After git pull on cluster:
+    rm data/runs/test_sequences/nef_runs/nef_*.pkl 2>/dev/null
+    # Precompute counting activities if needed:
+    venv/bin/python models/counting_integrator.py --precompute_activities \
+        --dataset task_continuous --n_neurons 200 --n_neurons_counting 1000
+    venv/bin/python models/counting_integrator.py --precompute_activities \
+        --dataset task_binary --n_neurons 200 --n_neurons_counting 1000
+    python scripts/submit_nef_sequences.py   # submits 100 SLURM jobs
+    # After completion:
+    python scripts/collect_nef_sequences.py
+    # Transfer locally then:
+    venv/bin/python scripts/collect_nef_sequences.py
+    venv/bin/python scripts/test_sequences.py   # plot
+
+### Figure layout (scripts/test_sequences.py)
+- Row 1 (A–G): Binary; Row 2 (H–N): Continuous; Row 3 (O–P): Cross-task
+- A/H: RMSE vs obs split by true lambda quartile (Q1–Q4)
+- C/J: |Δresponse| vs obs split by true lambda quartile
+- F/M: true λ vs late RMSE scatter + regplot
+- Splitting variable: true lambda from params_str (not late delta)
+- ALPHA_0 = 1.0 hardcoded in run_nef_sequences.py
 
 ---
 

@@ -9,7 +9,6 @@
  * Box 2 click → reveal highlighted ball + enable slider + show obs circles
  */
 
-const GOAL_COLOR  = '#2563eb';
 const SAMPLE_BLUE = '#2563eb';
 const SAMPLE_RED  = '#ef4444';
 const DIST_COLOR  = '#16a34a';

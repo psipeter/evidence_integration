@@ -7,10 +7,6 @@
 export const normalPDF = (x, mu, sigma) =>
   Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
 
-export const drawPerformance = (container, mu, sigma, values, responses) => {
-  container.innerHTML = buildPerformanceSVG(mu, sigma, values, responses);
-};
-
 export const buildPerformanceSVG = (mu, sigma, values, responses) => {
   const W = 520, H = 170;
   const xMin = -100, xMax = 100;

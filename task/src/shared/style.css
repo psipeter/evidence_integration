@@ -30,8 +30,10 @@ body {
 /* ── Instruction / welcome / consent screens ─────────────────────────────── */
 .screen-wrap {
   max-width: 700px;
+  width: 100%;
   text-align: left;
   margin: auto;
+  padding: 0 1rem;
 }
 .screen-wrap h2 {
   text-align: center;
@@ -44,13 +46,13 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2.5rem;        /* breathing room between number, slider, button */
-  padding: 3rem 0;    /* equal top/bottom margin from viewport centre */
+  gap: clamp(1rem, 3vw, 2.5rem);
+  padding: clamp(1rem, 3vh, 3rem) 0;
 }
 
 /* Big stimulus number — border only as wide as the rendered text */
 .stimulus-number {
-  font-size: 8rem;
+  font-size: clamp(3rem, 10vw, 8rem);
   font-weight: bold;
   color: #222;
   line-height: 1;
@@ -62,7 +64,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.6rem;
-  width: 50vw;
+  width: clamp(280px, 50vw, 700px);
 }
 
 .slider-wrap {
@@ -179,7 +181,7 @@ input[type="range"].slider-unset::-moz-range-thumb {
 
 /* "Too slow" message replacing the stimulus number */
 .too-slow-text {
-  font-size: 8rem;
+  font-size: clamp(3rem, 10vw, 8rem);
   font-weight: bold;
   color: #ef4444;
   line-height: 1;
@@ -188,11 +190,12 @@ input[type="range"].slider-unset::-moz-range-thumb {
 /* ── Consent form layout ─────────────────────────────────────────────────── */
 .consent-outer {
   max-width: 700px;
+  width: 100%;
   margin: auto;
+  padding: 0 1rem;
   display: flex;
   flex-direction: column;
-  /* Fill the jsPsych content area height so footer pins to bottom */
-  height: 75vh;
+  height: clamp(400px, 75vh, 800px);
 }
 
 .consent-scroll {
@@ -226,7 +229,7 @@ input[type="range"].slider-unset::-moz-range-thumb {
   align-items: stretch;
   justify-content: center;
   gap: 1.5rem;
-  width: 50vw;   /* matches slider width */
+  width: clamp(280px, 50vw, 700px);
 }
 
 .practice-panel {
@@ -277,7 +280,7 @@ input[type="range"].slider-unset::-moz-range-thumb {
 /* Slider in practice uses same .slider-section/.slider-wrap as main task,
    constrained to 50vw by the parent .practice-wrap */
 .practice-wrap .slider-section {
-  width: 50vw;
+  width: clamp(280px, 50vw, 700px);
 }
 
 /* ── Tutorial title (top-center) ─────────────────────────────────────────── */
@@ -326,8 +329,8 @@ input[type="range"].slider-unset::-moz-range-thumb {
 
 /* ── Binary stimulus circle ──────────────────────────────────────────────── */
 .binary-circle {
-  width: 120px;
-  height: 120px;
+  width: clamp(60px, 8vw, 120px);
+  height: clamp(60px, 8vw, 120px);
   border-radius: 50%;
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
@@ -338,7 +341,7 @@ input[type="range"].slider-unset::-moz-range-thumb {
   flex-direction: column;
   align-items: center;
   gap: 0.3rem;
-  width: 50vw;
+  width: clamp(280px, 50vw, 700px);
 }
 
 .binary-slider-row {

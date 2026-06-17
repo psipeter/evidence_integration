@@ -16,17 +16,22 @@ same --input_dir, or separate dirs can be merged by running twice and concatenat
 
 Output columns (observation rows only)
 ---------------------------------------
-    prolific_pid  : str    Prolific participant ID
-    task          : str    'continuous' or 'binary'
-    trial         : int    0-indexed trial number
-    observation   : int    0-indexed observation within trial
-    value         : int    Stimulus value (10-99 continuous; 0/1 binary)
-    true_mean     : float  Generative mean / true probability
-    true_std      : float  Generative std (continuous); NaN for binary
-    response      : float  Participant estimate (NaN if timed out or no response)
-    timed_out     : bool   True if response deadline elapsed
-    rt            : float  Response time in ms (NaN if timed out)
-    time_elapsed  : int    ms since experiment start
+    prolific_pid   : str    Prolific participant ID
+    task           : str    'continuous' or 'binary'
+    trial          : int    0-indexed trial number
+    observation    : int    0-indexed observation within trial
+    value          : int    Stimulus value (-100..100 continuous; -1/1 binary)
+    true_mean      : float  Generative mean (continuous)
+    true_std       : float  Generative std (continuous); NaN for binary
+    true_p         : float  True Bernoulli probability (binary); NaN for continuous
+    qid            : int    Unique sequence ID (structured trials); NaN for random
+    trial_type     : str    'structured' or 'random'
+    prefix_length  : int    Number of fixed prefix observations
+    std_condition  : float  Observation std value (continuous); NaN for binary
+    response       : float  Participant estimate (NaN if timed out or no response)
+    timed_out      : bool   True if response deadline elapsed
+    rt             : float  Response time in ms (NaN if timed out)
+    time_elapsed   : int    ms since experiment start
 """
 
 import json
@@ -74,17 +79,22 @@ def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
             continue
 
         rows.append({
-            'prolific_pid': t.get('prolific_pid', 'unknown'),
-            'task':         t.get('task', 'unknown'),
-            'trial':        t.get('trial', np.nan),
-            'observation':  t.get('observation', np.nan),
-            'value':        t.get('value', np.nan),
-            'true_mean':    t.get('true_mean', np.nan),
-            'true_std':     t.get('true_std', np.nan),
-            'response':     t.get('response', np.nan) if t.get('response') is not None else np.nan,
-            'timed_out':    bool(t.get('timed_out', False)),
-            'rt':           t.get('rt', np.nan) if t.get('rt') is not None else np.nan,
-            'time_elapsed': t.get('time_elapsed', np.nan),
+            'prolific_pid':  t.get('prolific_pid', 'unknown'),
+            'task':          t.get('task', 'unknown'),
+            'trial':         t.get('trial', np.nan),
+            'observation':   t.get('observation', np.nan),
+            'value':         t.get('value', np.nan),
+            'true_mean':     t.get('true_mean', np.nan),
+            'true_std':      t.get('true_std', np.nan),
+            'true_p':        t.get('true_p', np.nan) if t.get('true_p') is not None else np.nan,
+            'qid':           t.get('qid', np.nan),
+            'trial_type':    t.get('trial_type', np.nan),
+            'prefix_length': t.get('prefix_length', np.nan),
+            'std_condition': t.get('std_condition', np.nan) if t.get('std_condition') is not None else np.nan,
+            'response':      t.get('response', np.nan) if t.get('response') is not None else np.nan,
+            'timed_out':     bool(t.get('timed_out', False)),
+            'rt':            t.get('rt', np.nan) if t.get('rt') is not None else np.nan,
+            'time_elapsed':  t.get('time_elapsed', np.nan),
         })
 
     return pd.DataFrame(rows)
@@ -129,9 +139,9 @@ def main():
     combined = pd.concat(dfs, ignore_index=True)
 
     # Cast types
-    for col in ['trial', 'observation', 'value']:
+    for col in ['trial', 'observation', 'value', 'qid', 'prefix_length']:
         combined[col] = pd.to_numeric(combined[col], errors='coerce').astype('Int64')
-    for col in ['true_mean', 'true_std', 'response', 'rt']:
+    for col in ['true_mean', 'true_std', 'true_p', 'std_condition', 'response', 'rt']:
         combined[col] = pd.to_numeric(combined[col], errors='coerce')
 
     # Sort

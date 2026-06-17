@@ -50,7 +50,7 @@ class ObservationPlugin {
             </div>
           </div>
           <div class="slider-wrap">
-            <span class="slider-label">10</span>
+            <span class="slider-label">-100</span>
             <input type="range" id="response-slider"
               min="-100" max="100" value="${init_pos}" step="1"
               class="${unset ? 'slider-unset' : ''}">
