@@ -65,12 +65,28 @@ const buildUrnSVG = (p, currentValue, obsNum) => {
     dots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"
                stroke="#fff" stroke-width="1.5" />`;
     if (isHighlight) {
-      dots += `<circle cx="${cx}" cy="${cy}" r="${r + 5}"
+      dots += `<circle cx="${cx}" cy="${cy}" r="${r + 3}"
                  fill="none" stroke="#222" stroke-width="2.5" />`;
     }
   });
 
-  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${dots}</svg>`;
+  // Add label row below grid
+  const H_full = H + 30;
+  const labelY = H + 20;
+  const labelX = W / 2;
+
+  return `<svg viewBox="0 0 ${W} ${H_full}" width="100%" height="100%"
+    xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <rect x="8" y="8" width="178" height="144" fill="none" stroke="#16a34a" stroke-width="2" rx="4"/>
+    ${dots}
+    <text x="${labelX - 36}" y="${labelY}" text-anchor="start"
+          font-family="Arial" font-size="15" font-weight="bold"
+          fill="#222">P(</text>
+    <circle cx="${labelX - 14}" cy="${labelY - 4}" r="6" fill="${SAMPLE_BLUE}"/>
+    <text x="${labelX - 5}" y="${labelY}" text-anchor="start"
+          font-family="Arial" font-size="15" font-weight="bold"
+          fill="#222">) = ???</text>
+  </svg>`;
 };
 
 // Update the slider gradient fill
@@ -96,7 +112,12 @@ class PracticeObservationBinaryPlugin {
     const ballCol = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
 
     display_el.innerHTML = `
-      <div class="tutorial-title">Tutorial &nbsp;·&nbsp; Observation ${obs_num} / ${n_obs}</div>
+      <div class="tutorial-title">Tutorial</div>
+      <div style="text-align:center;margin-bottom:0.3rem;">
+        ${Array.from({length: n_obs}, (_, i) =>
+          `<span class="obs-circle ${i < obs_num ? 'obs-circle-binary-filled' : ''}">${i < obs_num ? '&#9679;' : '&#9675;'}</span>`
+        ).join('')}
+      </div>
 
       <div class="practice-wrap">
         <div class="practice-top-row">
@@ -106,19 +127,16 @@ class PracticeObservationBinaryPlugin {
             <p class="practice-info-block">
               <span style="color:${SAMPLE_BLUE};font-weight:bold;">Blue</span> or
               <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> balls
-              are drawn one-at-a-time based on a
+              are drawn one-at-a-time based on a<br>
               <span style="color:${DIST_COLOR};font-weight:bold;">hidden probability</span>.
             </p>
             <p class="practice-info-block">
-              Goal: estimate the
-              <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>
+              Goal: estimate the <strong>probability</strong>
               of drawing a
               <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> ball.
             </p>
             <p class="practice-info-block">
-              After each observation,
-              move the slider to update your estimate and press
-              <strong>Submit</strong> <kbd class="key-badge">space</kbd>.
+              After each <span style="color:#888;font-weight:bold;">observation</span>, move the slider to update your estimate.
             </p>
           </div>
 
@@ -128,14 +146,13 @@ class PracticeObservationBinaryPlugin {
               style="background:${ballCol};"></div>
           </div>
 
-          <!-- RIGHT: pie chart -->
+          <!-- RIGHT: urn chart -->
           <div class="practice-panel practice-panel-right">
-            <div id="pie-svg" class="urn-canvas" style="line-height:0;"></div>
+            <div id="pie-svg" class="dist-canvas" style="line-height:0;"></div>
           </div>
 
         </div>
 
-        <!-- Slider with blue/red gradient and ball icons -->
         <div class="binary-slider-section">
           <div class="slider-label-float-wrap">
             <div id="slider-float-label" class="slider-float-label"
@@ -152,14 +169,13 @@ class PracticeObservationBinaryPlugin {
             <div class="binary-ball binary-ball-red"></div>
           </div>
         </div>
-      </div>
-
-      <div style="text-align:center;margin-top:0.5rem;">
-        <button id="submit-btn" class="jspsych-btn"
-          ${unset ? 'disabled' : ''}
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
-          Submit
-        </button>
+        <div style="text-align:center;margin-top:0.5rem;">
+          <button id="submit-btn" class="jspsych-btn"
+            ${unset ? 'disabled' : ''}
+            style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
+            Submit
+          </button>
+        </div>
       </div>`;
 
     display_el.querySelector('#pie-svg').innerHTML = buildUrnSVG(true_p, value, obs_num);
@@ -186,7 +202,6 @@ class PracticeObservationBinaryPlugin {
       if (finished) return;
       finished = true;
       document.body.style.backgroundColor = '#f5f5f5';
-      document.removeEventListener('keydown', spaceHandler);
       const hadUnset = slider.classList.contains('slider-unset');
       const response = !hadUnset ? parseInt(slider.value) : null;
       this.jsPsych.finishTrial({ response, timed_out: false });
@@ -212,10 +227,6 @@ class PracticeObservationBinaryPlugin {
 
     requestAnimationFrame(() => requestAnimationFrame(attachListeners));
 
-    const spaceHandler = (e) => {
-      if (e.code === 'Space' && !btn.disabled) { e.preventDefault(); finish(); }
-    };
-    document.addEventListener('keydown', spaceHandler);
   }
 }
 

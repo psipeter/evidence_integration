@@ -64,7 +64,7 @@ const buildDistSVG = (mu, sigma, currentValue) => {
     <text x="${xPos(currentValue).toFixed(2)}" y="${axisY + tickH + 12}"
           text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="${SAMPLE_COLOR}">${currentValue}</text>` : '';
 
-  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
       stroke="#bbb" stroke-width="1"/>
     <text x="${pad.l}" y="${axisY + 14}" text-anchor="middle"
@@ -95,7 +95,14 @@ class PracticeObservationPlugin {
     const unset = slider_default === 'none';
 
     display_el.innerHTML = `
-      <div class="tutorial-title">Tutorial &nbsp;·&nbsp; Observation ${obs_num} / ${n_obs}</div>
+      <div class="tutorial-title">Tutorial</div>
+      <div style="text-align:center;margin-bottom:0.3rem;">
+        ${Array.from({length: n_obs}, (_, i) =>
+          `<span class="obs-circle ${i < obs_num ? 'obs-circle-filled' : ''}">
+            ${i < obs_num ? '&#9679;' : '&#9675;'}
+          </span>`
+        ).join('')}
+      </div>
 
       <div class="practice-wrap">
 
@@ -114,9 +121,7 @@ class PracticeObservationPlugin {
               of that distribution.
             </p>
             <p class="practice-info-block">
-              After each <span style="color:${SAMPLE_COLOR};font-weight:bold;">observation</span>,
-              move the slider to update your estimate and press
-              <strong>Submit</strong> <kbd class="key-badge">space</kbd>.
+              After each <span style="color:${SAMPLE_COLOR};font-weight:bold;">observation</span>, move the slider to update your estimate.
             </p>
           </div>
 
@@ -184,7 +189,6 @@ class PracticeObservationPlugin {
       if (finished) return;
       finished = true;
       document.body.style.backgroundColor = '#f5f5f5';
-      document.removeEventListener('keydown', spaceHandler);
       const hadUnset = slider.classList.contains('slider-unset');
       const response = !hadUnset ? parseInt(slider.value) : null;
       this.jsPsych.finishTrial({ response, timed_out: false });
@@ -209,13 +213,6 @@ class PracticeObservationPlugin {
 
     requestAnimationFrame(() => requestAnimationFrame(attachListeners));
 
-    const spaceHandler = (e) => {
-      if (e.code === 'Space' && !btn.disabled) {
-        e.preventDefault();
-        finish();
-      }
-    };
-    document.addEventListener('keydown', spaceHandler);
 
 
   }

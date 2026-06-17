@@ -97,7 +97,6 @@ class ObservationPlugin {
       finished = true;
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       document.body.style.backgroundColor = '#f5f5f5';
-      document.removeEventListener('keydown', spaceHandler);
       const hadUnset = slider.classList.contains('slider-unset');
       const response = (!timed_out && !hadUnset) ? parseInt(slider.value) : null;
       const rt = timed_out ? null : Math.round(performance.now() - trialStart);
@@ -137,14 +136,6 @@ class ObservationPlugin {
 
     requestAnimationFrame(() => requestAnimationFrame(attachListeners));
 
-    // Space bar (checked every keydown, not just after rAF)
-    const spaceHandler = (e) => {
-      if (e.code === 'Space' && !btn.disabled) {
-        e.preventDefault();
-        finish(false);
-      }
-    };
-    document.addEventListener('keydown', spaceHandler);
 
     // -----------------------------------------------------------------------
     // Timeout countdown clock

@@ -34,16 +34,14 @@ class PracticeSummaryPlugin {
                  border:1px solid #e5e7eb;border-radius:6px;
                  background:#fff;padding:4px;">
         </div>
-        <div class="summary-info-row">
-          <p class="practice-info-block">
-            In the experiment, the
-            <span style="color:#2563eb;font-weight:bold;">true mean</span>
-            will not be shown.
-          </p>
-          <p class="practice-info-block">
-            In the experiment, the number of
+        <div style="margin-bottom:0.75rem;">
+          <p class="practice-info-block" style="text-align:center;white-space:nowrap;display:inline-block;">
+            In the experiment, you will not see the
+            <span style="color:#16a34a;font-weight:bold;">distribution</span>,
+            the <span style="color:#2563eb;font-weight:bold;">mean</span>,
+            or how many
             <span style="color:#ef4444;font-weight:bold;">observations</span>
-            per trial is unknown.
+            remain.
           </p>
         </div>
         <button id="proceed-btn" class="jspsych-btn"

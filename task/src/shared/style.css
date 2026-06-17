@@ -242,8 +242,7 @@ input[type="range"].slider-unset::-moz-range-thumb {
 }
 
 .practice-panel-right {
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
 }
 
 .practice-info-block {
@@ -271,7 +270,8 @@ input[type="range"].slider-unset::-moz-range-thumb {
   background: #fff;
   padding: 4px;
   width: 100%;
-  height: auto;
+  height: 100%;
+  min-height: 120px;
 }
 
 /* Slider in practice uses same .slider-section/.slider-wrap as main task,
@@ -436,8 +436,79 @@ input[type="range"].binary-slider.slider-unset::-moz-range-track {
 /* ── Urn dot grid ─────────────────────────────────────────────────────────── */
 .urn-canvas {
   display: block;
-  border: 2px solid #16a34a;
+  border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #fff;
   padding: 4px;
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+}
+
+/* ── Tutorial intro boxes ────────────────────────────────────────────────── */
+.tutorial-box {
+  cursor: default;
+  transition: opacity 0.3s, background 0.2s, border-color 0.2s;
+  min-height: 3.5rem;
+  display: flex;
+  align-items: center;
+}
+
+/* Locked — not yet reachable */
+.tutorial-box-locked {
+  opacity: 0.25;
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+/* Active — next to click */
+.tutorial-box-active {
+  opacity: 1;
+  background: #eff6ff;
+  border-color: #93c5fd;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px #bfdbfe;
+}
+.tutorial-box-active:hover {
+  background: #dbeafe;
+  border-color: #60a5fa;
+}
+
+/* Revealed */
+.tutorial-box-revealed {
+  opacity: 1;
+  background: #fff;
+  border-color: #d1fae5;
+  cursor: default;
+}
+
+.tutorial-click-hint {
+  font-size: 0.85rem;
+  color: #2563eb;
+  font-weight: bold;
+  width: 100%;
+  text-align: center;
+}
+
+.tutorial-locked-hint {
+  font-size: 1rem;
+  color: #ccc;
+  width: 100%;
+  text-align: center;
+  letter-spacing: 0.2em;
+}
+
+/* ── Observation progress circles ────────────────────────────────────────── */
+.obs-circle {
+  font-size: 1.5rem;
+  color: #ccc;
+  margin: 0 0.3rem;
+}
+.obs-circle-filled {
+  color: #ef4444;
+}
+
+/* Binary obs circles use gray fill instead of red */
+.obs-circle-binary-filled {
+  color: #888;
 }

@@ -26,7 +26,7 @@ class TrialSummaryPlugin {
 
     const perfHTML = show_performance ? `
       <div id="perf-svg"
-        style="display:inline-block;margin-bottom:0.75rem;
+        style="display:block;margin:0 auto 0.75rem;width:fit-content;
                border:1px solid #e5e7eb;border-radius:6px;
                background:#fff;padding:4px;">
       </div>
@@ -36,7 +36,6 @@ class TrialSummaryPlugin {
       <div class="screen-wrap" style="text-align:center;">
         <p style="font-size:1.2rem;margin-bottom:0.75rem;">Trial ${trial_num} complete.</p>
         ${perfHTML}
-        <p style="color:#555;margin:0.75rem 0 1rem;">${is_last ? "Click <em>Finish</em> when ready." : "Click <em>Next trial</em> when you are ready to continue."}</p>
         <button id="next-btn" class="jspsych-btn"
           style="font-size:1.1rem;padding:0.6rem 2.5rem;">
           ${is_last ? "Finish" : "Next trial"}

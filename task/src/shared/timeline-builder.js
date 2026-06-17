@@ -30,6 +30,8 @@ import PracticeSummaryPlugin       from './plugin-practice-summary.js';
 import TrialSummaryPlugin          from './plugin-trial-summary.js';
 import 'jspsych/css/jspsych.css';
 import PracticeObservationBinaryPlugin from './plugin-practice-observation-binary.js';
+import TutorialIntroContinuousPlugin    from './plugin-tutorial-intro-continuous.js';
+import TutorialIntroBinaryPlugin        from './plugin-tutorial-intro-binary.js';
 import PracticeSummaryBinaryPlugin  from './plugin-practice-summary-binary.js';
 import ObservationBinaryPlugin      from './plugin-observation-binary.js';
 import TrialSummaryBinaryPlugin     from './plugin-trial-summary-binary.js';
@@ -144,11 +146,45 @@ export function buildAndRun(cfg) {
     on_finish: (data) => { data.consent_given = true; },
   });
 
+  // ── Tutorial intro (continuous only) ────────────────────────────────────────
+  // The intro shows obs 0 with the interactive reveal, then finishes with a
+  // response — so the practice loop starts from obs 1 (skipping obs 0).
+  const practiceStartObs = 1;  // intro handles obs 0 for both tasks
+  if (!isBinary) {
+    timeline.push({
+      type: TutorialIntroContinuousPlugin,
+      example_value: practiceValues[0],
+      true_mean:     practiceMean,
+      true_std:      practiceStd,
+      data: { screen: 'tutorial_intro', observation: 0, value: practiceValues[0] },
+      on_finish: (data) => {
+        if (data.response !== null && data.response !== undefined) {
+          practiceLastResponse = data.response;
+          practiceResponses.push({ value: practiceValues[0], response: data.response });
+        }
+      },
+    });
+  } else {
+    timeline.push({
+      type: TutorialIntroBinaryPlugin,
+      example_value: practiceValues[0],
+      true_p:        practiceMean,
+      n_obs:         practiceValues.length,
+      data: { screen: 'tutorial_intro', observation: 0, value: practiceValues[0] },
+      on_finish: (data) => {
+        if (data.response !== null && data.response !== undefined) {
+          practiceLastResponse = data.response;
+          practiceResponses.push({ value: practiceValues[0], response: data.response });
+        }
+      },
+    });
+  }
+
   // ── Practice block ────────────────────────────────────────────────────────
   let practiceLastResponse = defaultValue;
   let practiceResponses    = [];
 
-  for (let o = 0; o < practiceValues.length; o++) {
+  for (let o = practiceStartObs; o < practiceValues.length; o++) {
     const _o     = o;
     const _value = practiceValues[o];
 
@@ -160,7 +196,7 @@ export function buildAndRun(cfg) {
             duration_ms: 250,
             data: { screen: 'practice_iti', observation: _o },
           }],
-          conditional_function: () => _o > 0,
+          conditional_function: () => true,
         },
         {
           type: TutorialObsPlugin,
@@ -295,15 +331,14 @@ export function buildAndRun(cfg) {
 
   // ── End ───────────────────────────────────────────────────────────────────
   timeline.push({
-    type: jsPsychHtmlKeyboardResponse,
+    type: jsPsychHtmlButtonResponse,
     stimulus: `
       <div class="screen-wrap" style="text-align:center;">
         <h2>Thank you!</h2>
         <p style="margin-top:1rem;">Your responses have been saved.</p>
-        <p style="margin-top:1rem;color:#666;">
-          Press any key to return to Prolific and complete your submission.
-        </p>
       </div>`,
+    choices: ['Return to Prolific to complete your submission'],
+    button_html: (c) => makeButton(c),
     data: { screen: 'end' },
   });
 
