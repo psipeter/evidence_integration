@@ -319,8 +319,8 @@ ITI clock, 5-observation interactive tutorial, post-trial summary plot.
 ### Design goals
 - Continuous: repeated sequences + long sequences + continuous values — unlocks
   all PTN metrics simultaneously; cross-task λ correlation with binary task
-- Binary: same participants (Prolific allowlist), Bernoulli generative model;
-  enables cross-task individual-differences analysis
+- Binary: same participants (free ordering, natural counterbalancing), Bernoulli generative model;
+  enables cross-task individual-differences analysis; task order recorded as covariate
 
 ### Directory structure
 
@@ -407,13 +407,45 @@ python task/parse_results.py --input_dir task/dev-results/ \
 
 ### Deploying to MindProbe
 
-1. `npm run build:continuous` → `dist-continuous/`
-2. Zip `dist-continuous/` contents; upload to MindProbe as a JATOS study
-3. Repeat for binary: `npm run build:binary` → `dist-binary/`
-4. Set Prolific URL: `https://mindprobe.eu/publix/...?PROLIFIC_PID={{%PROLIFIC_PID%}}`
-5. Set completion redirect: `https://app.prolific.com/submissions/complete?cc=<CODE>`
-6. After continuous study completes, export completers' PIDs and create a
-   Prolific allowlist study for the binary task
+**Pre-deployment checklist:**
+- Set `N_TRIALS_TO_RUN = 40` and `N_OBS_TO_RUN = 15` in both config files
+- Fill consent form placeholders (IRB number, study title, contact email)
+- Replace `cc=PLACEHOLDER` with real Prolific completion codes (one per study)
+
+**Build and package:**
+```bash
+npm run build:continuous && npm run build:binary
+python task/generate_jzip.py  # generates evidence-integration-{task}.jzip
+```
+
+**Import to MindProbe:**
+1. Studies → **+** → **Import Study** → select `.jzip` file
+2. Repeat for binary
+3. Verify each study has one component with `reloadable: false`
+4. Set **End Redirect URL** in study properties to Prolific completion URL
+
+**Key implementation details:**
+- `jatos.js` included in HTML `<head>` — JATOS injects real object in production;
+  `jatos-shim.js` activates only in local dev (posts to `dev-server.js` on port 3099)
+- Data saved via `jatos.endStudyAndRedirect(prolificURL, jsPsych.data.get().json())`
+- `beforeunload` guard warns participant against navigating away mid-task
+- Non-completions: **request return** on Prolific (not rejection) — slot reopens
+
+### Prolific rollout plan
+
+- Publish both studies **simultaneously** with no inter-study screening filter
+- **Free task ordering** — Prolific randomises dashboard order, giving natural counterbalancing
+- Set both studies to **auto-approve** so second task appears on participant dashboard immediately
+- End screen in both tasks: *"one half of a two-part study — look for the other on your dashboard"*
+- **Payment:** ≥$12/hr recommended; set estimated completion time conservatively (e.g. 35 min)
+- **Recruitment messaging:** after each batch of completions, message participants via Prolific
+  nudging them toward the other task (Prolific → Messages → Message all [study] participants)
+- **Order as covariate:** record which task each participant did first from MindProbe submission
+  timestamps; include task order as a between-subjects covariate in λ correlation analysis
+- **Non-completions:** request return (not rejection) — slot reopens, participant not penalised
+- **Academic discount:** use Dartmouth email for 33.3% platform fee discount
+- **Device restriction:** set desktop-only in Prolific study settings; note in study description
+- **Academic discount:** use Dartmouth institutional email for 33.3% platform fee discount
 
 ### Data format (downloaded from MindProbe / saved by dev-server)
 
@@ -429,8 +461,7 @@ python task/parse_results.py --input_dir task/dev-results/ \
 | `true_mean` | float | Generative mean (continuous); NaN for binary |
 | `true_std` | float | Generative std (continuous); NaN for binary |
 | `true_p` | float | True Bernoulli probability (binary); NaN for continuous |
-| `qid` | int | Unique sequence ID (structured trials); NaN for random |
-| `trial_type` | str | `'structured'` or `'random'` |
+| `qid` | int | Unique sequence ID for each repeated sequence |
 | `prefix_length` | int | Number of fixed prefix observations |
 | `std_condition` | float | Observation std (continuous); NaN for binary |
 | `response` | float | Participant estimate (NaN if timed out) |

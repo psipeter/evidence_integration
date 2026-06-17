@@ -7,7 +7,8 @@
 import sequencesData from '../../sequences/continuous_sequences.json';
 
 // ── Parameters ────────────────────────────────────────────────────────────
-const N_TRIALS_TO_RUN        = 2;       // ← SET TO 40 BEFORE DEPLOYMENT
+const N_TRIALS_TO_RUN        = 1;       // ← SET TO 40 BEFORE DEPLOYMENT
+const N_OBS_TO_RUN           = 5;       // ← SET TO 15 (or remove) BEFORE DEPLOYMENT
 const SHOW_SLIDER_VALUE      = true;
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last' | 'value'
 const DEFAULT_VALUE          = 0;       // midpoint of [-100, 100]
@@ -25,7 +26,9 @@ const practiceValues = [16, 27, 10, 33, -2];  // mean≈16.8, all in [-5,45]
 
 export const config = {
   taskType:             'continuous',
-  sequences:            sequencesData.slice(0, N_TRIALS_TO_RUN),
+  sequences:            sequencesData.slice(0, N_TRIALS_TO_RUN).map(
+                          s => ({ ...s, values: s.values.slice(0, N_OBS_TO_RUN) })
+                        ),
   practiceValues,
   practiceMean:         PRACTICE_MEAN,
   practiceStd:          PRACTICE_STD,

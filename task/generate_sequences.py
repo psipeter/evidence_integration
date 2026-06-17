@@ -3,20 +3,22 @@ generate_sequences.py
 =====================
 Generate stimulus sequences for the continuous and/or binary evidence
 integration tasks.  Optionally runs a seed search (--n_tries > 1) to find
-the seed producing the best-shaped decay curves, replacing the old
-check_sequences.py script.
+the seed producing the best-shaped decay curves.
+
+All trials are structured (shared prefix + randomised tail across repeats).
+There are no random trials.
 
 Trial structure
 ---------------
-  structured  — the first `prefix_length` observations are fixed and shared
-                across `n_repeats` trials; the tail is freshly randomised
-                each repeat.  prefix_length == seq_length → full repeat.
-  random      — all observations freshly randomised; qid = None.
+  Each trial has `seq_length` observations. The first `prefix_length`
+  observations are fixed and shared across all `n_repeats` repeats of a
+  given unique sequence (qid). The tail is freshly randomised each repeat.
+  prefix_length == seq_length → entire sequence is identical across repeats.
 
 Generative distributions
 ------------------------
-  continuous : Normal(true_mean, true_std)
-               true_mean ~ Uniform(mean_range), true_std = std_fixed
+  continuous : Normal(true_mean, std_fixed)
+               true_mean ~ Uniform(mean_range)
                values are integers clipped to [value_min, value_max]
   binary     : Bernoulli(true_p), true_p ~ Uniform(p_range)
                values in {-1, +1}
@@ -28,13 +30,8 @@ Seed search (--n_tries > 1)
        curve, penalises deviations and early-obs rises.
     2. Delta-decay quality (panel C): fits A/t to mean |Δresponse|, penalises
        deviations.
-  The seed with the lowest combined score is saved.  Diagnostic PDFs are
-  written to {output_dir}/diagnostics/ every 50 attempts.
-
-Rejection sampling
-------------------
-  Continuous: none — clipping + seed search suffice.
-  Binary    : prefix log-probability check (P(prefix|true_p) >= 1e-4).
+  The seed with the lowest combined score is saved. Diagnostic PDFs written
+  to {output_dir}/diagnostics/ every 50 attempts.
 
 Output (single master copy in task/sequences/)
 ----------------------------------------------
@@ -46,10 +43,10 @@ Usage
   # Single seed (fast)
   python task/generate_sequences.py --task both --seed 42
 
-  # Seed search (replaces check_sequences.py)
+  # Seed search
   python task/generate_sequences.py --task both --n_tries 500 \\
       --n_unique_sequences 8 --n_repeats 5 --seq_length 15 \\
-      --prefix_length 3 --mean_range -60 60 --std_fixed 20 \\
+      --prefix_length 4 --mean_range -60 60 --std_fixed 20 \\
       --p_range 0.2 0.8
 """
 
@@ -60,7 +57,6 @@ import json
 import math
 import pathlib
 import shutil
-import sys
 import tempfile
 
 import matplotlib
@@ -110,8 +106,7 @@ def binary_param_grid(n: int, p_range, rng):
 # ---------------------------------------------------------------------------
 def draw_continuous_obs(rng, true_mean, true_std, n,
                         value_min=VALUE_MIN, value_max=VALUE_MAX):
-    vals = []
-    attempts = 0
+    vals, attempts = [], 0
     while len(vals) < n:
         attempts += 1
         v = int(np.round(rng.normal(true_mean, true_std)))
@@ -128,99 +123,80 @@ def draw_binary_obs(rng, true_p, n):
 
 
 # ---------------------------------------------------------------------------
-# Rejection sampling
+# Rejection sampling (binary only)
 # ---------------------------------------------------------------------------
-def check_prefix_plausibility_binary(prefix, true_p, plausibility_threshold=1e-4):
-    """Binary: P(prefix | true_p) >= plausibility_threshold."""
-    if len(prefix) == 0:
+def check_prefix_plausibility_binary(prefix, true_p, threshold=1e-4):
+    if not prefix:
         return True
     n_blue = sum(v == 1 for v in prefix)
     n_red  = len(prefix) - n_blue
-    log_p  = (n_blue * math.log(true_p + 1e-12) +
-              n_red  * math.log(1 - true_p + 1e-12))
-    return log_p >= math.log(plausibility_threshold + 1e-12)
+    log_p  = n_blue * math.log(true_p + 1e-12) + n_red * math.log(1 - true_p + 1e-12)
+    return log_p >= math.log(threshold + 1e-12)
 
 
 # ---------------------------------------------------------------------------
-# Sequence builders
+# Sequence builder
 # ---------------------------------------------------------------------------
-def build_structured_sequence(rng, task, true_mean, true_std, true_p,
-                               seq_length, prefix_length):
-    """Returns (sequence, prefix).  Binary uses prefix plausibility check."""
-    full_repeat          = (prefix_length == 0 or prefix_length >= seq_length)
-    effective_prefix_len = seq_length if full_repeat else prefix_length
+def build_sequence(rng, task, true_mean, true_std, true_p,
+                   seq_length, prefix_length):
+    """Returns (sequence, prefix). Binary uses prefix plausibility check."""
+    full_repeat = (prefix_length == 0 or prefix_length >= seq_length)
+    eff_pfx     = seq_length if full_repeat else prefix_length
 
     for _ in range(MAX_REJECTION_ATTEMPTS):
         if task == 'continuous':
-            prefix = draw_continuous_obs(rng, true_mean, true_std,
-                                         effective_prefix_len)
+            prefix = draw_continuous_obs(rng, true_mean, true_std, eff_pfx)
         else:
-            prefix = draw_binary_obs(rng, true_p, effective_prefix_len)
+            prefix = draw_binary_obs(rng, true_p, eff_pfx)
 
-        if task == 'binary' and not check_prefix_plausibility_binary(
-                prefix, true_p, 1e-4):
+        if task == 'binary' and not check_prefix_plausibility_binary(prefix, true_p):
             continue
 
         if full_repeat:
-            sequence = prefix
-        else:
-            tail_len = seq_length - effective_prefix_len
-            if task == 'continuous':
-                tail = draw_continuous_obs(rng, true_mean, true_std, tail_len)
-            else:
-                tail = draw_binary_obs(rng, true_p, tail_len)
-            sequence = prefix + tail
+            return prefix, prefix
 
-        return sequence, prefix
+        tail_len = seq_length - eff_pfx
+        tail = (draw_continuous_obs(rng, true_mean, true_std, tail_len)
+                if task == 'continuous'
+                else draw_binary_obs(rng, true_p, tail_len))
+        return prefix + tail, prefix
 
     raise RuntimeError(
-        f"Could not generate valid structured sequence after "
-        f"{MAX_REJECTION_ATTEMPTS} attempts "
-        f"(task={task}, true_mean={true_mean}, true_p={true_p})."
+        f"Could not generate valid sequence after {MAX_REJECTION_ATTEMPTS} "
+        f"attempts (task={task}, true_mean={true_mean}, true_p={true_p})."
     )
-
-
-def build_random_sequence(rng, task, true_mean, true_std, true_p, seq_length):
-    if task == 'continuous':
-        return draw_continuous_obs(rng, true_mean, true_std, seq_length)
-    return draw_binary_obs(rng, true_p, seq_length)
 
 
 # ---------------------------------------------------------------------------
 # Core generation
 # ---------------------------------------------------------------------------
 def generate_task_sequences(task, args, rng):
-    """Generate all trials for one task.  Returns (DataFrame, json_trials)."""
+    """Generate all trials for one task. Returns (DataFrame, json_trials)."""
     seq_length    = args.seq_length
     prefix_length = args.prefix_length if not args.full_repeat else 0
     full_repeat   = args.full_repeat or (prefix_length >= seq_length)
     eff_pfx       = seq_length if full_repeat else prefix_length
 
-    n_unique     = args.n_unique_sequences
-    n_repeats    = args.n_repeats
-    n_structured = n_unique * n_repeats
-    n_random     = args.n_random
-    n_total      = n_structured + n_random
+    n_unique = args.n_unique_sequences
+    n_repeats = args.n_repeats
+    n_total   = n_unique * n_repeats
 
     print(f"\n{'='*60}")
     print(f"Task: {task.upper()}")
-    print(f"  Total trials       : {n_total}")
-    print(f"  Structured trials  : {n_structured} ({n_unique} seqs × {n_repeats} reps)")
-    print(f"  Random trials      : {n_random}")
+    print(f"  Total trials       : {n_total} ({n_unique} seqs × {n_repeats} reps)")
     print(f"  Sequence length    : {seq_length}")
     print(f"  Prefix length      : {'full' if full_repeat else eff_pfx}")
 
     # ── Parameter sets ───────────────────────────────────────────────────────
     if task == 'continuous':
-        param_sets = continuous_param_grid(
-            n_unique, args.mean_range, args.std_fixed, rng)
+        param_sets = continuous_param_grid(n_unique, args.mean_range, args.std_fixed, rng)
         print(f"  Std fixed          : {args.std_fixed}")
         print(f"  Mean range         : {args.mean_range}")
     else:
         param_sets = binary_param_grid(n_unique, args.p_range, rng)
         print(f"  true_p range       : {args.p_range}")
 
-    # ── Build structured templates ───────────────────────────────────────────
+    # ── Build templates (one per unique sequence / qid) ──────────────────────
     templates = []
     for qid, ps in enumerate(param_sets):
         if task == 'continuous':
@@ -231,86 +207,60 @@ def generate_task_sequences(task, args, rng):
             true_mean = true_p
             true_std  = float('nan')
 
-        sequence, prefix = build_structured_sequence(
+        sequence, prefix = build_sequence(
             rng, task, true_mean, true_std, true_p, seq_length, prefix_length)
+        sc = float(true_std) if task == 'continuous' and not math.isnan(true_std) else float('nan')
         templates.append({
             'qid': qid, 'true_mean': true_mean, 'true_std': true_std,
-            'std_condition': (float(true_std)
-                              if task == 'continuous' and not math.isnan(true_std)
-                              else float('nan')),
-            'true_p': true_p, 'prefix': prefix, 'sequence': sequence,
+            'std_condition': sc, 'true_p': true_p,
+            'prefix': prefix, 'sequence': sequence,
         })
-        pfx_label = ([','.join(map(str, prefix[:5]))]
-                     + (['...'] if len(prefix) > 5 else []))
-        print(f"  qid {qid:3d}: "
-              f"params={'mean={:.1f} std={:.1f}'.format(true_mean, true_std) if task == 'continuous' else 'p={:.3f}'.format(true_p)}"
-              f"  prefix=[{pfx_label[0]}{'...' if len(prefix) > 5 else ''}]")
+        pfx_str = ','.join(map(str, prefix[:5])) + ('...' if len(prefix) > 5 else '')
+        label   = f'mean={true_mean:.1f} std={true_std:.1f}' if task == 'continuous' else f'p={true_p:.3f}'
+        print(f"  qid {qid:3d}: params={label}  prefix=[{pfx_str}]")
 
-    # ── Expand to trials ─────────────────────────────────────────────────────
-    structured_trials = []
+    # ── Expand to trials (n_repeats per template) ────────────────────────────
+    trials = []
     for tmpl in templates:
         for _ in range(n_repeats):
             if full_repeat:
                 values = tmpl['sequence']
             else:
-                if task == 'continuous':
-                    tail = draw_continuous_obs(rng, tmpl['true_mean'],
-                                               tmpl['true_std'],
-                                               seq_length - eff_pfx)
-                else:
-                    tail = draw_binary_obs(rng, tmpl['true_p'],
-                                          seq_length - eff_pfx)
+                tail_len = seq_length - eff_pfx
+                tail = (draw_continuous_obs(rng, tmpl['true_mean'], tmpl['true_std'], tail_len)
+                        if task == 'continuous'
+                        else draw_binary_obs(rng, tmpl['true_p'], tail_len))
                 values = tmpl['prefix'] + tail
-            structured_trials.append({**tmpl, 'trial_type': 'structured',
-                                       'values': values})
+            trials.append({**tmpl, 'values': values})
 
-    # ── Random trials ────────────────────────────────────────────────────────
-    random_trials = []
-    for _ in range(n_random):
-        if task == 'continuous':
-            true_mean = round(rng.uniform(*args.mean_range), 4)
-            true_std  = args.std_fixed
-            true_p    = float('nan')
-        else:
-            true_p    = round(rng.uniform(*args.p_range), 4)
-            true_mean = true_p
-            true_std  = float('nan')
-        values = build_random_sequence(
-            rng, task, true_mean, true_std, true_p, seq_length)
-        random_trials.append({
-            'qid': None, 'trial_type': 'random',
-            'true_mean': true_mean, 'true_std': true_std,
-            'std_condition': (float(true_std)
-                              if task == 'continuous' and not math.isnan(true_std)
-                              else float('nan')),
-            'true_p': true_p, 'values': values,
-        })
+    rng.shuffle(trials)
 
-    # ── Shuffle and build DataFrame + JSON ───────────────────────────────────
-    all_trials = structured_trials + random_trials
-    rng.shuffle(all_trials)
-
+    # ── Build DataFrame + JSON ───────────────────────────────────────────────
     records, json_trials = [], []
-    for t, trial in enumerate(all_trials):
-        sc = trial.get('std_condition', float('nan'))
+    for t, trial in enumerate(trials):
+        sc = trial['std_condition']
         for o, v in enumerate(trial['values'], start=1):
             records.append({
-                'task': task, 'trial': t,
-                'qid': trial['qid'], 'trial_type': trial['trial_type'],
-                'observation': o, 'value': v,
-                'true_mean': trial['true_mean'], 'true_std': trial['true_std'],
-                'std_condition': sc, 'true_p': trial['true_p'],
-                'prefix_length': eff_pfx if trial['trial_type'] == 'structured' else 0,
+                'task':          task,
+                'trial':         t,
+                'qid':           trial['qid'],
+                'observation':   o,
+                'value':         v,
+                'true_mean':     trial['true_mean'],
+                'true_std':      trial['true_std'],
+                'std_condition': sc,
+                'true_p':        trial['true_p'],
+                'prefix_length': eff_pfx,
             })
         json_trials.append({
-            'trial': t, 'qid': trial['qid'],
-            'trial_type': trial['trial_type'],
-            'true_mean':  None if math.isnan(trial['true_mean']) else trial['true_mean'],
-            'true_std':   None if math.isnan(trial['true_std'])  else trial['true_std'],
-            'true_p':     None if math.isnan(trial['true_p'])    else trial['true_p'],
+            'trial':         t,
+            'qid':           trial['qid'],
+            'true_mean':     None if math.isnan(trial['true_mean']) else trial['true_mean'],
+            'true_std':      None if math.isnan(trial['true_std'])  else trial['true_std'],
+            'true_p':        None if math.isnan(trial['true_p'])    else trial['true_p'],
             'std_condition': None if (sc != sc) else sc,
-            'values': trial['values'],
-            'prefix_length': eff_pfx if trial['trial_type'] == 'structured' else 0,
+            'values':        trial['values'],
+            'prefix_length': eff_pfx,
         })
 
     df = pd.DataFrame(records)
@@ -321,19 +271,14 @@ def generate_task_sequences(task, args, rng):
         assert df['value'].between(VALUE_MIN, VALUE_MAX).all()
     else:
         assert df['value'].isin([-1, 1]).all()
-    n_s = df[df.trial_type == 'structured']['trial'].nunique()
-    n_r = df[df.trial_type == 'random']['trial'].nunique()
-    assert n_s == n_structured and n_r == n_random
-    if n_unique > 0:
-        qid_counts = (df[df.trial_type == 'structured']
-                      .groupby('qid')['trial'].nunique())
-        assert (qid_counts == n_repeats).all()
+    assert df['trial'].nunique() == n_total
+    qid_counts = df.groupby('qid')['trial'].nunique()
+    assert (qid_counts == n_repeats).all()
 
-    print(f"\n  ✓ {len(df)} rows | {n_s} structured + {n_r} random trials")
+    print(f"\n  ✓ {len(df)} rows | {n_total} trials | {n_unique} unique seqs × {n_repeats} reps")
     if task == 'continuous':
         print(f"  Value range  : {df['value'].min()} – {df['value'].max()}")
         print(f"  true_mean    : {df['true_mean'].min():.1f} – {df['true_mean'].max():.1f}")
-        print(f"  true_std     : {df['true_std'].min():.1f} – {df['true_std'].max():.1f}")
     else:
         print(f"  true_p range : {df['true_p'].min():.3f} – {df['true_p'].max():.3f}")
 
@@ -341,9 +286,8 @@ def generate_task_sequences(task, args, rng):
 
 
 # ---------------------------------------------------------------------------
-# Seed-search scoring (formerly check_sequences.py)
+# Seed-search scoring
 # ---------------------------------------------------------------------------
-
 def _bayesian_continuous(values_raw):
     resps, running = [], 0.0
     for t, v in enumerate(values_raw, 1):
@@ -365,17 +309,7 @@ def _power_law_A(t, A):
 
 
 def score_sequences(seq_df, task):
-    """
-    Score a sequence set.  Lower = better shaped decay curves.
-
-    Score 1 — RMSE-decay quality (panel A):
-      Fit A/t^b to Bayesian agent RMSE curve; penalise deviations + early rises.
-    Score 2 — delta-decay quality (panel C):
-      Fit A/t to mean |Δresponse|; penalise deviations.
-    Returns (score_rmse_shape, score_delta, combined).
-    """
     rmse_by_obs, delta_curves = {}, []
-
     for trial_id in seq_df['trial'].unique():
         tdf    = seq_df[seq_df['trial'] == trial_id].sort_values('observation')
         values = tdf['value'].tolist()
@@ -387,8 +321,7 @@ def score_sequences(seq_df, task):
             resps = _bayesian_binary(values)
         for obs, r in zip(tdf['observation'].tolist(), resps):
             rmse_by_obs.setdefault(obs, []).append(abs(r - gt))
-        delta_curves.append([abs(resps[i] - resps[i - 1])
-                              for i in range(1, len(resps))])
+        delta_curves.append([abs(resps[i] - resps[i-1]) for i in range(1, len(resps))])
 
     obs_sorted = sorted(rmse_by_obs)
     rmse_curve = np.array([np.mean(rmse_by_obs[o]) for o in obs_sorted])
@@ -396,23 +329,19 @@ def score_sequences(seq_df, task):
 
     try:
         popt, _ = curve_fit(lambda t, A, b: A / t**b, t_vals, rmse_curve,
-                             p0=[rmse_curve[0], 0.5],
-                             bounds=([0, 0.01], [np.inf, 2.0]))
-        fitted       = popt[0] / t_vals**popt[1]
-        score_shape  = float(np.sqrt(np.mean((rmse_curve - fitted)**2)))
+                             p0=[rmse_curve[0], 0.5], bounds=([0, 0.01], [np.inf, 2.0]))
+        score_shape = float(np.sqrt(np.mean((rmse_curve - popt[0] / t_vals**popt[1])**2)))
     except Exception:
-        score_shape  = float(np.std(np.diff(rmse_curve)))
+        score_shape = float(np.std(np.diff(rmse_curve)))
 
-    early      = rmse_curve[:min(5, len(rmse_curve))]
-    early_rise = float(np.sum(np.maximum(np.diff(early), 0)))
+    early_rise = float(np.sum(np.maximum(np.diff(rmse_curve[:min(5, len(rmse_curve))]), 0)))
 
     mean_delta = np.mean(delta_curves, axis=0)
     t_d        = np.arange(2, len(mean_delta) + 2, dtype=float)
     try:
         popt2, _ = curve_fit(_power_law_A, t_d, mean_delta,
                               p0=[mean_delta[0]], bounds=([0], [np.inf]))
-        score_delta = float(np.sqrt(np.mean(
-            (mean_delta - _power_law_A(t_d, popt2[0]))**2)))
+        score_delta = float(np.sqrt(np.mean((mean_delta - _power_law_A(t_d, popt2[0]))**2)))
     except Exception:
         score_delta = float(np.std(mean_delta))
 
@@ -427,16 +356,11 @@ def _plot_diagnostic(seq_df, task, attempt, out_dir, score):
     for trial_id in seq_df['trial'].unique():
         tdf    = seq_df[seq_df['trial'] == trial_id].sort_values('observation')
         values = tdf['value'].tolist()
-        if task == 'continuous':
-            gt    = tdf['true_mean'].iloc[0] / 100.0
-            resps = _bayesian_continuous(values)
-        else:
-            gt    = tdf['true_p'].iloc[0] * 2 - 1
-            resps = _bayesian_binary(values)
+        gt     = tdf['true_mean'].iloc[0] / 100.0 if task == 'continuous' else tdf['true_p'].iloc[0] * 2 - 1
+        resps  = _bayesian_continuous(values) if task == 'continuous' else _bayesian_binary(values)
         for obs, r in zip(tdf['observation'].tolist(), resps):
             rmse_by_obs.setdefault(obs, []).append(abs(r - gt))
-        delta_curves.append([abs(resps[i] - resps[i - 1])
-                              for i in range(1, len(resps))])
+        delta_curves.append([abs(resps[i] - resps[i-1]) for i in range(1, len(resps))])
 
     obs_sorted = sorted(rmse_by_obs)
     rmse_curve = np.array([np.mean(rmse_by_obs[o]) for o in obs_sorted])
@@ -445,38 +369,27 @@ def _plot_diagnostic(seq_df, task, attempt, out_dir, score):
 
     axes[0].plot(obs_sorted, rmse_curve, 'b-o', ms=3, lw=1.5)
     axes[0].set_title('RMSE vs true target'); axes[0].set_xlabel('obs')
-
     axes[1].plot(obs_sorted, rmse_curve, 'b-o', ms=3, lw=1.5, label='data')
     try:
         t_v = np.array(obs_sorted, float)
         popt, _ = curve_fit(lambda t, A, b: A / t**b, t_v, rmse_curve,
-                             p0=[rmse_curve[0], 0.5],
-                             bounds=([0, 0.01], [np.inf, 2.0]))
-        axes[1].plot(obs_sorted, popt[0] / t_v**popt[1],
-                     'r--', lw=1.5, label=f'A/t^{popt[1]:.2f}')
+                             p0=[rmse_curve[0], 0.5], bounds=([0, 0.01], [np.inf, 2.0]))
+        axes[1].plot(obs_sorted, popt[0] / t_v**popt[1], 'r--', lw=1.5, label=f'A/t^{popt[1]:.2f}')
     except Exception:
         pass
-    axes[1].set_title('RMSE + power-law fit')
-    axes[1].set_xlabel('obs'); axes[1].legend(fontsize=7)
-
+    axes[1].set_title('RMSE + power-law fit'); axes[1].set_xlabel('obs'); axes[1].legend(fontsize=7)
     axes[2].plot(t_d, mean_delta, 'g-o', ms=3, lw=1.5, label='data')
     try:
-        popt2, _ = curve_fit(_power_law_A, t_d, mean_delta,
-                              p0=[mean_delta[0]], bounds=([0], [np.inf]))
-        axes[2].plot(t_d, _power_law_A(t_d, popt2[0]),
-                     'r--', lw=1.5, label='A/t fit')
+        popt2, _ = curve_fit(_power_law_A, t_d, mean_delta, p0=[mean_delta[0]], bounds=([0], [np.inf]))
+        axes[2].plot(t_d, _power_law_A(t_d, popt2[0]), 'r--', lw=1.5, label='A/t fit')
     except Exception:
         pass
-    axes[2].set_title('Mean |Δresponse|')
-    axes[2].set_xlabel('obs'); axes[2].legend(fontsize=7)
-
+    axes[2].set_title('Mean |Δresponse|'); axes[2].set_xlabel('obs'); axes[2].legend(fontsize=7)
     if task == 'binary':
-        tp = seq_df[seq_df.observation == 1]['true_p'].values
-        axes[3].hist(tp, bins=10, color='purple', alpha=0.7)
+        axes[3].hist(seq_df[seq_df.observation == 1]['true_p'].values, bins=10, color='purple', alpha=0.7)
         axes[3].set_title('true_p distribution'); axes[3].set_xlabel('true_p')
     else:
-        tm = seq_df[seq_df.observation == 1]['true_mean'].values
-        axes[3].hist(tm, bins=10, color='teal', alpha=0.7)
+        axes[3].hist(seq_df[seq_df.observation == 1]['true_mean'].values, bins=10, color='teal', alpha=0.7)
         axes[3].set_title('true_mean distribution'); axes[3].set_xlabel('true_mean')
 
     diag_dir = pathlib.Path(out_dir) / 'diagnostics'
@@ -485,8 +398,7 @@ def _plot_diagnostic(seq_df, task, attempt, out_dir, score):
     plt.close(fig)
 
 
-def _save_sequences(df, json_trials, task, out_dir, overwrite=True):
-    """Write pkl and json to out_dir."""
+def _save_sequences(df, json_trials, task, out_dir):
     out_dir = pathlib.Path(out_dir)
     json_path = out_dir / f'{task}_sequences.json'
     pkl_path  = out_dir / f'{task}_sequences.pkl'
@@ -497,52 +409,28 @@ def _save_sequences(df, json_trials, task, out_dir, overwrite=True):
 
 
 def _seed_search(task, args, out_dir):
-    """
-    Try args.n_tries seeds, score each, save the best.
-    Uses task-offset seeds: continuous = seed, binary = seed + 1000.
-    """
     print(f"\n{'='*55}\nSeed search: {task.upper()} ({args.n_tries} tries)")
-
-    best_score  = np.inf
-    best_scores = (np.inf, np.inf)
-    best_seed   = None
-    best_df     = None
-    best_json   = None
-    all_scores  = []
-
+    best_score, best_scores, best_seed, best_df = np.inf, (np.inf, np.inf), None, None
+    all_scores = []
     tmpdir = pathlib.Path(tempfile.mkdtemp())
     try:
         for attempt in range(args.n_tries):
-            seed      = attempt
-            task_seed = seed if task == 'continuous' else seed + 1000
-            rng       = make_rng(task_seed)
-
+            task_seed = attempt if task == 'continuous' else attempt + 1000
+            rng = make_rng(task_seed)
             try:
                 df, json_trials = generate_task_sequences(task, args, rng)
             except Exception:
                 continue
-
             r_shape, r_delta, combined = score_sequences(df, task)
             all_scores.append(combined)
-
             if combined < best_score:
-                best_score  = combined
-                best_scores = (r_shape, r_delta)
-                best_seed   = seed
-                best_df     = df.copy()
-                best_json   = json_trials
-                # Write current best immediately so partial runs are usable
+                best_score, best_scores, best_seed, best_df = combined, (r_shape, r_delta), attempt, df.copy()
                 _save_sequences(df, json_trials, task, out_dir)
-
             if (attempt + 1) % 50 == 0:
                 if best_df is not None:
-                    _plot_diagnostic(best_df, task, attempt + 1,
-                                     out_dir, best_score)
-                pct = np.mean(np.array(all_scores) <= best_score) * 100
-                print(f"  [{attempt+1:4d}/{args.n_tries}]  "
-                      f"best seed={best_seed}  combined={best_score:.5f}  "
+                    _plot_diagnostic(best_df, task, attempt + 1, out_dir, best_score)
+                print(f"  [{attempt+1:4d}/{args.n_tries}]  best seed={best_seed}  combined={best_score:.5f}  "
                       f"(shape={best_scores[0]:.5f}  delta={best_scores[1]:.5f})")
-
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -568,32 +456,26 @@ def parse_args():
         description='Generate (and optionally seed-search) task sequences.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument('--task', choices=['continuous', 'binary', 'both'],
-                   default='both')
-    p.add_argument('--n_tries', type=int, default=1,
-                   help='Number of seeds to try; best is saved. '
-                        '1 = single generation with --seed.')
-    p.add_argument('--n_unique_sequences', type=int, default=8)
-    p.add_argument('--n_repeats',          type=int, default=5)
-    p.add_argument('--n_random',           type=int, default=0)
-    p.add_argument('--seq_length',         type=int, default=15)
-    p.add_argument('--prefix_length',      type=int, default=4)
+    p.add_argument('--task',               choices=['continuous', 'binary', 'both'], default='both')
+    p.add_argument('--n_tries',            type=int,   default=1,
+                   help='Seeds to try; best saved. 1 = single run with --seed.')
+    p.add_argument('--n_unique_sequences', type=int,   default=8)
+    p.add_argument('--n_repeats',          type=int,   default=5)
+    p.add_argument('--seq_length',         type=int,   default=15)
+    p.add_argument('--prefix_length',      type=int,   default=4)
     p.add_argument('--full_repeat',        action='store_true')
-    p.add_argument('--mean_range', type=float, nargs=2, default=[-60.0, 60.0],
-                   metavar=('LO', 'HI'))
-    p.add_argument('--std_fixed',  type=float, default=20.0)
-    p.add_argument('--p_range',    type=float, nargs=2, default=[0.2, 0.8],
-                   metavar=('LO', 'HI'))
-    p.add_argument('--output_dir', default='task/sequences')
-    p.add_argument('--seed',       type=int,   default=42,
+    p.add_argument('--mean_range',         type=float, nargs=2, default=[-60.0, 60.0], metavar=('LO', 'HI'))
+    p.add_argument('--std_fixed',          type=float, default=20.0)
+    p.add_argument('--p_range',            type=float, nargs=2, default=[0.2, 0.8],   metavar=('LO', 'HI'))
+    p.add_argument('--output_dir',         default='task/sequences')
+    p.add_argument('--seed',               type=int,   default=42,
                    help='Seed for single generation (ignored when n_tries > 1)')
-    p.add_argument('--overwrite',  action='store_true')
+    p.add_argument('--overwrite',          action='store_true')
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-
     assert args.n_unique_sequences > 0
     assert args.n_repeats > 0
     assert args.seq_length > 0
@@ -608,12 +490,10 @@ def main():
     tasks = ['continuous', 'binary'] if args.task == 'both' else [args.task]
 
     if args.n_tries > 1:
-        # ── Seed search ───────────────────────────────────────────────────────
         print(f"Seed search | {args.n_tries} tries per task")
         for task in tasks:
             _seed_search(task, args, out_dir)
     else:
-        # ── Single generation ─────────────────────────────────────────────────
         print(f"Generating sequences | seed={args.seed}")
         all_dfs = []
         for task in tasks:
@@ -622,9 +502,7 @@ def main():
             df, json_trials = generate_task_sequences(task, args, rng)
             all_dfs.append(df)
             pkl_path, json_path = _save_sequences(df, json_trials, task, out_dir)
-            print(f"\n  Saved: {json_path}")
-            print(f"  Saved: {pkl_path}")
-
+            print(f"\n  Saved: {json_path}\n  Saved: {pkl_path}")
         if len(all_dfs) == 2:
             combined = pd.concat(all_dfs, ignore_index=True)
             combined.to_pickle(out_dir / 'all_sequences.pkl')

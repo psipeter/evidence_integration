@@ -62,13 +62,20 @@ export function buildAndRun(cfg) {
   const prolificPID = urlParams.get('PROLIFIC_PID') || 'dev_pid';
 
   // jsPsych
+  // ── beforeunload guard — warns participant before navigating away ──────────
+  const beforeUnloadHandler = (e) => {
+    e.preventDefault();
+    e.returnValue = '';
+  };
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+
   const jsPsych = initJsPsych({
     on_finish: () => {
-      const allData = jsPsych.data.get().json();
-      jatos.submitResultData(allData, () => {
-        window.location.href =
-          'https://app.prolific.com/submissions/complete?cc=PLACEHOLDER';
-      });
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+      jatos.endStudyAndRedirect(
+        'https://app.prolific.com/submissions/complete?cc=PLACEHOLDER',
+        jsPsych.data.get().json()
+      );
     },
   });
 
@@ -94,7 +101,7 @@ export function buildAndRun(cfg) {
         <strong>Psychological and Brain Sciences</strong>.</p><br>
         <p>The study takes approximately <strong>30 minutes</strong> to complete.
         You will be compensated at the rate advertised on Prolific.</p><br>
-        <p>Please click <em>Next</em> to read the consent form before beginning.</p>
+        <p style="background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:0.6rem 0.75rem;font-size:0.9rem;color:#713f12;">&#9888; Do not close, refresh, or navigate away during the task — your data will be lost and you will not be paid. If this happens accidentally, please request a return on Prolific.</p><br>        <p>Please click <em>Next</em> to read the consent form before beginning.</p>
       </div>`,
     choices: ['Next'],
     button_html: (c) => makeButton(c),
@@ -277,7 +284,6 @@ export function buildAndRun(cfg) {
           true_std:      seq.true_std,
           true_p:        seq.true_p   ?? null,
           qid:           seq.qid      ?? null,
-          trial_type:    seq.trial_type ?? null,
           prefix_length: seq.prefix_length ?? null,
           std_condition: seq.std_condition ?? null,
         },
@@ -289,7 +295,6 @@ export function buildAndRun(cfg) {
       });
     }
 
-    // Inter-trial summary
     const _t         = t;
     const _trueMean  = seq.true_mean;
     const _trueStd   = seq.true_std;
@@ -303,7 +308,7 @@ export function buildAndRun(cfg) {
         trial_num:        _t + 1,
         true_mean:        _trueMean,
         true_std:         _trueStd,
-        true_p:           seq.true_p ?? null,
+        true_p:           _seq.true_p ?? null,
         values:           _values,
         responses:        () => _responses.map(r => r.response),
         show_performance: showTrialPerformance,
@@ -318,29 +323,34 @@ export function buildAndRun(cfg) {
     const _t        = sequences.length - 1;
     const _seq      = sequences[_t];
     const _responses = lastTrialResponses;
-    if (showTrialPerformance) {
-      timeline.push({
-        type: TrialSummaryPlugin2,
-        trial_num:        _t + 1,
-        true_mean:        _seq.true_mean,
-        true_std:         _seq.true_std,
-        values:           [..._seq.values],
-        responses:        () => _responses.map(r => r.response),
-        show_performance: true,
-        is_last:          true,
-        data: { screen: 'inter_trial', trial: _t },
-      });
-    }
+    timeline.push({
+      type: TrialSummaryPlugin2,
+      trial_num:        _t + 1,
+      true_mean:        _seq.true_mean,
+      true_std:         _seq.true_std,
+      values:           [..._seq.values],
+      responses:        () => _responses.map(r => r.response),
+      show_performance: showTrialPerformance,
+      is_last:          true,
+      data: { screen: 'inter_trial', trial: _t },
+    });
   }
 
   // ── End ───────────────────────────────────────────────────────────────────
-  timeline.push({
-    type: jsPsychHtmlButtonResponse,
-    stimulus: `
+  const endStimulus = `
       <div class="screen-wrap" style="text-align:center;">
         <h2>Thank you!</h2>
         <p style="margin-top:1rem;">Your responses have been saved.</p>
-      </div>`,
+        <p style="margin-top:0.75rem;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:0.6rem 0.75rem;">
+          This is <strong>one half of a two-part study</strong>. The other part will
+          appear on your Prolific dashboard shortly &mdash; please complete it today
+          if possible.
+        </p>
+      </div>`;
+
+  timeline.push({
+    type: jsPsychHtmlButtonResponse,
+    stimulus: endStimulus,
     choices: ['Return to Prolific to complete your submission'],
     button_html: (c) => makeButton(c),
     data: { screen: 'end' },

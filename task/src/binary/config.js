@@ -7,7 +7,8 @@
 import sequencesData from '../../sequences/binary_sequences.json';
 
 // ── Parameters ────────────────────────────────────────────────────────────
-const N_TRIALS_TO_RUN        = 2;       // ← SET TO 40 BEFORE DEPLOYMENT
+const N_TRIALS_TO_RUN        = 1;       // ← SET TO 40 BEFORE DEPLOYMENT
+const N_OBS_TO_RUN           = 5;       // ← SET TO 15 (or remove) BEFORE DEPLOYMENT
 const SHOW_SLIDER_VALUE      = true;
 const SLIDER_DEFAULT         = 'none';
 const DEFAULT_VALUE          = 50;      // midpoint of [0,100] slider
@@ -21,7 +22,9 @@ const PRACTICE_P     = 0.6;
 
 export const config = {
   taskType:             'binary',
-  sequences:            sequencesData.slice(0, N_TRIALS_TO_RUN),
+  sequences:            sequencesData.slice(0, N_TRIALS_TO_RUN).map(
+                          s => ({ ...s, values: s.values.slice(0, N_OBS_TO_RUN) })
+                        ),
   practiceValues,
   practiceMean:         PRACTICE_P,
   practiceStd:          0,

@@ -24,8 +24,7 @@ Output columns (observation rows only)
     true_mean      : float  Generative mean (continuous)
     true_std       : float  Generative std (continuous); NaN for binary
     true_p         : float  True Bernoulli probability (binary); NaN for continuous
-    qid            : int    Unique sequence ID (structured trials); NaN for random
-    trial_type     : str    'structured' or 'random'
+    qid            : int    Unique sequence ID for each repeated sequence
     prefix_length  : int    Number of fixed prefix observations
     std_condition  : float  Observation std value (continuous); NaN for binary
     response       : float  Participant estimate (NaN if timed out or no response)
@@ -88,7 +87,6 @@ def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
             'true_std':      t.get('true_std', np.nan),
             'true_p':        t.get('true_p', np.nan) if t.get('true_p') is not None else np.nan,
             'qid':           t.get('qid', np.nan),
-            'trial_type':    t.get('trial_type', np.nan),
             'prefix_length': t.get('prefix_length', np.nan),
             'std_condition': t.get('std_condition', np.nan) if t.get('std_condition') is not None else np.nan,
             'response':      t.get('response', np.nan) if t.get('response') is not None else np.nan,
