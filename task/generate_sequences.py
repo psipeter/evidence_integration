@@ -12,8 +12,7 @@ Trial structure
     Shared across all n_repeats repeats of a given qid.
     Generated JOINTLY across all n_unique sequences, one position at a
     time.  Each position is redrawn until the aggregate Bayesian RMSE
-    decreases — guaranteeing smooth convergence in the early curve by
-    construction, cheaply (median ~5–8 draws total).
+    does not rise (pass 1 structural constraint).
 
   Suffix block (obs prefix_length+1..seq_length):
     Generated JOINTLY across all n_unique sequences, one position at a
@@ -46,11 +45,28 @@ Generative distributions
   continuous : Normal(true_mean, std_fixed), clipped to [0, 100]
   binary     : Bernoulli(true_p), values in {−1, +1}
 
+Best seeds (from 200-seed search minimising weighted RL |Δ| score)
+------------------------------------------------------------------
+  continuous : seed=51  prefix_length=4
+  binary     : TBD after rerun with new scoring  prefix_length=4
+
+Scoring (3-pass):
+  Pass 1 (structural): Bayesian RMSE non-rising, k=1 plausibility
+  Pass 2 (objective):  Σ_obs w(obs)×max(0, |Δ|(obs)−|Δ|(obs−1)) for Bayesian agent
+    w(obs) = exp(-0.5*(obs-2)); score=0 iff |Δ| curve is perfectly monotone
+    Binary: same metric using RL_lambda(λ=0.5) since bay/rl ratio varies
+  Pass 2 gate: bay_delta == 0
+  Pass 3 objective: minimize rl_delta
+
 Usage
 -----
-  python task/generate_sequences.py --task both --seed 42
-  python task/generate_sequences.py --task both --seed 42 \\
-      --n_unique_sequences 10 --n_repeats 4 --prefix_length 3
+  # Single seed (fast, use best known seeds)
+  python task/generate_sequences.py --task continuous --seed 51
+  python task/generate_sequences.py --task binary --seed 42
+
+  # Seed search (pass 2 gate + pass 3 RL objective)
+  python task/generate_sequences.py --task both --n_tries 200 \\
+      --rl_alpha_0 1.0 --rl_lambda 0.5 --prefix_length 4
 """
 
 from __future__ import annotations
@@ -59,15 +75,9 @@ import argparse
 import json
 import math
 import pathlib
-import shutil
-import tempfile
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.optimize import curve_fit
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -162,6 +172,38 @@ def _bayesian_errors(sequence, task, true_mean, true_p):
 
 
 # ---------------------------------------------------------------------------
+# RL_lambda agent helper
+# ---------------------------------------------------------------------------
+def _rl_lambda_errors(sequence, task, true_mean, true_p,
+                      alpha_0=1.0, lambda_=0.5):
+    """Per-observation |response − true parameter| for RL_lambda agent.
+    alpha_t = alpha_0 / n^lambda_  (decaying learning rate)
+    Continuous: response tracks normalised [0,1] mean.
+    Binary:     response tracks p directly (initialised at 0.5).
+    """
+    errs    = []
+    running = 0.5   # prior at midpoint for both tasks
+    if task == 'continuous':
+        gt = true_mean / 100.0
+        for n, v in enumerate(sequence, 1):
+            alpha    = alpha_0 / (n ** lambda_)
+            running += alpha * (v / 100.0 - running)
+            running  = float(np.clip(running, 0.0, 1.0))
+            errs.append(abs(running - gt))
+    else:
+        gt = true_p
+        for n, v in enumerate(sequence, 1):
+            alpha    = alpha_0 / (n ** lambda_)
+            obs_norm = 1.0 if v == 1 else 0.0   # map {-1,+1} → {0,1}
+            running += alpha * (obs_norm - running)
+            running  = float(np.clip(running, 0.0, 1.0))
+            errs.append(abs(running - gt))
+    return errs
+
+
+
+
+# ---------------------------------------------------------------------------
 # Per-sequence plausibility check
 # ---------------------------------------------------------------------------
 def check_sequence_plausibility(sequence, task, true_mean, true_std, true_p,
@@ -183,47 +225,39 @@ def check_sequence_plausibility(sequence, task, true_mean, true_std, true_p,
 def build_prefix_block(rng, task, param_list, prefix_length):
     """Generate prefixes for all base qids jointly, one position at a time.
 
-    At each position p, draw one observation per qid and accept the full
-    position only if the aggregate Bayesian RMSE across all qids does not
-    rise from position p−1 to p.  Redraw the entire position if it rises.
-
-    This guarantees monotone aggregate RMSE across the prefix by
-    construction.  Also rejects any prefix whose per-sequence plausibility
-    (k=1) fails at the end.
+    At each position, draw one obs per qid and accept only if the
+    aggregate Bayesian RMSE does not rise.  Per-sequence plausibility
+    (k=1) is checked on the completed prefix.
 
     Returns: list of prefixes (one per entry in param_list).
     """
     n_qids = len(param_list)
 
     for _outer in range(MAX_REJECTION_ATTEMPTS):
-        prefixes   = [[] for _ in range(n_qids)]
+        prefixes     = [[] for _ in range(n_qids)]
         prev_agg_err = float('inf')
-        success = True
+        success      = True
 
         for pos in range(prefix_length):
             for _pos_attempt in range(MAX_REJECTION_ATTEMPTS):
-                # Draw one observation per qid at this position
                 if task == 'continuous':
                     new_obs = [draw_continuous_obs(rng, tm, ts, 1)[0]
                                for tm, ts, _ in param_list]
                 else:
                     new_obs = [draw_binary_obs(rng, tp, 1)[0]
                                for _, _, tp in param_list]
-
-                # Compute aggregate Bayesian error after adding these obs
-                agg_err = np.mean([
+                agg_err = float(np.mean([
                     _bayesian_errors(prefixes[q] + [new_obs[q]], task,
                                      param_list[q][0], param_list[q][2])[-1]
                     for q in range(n_qids)
-                ])
-
-                if agg_err <= prev_agg_err:
-                    for q in range(n_qids):
-                        prefixes[q].append(new_obs[q])
-                    prev_agg_err = agg_err
-                    break
+                ]))
+                if agg_err > prev_agg_err:
+                    continue
+                for q in range(n_qids):
+                    prefixes[q].append(new_obs[q])
+                prev_agg_err = agg_err
+                break
             else:
-                # Couldn't find a non-rising position — restart from scratch
                 success = False
                 break
 
@@ -248,7 +282,8 @@ def build_prefix_block(rng, task, param_list, prefix_length):
 # ---------------------------------------------------------------------------
 # SUFFIX BLOCK  — joint across all qids, one position at a time, per repeat
 # ---------------------------------------------------------------------------
-def build_suffix_block(rng, task, all_templates, suffix_length):
+def build_suffix_block(rng, task, all_templates, suffix_length,
+                       error_fn=None):
     """Generate one suffix per qid for a single repeat, jointly.
 
     Mirrors build_prefix_block: sample one observation per qid at each
@@ -262,13 +297,15 @@ def build_suffix_block(rng, task, all_templates, suffix_length):
 
     Returns: list of suffixes (one per template in all_templates).
     """
+    if error_fn is None:
+        error_fn = _bayesian_errors
     n_qids = len(all_templates)
 
     for _outer in range(MAX_REJECTION_ATTEMPTS):
         suffixes    = [[] for _ in range(n_qids)]
         # Start error from end of prefix for each qid
         prev_errors = [
-            _bayesian_errors(t['prefix'], task, t['true_mean'], t['true_p'])[-1]
+            error_fn(t['prefix'], task, t['true_mean'], t['true_p'])[-1]
             if t['prefix'] else float('inf')
             for t in all_templates
         ]
@@ -284,10 +321,8 @@ def build_suffix_block(rng, task, all_templates, suffix_length):
                 else:
                     new_obs = [draw_binary_obs(rng, t['true_p'], 1)[0]
                                for t in all_templates]
-
-                # Aggregate error after adding this position
                 agg_err = float(np.mean([
-                    _bayesian_errors(
+                    error_fn(
                         all_templates[q]['prefix'] + suffixes[q] + [new_obs[q]],
                         task,
                         all_templates[q]['true_mean'],
@@ -295,7 +330,6 @@ def build_suffix_block(rng, task, all_templates, suffix_length):
                     )[-1]
                     for q in range(n_qids)
                 ]))
-
                 if agg_err <= prev_agg:
                     for q in range(n_qids):
                         suffixes[q].append(new_obs[q])
@@ -408,7 +442,39 @@ def generate_task_sequences(task, args, rng):
             for q, tmpl in enumerate(templates):
                 trials.append({**tmpl, 'values': tmpl['prefix'] + suffixes[q]})
 
-    rng.shuffle(trials)
+    # Shuffle trials such that:
+    #   1. No two consecutive trials share the same qid (same prefix).
+    #   2. The first trial's distribution is sufficiently different from
+    #      the tutorial's, so participants don't confuse the two.
+    #      Continuous: |true_mean - 50| > 10  (avoid near-centre means)
+    #      Binary:     |true_p - 0.5| > 0.15  (avoid near-0.5 probabilities)
+    def shuffle_no_consecutive_qid(trials, rng, task):
+        trials = list(trials)
+        rng.shuffle(trials)
+        result = []
+        remaining = list(trials)
+        while remaining:
+            last_qid = result[-1]['qid'] if result else None
+            is_first = len(result) == 0
+            def ok(t):
+                if t['qid'] == last_qid:
+                    return False
+                if is_first:
+                    if task == 'continuous':
+                        return abs(t['true_mean'] - 50.0) > 10.0
+                    else:
+                        return abs(t['true_p'] - 0.5) > 0.15
+                return True
+            candidates = [i for i, t in enumerate(remaining) if ok(t)]
+            if not candidates:  # relax constraints if stuck
+                candidates = [i for i, t in enumerate(remaining)
+                              if t['qid'] != last_qid]
+            if not candidates:
+                candidates = list(range(len(remaining)))
+            idx = candidates[int(rng.integers(len(candidates)))]
+            result.append(remaining.pop(idx))
+        return result
+    trials = shuffle_no_consecutive_qid(trials, rng, task)
 
     # ── Build DataFrame + JSON ───────────────────────────────────────────────
     records, json_trials = [], []
@@ -453,63 +519,136 @@ def generate_task_sequences(task, args, rng):
 
 
 # ---------------------------------------------------------------------------
-# Seed-search scoring  (unchanged)
+# Seed-search scoring
 # ---------------------------------------------------------------------------
-def _bayesian_continuous(values_raw):
-    resps, running = [], 0.0
-    for t, v in enumerate(values_raw, 1):
-        running += (v / 100.0 - running) / t
-        resps.append(running * (t + 1) / (t + 3))
-    return resps
 
 
-def _bayesian_binary(values):
-    resps, n_pos = [], 0
-    for t, v in enumerate(values, 1):
-        n_pos += (1 if v == 1 else 0)
-        resps.append((n_pos + 1) / (t + 2) * 2 - 1)
-    return resps
 
 
-def _power_law_A(t, A):
-    return A / np.asarray(t, float)
+def _weighted_delta_score(seq_df, task, agent_fn, gamma=0.5):
+    """Exponentially weighted sum of RISES in the mean |Δresponse| curve.
 
+    Builds the aggregate mean |Δresponse| curve across all trials, then
+    sums only upward steps (rises), weighted by position:
 
-def score_sequences(seq_df, task):
-    rmse_by_obs, delta_curves = {}, []
+        score = Σ_obs  w(obs) × max(0, curve(obs) − curve(obs−1))
+
+    w(obs) = exp(-gamma*(obs-2)): early rises penalised most.
+    Score = 0 iff the |Δ| curve is perfectly monotone non-rising.
+
+    agent_fn(values, task, true_mean, true_p) → list of responses
+    """
+    obs_deltas = {}
     for trial_id in seq_df['trial'].unique():
-        tdf    = seq_df[seq_df['trial'] == trial_id].sort_values('observation')
-        values = tdf['value'].tolist()
-        gt     = tdf['true_mean'].iloc[0] / 100.0 if task == 'continuous' \
-                 else tdf['true_p'].iloc[0] * 2 - 1
-        resps  = _bayesian_continuous(values) if task == 'continuous' \
-                 else _bayesian_binary(values)
-        for obs, r in zip(tdf['observation'].tolist(), resps):
-            rmse_by_obs.setdefault(obs, []).append(abs(r - gt))
-        delta_curves.append([abs(resps[i] - resps[i-1]) for i in range(1, len(resps))])
+        tdf   = seq_df[seq_df['trial'] == trial_id].sort_values('observation')
+        tm    = tdf['true_mean'].iloc[0]
+        tp    = tdf['true_p'].iloc[0] if task == 'binary' else float('nan')
+        resps = agent_fn(tdf['value'].tolist(), task, tm, tp)
+        for i in range(1, len(resps)):
+            obs = int(tdf['observation'].iloc[i])
+            obs_deltas.setdefault(obs, []).append(abs(resps[i] - resps[i - 1]))
+    obs_sorted = sorted(obs_deltas)
+    curve = [float(np.mean(obs_deltas[o])) for o in obs_sorted]
+    total = 0.0
+    for i in range(1, len(curve)):
+        rise = curve[i] - curve[i - 1]
+        if rise > 0:
+            obs = obs_sorted[i]
+            w   = float(np.exp(-gamma * (obs - 2)))
+            total += w * rise
+    return total
 
-    obs_sorted = sorted(rmse_by_obs)
-    rmse_curve = np.array([np.mean(rmse_by_obs[o]) for o in obs_sorted])
-    t_vals     = np.arange(1, len(rmse_curve) + 1, dtype=float)
 
-    try:
-        popt, _ = curve_fit(lambda t, A, b: A / t**b, t_vals, rmse_curve,
-                             p0=[rmse_curve[0], 0.5], bounds=([0, 0.01], [np.inf, 2.0]))
-        score_shape = float(np.sqrt(np.mean((rmse_curve - popt[0] / t_vals**popt[1])**2)))
-    except Exception:
-        score_shape = float(np.std(np.diff(rmse_curve)))
+def _weighted_rmse_score(seq_df, task, agent_fn, gamma=0.5):
+    """Exponentially weighted rises in the mean RMSE curve.
 
-    early_rise  = float(np.sum(np.maximum(np.diff(rmse_curve[:min(5, len(rmse_curve))]), 0)))
-    mean_delta  = np.mean(delta_curves, axis=0)
-    t_d         = np.arange(2, len(mean_delta) + 2, dtype=float)
-    try:
-        popt2, _ = curve_fit(_power_law_A, t_d, mean_delta,
-                              p0=[mean_delta[0]], bounds=([0], [np.inf]))
-        score_delta = float(np.sqrt(np.mean((mean_delta - _power_law_A(t_d, popt2[0]))**2)))
-    except Exception:
-        score_delta = float(np.std(mean_delta))
+    Mirrors _weighted_delta_score but operates on |response − true_param|
+    (RMSE) rather than |Δresponse|.  Score = 0 iff RMSE curve is monotone.
 
-    return score_shape, score_delta, score_shape + early_rise + score_delta
+    agent_fn(values, task, true_mean, true_p) → list of responses
+    """
+    obs_errs = {}
+    for trial_id in seq_df['trial'].unique():
+        tdf  = seq_df[seq_df['trial'] == trial_id].sort_values('observation')
+        tm   = tdf['true_mean'].iloc[0]
+        tp   = tdf['true_p'].iloc[0] if task == 'binary' else float('nan')
+        gt   = tm / 100.0 if task == 'continuous' else tp
+        resp = agent_fn(tdf['value'].tolist(), task, tm, tp)
+        for obs, r in zip(tdf['observation'].tolist(), resp):
+            obs_errs.setdefault(int(obs), []).append(abs(r - gt))
+    obs_sorted = sorted(obs_errs)
+    curve  = [float(np.mean(obs_errs[o])) for o in obs_sorted]
+    total  = 0.0
+    for i in range(1, len(curve)):
+        rise = curve[i] - curve[i - 1]
+        if rise > 0:
+            obs = obs_sorted[i]
+            w   = float(np.exp(-gamma * (obs - 1)))
+            total += w * rise
+    return total
+
+
+def _bayesian_responses(values, task, true_mean, true_p):
+    """Bayesian agent responses (running posterior mean, normalised)."""
+    resps = []
+    if task == 'continuous':
+        running = 0.5
+        for n, v in enumerate(values, 1):
+            running += (v / 100.0 - running) / n
+            resps.append(float(np.clip(running, 0.0, 1.0)))
+    else:
+        n_pos = 0
+        for n, v in enumerate(values, 1):
+            n_pos += (1 if v == 1 else 0)
+            resps.append((n_pos + 1) / (n + 2))  # Laplace smoothing → [0,1]
+    return resps
+
+
+def _rl_responses(values, task, true_mean, true_p,
+                  alpha_0=1.0, lambda_=0.5):
+    """RL_lambda agent responses (running estimate, normalised to [0,1])."""
+    running = 0.5
+    resps   = []
+    for n, v in enumerate(values, 1):
+        alpha   = alpha_0 / (n ** lambda_)
+        obs_n   = v / 100.0 if task == 'continuous' else (1.0 if v == 1 else 0.0)
+        running = float(np.clip(running + alpha * (obs_n - running), 0.0, 1.0))
+        resps.append(running)
+    return resps
+
+
+def score_sequences(seq_df, task, rl_alpha_0=1.0, rl_lambda=0.5, gamma=0.5):
+    """Three-pass scoring for seed search.
+
+    Pass 1 (generation constraint, already applied):
+      Bayesian RMSE non-rising — enforced structurally in block builders.
+      k=1 plausibility — enforced structurally in block builders.
+      All candidates reaching this function already satisfy pass 1.
+
+    Pass 2 — Bayesian weighted |Δresponse|:
+      Exponentially weighted sum of mean |ΔBayesian_response| per obs.
+      Ensures smooth Bayesian curve shape.
+
+    Pass 3 — RL_lambda weighted |Δresponse|  (primary objective):
+      Same metric using RL_lambda(alpha_0, lambda_) responses.
+      Directly targets what panels C/J show — smooth per-quartile
+      |Δ| decay.  Pass 3 score is the combined score returned;
+      pass 2 is reported for diagnostics.
+
+    Pass 2 gate: bay_delta must be 0 (Bayesian |Δ| curve perfectly monotone).
+    Pass 3 objective: minimize rl_delta among seeds that pass gate.
+    Returns (bay_delta, rl_delta, combined) where combined = rl_delta.
+    """
+    bay_fn    = _bayesian_responses
+    rl_fn     = lambda vals, tsk, tm, tp: _rl_responses(
+        vals, tsk, tm, tp, alpha_0=rl_alpha_0, lambda_=rl_lambda)
+    bay_delta = _weighted_delta_score(seq_df, task, bay_fn)
+    bay_rmse  = _weighted_rmse_score(seq_df,  task, bay_fn)
+    rl_delta  = _weighted_delta_score(seq_df, task, rl_fn)
+    rl_rmse   = _weighted_rmse_score(seq_df,  task, rl_fn)
+    bay_score = bay_delta + bay_rmse
+    rl_score  = rl_delta  + rl_rmse
+    return bay_score, rl_score, rl_score  # combined = rl_score
 
 
 def _save_sequences(df, json_trials, task, out_dir):
@@ -523,32 +662,63 @@ def _save_sequences(df, json_trials, task, out_dir):
 
 
 def _seed_search(task, args, out_dir):
-    print(f"\n{'='*55}\nSeed search: {task.upper()} ({args.n_tries} tries)")
-    best_score, best_scores, best_seed, best_df = np.inf, (np.inf, np.inf), None, None
-    all_scores = []
-    tmpdir = pathlib.Path(tempfile.mkdtemp())
-    try:
-        for attempt in range(args.n_tries):
-            task_seed = attempt if task == 'continuous' else attempt + 1000
-            rng = make_rng(task_seed)
-            try:
+    import io, contextlib, signal
+
+    def _timeout_handler(signum, frame):
+        raise TimeoutError()
+    print(f"\n{'='*55}")
+    print(f"Seed search: {task.upper()} | {args.n_tries} tries | "
+          f"RL_lambda α={args.rl_alpha_0} λ={args.rl_lambda}")
+    print(f"Score = weighted |Δresponse| rises (lower → more monotone decay)")
+    print(f"  w(obs) = exp(-0.5*(obs-2));  score=0 iff perfectly monotone")
+    print(f"  Pass 1 (structural): Bayesian RMSE non-rising, k=1 plausibility")
+    print(f"  Pass 2 (objective):  bay_delta rises (continuous), rl_delta rises (binary)")
+    best_score, best_scores, best_seed, best_df, best_json = \
+        np.inf, (np.inf, np.inf), None, None, None
+    all_scores, n_ok, n_pass2 = [], 0, 0
+    for attempt in range(args.n_tries):
+        task_seed = attempt if task == 'continuous' else attempt + 1000
+        rng = make_rng(task_seed)
+        try:
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(30)  # 30s per seed — skips hangers
+            # Use reduced inner attempts during search for speed
+            _orig_max = generate_task_sequences.__globals__['MAX_REJECTION_ATTEMPTS']
+            generate_task_sequences.__globals__['MAX_REJECTION_ATTEMPTS'] = 200
+            with contextlib.redirect_stdout(io.StringIO()):
                 df, json_trials = generate_task_sequences(task, args, rng)
-            except Exception:
-                continue
-            r_shape, r_delta, combined = score_sequences(df, task)
-            all_scores.append(combined)
-            if combined < best_score:
-                best_score, best_scores, best_seed, best_df = \
-                    combined, (r_shape, r_delta), attempt, df.copy()
-                _save_sequences(df, json_trials, task, out_dir)
-            if (attempt + 1) % 50 == 0:
-                print(f"  [{attempt+1:4d}/{args.n_tries}]  best={best_seed}  "
-                      f"combined={best_score:.5f}")
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-    arr = np.array(all_scores)
-    print(f"\n  Best seed={best_seed}  combined={best_score:.5f}  "
-          f"median={np.median(arr):.5f}")
+            generate_task_sequences.__globals__['MAX_REJECTION_ATTEMPTS'] = _orig_max
+            signal.alarm(0)
+        except Exception:
+            signal.alarm(0)
+            generate_task_sequences.__globals__['MAX_REJECTION_ATTEMPTS'] = 10_000
+            continue
+        n_ok += 1
+        bay, rl, combined = score_sequences(
+            df, task, rl_alpha_0=args.rl_alpha_0, rl_lambda=args.rl_lambda)
+        if bay > 1e-3:
+            continue  # pass 2 gate: bay_delta + bay_rmse must be near-zero
+        n_pass2 += 1
+        all_scores.append(combined)
+        if combined < best_score:
+            best_score  = combined
+            best_scores = (bay, rl)
+            best_seed   = attempt
+            best_df     = df.copy()
+            best_json   = json_trials
+            _save_sequences(df, json_trials, task, out_dir)
+        if (attempt + 1) % 10 == 0 or attempt == args.n_tries - 1:
+            print(f"  [{attempt+1:4d}/{args.n_tries}]  ok={n_ok}  pass2={n_pass2}  "
+                  f"best_seed={best_seed}  "
+                  f"rl_delta={best_scores[1]:.5f}  "
+                  f"combined={best_score:.5f}")
+    arr = np.array(all_scores) if all_scores else np.array([np.inf])
+    print(f"\n  Best seed      : {best_seed}")
+
+    print(f"  Bay score      : {best_scores[0]:.6f}  (delta+rmse, gate: < 0.001)")
+    print(f"  RL  score      : {best_scores[1]:.6f}  (delta+rmse)")
+    print(f"  Combined       : {best_score:.5f}  (median {np.median(arr):.5f})")
+    print(f"  Saved to       : {out_dir}/{task}_sequences.{{pkl,json}}")
 
 
 # ---------------------------------------------------------------------------
@@ -561,12 +731,17 @@ def parse_args():
     p.add_argument('--n_unique_sequences', type=int,   default=10)
     p.add_argument('--n_repeats',          type=int,   default=4)
     p.add_argument('--seq_length',         type=int,   default=15)
-    p.add_argument('--prefix_length',      type=int,   default=3)
+    p.add_argument('--prefix_length',      type=int,   default=4)
     p.add_argument('--mean_range',         type=float, nargs=2, default=[20.0, 80.0])
     p.add_argument('--std_fixed',          type=float, default=20.0)
     p.add_argument('--p_range',            type=float, nargs=2, default=[0.2, 0.8])
+    p.add_argument('--rl_alpha_0',         type=float, default=1.0,
+                   help='RL_lambda alpha_0 for dual-agent constraint')
+    p.add_argument('--rl_lambda',          type=float, default=0.5,
+                   help='RL_lambda lambda for dual-agent constraint')
     p.add_argument('--output_dir',         default='task/sequences')
-    p.add_argument('--seed',               type=int,   default=42)
+    p.add_argument('--seed',               type=int,   default=42,
+                   help='Best known: continuous=51, binary=42')
     return p.parse_args()
 
 

@@ -10,7 +10,7 @@ export const normalPDF = (x, mu, sigma) =>
 export const buildPerformanceSVG = (mu, sigma, values, responses) => {
   const W = 520, H = 190;
   const xMin = 0, xMax = 100;
-  const pad  = { l: 44, r: 44, t: 22, b: 56 };
+  const pad  = { l: 88, r: 88, t: 22, b: 38 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
   const axisY = pad.t + plotH;
@@ -47,15 +47,14 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
                   stroke="#222" stroke-width="2.5" stroke-linecap="round"/>`;
   }).join('');
 
-  // Legend: red "observations" top-left, black "estimates" top-right
-  const legY = pad.t - 2;
+  // Row labels: right-aligned in left padding, vertically centred on each tick row
   const obsLegend = `
-    <text x="${pad.l}" y="${legY}"
-      font-family="Arial" font-size="13" font-weight="bold"
-      fill="#ef4444" text-anchor="start">observations</text>`;
+    <text x="${pad.l - 6}" y="${(obsRowY + tickH / 2 + 4).toFixed(1)}"
+      font-family="Arial" font-size="11" font-weight="bold"
+      fill="#ef4444" text-anchor="end">observations</text>`;
   const estLegend = `
-    <text x="${pad.l + plotW}" y="${legY}"
-      font-family="Arial" font-size="13" font-weight="bold"
+    <text x="${pad.l - 6}" y="${(estRowY + tickH / 2 + 4).toFixed(1)}"
+      font-family="Arial" font-size="11" font-weight="bold"
       fill="#222" text-anchor="end">estimates</text>`;
 
   const muX = xPos(mu);
@@ -76,10 +75,14 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
     <!-- Axis -->
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
       stroke="#ccc" stroke-width="1"/>
-    <text x="${pad.l}" y="${axisY + 12}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">0</text>
-    <text x="${pad.l + plotW}" y="${axisY + 12}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">100</text>
+    <line x1="${pad.l}" y1="${axisY - 4}" x2="${pad.l}" y2="${axisY + 4}"
+      stroke="#ccc" stroke-width="1"/>
+    <text x="${pad.l}" y="${axisY - 7}" text-anchor="middle"
+      font-family="Arial" font-size="10" fill="#bbb">0</text>
+    <line x1="${pad.l + plotW}" y1="${axisY - 4}" x2="${pad.l + plotW}" y2="${axisY + 4}"
+      stroke="#ccc" stroke-width="1"/>
+    <text x="${pad.l + plotW}" y="${axisY - 7}" text-anchor="middle"
+      font-family="Arial" font-size="10" fill="#bbb">100</text>
 
     ${obsTicks}
     ${estTicks}
