@@ -139,7 +139,7 @@ class TutorialIntroBinaryPlugin {
         </div>
 
         <div id="tut-slider-wrap" style="visibility:hidden;">
-          ${buildBinarySliderHTML({ unset: true, initPos: 50, showValue: false })}
+          ${buildBinarySliderHTML({ unset: true, initPos: 50, showValue: true })}
           <div style="text-align:center;margin-top:0.5rem;">
             <button id="submit-btn" class="jspsych-btn" disabled
                     style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
@@ -159,7 +159,7 @@ class TutorialIntroBinaryPlugin {
       sliderWrap.style.visibility = 'visible';
       initBinarySlider(display_el, {
         unset: true,
-        showValue: false,
+        showValue: true,
         onFinish: (response) => {
           jsPsych.finishTrial({ response, timed_out: false });
         },

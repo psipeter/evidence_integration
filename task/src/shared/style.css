@@ -166,14 +166,14 @@ input[type="range"].slider-last::-moz-range-thumb {
 .slider-label-float-wrap {
   position: relative;
   width: 100%;
-  height: 0;           /* zero height — label overflows visually but takes no space */
+  height: 2rem;        /* reserves space for the float label above the thumb */
   overflow: visible;
-  pointer-events: none; /* never intercept clicks meant for the slider below */
+  pointer-events: none;
 }
 
 .slider-float-label {
   position: absolute;
-  top: -1.8rem;             /* sits above the thumb */
+  top: -1.4rem;             /* above the thumb; wrapper adds 1rem of space */
   transform: translateX(-50%);
   font-size: 1.2rem;
   font-weight: bold;
@@ -414,23 +414,25 @@ input[type="range"].binary-slider {
 input[type="range"].binary-slider::-webkit-slider-runnable-track {
   height: 16px;
   border-radius: 8px;
-  /* blue → gray → red smooth gradient; thumb position irrelevant */
-    background: linear-gradient(
-      to right,
-      #2563eb 0%,
-      #888 50%,
-      #ef4444 100%
-    );
+  /* solid blue left of thumb, solid red right of thumb */
+  background: linear-gradient(
+    to right,
+    #2563eb 0%,
+    #2563eb var(--pct, 50%),
+    #ef4444 var(--pct, 50%),
+    #ef4444 100%
+  );
 }
 input[type="range"].binary-slider::-moz-range-track {
   height: 16px;
   border-radius: 8px;
-    background: linear-gradient(
-      to right,
-      #2563eb 0%,
-      #888 50%,
-      #ef4444 100%
-    );
+  background: linear-gradient(
+    to right,
+    #2563eb 0%,
+    #2563eb var(--pct, 50%),
+    #ef4444 var(--pct, 50%),
+    #ef4444 100%
+  );
 }
 
 input[type="range"].binary-slider::-webkit-slider-thumb {
@@ -485,22 +487,24 @@ input[type="range"].binary-slider.slider-last::-moz-range-thumb {
 input[type="range"].binary-slider.slider-last::-webkit-slider-runnable-track {
   height: 16px;
   border-radius: 8px;
-    background: linear-gradient(
-      to right,
-      rgba(37,99,235,0.3) 0%,
-      rgba(136,136,136,0.3) 50%,
-      rgba(239,68,68,0.3) 100%
-    );
+  background: linear-gradient(
+    to right,
+    rgba(37,99,235,0.3) 0%,
+    rgba(37,99,235,0.3) var(--pct, 50%),
+    rgba(239,68,68,0.3) var(--pct, 50%),
+    rgba(239,68,68,0.3) 100%
+  );
 }
 input[type="range"].binary-slider.slider-last::-moz-range-track {
   height: 16px;
   border-radius: 8px;
-    background: linear-gradient(
-      to right,
-      rgba(37,99,235,0.3) 0%,
-      rgba(136,136,136,0.3) 50%,
-      rgba(239,68,68,0.3) 100%
-    );
+  background: linear-gradient(
+    to right,
+    rgba(37,99,235,0.3) 0%,
+    rgba(37,99,235,0.3) var(--pct, 50%),
+    rgba(239,68,68,0.3) var(--pct, 50%),
+    rgba(239,68,68,0.3) 100%
+  );
 }
 
 /* ── Urn dot grid ─────────────────────────────────────────────────────────── */

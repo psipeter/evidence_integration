@@ -10,19 +10,14 @@ Trial structure
 
   Prefix block (obs 1..prefix_length):
     Shared across all n_repeats repeats of a given qid.
-    Generated JOINTLY across all n_unique sequences, one position at a
-    time.  Each position is redrawn until the aggregate Bayesian RMSE
-    does not rise (pass 1 structural constraint).
+    Drawn freely (i.i.d.) from the true distribution — no convergence
+    constraint.  Participants cannot easily infer the true parameter
+    from the prefix alone.
 
   Suffix block (obs prefix_length+1..seq_length):
-    Generated JOINTLY across all n_unique sequences, one position at a
-    time, independently for each of the n_repeats repeats.  Same
-    position-wise rejection as the prefix: each position is redrawn
-    until the aggregate Bayesian RMSE does not rise.  The completed
-    prefix+suffix must also pass the per-sequence plausibility check
-    (k≤1) for every qid.  Suffix varies across repeats (different
-    random draws each time), providing the within-qid variability
-    needed for PTN/response-variability analysis.
+    Drawn freely per repeat, accepted when the full sequence
+    (prefix+suffix) passes the plausibility check.  Varies across
+    repeats, providing within-qid variability for PTN analysis.
 
 Mirrored sequences
 ------------------
@@ -208,12 +203,18 @@ def _rl_lambda_errors(sequence, task, true_mean, true_p,
 # ---------------------------------------------------------------------------
 def check_sequence_plausibility(sequence, task, true_mean, true_std, true_p,
                                 k: float = 1.0) -> bool:
-    """True iff sample statistics are within k × SE of the true parameter."""
+    """True iff full-sequence mean AND std are within k × SE of true values.
+    Continuous: mean check + std check (std SE = std*sqrt(2/(n-1))).
+    Binary:     fraction check only (std is determined by p).
+    """
     n = len(sequence)
     if n == 0:
         return True
     if task == 'continuous':
-        return abs(np.mean(sequence) - true_mean) <= k * true_std / np.sqrt(n)
+        mean_ok = abs(np.mean(sequence) - true_mean) <= k * true_std / np.sqrt(n)
+        std_ok  = abs(np.std(sequence) - true_std) \
+                  <= k * true_std * np.sqrt(2.0 / max(n - 1, 1))
+        return mean_ok and std_ok
     else:
         return abs(sum(v == 1 for v in sequence) / n - true_p) \
                <= k * np.sqrt(true_p * (1 - true_p) / n)
@@ -223,136 +224,60 @@ def check_sequence_plausibility(sequence, task, true_mean, true_std, true_p,
 # PREFIX BLOCK  — joint generation across all qids
 # ---------------------------------------------------------------------------
 def build_prefix_block(rng, task, param_list, prefix_length):
-    """Generate prefixes for all base qids jointly, one position at a time.
+    """Draw prefix observations freely from the generative distribution.
 
-    At each position, draw one obs per qid and accept only if the
-    aggregate Bayesian RMSE does not rise.  Per-sequence plausibility
-    (k=1) is checked on the completed prefix.
+    No per-position constraint.  Observations are i.i.d. from the true
+    distribution — the prefix is not constrained to converge early, so
+    participants cannot easily infer the true parameter from the prefix
+    alone.  Smoothness of model curves is enforced by seed search (pass 2/3)
+    rather than by construction.
 
     Returns: list of prefixes (one per entry in param_list).
     """
     n_qids = len(param_list)
-
-    for _outer in range(MAX_REJECTION_ATTEMPTS):
-        prefixes     = [[] for _ in range(n_qids)]
-        prev_agg_err = float('inf')
-        success      = True
-
-        for pos in range(prefix_length):
-            for _pos_attempt in range(MAX_REJECTION_ATTEMPTS):
-                if task == 'continuous':
-                    new_obs = [draw_continuous_obs(rng, tm, ts, 1)[0]
-                               for tm, ts, _ in param_list]
-                else:
-                    new_obs = [draw_binary_obs(rng, tp, 1)[0]
-                               for _, _, tp in param_list]
-                agg_err = float(np.mean([
-                    _bayesian_errors(prefixes[q] + [new_obs[q]], task,
-                                     param_list[q][0], param_list[q][2])[-1]
-                    for q in range(n_qids)
-                ]))
-                if agg_err > prev_agg_err:
-                    continue
-                for q in range(n_qids):
-                    prefixes[q].append(new_obs[q])
-                prev_agg_err = agg_err
-                break
-            else:
-                success = False
-                break
-
-        if not success:
-            continue
-
-        # Per-sequence plausibility check on the completed prefixes
-        all_ok = all(
-            check_sequence_plausibility(
-                prefixes[q], task, param_list[q][0], param_list[q][1], param_list[q][2])
-            for q in range(n_qids)
-        )
-        if all_ok:
-            return prefixes
-
-    raise RuntimeError(
-        f"build_prefix_block failed after {MAX_REJECTION_ATTEMPTS} attempts "
-        f"(task={task})."
-    )
+    if task == 'continuous':
+        return [draw_continuous_obs(rng, param_list[q][0], param_list[q][1],
+                                    prefix_length)
+                for q in range(n_qids)]
+    else:
+        return [draw_binary_obs(rng, param_list[q][2], prefix_length)
+                for q in range(n_qids)]
 
 
 # ---------------------------------------------------------------------------
 # SUFFIX BLOCK  — joint across all qids, one position at a time, per repeat
 # ---------------------------------------------------------------------------
-def build_suffix_block(rng, task, all_templates, suffix_length,
-                       error_fn=None):
-    """Generate one suffix per qid for a single repeat, jointly.
-
-    Mirrors build_prefix_block: sample one observation per qid at each
-    suffix position, rejecting the position if the aggregate Bayesian RMSE
-    (computed over the full prefix+suffix-so-far) rises.  This guarantees
-    monotone aggregate RMSE throughout the suffix as well as the prefix.
-
-    Additionally, the completed full sequence (prefix+suffix) must pass
-    the per-sequence plausibility check (k=1) for every qid.  If not,
-    the entire suffix block is redrawn.
+def build_suffix_block(rng, task, all_templates, suffix_length):
+    """Draw suffix observations freely, accept when full sequence passes
+    plausibility check (mean + std within k=1 SE of true values).
 
     Returns: list of suffixes (one per template in all_templates).
     """
-    if error_fn is None:
-        error_fn = _bayesian_errors
     n_qids = len(all_templates)
 
     for _outer in range(MAX_REJECTION_ATTEMPTS):
-        suffixes    = [[] for _ in range(n_qids)]
-        # Start error from end of prefix for each qid
-        prev_errors = [
-            error_fn(t['prefix'], task, t['true_mean'], t['true_p'])[-1]
-            if t['prefix'] else float('inf')
-            for t in all_templates
-        ]
-        prev_agg = float(np.mean(prev_errors))
-        success  = True
+        if task == 'continuous':
+            suffixes = [draw_continuous_obs(rng, all_templates[q]['true_mean'],
+                                            all_templates[q]['true_std'],
+                                            suffix_length)
+                        for q in range(n_qids)]
+        else:
+            suffixes = [draw_binary_obs(rng, all_templates[q]['true_p'],
+                                        suffix_length)
+                        for q in range(n_qids)]
 
-        for pos in range(suffix_length):
-            for _pos_attempt in range(MAX_REJECTION_ATTEMPTS):
-                if task == 'continuous':
-                    new_obs = [draw_continuous_obs(
-                                   rng, t['true_mean'], t['true_std'], 1)[0]
-                               for t in all_templates]
-                else:
-                    new_obs = [draw_binary_obs(rng, t['true_p'], 1)[0]
-                               for t in all_templates]
-                agg_err = float(np.mean([
-                    error_fn(
-                        all_templates[q]['prefix'] + suffixes[q] + [new_obs[q]],
-                        task,
-                        all_templates[q]['true_mean'],
-                        all_templates[q]['true_p']
-                    )[-1]
-                    for q in range(n_qids)
-                ]))
-                if agg_err <= prev_agg:
-                    for q in range(n_qids):
-                        suffixes[q].append(new_obs[q])
-                    prev_agg = agg_err
-                    break
-            else:
-                success = False
-                break
-
-        if not success:
-            continue
-
-        # Per-sequence plausibility check on prefix+suffix for every qid
-        all_ok = all(
+        # Accept if every full sequence passes mean + std plausibility
+        k_plaus = 0.7 if task == 'binary' else 1.0
+        if all(
             check_sequence_plausibility(
                 all_templates[q]['prefix'] + suffixes[q],
                 task,
                 all_templates[q]['true_mean'],
                 all_templates[q]['true_std'],
-                all_templates[q]['true_p'])
+                all_templates[q]['true_p'],
+                k=k_plaus)
             for q in range(n_qids)
-        )
-        if all_ok:
+        ):
             return suffixes
 
     raise RuntimeError(
@@ -671,7 +596,7 @@ def _seed_search(task, args, out_dir):
           f"RL_lambda α={args.rl_alpha_0} λ={args.rl_lambda}")
     print(f"Score = weighted |Δresponse| rises (lower → more monotone decay)")
     print(f"  w(obs) = exp(-0.5*(obs-2));  score=0 iff perfectly monotone")
-    print(f"  Pass 1 (structural): Bayesian RMSE non-rising, k=1 plausibility")
+    print(f"  Pass 1 (structural): full-seq mean+std within k=1 SE of true values")
     print(f"  Pass 2 (objective):  bay_delta rises (continuous), rl_delta rises (binary)")
     best_score, best_scores, best_seed, best_df, best_json = \
         np.inf, (np.inf, np.inf), None, None, None
@@ -696,8 +621,8 @@ def _seed_search(task, args, out_dir):
         n_ok += 1
         bay, rl, combined = score_sequences(
             df, task, rl_alpha_0=args.rl_alpha_0, rl_lambda=args.rl_lambda)
-        if bay > 1e-3:
-            continue  # pass 2 gate: bay_delta + bay_rmse must be near-zero
+        if bay > 2e-2:
+            continue  # pass 2 gate: bay_score must be below 0.02
         n_pass2 += 1
         all_scores.append(combined)
         if combined < best_score:
@@ -715,7 +640,7 @@ def _seed_search(task, args, out_dir):
     arr = np.array(all_scores) if all_scores else np.array([np.inf])
     print(f"\n  Best seed      : {best_seed}")
 
-    print(f"  Bay score      : {best_scores[0]:.6f}  (delta+rmse, gate: < 0.001)")
+    print(f"  Bay score      : {best_scores[0]:.6f}  (delta+rmse, gate: < 0.02)")
     print(f"  RL  score      : {best_scores[1]:.6f}  (delta+rmse)")
     print(f"  Combined       : {best_score:.5f}  (median {np.median(arr):.5f})")
     print(f"  Saved to       : {out_dir}/{task}_sequences.{{pkl,json}}")

@@ -13,15 +13,15 @@
 export const BINARY_MIN = 0;
 export const BINARY_MAX = 100;
 
-// Blue → gray → red gradient through gray midpoint
+// Red → gray → blue gradient: t=0 red (p_blue=0), t=1 blue (p_blue=1)
 const BLUE_RGB = [37, 99, 235];
 const GRAY_RGB = [136, 136, 136];
 const RED_RGB  = [239, 68, 68];
 
 const lerpRgb = (t) => {
   const [a, b] = t < 0.5
-    ? [BLUE_RGB, GRAY_RGB]
-    : [GRAY_RGB, RED_RGB];
+    ? [RED_RGB, GRAY_RGB]
+    : [GRAY_RGB, BLUE_RGB];
   const s = t < 0.5 ? t * 2 : (t - 0.5) * 2;
   const r = Math.round(a[0] + s * (b[0] - a[0]));
   const g = Math.round(a[1] + s * (b[1] - a[1]));
@@ -64,10 +64,9 @@ const buildBinaryRuler = (slider) => {
   for (let v = BINARY_MIN; v <= BINARY_MAX; v += 25) {
     const pct     = v + '%';
     const t       = v / 100;
-    const color   = lerpRgb(t);
     const isMajor = v % 50 === 0;
-    html += `<div class="slider-tick ${isMajor ? 'slider-tick-major' : ''}" style="left:${pct};height:${isMajor ? 8 : 5}px;background:${color};"></div>`;
-    html += `<div class="slider-tick-label" style="left:${pct};color:${color};">${t.toFixed(2)}</div>`;
+    html += `<div class="slider-tick ${isMajor ? 'slider-tick-major' : ''}" style="left:${pct};height:${isMajor ? 8 : 5}px;"></div>`;
+    html += `<div class="slider-tick-label" style="left:${pct};">${t.toFixed(2)}</div>`;
   }
   ruler.innerHTML = html;
 };
@@ -86,6 +85,7 @@ export const updateBinaryLabel = (slider) => {
   if (!lbl) return;
   lbl.style.display = 'block';
   lbl.textContent   = (slider.value / 100).toFixed(2);
+  lbl.style.color   = lerpRgb(slider.value / 100);
   const thumbR   = 3;
   const rect     = slider.getBoundingClientRect();
   const usable   = rect.width - 2 * thumbR;
