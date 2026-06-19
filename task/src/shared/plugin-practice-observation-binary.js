@@ -1,3 +1,4 @@
+import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
 /**
  * plugin-practice-observation-binary.js
  * Tutorial observation for the binary (Bernoulli) task.
@@ -89,12 +90,6 @@ const buildUrnSVG = (p, currentValue, obsNum) => {
   </svg>`;
 };
 
-// Update the slider gradient fill
-const updateSliderFill = (slider) => {
-  const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100;
-  slider.style.setProperty('--pct', pct + '%');
-};
-
 class PracticeObservationBinaryPlugin {
   constructor(jsPsych) {
     this.jsPsych = jsPsych;
@@ -108,7 +103,8 @@ class PracticeObservationBinaryPlugin {
 
     const { value, obs_num, n_obs, true_p,
             slider_default, init_pos, show_value } = trial;
-    const unset   = slider_default === 'none';
+    const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 50);
+    const unset = slider_default === 'none';
     const ballCol = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
 
     display_el.innerHTML = `
@@ -153,22 +149,7 @@ class PracticeObservationBinaryPlugin {
 
         </div>
 
-        <div class="binary-slider-section">
-          <div class="slider-label-float-wrap">
-            <div id="slider-float-label" class="slider-float-label"
-              style="display:${unset ? 'none' : 'block'};">
-              ${unset ? '' : init_pos + '%'}
-            </div>
-          </div>
-          <div class="binary-slider-row">
-            <div class="binary-ball binary-ball-blue"></div>
-            <input type="range" id="response-slider"
-              class="binary-slider ${unset ? 'slider-unset' : ''}"
-              min="0" max="100" value="${init_pos}" step="1"
-              style="--pct:${unset ? '50' : init_pos}%">
-            <div class="binary-ball binary-ball-red"></div>
-          </div>
-        </div>
+        ${buildBinarySliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
         <div style="text-align:center;margin-top:0.5rem;">
           <button id="submit-btn" class="jspsych-btn"
             ${unset ? 'disabled' : ''}
@@ -180,52 +161,16 @@ class PracticeObservationBinaryPlugin {
 
     display_el.querySelector('#pie-svg').innerHTML = buildUrnSVG(true_p, value, obs_num);
 
-    const slider = display_el.querySelector('#response-slider');
-    const lbl    = display_el.querySelector('#slider-float-label');
-    const btn    = display_el.querySelector('#submit-btn');
-
-    const updateLabel = () => {
-      if (!show_value || !lbl) return;
-      lbl.style.display = 'block';
-      lbl.textContent   = slider.value + '%';
-      const thumbR      = 3;
-      const rect        = slider.getBoundingClientRect();
-      const usable      = rect.width - 2 * thumbR;
-      const pct         = (slider.value - slider.min) / (slider.max - slider.min);
-      const posInSlider = thumbR + pct * usable;
-      const sectionLeft = slider.parentElement.parentElement.getBoundingClientRect().left;
-      lbl.style.left    = (rect.left - sectionLeft + posInSlider) + 'px';
-    };
-
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      document.body.style.backgroundColor = '#f5f5f5';
-      const hadUnset = slider.classList.contains('slider-unset');
-      const response = !hadUnset ? parseInt(slider.value) : null;
-      this.jsPsych.finishTrial({ response, timed_out: false });
-    };
-
-    const attachListeners = () => {
-      if (!unset) { updateLabel(); updateSliderFill(slider); }
-      slider.addEventListener('pointerdown', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        requestAnimationFrame(() => { updateLabel(); updateSliderFill(slider); });
+    const jsPsych = this.jsPsych;
+    requestAnimationFrame(() => {
+      initBinarySlider(display_el, {
+        unset,
+        showValue: show_value,
+        onFinish: (response) => {
+          jsPsych.finishTrial({ response, timed_out: false });
+        },
       });
-      slider.addEventListener('input', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        updateLabel();
-        updateSliderFill(slider);
-      });
-      btn.addEventListener('pointerdown', (e) => {
-        if (!btn.disabled) { e.preventDefault(); finish(); }
-      });
-    };
-
-    requestAnimationFrame(() => requestAnimationFrame(attachListeners));
+    });
 
   }
 }

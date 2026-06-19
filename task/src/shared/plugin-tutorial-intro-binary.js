@@ -1,3 +1,4 @@
+import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
 /**
  * plugin-tutorial-intro-binary.js
  *
@@ -79,11 +80,6 @@ const buildUrnSVG = (p, currentValue) => {
   </svg>`;
 };
 
-const updateSliderFill = (slider) => {
-  const pct = (slider.value - slider.min) / (slider.max - slider.min) * 100;
-  slider.style.setProperty('--pct', pct + '%');
-};
-
 const makeBox = (id, realHTML, isActive) => `
   <p id="${id}" class="practice-info-block"
      style="position:relative;${isActive ? 'cursor:pointer;' : ''}">
@@ -143,19 +139,7 @@ class TutorialIntroBinaryPlugin {
         </div>
 
         <div id="tut-slider-wrap" style="visibility:hidden;">
-          <div class="binary-slider-section">
-            <div class="slider-label-float-wrap">
-              <div id="slider-float-label" class="slider-float-label"
-                   style="display:none;"></div>
-            </div>
-            <div class="binary-slider-row">
-              <div class="binary-ball binary-ball-blue"></div>
-              <input type="range" id="response-slider"
-                     class="binary-slider slider-unset"
-                     min="0" max="100" value="50" step="1" style="--pct:50%">
-              <div class="binary-ball binary-ball-red"></div>
-            </div>
-          </div>
+          ${buildBinarySliderHTML({ unset: true, initPos: 50, showValue: false })}
           <div style="text-align:center;margin-top:0.5rem;">
             <button id="submit-btn" class="jspsych-btn" disabled
                     style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
@@ -169,47 +153,16 @@ class TutorialIntroBinaryPlugin {
     display_el.querySelector('#urn-svg').innerHTML =
       buildUrnSVG(true_p, example_value);
 
-    const slider     = display_el.querySelector('#response-slider');
-    const lbl        = display_el.querySelector('#slider-float-label');
-    const btn        = display_el.querySelector('#submit-btn');
     const sliderWrap = display_el.querySelector('#tut-slider-wrap');
-
-    const updateLabel = () => {
-      lbl.style.display = 'block';
-      lbl.textContent   = slider.value + '%';
-      const thumbR  = 3;
-      const rect    = slider.getBoundingClientRect();
-      const usable  = rect.width - 2 * thumbR;
-      const pct     = (slider.value - slider.min) / (slider.max - slider.min);
-      const pos     = thumbR + pct * usable;
-      const secLeft = slider.parentElement.parentElement.getBoundingClientRect().left;
-      lbl.style.left = (rect.left - secLeft + pos) + 'px';
-    };
-
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      const response = slider.classList.contains('slider-unset')
-        ? null : parseInt(slider.value);
-      self.jsPsych.finishTrial({ response, timed_out: false });
-    };
-
+    const jsPsych    = self.jsPsych;
     const activateSlider = () => {
       sliderWrap.style.visibility = 'visible';
-      slider.addEventListener('pointerdown', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        requestAnimationFrame(() => { updateLabel(); updateSliderFill(slider); });
-      });
-      slider.addEventListener('input', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        updateLabel();
-        updateSliderFill(slider);
-      });
-      btn.addEventListener('pointerdown', e => {
-        if (!btn.disabled) { e.preventDefault(); finish(); }
+      initBinarySlider(display_el, {
+        unset: true,
+        showValue: false,
+        onFinish: (response) => {
+          jsPsych.finishTrial({ response, timed_out: false });
+        },
       });
     };
 

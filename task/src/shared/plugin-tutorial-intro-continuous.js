@@ -7,6 +7,7 @@
  */
 
 import { normalPDF } from './draw-performance.js';
+import { buildSliderHTML, initSlider } from './slider.js';
 
 const GOAL_COLOR   = '#2563eb';
 const SAMPLE_COLOR = '#ef4444';
@@ -24,7 +25,7 @@ const info = {
 // Build SVG given pixel dimensions — normalises all coordinates to W x H.
 const buildDistSVG = (mu, sigma, currentValue) => {
   const W = 220, H = 160;
-  const xMin = -100, xMax = 100;
+  const xMin = 0, xMax = 100;
   const pad  = { l: 20, r: 20, t: 26, b: 44 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
@@ -46,7 +47,7 @@ const buildDistSVG = (mu, sigma, currentValue) => {
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l+plotW}" y2="${axisY}"
           stroke="#bbb" stroke-width="1"/>
       <text x="${pad.l}" y="${axisY+14}" text-anchor="middle"
-            font-family="Arial" font-size="13" fill="#999">-100</text>
+            font-family="Arial" font-size="13" fill="#999">0</text>
       <text x="${pad.l+plotW}" y="${axisY+14}" text-anchor="middle"
             font-family="Arial" font-size="13" fill="#999">100</text>
     </g>
@@ -133,18 +134,7 @@ class TutorialIntroContinuousPlugin {
         </div>
 
         <div id="tut-slider-wrap" style="visibility:hidden;">
-          <div class="slider-section">
-            <div class="slider-label-float-wrap">
-              <div id="slider-float-label" class="slider-float-label"
-                   style="display:none;"></div>
-            </div>
-            <div class="slider-wrap">
-              <span class="slider-label">-100</span>
-              <input type="range" id="response-slider"
-                     min="-100" max="100" value="0" step="1" class="slider-unset">
-              <span class="slider-label">100</span>
-            </div>
-          </div>
+          ${buildSliderHTML({ unset: true, initPos: 0, showValue: true })}
           <button id="submit-btn" class="jspsych-btn" disabled
                   style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
             Submit
@@ -157,46 +147,18 @@ class TutorialIntroContinuousPlugin {
     display_el.querySelector('#dist-svg').innerHTML =
       buildDistSVG(true_mean, true_std, example_value);
 
-    const slider     = display_el.querySelector('#response-slider');
-    const lbl        = display_el.querySelector('#slider-float-label');
-    const btn        = display_el.querySelector('#submit-btn');
     const sliderWrap = display_el.querySelector('#tut-slider-wrap');
 
-    const updateLabel = () => {
-      lbl.style.display = 'block';
-      lbl.textContent   = slider.value;
-      const thumbR  = 3;
-      const rect    = slider.getBoundingClientRect();
-      const usable  = rect.width - 2 * thumbR;
-      const pct     = (slider.value - slider.min) / (slider.max - slider.min);
-      const pos     = thumbR + pct * usable;
-      const secLeft = slider.parentElement.parentElement.getBoundingClientRect().left;
-      lbl.style.left = (rect.left - secLeft + pos) + 'px';
-    };
-
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      const response = slider.classList.contains('slider-unset')
-        ? null : parseInt(slider.value);
-      self.jsPsych.finishTrial({ response, timed_out: false });
-    };
-
+    const jsPsych = self.jsPsych;
     const activateSlider = () => {
       sliderWrap.style.visibility = 'visible';
-      slider.addEventListener('pointerdown', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        requestAnimationFrame(updateLabel);
-      });
-      slider.addEventListener('input', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        updateLabel();
-      });
-      btn.addEventListener('pointerdown', e => {
-        if (!btn.disabled) { e.preventDefault(); finish(); }
+      initSlider(display_el, {
+        unset: true,
+        showValue: true,
+        ghostPos: null,
+        onFinish: (response) => {
+          jsPsych.finishTrial({ response, timed_out: false });
+        },
       });
     };
 

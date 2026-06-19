@@ -328,9 +328,15 @@ def _blank(ax, msg='No data\n(noisy models only)'):
     sns.despine(ax=ax, left=True, bottom=True)
 
 
-def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None):
+def _human_scalar(ax, val, x_pos, color='k', marker='*', size=120, label='Human', zorder=6):
+    """Plot a single human scalar value as a star marker."""
+    ax.scatter([x_pos], [val], color=color, marker=marker, s=size,
+               zorder=zorder, label=label)
+
+
+def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None, human_df=None):
     """A/H: RMSE vs obs, split by true lambda quartile (Q1=lowest, Q4=highest).
-    Linestyle+weight → quartile. Colour → model type."""
+    Linestyle+weight → quartile. Colour → model type. Black line = human."""
     err_df = compute_task_error(df)
     if err_df.empty: _blank(ax, 'No data'); return
 
@@ -365,12 +371,23 @@ def plot_A(ax, df, palette, title='', sub_df=None, sub_label=None):
     ax.set_ylim(bottom=0)
     if title: ax.set_title(title, fontsize=8, fontweight='bold')
     ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
+
+    # Human overlay — thick black line, no quartile split
+    if human_df is not None and not human_df.empty:
+        human_err = compute_task_error(human_df)
+        if not human_err.empty:
+            curve = human_err.groupby('observation')['err'].mean()
+            ax.plot(curve.index, curve.values,
+                    color='k', lw=2.5, ls='-', zorder=5, label='Human')
+            handles.append(Line2D([0],[0], color='k', lw=2.5))
+            labels.append('Human')
+            ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def plot_B(ax, df, palette, sub_df=None, sub_label=None):
-    """B/I: KDE of per-pid mean response variability for noisy models (NEF only).
-    RL_lambda is deterministic so excluded — shows zero and clutters the plot."""
+def plot_B(ax, df, palette, sub_df=None, sub_label=None, human_df=None):
+    """B/I: KDE of per-pid mean response variability.
+    RL_lambda is deterministic — zero variance, skipped. Human shown as KDE or point."""
     pdf = df[(df.trial_type=='structured') &
              (df.observation < df.prefix_length)].copy()
     if pdf.empty: _blank(ax); return
@@ -392,6 +409,27 @@ def plot_B(ax, df, palette, sub_df=None, sub_label=None):
         labels.append(mt)
         any_plotted = True
 
+    # Human overlay
+    if human_df is not None and not human_df.empty:
+        hpdf = human_df[(human_df.get('trial_type', pd.Series('structured', index=human_df.index)) == 'structured') |
+                        human_df.get('trial_type', pd.Series(dtype=str)).isna()].copy()
+        # Use all trials if trial_type not present
+        if 'prefix_length' in human_df.columns and 'trial_type' not in human_df.columns:
+            hpdf = human_df.copy()
+        if not hpdf.empty and 'prefix_length' in hpdf.columns:
+            pv = (hpdf[hpdf.observation < hpdf.prefix_length]
+                  .groupby(['model_id', 'qid', 'observation'])['response']
+                  .std().reset_index(name='resp_var'))
+            pv_pid = pv.groupby('model_id')['resp_var'].mean().dropna().values
+            if len(pv_pid) > 1:
+                sns.kdeplot(pv_pid, ax=ax, color='k', lw=1.8, fill=True, alpha=0.2)
+                handles.append(Line2D([0],[0], color='k', lw=1.8))
+                labels.append('Human')
+            elif len(pv_pid) == 1:
+                ax.axvline(pv_pid[0], color='k', lw=1.5, ls='--', zorder=5)
+                handles.append(Line2D([0],[0], color='k', lw=1.5, ls='--'))
+                labels.append(f'Human ({pv_pid[0]:.3f})')
+            any_plotted = True
     if not any_plotted:
         _blank(ax, 'No noisy models')
         return
@@ -402,9 +440,9 @@ def plot_B(ax, df, palette, sub_df=None, sub_label=None):
     sns.despine(ax=ax, top=True, right=True)
 
 
-def plot_C(ax, df, palette, sub_df=None, sub_label=None):
+def plot_C(ax, df, palette, sub_df=None, sub_label=None, human_df=None):
     """C/J: |Δresponse| vs obs, split by true lambda quartile (Q1=lowest, Q4=highest).
-    Linestyle+weight → quartile. Colour → model type."""
+    Linestyle+weight → quartile. Colour → model type. Black line = human."""
     dlt_all = compute_abs_delta(df)
     if dlt_all.empty: _blank(ax, 'No data'); return
 
@@ -438,11 +476,22 @@ def plot_C(ax, df, palette, sub_df=None, sub_label=None):
     ax.set_xlabel('Observation'); ax.set_ylabel('Mean |Δresponse|')
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
+
+    # Human overlay — thick black line, no quartile split
+    if human_df is not None and not human_df.empty:
+        human_dlt = compute_abs_delta(human_df)
+        if not human_dlt.empty:
+            curve = human_dlt.groupby('observation')['delta'].mean()
+            ax.plot(curve.index, curve.values,
+                    color='k', lw=2.5, ls='-', zorder=5, label='Human')
+            handles.append(Line2D([0],[0], color='k', lw=2.5))
+            labels.append('Human')
+            ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def plot_D(ax, df, palette, sub_df=None, sub_label=None):
-    """D/I: Split-half prefix variability reliability."""
+def plot_D(ax, df, palette, sub_df=None, sub_label=None, human_df=None):
+    """D/K: Split-half prefix variability reliability."""
     wide = split_half_var(df)
     if wide.empty: _blank(ax); return
     handles, labels = [], []
@@ -461,10 +510,11 @@ def plot_D(ax, df, palette, sub_df=None, sub_label=None):
             labels.append(f'{mt} r={r:.2f}{pvalue_to_stars(p)}')
             any_plotted = True
         # skip deterministic models (var/λ≈0) — no point to plot
-    if not any_plotted: _blank(ax); return
-    all_v = pd.concat([wide['first'], wide['second']])
-    lo, hi = max(0, all_v.min()-0.005), all_v.max()+0.005
-    ax.plot([lo,hi], [lo,hi], color='0.7', lw=0.8, ls='--', zorder=0)
+    # plot identity line if any model data shown
+    if any_plotted:
+        all_v = pd.concat([wide['first'], wide['second']])
+        lo, hi = max(0, all_v.min()-0.005), all_v.max()+0.005
+        ax.plot([lo,hi], [lo,hi], color='0.7', lw=0.8, ls='--', zorder=0)
     if sub_df is not None:
         sub_wide = split_half_var(sub_df)
         if not sub_wide.empty:
@@ -476,13 +526,36 @@ def plot_D(ax, df, palette, sub_df=None, sub_label=None):
                                 color=color, ci=None, scatter=False,
                                 line_kws={'lw': 1.5, 'ls': '--', 'alpha': 0.7})
                 # skip deterministic models in sub overlay
+    # Human overlay — shown even if no model data
+    human_plotted = False
+    if human_df is not None and not human_df.empty:
+        hdf2 = human_df.copy()
+        if 'trial_type' not in hdf2.columns:
+            hdf2['trial_type'] = 'structured'
+        hw = split_half_var(hdf2)
+        if not hw.empty:
+            if len(hw) == 1:
+                _human_scalar(ax, hw['second'].iloc[0], hw['first'].iloc[0])
+                handles.append(Line2D([0],[0], color='k', marker='*', markersize=8, ls='None'))
+                labels.append('Human')
+            elif len(hw) >= 3:
+                sns.regplot(data=hw, x='first', y='second', ax=ax,
+                            color='k', ci=95, scatter=True, line_kws={'lw': 2.0})
+                r, p = pearsonr(hw['first'], hw['second'])
+                handles.append(Line2D([0],[0], color='k', lw=2.0))
+                labels.append(f'Human r={r:.2f}{pvalue_to_stars(p)}')
+            human_plotted = True
+    if not any_plotted and not human_plotted:
+        _blank(ax, 'No data')
+        return
     ax.set_xlabel('Var (1st half)'); ax.set_ylabel('Var (2nd half)')
-    ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
+    if handles:
+        ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def plot_E(ax, df, palette, sub_df=None, sub_label=None):
-    """E/J: Split-half λ reliability."""
+def plot_E(ax, df, palette, sub_df=None, sub_label=None, human_df=None):
+    """E/L: Split-half λ reliability."""
     wide = split_half_lambda(df)
     if wide.empty: _blank(ax); return
     handles, labels = [], []
@@ -516,6 +589,21 @@ def plot_E(ax, df, palette, sub_df=None, sub_label=None):
                                 color=color, ci=None, scatter=False,
                                 line_kws={'lw': 1.5, 'ls': '--', 'alpha': 0.7})
                 # skip deterministic models in sub overlay
+    # Human overlay
+    if human_df is not None and not human_df.empty:
+        hw = split_half_lambda(human_df)
+        if not hw.empty:
+            if len(hw) == 1:
+                _human_scalar(ax, hw['second'].iloc[0], hw['first'].iloc[0])
+                handles.append(Line2D([0],[0], color='k', marker='*', markersize=8, ls='None'))
+                labels.append('Human')
+            elif len(hw) >= 3:
+                sns.regplot(data=hw, x='first', y='second', ax=ax,
+                            color='k', ci=95, scatter=True, line_kws={'lw': 2.0})
+                r, p = pearsonr(hw['first'], hw['second'])
+                handles.append(Line2D([0],[0], color='k', lw=2.0))
+                labels.append(f'Human r={r:.2f}{pvalue_to_stars(p)}')
+            ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     ax.set_xlabel('λ (1st half)'); ax.set_ylabel('λ (2nd half)')
     ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -523,7 +611,7 @@ def plot_E(ax, df, palette, sub_df=None, sub_label=None):
 
 # ── Cross-task panels ───────────────────────────────────────────────────────
 
-def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
+def plot_F_late(ax, df, palette, sub_df=None, sub_label=None, human_df=None):
     """F/M: True λ vs late RMSE — scatter + regplot per model type.
     X: true lambda (from params_str). Y: mean RMSE in last 3 obs."""
     err_df = compute_task_error(df)
@@ -561,6 +649,22 @@ def plot_F_late(ax, df, palette, sub_df=None, sub_label=None):
         labels.append(f"{mt}, r={r:.2f}{pvalue_to_stars(p)}")
 
     if not handles: _blank(ax, 'No data'); return
+    # Human: fit lambda, compute late RMSE, plot as single point
+    if human_df is not None and not human_df.empty:
+        herr = compute_task_error(human_df)
+        if not herr.empty:
+            n_obs_h = human_df['observation'].max()
+            late_start_h = n_obs_h - 2
+            for hmid, hg in human_df.groupby('model_id'):
+                lam_h, _ = fit_lambda_mid(hg)
+                late_err_h = herr[(herr.model_id==hmid) &
+                                  (herr.observation >= late_start_h)]['err'].mean()
+                if np.isfinite(lam_h) and np.isfinite(late_err_h):
+                    ax.scatter([lam_h], [late_err_h], color='k', marker='*',
+                               s=120, zorder=6, label='Human')
+                    handles.append(Line2D([0],[0], color='k', marker='*',
+                                         markersize=8, ls='None'))
+                    labels.append('Human')
     ax.set_xlabel('True λ')
     ax.set_ylabel('Late RMSE')
     ax.set_ylim(bottom=0)
@@ -665,6 +769,7 @@ def plot_K(ax, df_bin, df_cont, palette, sub_bin=None, sub_cont=None, sub_label=
         yv = np.array([lam_c[m] for m in mids])
         std_x = xv.std()
         if std_x > 1e-6:
+            ax.scatter(xv, yv, color=color, s=8, alpha=0.4, zorder=3)
             sns.regplot(x=xv, y=yv, ax=ax, color=color, ci=95,
                         scatter=False, line_kws={'lw': 2.0})
             r, p = pearsonr(xv, yv)
@@ -819,6 +924,8 @@ def main():
                         help='Number of observations per trial in subsample overlay')
     parser.add_argument('--sub_seed', type=int, default=42,
                         help='Random seed for subsampling')
+    parser.add_argument('--human_dir', default=None,
+                        help='Directory containing human_responses_{task}.pkl files')
     args = parser.parse_args()
 
     apply_style()
@@ -850,6 +957,22 @@ def main():
     df_cont = df[df.task=='continuous'].copy()
     raw_bin  = df_bin
     raw_cont = df_cont
+
+    # Load human data if provided
+    hdf_bin  = None
+    hdf_cont = None
+    if args.human_dir:
+        hdir = Path(args.human_dir)
+        hpkl_cont = hdir / 'human_responses_continuous.pkl'
+        hpkl_bin  = hdir / 'human_responses_binary.pkl'
+        if hpkl_cont.exists():
+            hdf_cont = pd.read_pickle(hpkl_cont)
+            print(f'  Human continuous: {hdf_cont["model_id"].nunique()} participant(s), '
+                  f'{hdf_cont["trial"].nunique()} trials')
+        if hpkl_bin.exists():
+            hdf_bin = pd.read_pickle(hpkl_bin)
+            print(f'  Human binary:     {hdf_bin["model_id"].nunique()} participant(s), '
+                  f'{hdf_bin["trial"].nunique()} trials')
 
     # Subsampled versions (None if flag not set)
     if args.subsample:
@@ -901,21 +1024,21 @@ def main():
     ax_L = fig.add_subplot(gs[2, 4:7])   # cross-task prefix var correlation
 
     # ── Plot binary row ──────────────────────────────────────────────────────
-    plot_A(ax_bin[0], df_bin,  palette, title='Binary',      sub_df=sub_bin,  sub_label=sub_label)
+    plot_A(ax_bin[0], df_bin,  palette, title='Binary',      sub_df=sub_bin,  sub_label=sub_label, human_df=hdf_bin)
     plot_B(ax_bin[1], raw_bin,  palette,                      sub_df=sub_raw_bin,  sub_label=sub_label)
-    plot_C(ax_bin[2], df_bin,  palette,                       sub_df=sub_bin,  sub_label=sub_label)
-    plot_D(ax_bin[3], raw_bin,  palette,                      sub_df=sub_raw_bin,  sub_label=sub_label)
-    plot_E(ax_bin[4], df_bin,  palette,                       sub_df=sub_bin,  sub_label=sub_label)
+    plot_C(ax_bin[2], df_bin,  palette,                       sub_df=sub_bin,  sub_label=sub_label, human_df=hdf_bin)
+    plot_D(ax_bin[3], raw_bin,  palette,                      sub_df=sub_raw_bin,  sub_label=sub_label, human_df=hdf_bin)
+    plot_E(ax_bin[4], df_bin,  palette,                       sub_df=sub_bin,  sub_label=sub_label, human_df=hdf_bin)
     plot_F_late(ax_bin[5], df_bin,  palette, sub_df=sub_bin,  sub_label=sub_label)
     plot_G_lambda_recovery(ax_bin[6], df_bin,  palette, sub_df=sub_bin,  sub_label=sub_label)
 
     # ── Plot continuous row ──────────────────────────────────────────────────
-    plot_A(ax_cont[0], df_cont, palette, title='Continuous', sub_df=sub_cont, sub_label=sub_label)
-    plot_B(ax_cont[1], raw_cont, palette,                     sub_df=sub_raw_cont, sub_label=sub_label)
-    plot_C(ax_cont[2], df_cont, palette,                      sub_df=sub_cont, sub_label=sub_label)
-    plot_D(ax_cont[3], raw_cont, palette,                     sub_df=sub_raw_cont, sub_label=sub_label)
-    plot_E(ax_cont[4], df_cont, palette,                      sub_df=sub_cont, sub_label=sub_label)
-    plot_F_late(ax_cont[5], df_cont, palette, sub_df=sub_cont, sub_label=sub_label)
+    plot_A(ax_cont[0], df_cont, palette, title='Continuous', sub_df=sub_cont, sub_label=sub_label, human_df=hdf_cont)
+    plot_B(ax_cont[1], raw_cont, palette,                     sub_df=sub_raw_cont, sub_label=sub_label, human_df=hdf_cont)
+    plot_C(ax_cont[2], df_cont, palette,                      sub_df=sub_cont, sub_label=sub_label, human_df=hdf_cont)
+    plot_D(ax_cont[3], raw_cont, palette,                     sub_df=sub_raw_cont, sub_label=sub_label, human_df=hdf_cont)
+    plot_E(ax_cont[4], df_cont, palette,                      sub_df=sub_cont, sub_label=sub_label, human_df=hdf_cont)
+    plot_F_late(ax_cont[5], df_cont, palette, sub_df=sub_cont, sub_label=sub_label, human_df=hdf_cont)
     plot_G_lambda_recovery(ax_cont[6], df_cont, palette, sub_df=sub_cont, sub_label=sub_label)
 
     # ── Plot cross-task row ──────────────────────────────────────────────────

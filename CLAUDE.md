@@ -149,6 +149,8 @@ JATOS/MindProbe deployment:
 - Data saved via jatos.endStudyAndRedirect(prolificURL, jsPsych.data.get().json())
 - beforeunload guard warns participant against navigating away
 - Non-completions: request return on Prolific (not rejection); slot reopens
+- Abandoned runs stay as DATA_RETRIEVED in MindProbe — filter by FINISHED state
+  when exporting results (Results panel → filter by state before export)
 
 Prolific rollout plan:
 - Publish both studies simultaneously; no inter-study screening filter

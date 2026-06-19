@@ -7,13 +7,13 @@
 import sequencesData from '../../sequences/binary_sequences.json';
 
 // ── Parameters ────────────────────────────────────────────────────────────
-const N_TRIALS_TO_RUN        = 1;       // ← SET TO 40 BEFORE DEPLOYMENT
-const N_OBS_TO_RUN           = 5;       // ← SET TO 15 (or remove) BEFORE DEPLOYMENT
-const SHOW_SLIDER_VALUE      = true;
-const SLIDER_DEFAULT         = 'none';
+const N_TRIALS_TO_RUN        = 40;
+const N_OBS_TO_RUN           = 15;
+const SHOW_SLIDER_VALUE      = true;    // float label above thumb
+const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
 const DEFAULT_VALUE          = 50;      // midpoint of [0,100] slider
 const ITI_MS                 = 1000;
-const T_OBS_MS               = 5000;
+const T_OBS_MS               = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
 
 // Practice (tutorial) — fixed sequence: B B R B R (+1=blue, -1=red)

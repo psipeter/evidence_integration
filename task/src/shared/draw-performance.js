@@ -8,13 +8,15 @@ export const normalPDF = (x, mu, sigma) =>
   Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
 
 export const buildPerformanceSVG = (mu, sigma, values, responses) => {
-  const W = 520, H = 170;
-  const xMin = -100, xMax = 100;
-  const pad  = { l: 44, r: 44, t: 22, b: 36 };
+  const W = 520, H = 190;
+  const xMin = 0, xMax = 100;
+  const pad  = { l: 44, r: 44, t: 22, b: 56 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
   const axisY = pad.t + plotH;
   const tickH = 14;
+  const obsRowY  = axisY;        // red ticks: flush with axis
+  const estRowY  = axisY + 18;   // black ticks: one row below
 
   const xPos  = (x) => pad.l + (x - xMin) / (xMax - xMin) * plotW;
   const peakP = normalPDF(mu, mu, sigma);
@@ -30,18 +32,18 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
   const fillPoints = curvePoints
     + ` ${xPos(xMax).toFixed(2)},${axisY} ${xPos(xMin).toFixed(2)},${axisY}`;
 
-  // Observation ticks (red)
+  // Observation ticks (red) — top row
   const obsTicks = (values || []).map(v =>
-    `<line x1="${xPos(v).toFixed(2)}" y1="${axisY}"
-           x2="${xPos(v).toFixed(2)}" y2="${axisY + tickH}"
+    `<line x1="${xPos(v).toFixed(2)}" y1="${obsRowY}"
+           x2="${xPos(v).toFixed(2)}" y2="${obsRowY + tickH}"
            stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/>`
   ).join('');
 
-  // Estimate ticks (black)
+  // Estimate ticks (black) — bottom row
   const estTicks = (responses || []).map(r => {
     if (r === null) return '';
-    return `<line x1="${xPos(r).toFixed(2)}" y1="${axisY}"
-                  x2="${xPos(r).toFixed(2)}" y2="${axisY + tickH}"
+    return `<line x1="${xPos(r).toFixed(2)}" y1="${estRowY}"
+                  x2="${xPos(r).toFixed(2)}" y2="${estRowY + tickH}"
                   stroke="#222" stroke-width="2.5" stroke-linecap="round"/>`;
   }).join('');
 
@@ -75,9 +77,10 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
       stroke="#ccc" stroke-width="1"/>
     <text x="${pad.l}" y="${axisY + 12}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">-100</text>
+      font-family="Arial" font-size="13" fill="#999">0</text>
     <text x="${pad.l + plotW}" y="${axisY + 12}" text-anchor="middle"
       font-family="Arial" font-size="13" fill="#999">100</text>
+
     ${obsTicks}
     ${estTicks}
     ${obsLegend}

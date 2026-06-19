@@ -73,7 +73,7 @@ export function buildAndRun(cfg) {
     on_finish: () => {
       window.removeEventListener('beforeunload', beforeUnloadHandler);
       jatos.endStudyAndRedirect(
-        'https://app.prolific.com/submissions/complete?cc=PLACEHOLDER',
+        'https://app.prolific.com/submissions/complete?cc=C3W3TF1O',
         jsPsych.data.get().json()
       );
     },
@@ -87,26 +87,6 @@ export function buildAndRun(cfg) {
       style="font-size:1.1rem;padding:0.6rem 2.5rem;${extraStyle}">${label}</button>`;
 
   const timeline = [];
-
-  // ── Welcome ──────────────────────────────────────────────────────────────
-  timeline.push({
-    type: jsPsychHtmlButtonResponse,
-    stimulus: `
-      <div class="screen-wrap">
-        <h2>Welcome</h2>
-        <p>Thank you for taking part in this study.</p><br>
-        <p>This study is conducted by
-        <strong>Peter Duggins and Alireza Soltani</strong>
-        at <strong>Dartmouth College</strong>, Department of
-        <strong>Psychological and Brain Sciences</strong>.</p><br>
-        <p>The study takes approximately <strong>30 minutes</strong> to complete.
-        You will be compensated at the rate advertised on Prolific.</p><br>
-        <p style="background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:0.6rem 0.75rem;font-size:0.9rem;color:#713f12;">&#9888; Do not close, refresh, or navigate away during the task — your data will be lost and you will not be paid. If this happens accidentally, please request a return on Prolific.</p><br>        <p>Please click <em>Next</em> to read the consent form before beginning.</p>
-      </div>`,
-    choices: ['Next'],
-    button_html: (c) => makeButton(c),
-    data: { screen: 'welcome' },
-  });
 
   // ── Consent ───────────────────────────────────────────────────────────────
   timeline.push({
@@ -132,6 +112,24 @@ export function buildAndRun(cfg) {
           account.]</p><br>
           <p><strong>Contact:</strong> [researcher@dartmouth.edu] |
           Dartmouth IRB: [irb@dartmouth.edu]</p>
+        </div>
+        <div class="consent-info-boxes">
+          <div class="consent-info-box">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
+              fill="none" stroke="#555" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span>The study takes approximately <strong>30 minutes</strong> to complete.
+            You will be compensated at the rate advertised on Prolific.</span>
+          </div>
+          <div class="consent-info-box consent-info-box--warning">
+            <span style="font-size:1.1rem;flex-shrink:0;margin-top:1px;">&#9888;</span>
+            <span>Do not close, refresh, or navigate away during the task — your data
+            will be lost and you will not be paid. If this happens accidentally,
+            please request a return on Prolific.</span>
+          </div>
         </div>
         <div class="consent-footer">
           <hr style="margin-bottom:1rem;">
@@ -262,18 +260,15 @@ export function buildAndRun(cfg) {
         });
       }
 
-      const initPos = sliderDefault === 'value' ? defaultValue
-                    : sliderDefault === 'last'  ? lastResponse
-                    : defaultValue;
-
       timeline.push({
         type: TrialObsPlugin,
         value:          seq.values[o],
         trial_num:      t + 1,
         n_trials:       sequences.length,
         t_obs_ms:       tObsMs,
-        slider_default: sliderDefault,
-        init_pos:       initPos,
+        // obs 0 of each trial: always start fresh (no carry-over)
+        slider_default: o === 0 ? 'none' : sliderDefault,
+        init_pos:       () => sliderDefault === 'last' && o > 0 ? lastResponse : defaultValue,
         show_value:     showSliderValue,
         data: {
           screen:        'observation',
@@ -308,10 +303,11 @@ export function buildAndRun(cfg) {
         trial_num:        _t + 1,
         true_mean:        _trueMean,
         true_std:         _trueStd,
-        true_p:           _seq.true_p ?? null,
+        true_p:           seq.true_p ?? null,
         values:           _values,
         responses:        () => _responses.map(r => r.response),
         show_performance: showTrialPerformance,
+        n_trials:         sequences.length,
         is_last:          false,
         data: { screen: 'inter_trial', trial: _t },
       });
@@ -331,6 +327,7 @@ export function buildAndRun(cfg) {
       values:           [..._seq.values],
       responses:        () => _responses.map(r => r.response),
       show_performance: showTrialPerformance,
+      n_trials:         sequences.length,
       is_last:          true,
       data: { screen: 'inter_trial', trial: _t },
     });

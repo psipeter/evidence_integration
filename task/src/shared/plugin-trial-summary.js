@@ -15,6 +15,7 @@ const info = {
     values:           { type: 'OBJECT',  default: []    },
     responses:        { type: 'OBJECT',  default: []    },
     show_performance: { type: 'BOOLEAN', default: false },
+    n_trials:         { type: 'INT',     default: 40   },
     is_last:          { type: 'BOOLEAN', default: false },
   },
 };
@@ -28,7 +29,7 @@ class TrialSummaryPlugin {
     document.body.style.backgroundColor = '#f5f5f5';
 
     const { trial_num, true_mean, true_std,
-            values, responses, show_performance, is_last } = trial;
+            values, responses, show_performance, is_last, n_trials } = trial;
 
     const perfHTML = show_performance ? `
       <div id="perf-svg"
@@ -40,7 +41,12 @@ class TrialSummaryPlugin {
 
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;">
-        <p style="font-size:1.2rem;margin-bottom:0.75rem;">Trial ${trial_num} complete.</p>
+        <div class="progress-wrap">
+          <div class="progress-label">Trial ${trial_num} of ${n_trials}</div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width:${Math.round(trial_num/n_trials*100)}%"></div>
+          </div>
+        </div>
         ${perfHTML}
         <button id="next-btn" class="jspsych-btn"
           style="font-size:1.1rem;padding:0.6rem 2.5rem;">

@@ -70,7 +70,6 @@ body {
 .slider-wrap {
   display: flex;
   align-items: center;
-  gap: 1rem;
   width: 100%;
 }
 
@@ -89,6 +88,8 @@ input[type="range"] {
   cursor: pointer;
   background: transparent;
   height: 96px;             /* hit area */
+  position: relative;
+  z-index: 1;
 }
 
 /* Track: thin flat line */
@@ -134,6 +135,16 @@ input[type="range"].slider-unset::-webkit-slider-thumb {
 input[type="range"].slider-unset::-moz-range-thumb {
   background: transparent;
   box-shadow: none;
+}
+
+/* 'last' mode: light gray thumb until clicked */
+input[type="range"].slider-last::-webkit-slider-thumb {
+  background: #ccc;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+input[type="range"].slider-last::-moz-range-thumb {
+  background: #ccc;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 }
 
 /* Numeric readout */
@@ -199,13 +210,41 @@ input[type="range"].slider-unset::-moz-range-thumb {
 }
 
 .consent-scroll {
-  flex: 1;              /* takes all available space above the footer */
+  flex: 1;
   overflow-y: auto;
   padding-right: 0.5rem;
+  font-size: 0.85rem;
   line-height: 1.6;
-  /* Subtle inner shadow hints that content is scrollable */
   mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+}
+
+.consent-info-boxes {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0;
+}
+
+.consent-info-box {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e3a5f;
+}
+
+.consent-info-box--warning {
+  background: #fef9c3;
+  border-color: #fde047;
+  color: #713f12;
 }
 
 .consent-footer {
@@ -375,25 +414,23 @@ input[type="range"].binary-slider {
 input[type="range"].binary-slider::-webkit-slider-runnable-track {
   height: 16px;
   border-radius: 8px;
-  /* blue on left up to thumb, red on right */
-  background: linear-gradient(
-    to right,
-    #2563eb 0%,
-    #2563eb var(--pct, 50%),
-    #ef4444 var(--pct, 50%),
-    #ef4444 100%
-  );
+  /* blue → gray → red smooth gradient; thumb position irrelevant */
+    background: linear-gradient(
+      to right,
+      #2563eb 0%,
+      #888 50%,
+      #ef4444 100%
+    );
 }
 input[type="range"].binary-slider::-moz-range-track {
   height: 16px;
   border-radius: 8px;
-  background: linear-gradient(
-    to right,
-    #2563eb 0%,
-    #2563eb var(--pct, 50%),
-    #ef4444 var(--pct, 50%),
-    #ef4444 100%
-  );
+    background: linear-gradient(
+      to right,
+      #2563eb 0%,
+      #888 50%,
+      #ef4444 100%
+    );
 }
 
 input[type="range"].binary-slider::-webkit-slider-thumb {
@@ -430,10 +467,40 @@ input[type="range"].binary-slider.slider-unset::-moz-range-thumb {
 
 /* Unset: grey track, no fill */
 input[type="range"].binary-slider.slider-unset::-webkit-slider-runnable-track {
-  background: #ccc;
+  background: #d1d5db;
 }
 input[type="range"].binary-slider.slider-unset::-moz-range-track {
-  background: #ccc;
+  background: #d1d5db;
+}
+
+/* Last mode: gray thumb + faded gradient track */
+input[type="range"].binary-slider.slider-last::-webkit-slider-thumb {
+  background: #ccc !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
+}
+input[type="range"].binary-slider.slider-last::-moz-range-thumb {
+  background: #ccc !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
+}
+input[type="range"].binary-slider.slider-last::-webkit-slider-runnable-track {
+  height: 16px;
+  border-radius: 8px;
+    background: linear-gradient(
+      to right,
+      rgba(37,99,235,0.3) 0%,
+      rgba(136,136,136,0.3) 50%,
+      rgba(239,68,68,0.3) 100%
+    );
+}
+input[type="range"].binary-slider.slider-last::-moz-range-track {
+  height: 16px;
+  border-radius: 8px;
+    background: linear-gradient(
+      to right,
+      rgba(37,99,235,0.3) 0%,
+      rgba(136,136,136,0.3) 50%,
+      rgba(239,68,68,0.3) 100%
+    );
 }
 
 /* ── Urn dot grid ─────────────────────────────────────────────────────────── */
@@ -515,3 +582,87 @@ input[type="range"].binary-slider.slider-unset::-moz-range-track {
 .obs-circle-binary-filled {
   color: #888;
 }
+
+/* ── Progress bar (trial summary) ─────────────────────────────────────── */
+.progress-wrap {
+  width: clamp(280px, 50vw, 500px);
+  margin: 0 auto 1.25rem;
+  text-align: left;
+}
+
+.progress-label {
+  font-size: 1rem;
+  color: #555;
+  margin-bottom: 0.4rem;
+  text-align: center;
+}
+
+.progress-track {
+  width: 100%;
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 6px;
+  transition: width 0.4s ease;
+  min-width: 4px;  /* always visible even at trial 1 */
+}
+
+/* ── Slider tick ruler ────────────────────────────────────────────────────── */
+.slider-track-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.5rem;  /* room for edge tick labels (-100, 100) */
+  box-sizing: border-box;
+}
+
+.slider-track-wrap input[type="range"] {
+  width: 100%;
+}
+
+.slider-ruler {
+  position: relative;
+  height: 32px;
+  width: 100%;
+  margin-top: 2px;
+  overflow: visible;
+  z-index: 1;
+  pointer-events: none;  /* clicks pass through to slider */
+}
+
+.slider-tick {
+  position: absolute;
+  width: 1px;
+  background: #aaa;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.slider-tick-major {
+  background: #666;
+  width: 1.5px;
+}
+
+.slider-tick-label {
+  position: absolute;
+  top: 10px;
+  transform: translateX(-50%);
+  font-family: Arial, sans-serif;
+  font-size: 0.75rem;
+  color: #777;
+  white-space: nowrap;
+}
+
+/* ── Ghost line: previous estimate ──────────────────────────────────────── */
+/* Ghost overlays the slider input. Placed AFTER input in DOM so it
+ * paints on top. position:absolute anchors to slider-track-wrap.
+ * The input height is 96px; thumb is 40px tall, centred via margin-top:-12px
+ * on a 16px track. Track centre = 96/2 = 48px from input top.
+ * Ghost visible rect: 40px tall, centred at 48px → top = 48-20 = 28px. */

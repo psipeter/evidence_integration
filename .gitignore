@@ -91,3 +91,4 @@ task/node_modules/
 task/dist-continuous/
 task/dist-binary/
 task/dist/
+task/jatos.js

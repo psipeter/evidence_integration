@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
 
   // Dev mode: serve everything, open the launcher page
   return {
-    base: './',
+    base: '/',
     server: { open: '/index-dev.html' },
     build: {
       // Default build = continuous

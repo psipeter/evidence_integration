@@ -7,6 +7,7 @@
  */
 
 import { normalPDF } from './draw-performance.js';
+import { buildSliderHTML, initSlider } from './slider.js';
 
 const GOAL_COLOR   = '#2563eb';   // blue  — true mean / ???
 const SAMPLE_COLOR = '#ef4444';   // red   — current observation
@@ -28,7 +29,7 @@ const info = {
 
 const buildDistSVG = (mu, sigma, currentValue) => {
   const W = 220, H = 160;
-  const xMin = -100, xMax = 100;
+  const xMin = 0, xMax = 100;
   const pad  = { l: 20, r: 20, t: 26, b: 44 };
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
@@ -68,7 +69,7 @@ const buildDistSVG = (mu, sigma, currentValue) => {
     <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
       stroke="#bbb" stroke-width="1"/>
     <text x="${pad.l}" y="${axisY + 14}" text-anchor="middle"
-      font-family="Arial" font-size="13" fill="#999">-100</text>
+      font-family="Arial" font-size="13" fill="#999">0</text>
     <text x="${pad.l + plotW}" y="${axisY + 14}" text-anchor="middle"
       font-family="Arial" font-size="13" fill="#999">100</text>
     <polygon points="${fillPoints}" fill="rgba(22,163,74,0.15)" stroke="none"/>
@@ -92,6 +93,7 @@ class PracticeObservationPlugin {
 
     const { value, obs_num, n_obs, true_mean, true_std,
             slider_default, init_pos, show_value } = trial;
+    const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 0);
     const unset = slider_default === 'none';
 
     display_el.innerHTML = `
@@ -138,23 +140,8 @@ class PracticeObservationPlugin {
 
         </div>
 
-        <!-- BOTTOM: full-width slider + submit (same size as main task) -->
-        <div class="slider-section">
-          <div class="slider-label-float-wrap">
-            <div id="slider-float-label" class="slider-float-label"
-              style="display:${unset ? 'none' : 'block'};">
-              ${unset ? '' : init_pos}
-            </div>
-          </div>
-          <div class="slider-wrap">
-            <span class="slider-label">-100</span>
-            <input type="range" id="response-slider"
-              min="-100" max="100" value="${init_pos}" step="1"
-              class="${unset ? 'slider-unset' : ''}">
-            <span class="slider-label">100</span>
-          </div>
-        </div>
-
+        <!-- BOTTOM: full-width slider + submit -->
+        ${buildSliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
         <button id="submit-btn" class="jspsych-btn"
           ${unset ? 'disabled' : ''}
           style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
@@ -166,52 +153,17 @@ class PracticeObservationPlugin {
     // Draw distribution
     display_el.querySelector('#dist-svg').innerHTML = buildDistSVG(true_mean, true_std, value);
 
-    const slider = display_el.querySelector('#response-slider');
-    const lbl    = display_el.querySelector('#slider-float-label');
-    const btn    = display_el.querySelector('#submit-btn');
-
-    const updateLabel = () => {
-      if (!show_value || !lbl) return;
-      lbl.style.display = 'block';
-      lbl.textContent   = slider.value;
-      const thumbR      = 3;
-      const rect        = slider.getBoundingClientRect();
-      const usable      = rect.width - 2 * thumbR;
-      const pct         = (slider.value - slider.min) / (slider.max - slider.min);
-      const posInSlider = thumbR + pct * usable;
-      const sectionLeft = slider.parentElement.parentElement.getBoundingClientRect().left;
-      lbl.style.left    = (rect.left - sectionLeft + posInSlider) + 'px';
-    };
-
-    let finished = false;
-
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      document.body.style.backgroundColor = '#f5f5f5';
-      const hadUnset = slider.classList.contains('slider-unset');
-      const response = !hadUnset ? parseInt(slider.value) : null;
-      this.jsPsych.finishTrial({ response, timed_out: false });
-    };
-
-    const attachListeners = () => {
-      if (!unset) updateLabel();
-      slider.addEventListener('pointerdown', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        requestAnimationFrame(updateLabel);
+    const jsPsych = this.jsPsych;
+    // Extra rAF ensures jsPsych has finished painting before slider measures layout
+    requestAnimationFrame(() => {
+      initSlider(display_el, {
+        unset,
+        showValue: show_value,
+        onFinish: (response) => {
+          jsPsych.finishTrial({ response, timed_out: false });
+        },
       });
-      slider.addEventListener('input', () => {
-        slider.classList.remove('slider-unset');
-        btn.disabled = false;
-        updateLabel();
-      });
-      btn.addEventListener('pointerdown', (e) => {
-        if (!btn.disabled) { e.preventDefault(); finish(); }
-      });
-    };
-
-    requestAnimationFrame(() => requestAnimationFrame(attachListeners));
+    });
 
 
 
