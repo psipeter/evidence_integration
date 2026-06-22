@@ -71,22 +71,20 @@ const buildUrnSVG = (p, currentValue, obsNum) => {
     }
   });
 
-  // Add label row below grid
-  const H_full = H + 30;
-  const labelY = H + 20;
-  const labelX = W / 2;
+  const rectCX = 8 + 178 / 2;
+  const rectCY = 8 + 144 / 2;
 
-  return `<svg viewBox="0 0 ${W} ${H_full}" width="100%" height="100%"
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%"
     xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
     <rect x="8" y="8" width="178" height="144" fill="none" stroke="#16a34a" stroke-width="2" rx="4"/>
     ${dots}
-    <text x="${labelX - 36}" y="${labelY}" text-anchor="start"
-          font-family="Arial" font-size="15" font-weight="bold"
-          fill="#222">P(</text>
-    <circle cx="${labelX - 14}" cy="${labelY - 4}" r="6" fill="${SAMPLE_BLUE}"/>
-    <text x="${labelX - 5}" y="${labelY}" text-anchor="start"
-          font-family="Arial" font-size="15" font-weight="bold"
-          fill="#222">) = ???</text>
+    <text x="${rectCX}" y="${rectCY + 8}" text-anchor="middle"
+          font-family="Arial" font-size="32" font-weight="bold"
+          stroke="#000" stroke-width="4" stroke-linejoin="round"
+          fill="none" paint-order="stroke">? ? ?</text>
+    <text x="${rectCX}" y="${rectCY + 8}" text-anchor="middle"
+          font-family="Arial" font-size="32" font-weight="bold"
+          fill="${SAMPLE_BLUE}">? ? ?</text>
   </svg>`;
 };
 
@@ -109,11 +107,6 @@ class PracticeObservationBinaryPlugin {
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
-      <div style="text-align:center;margin-bottom:0.3rem;">
-        ${Array.from({length: n_obs}, (_, i) =>
-          `<span class="obs-circle ${i < obs_num ? 'obs-circle-binary-filled' : ''}">${i < obs_num ? '&#9679;' : '&#9675;'}</span>`
-        ).join('')}
-      </div>
 
       <div class="practice-wrap">
         <div class="practice-top-row">

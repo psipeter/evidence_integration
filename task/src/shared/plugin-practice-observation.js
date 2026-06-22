@@ -98,13 +98,6 @@ class PracticeObservationPlugin {
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
-      <div style="text-align:center;margin-bottom:0.3rem;">
-        ${Array.from({length: n_obs}, (_, i) =>
-          `<span class="obs-circle ${i < obs_num ? 'obs-circle-filled' : ''}">
-            ${i < obs_num ? '&#9679;' : '&#9675;'}
-          </span>`
-        ).join('')}
-      </div>
 
       <div class="practice-wrap">
 

@@ -106,13 +106,6 @@ class TutorialIntroContinuousPlugin {
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
-      <div id="tut-obs-circles" style="visibility:hidden;text-align:center;margin-bottom:0.3rem;">
-        <span id="tut-circle-0" class="obs-circle obs-circle-filled">&#9679;</span>
-        <span id="tut-circle-1" class="obs-circle">&#9675;</span>
-        <span id="tut-circle-2" class="obs-circle">&#9675;</span>
-        <span id="tut-circle-3" class="obs-circle">&#9675;</span>
-        <span id="tut-circle-4" class="obs-circle">&#9675;</span>
-      </div>
       <div class="practice-wrap">
         <div class="practice-top-row">
 
@@ -193,7 +186,6 @@ class TutorialIntroContinuousPlugin {
       const svg = display_el.querySelector('#dist-svg');
       svg.querySelector('#tut-svg-obs').style.opacity = '1';
       display_el.querySelector('#tut-centre-number').style.opacity = '1';
-      display_el.querySelector('#tut-obs-circles').style.visibility = 'visible';
       activateSlider();
     };
 

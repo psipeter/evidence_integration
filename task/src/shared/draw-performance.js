@@ -64,7 +64,7 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
           stroke="#2563eb" stroke-width="2"
           stroke-dasharray="5 3" stroke-linecap="round"/>`;
 
-  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
     <!-- Distribution fill -->
     <polygon points="${fillPoints}" fill="rgba(22,163,74,0.12)" stroke="none"/>
     <!-- Distribution outline -->

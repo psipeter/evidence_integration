@@ -12,7 +12,8 @@ const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;    // float label above thumb
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
 const DEFAULT_VALUE          = 50;      // midpoint of [0,100] slider
-const ITI_MS                 = 1000;
+const BTI_MS       = 5000;
+const ITI_SHORT_MS  = 1000;
 const T_OBS_MS               = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
 
@@ -31,7 +32,8 @@ export const config = {
   showSliderValue:      SHOW_SLIDER_VALUE,
   sliderDefault:        SLIDER_DEFAULT,
   defaultValue:         DEFAULT_VALUE,
-  itiMs:                ITI_MS,
+  btiMs:               BTI_MS,
+  itiShortMs:         ITI_SHORT_MS,
   tObsMs:               T_OBS_MS,
   showTrialPerformance: SHOW_TRIAL_PERFORMANCE,
 };

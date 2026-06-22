@@ -29,7 +29,7 @@ body {
 
 /* ── Instruction / welcome / consent screens ─────────────────────────────── */
 .screen-wrap {
-  max-width: 700px;
+  max-width: 70vw;
   width: 100%;
   text-align: left;
   margin: auto;
@@ -64,7 +64,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.6rem;
-  width: clamp(280px, 50vw, 700px);
+  width: 70vw;
 }
 
 .slider-wrap {
@@ -200,7 +200,7 @@ input[type="range"].slider-last::-moz-range-thumb {
 
 /* ── Consent form layout ─────────────────────────────────────────────────── */
 .consent-outer {
-  max-width: 700px;
+  max-width: 70vw;
   width: 100%;
   margin: auto;
   padding: 0 1rem;
@@ -268,7 +268,7 @@ input[type="range"].slider-last::-moz-range-thumb {
   align-items: stretch;
   justify-content: center;
   gap: 1.5rem;
-  width: clamp(280px, 50vw, 700px);
+  width: 70vw;
 }
 
 .practice-panel {
@@ -288,13 +288,13 @@ input[type="range"].slider-last::-moz-range-thumb {
 }
 
 .practice-info-block {
-  font-size: 0.85rem;
-  color: #444;
-  line-height: 1.5;
+  font-size: 1.1rem;
+  color: #333;
+  line-height: 1.6;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
-  padding: 0.5rem 0.65rem;
+  padding: 0.6rem 0.8rem;
 }
 
 .practice-sample-label {
@@ -319,18 +319,21 @@ input[type="range"].slider-last::-moz-range-thumb {
 /* Slider in practice uses same .slider-section/.slider-wrap as main task,
    constrained to 50vw by the parent .practice-wrap */
 .practice-wrap .slider-section {
-  width: clamp(280px, 50vw, 700px);
+  width: 70vw;
 }
 
 /* ── Tutorial title (top-center) ─────────────────────────────────────────── */
 .tutorial-title {
+  position: fixed;
+  top: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
   text-align: center;
-  font-size: 1.1rem;
+  font-size: 1.5rem;
   font-weight: bold;
-  color: #555;
-  letter-spacing: 0.03em;
-  padding: 0.6rem 0 0.2rem;
-  width: 100%;
+  color: #333;
+  z-index: 100;
+  white-space: nowrap;
 }
 
 /* ── Keyboard shortcut badge ─────────────────────────────────────────────── */
@@ -356,7 +359,7 @@ input[type="range"].slider-last::-moz-range-thumb {
   display: flex;
   gap: 1rem;
   justify-content: center;
-  max-width: 520px;
+  max-width: 70vw;
   margin: 0 auto;
 }
 
@@ -380,7 +383,7 @@ input[type="range"].slider-last::-moz-range-thumb {
   flex-direction: column;
   align-items: center;
   gap: 0.3rem;
-  width: clamp(280px, 50vw, 700px);
+  width: 70vw;
 }
 
 .binary-slider-row {
@@ -572,24 +575,10 @@ input[type="range"].binary-slider.slider-last::-moz-range-track {
   letter-spacing: 0.2em;
 }
 
-/* ── Observation progress circles ────────────────────────────────────────── */
-.obs-circle {
-  font-size: 1.5rem;
-  color: #ccc;
-  margin: 0 0.3rem;
-}
-.obs-circle-filled {
-  color: #ef4444;
-}
-
-/* Binary obs circles use gray fill instead of red */
-.obs-circle-binary-filled {
-  color: #888;
-}
 
 /* ── Progress bar (trial summary) ─────────────────────────────────────── */
 .progress-wrap {
-  width: clamp(280px, 50vw, 500px);
+  width: 70vw;
   margin: 0 auto 1.25rem;
   text-align: left;
 }

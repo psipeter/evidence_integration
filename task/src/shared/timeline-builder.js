@@ -4,18 +4,18 @@
  *
  * Config shape:
  * {
- *   // Core
- *   sequences:            array of { trial, true_mean, true_std, values[] }
+ *   taskType:             'continuous' | 'binary'
+ *   sequences:            array of { trial, qid, true_mean, true_std, true_p,
+ *                                    values[], prefix_length, iti_ms }
  *   practiceValues:       number[]
- *   practiceMean:         number
- *   practiceStd:          number
- *
- *   // Display flags
+ *   practiceMean:         number  (true_mean for continuous, true_p for binary)
+ *   practiceStd:          number  (continuous only)
  *   showSliderValue:      boolean
- *   sliderDefault:        'none' | 'last' | 'value'
- *   defaultValue:         number
- *   itiMs:                number
- *   tObsMs:               number
+ *   sliderDefault:        'none' | 'last'
+ *   defaultValue:         number  (slider initial position, 0-100)
+ *   btiMs:                number  (between-trial interval, ms)
+ *   itiShortMs:           number  (between-observation ITI in tutorial, ms)
+ *   tObsMs:               number  (observation display timeout, ms)
  *   showTrialPerformance: boolean
  * }
  */
@@ -23,6 +23,7 @@
 import { initJsPsych } from 'jspsych';
 import jsPsychHtmlButtonResponse   from '@jspsych/plugin-html-button-response';
 import ItiClockPlugin              from './plugin-iti-clock.js';
+import InterTrialPlugin            from './plugin-inter-trial.js';
 import ObservationPlugin           from './plugin-observation.js';
 import PracticeObservationPlugin   from './plugin-practice-observation.js';
 import PracticeSummaryPlugin       from './plugin-practice-summary.js';
@@ -46,7 +47,8 @@ export function buildAndRun(cfg) {
     showSliderValue,
     sliderDefault,
     defaultValue,
-    itiMs,
+    btiMs,
+    itiShortMs = 1000,
     tObsMs,
     showTrialPerformance,
   } = cfg;
@@ -195,12 +197,9 @@ export function buildAndRun(cfg) {
     const obsNode = {
       timeline: [
         {
-          timeline: [{
-            type: ItiClockPlugin,
-            duration_ms: 250,
-            data: { screen: 'practice_iti', observation: _o },
-          }],
-          conditional_function: () => true,
+          type: ItiClockPlugin,
+          duration_ms: itiShortMs,
+          data: { screen: 'practice_iti', observation: _o },
         },
         {
           type: TutorialObsPlugin,
@@ -238,6 +237,16 @@ export function buildAndRun(cfg) {
     data: { screen: 'practice_summary' },
   });
 
+  // Inter-trial reset before trial 1
+  timeline.push({
+    type:        InterTrialPlugin,
+    trial_num:   1,
+    n_trials:    sequences.length,
+    duration_ms: btiMs,
+    is_binary:   isBinary,
+    data: { screen: 'inter_trial_reset', trial: -1 },
+  });
+
   // ── Trial loop ────────────────────────────────────────────────────────────
   let lastResponse      = defaultValue;
   let lastTimedOut      = false;
@@ -254,9 +263,9 @@ export function buildAndRun(cfg) {
       if (o > 0) {
         timeline.push({
           type: ItiClockPlugin,
-          duration_ms: itiMs,
+          duration_ms: seq.iti_ms ?? 1000,
           timed_out:   () => lastTimedOut,
-          data: { screen: 'iti', trial: t, observation: o },
+          data: { screen: 'iti', trial: t, observation: o, iti_ms: seq.iti_ms ?? 1000 },
         });
       }
 
@@ -300,16 +309,23 @@ export function buildAndRun(cfg) {
     if (!_isLast) {
       timeline.push({
         type: TrialSummaryPlugin2,
-        trial_num:        _t + 1,
         true_mean:        _trueMean,
         true_std:         _trueStd,
         true_p:           seq.true_p ?? null,
         values:           _values,
         responses:        () => _responses.map(r => r.response),
         show_performance: showTrialPerformance,
-        n_trials:         sequences.length,
         is_last:          false,
         data: { screen: 'inter_trial', trial: _t },
+      });
+      // BTI (between-trial interval) reset screen — always 5s
+      timeline.push({
+        type:        InterTrialPlugin,
+        trial_num:   _t + 2,
+        n_trials:    sequences.length,
+        duration_ms: btiMs,
+        is_binary:   isBinary,
+        data: { screen: 'inter_trial_reset', trial: _t },
       });
     }
   }
@@ -321,13 +337,11 @@ export function buildAndRun(cfg) {
     const _responses = lastTrialResponses;
     timeline.push({
       type: TrialSummaryPlugin2,
-      trial_num:        _t + 1,
       true_mean:        _seq.true_mean,
       true_std:         _seq.true_std,
       values:           [..._seq.values],
       responses:        () => _responses.map(r => r.response),
       show_performance: showTrialPerformance,
-      n_trials:         sequences.length,
       is_last:          true,
       data: { screen: 'inter_trial', trial: _t },
     });

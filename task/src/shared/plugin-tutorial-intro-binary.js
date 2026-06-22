@@ -29,7 +29,7 @@ const buildUrnSVG = (p, currentValue) => {
   const COLS = 5, ROWS = 4, N = COLS * ROWS;
   const r = 13, gap = 8, step = r * 2 + gap, pad = 16;
   const W = COLS * step + pad * 2 - gap;
-  const H = ROWS * step + pad * 2 - gap + 30; // extra space for label
+  const H = ROWS * step + pad * 2 - gap;
 
   const nBlue = Math.round(p * N);
   let colours = [
@@ -58,8 +58,9 @@ const buildUrnSVG = (p, currentValue) => {
     }
   });
 
-  const labelY = ROWS * step + pad * 2 - gap + 20;
-  const labelX = W / 2;
+  // Center of the border rect for the ??? overlay
+  const rectCX = 8 + 178 / 2;
+  const rectCY = 8 + 144 / 2;
 
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%"
     xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
@@ -68,13 +69,13 @@ const buildUrnSVG = (p, currentValue) => {
       ${dots}
     </g>
     <g id="tut-urn-label" style="opacity:0;">
-      <text x="${labelX - 36}" y="${labelY}" text-anchor="start"
-            font-family="Arial" font-size="15" font-weight="bold"
-            fill="#222">P(</text>
-      <circle cx="${labelX - 14}" cy="${labelY - 4}" r="6" fill="${SAMPLE_BLUE}"/>
-      <text x="${labelX - 5}" y="${labelY}" text-anchor="start"
-            font-family="Arial" font-size="15" font-weight="bold"
-            fill="#222">) = ???</text>
+      <text x="${rectCX}" y="${rectCY + 8}" text-anchor="middle"
+          font-family="Arial" font-size="32" font-weight="bold"
+          stroke="#000" stroke-width="4" stroke-linejoin="round"
+          fill="none" paint-order="stroke">? ? ?</text>
+    <text x="${rectCX}" y="${rectCY + 8}" text-anchor="middle"
+          font-family="Arial" font-size="32" font-weight="bold"
+          fill="${SAMPLE_BLUE}">? ? ?</text>
     </g>
     <g id="tut-urn-highlight" style="opacity:0;">${highlight}</g>
   </svg>`;
@@ -113,11 +114,6 @@ class TutorialIntroBinaryPlugin {
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
-      <div id="tut-obs-circles" style="visibility:hidden;text-align:center;margin-bottom:0.3rem;">
-        <span class="obs-circle obs-circle-binary-filled">&#9679;</span>
-        ${Array.from({length: n_obs - 1}, () =>
-          '<span class="obs-circle">&#9675;</span>').join('')}
-      </div>
       <div class="practice-wrap">
         <div class="practice-top-row">
 
@@ -195,7 +191,6 @@ class TutorialIntroBinaryPlugin {
       revealBox('tut-box-2');
       svg().querySelector('#tut-urn-highlight').style.opacity = '1';
       display_el.querySelector('#tut-ball').style.opacity = '1';
-      display_el.querySelector('#tut-obs-circles').style.visibility = 'visible';
       activateSlider();
     };
 

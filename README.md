@@ -310,17 +310,41 @@ Prolific via MindProbe/JATOS. Both use jsPsych 8 + Vite 6.
 
 | Task | Stimulus | Response | Generative model |
 |------|----------|----------|-----------------|
-| Continuous | Integer -100..100 | Slider -100..100 | Normal(mean, std_fixed=20) |
-| Binary | Blue/red circle | Slider 0–100% | Bernoulli(p) |
+| Continuous | Integer 0..100 | Slider 0–100 | Normal(mean, std_fixed=20) |
+| Binary | Blue/red circle | Slider 0–1 (p_blue) | Bernoulli(p) |
 
-Both: 40 trials × 15 observations (u8_r5, prefix_length=4), response deadline per obs,
-ITI clock, 5-observation interactive tutorial, post-trial summary plot.
+Both: 40 trials × 15 observations, prefix_length=4, response deadline per obs,
+ITI/BTI clocks, 5-observation interactive tutorial, post-trial summary plot.
 
 ### Design goals
 - Continuous: repeated sequences + long sequences + continuous values — unlocks
   all PTN metrics simultaneously; cross-task λ correlation with binary task
-- Binary: same participants (free ordering, natural counterbalancing), Bernoulli generative model;
-  enables cross-task individual-differences analysis; task order recorded as covariate
+- Binary: same participants (free ordering, natural counterbalancing), Bernoulli
+  generative model; enables cross-task individual-differences analysis
+- ITI manipulation: each qid gets 2 repeats with short ITI (1s) and 2 with long
+  ITI (5s), randomly assigned per qid. Longer ITI induces WM decay and increases
+  response variability — within-participant contrast for WM-mediated updating noise
+- BTI (between-trial interval): always 5s; shown as a reset screen
+  ("Trial X / 40 — generating new distribution…") to minimise cross-trial carry-over
+
+### Sequence generation
+
+```bash
+# Generate with best known seeds (prefix_length=4, n_unique=10, n_repeats=4)
+python task/generate_sequences.py --task continuous --seed 61
+python task/generate_sequences.py --task binary --seed 170
+
+# Seed search (3-pass: Bayesian validity → Bayesian |Δ| gate → RL_lambda |Δ| score)
+python task/generate_sequences.py --task both --n_tries 200 \
+    --prefix_length 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+```
+
+Best seeds: continuous=61, binary=170 (prefix_length=4).
+
+Three-pass scoring:
+- Pass 1 (structural): full-sequence mean+std within k SE; prefix/suffix drawn freely
+- Pass 2 (gate): bay_score = bay_delta + bay_rmse < 0.02
+- Pass 3 (objective): rl_score = rl_delta + rl_rmse (RL_lambda α=1, λ=0.5)
 
 ### Directory structure
 
@@ -330,9 +354,10 @@ task/
     shared/                        — all reusable code (both tasks)
       timeline-builder.js          — full timeline, parameterised by config
       jatos-shim.js                — dev no-op shim (POSTs to dev-server.js)
+      plugin-inter-trial.js        — BTI reset screen (5s, pulsing text)
       plugin-observation.js        — continuous obs (number + slider + timeout)
       plugin-observation-binary.js — binary obs (circle + gradient slider + timeout)
-      plugin-iti-clock.js          — inter-obs ITI clock
+      plugin-iti-clock.js          — inter-obs ITI clock (1s or 5s per trial)
       plugin-tutorial-intro-continuous.js   — continuous interactive intro (3-stage reveal)
       plugin-tutorial-intro-binary.js       — binary interactive intro (3-stage reveal)
       plugin-practice-observation.js        — continuous tutorial obs 2–5
@@ -343,19 +368,21 @@ task/
       plugin-trial-summary-binary.js        — binary trial summary (bar chart)
       draw-performance.js          — SVG distribution + ticks (continuous summary)
       bar-chart.js                 — SVG bar chart (binary summary)
-      style.css                    — all shared styles
+      slider.js                    — continuous slider module
+      slider-binary.js             — binary slider module (blue/red gradient)
+      style.css                    — all shared styles (70vw default width)
     continuous/
-      config.js                    — continuous task parameters (N_TRIALS_TO_RUN=2 dev; SET TO 40)
+      config.js                    — continuous task parameters
     binary/
-      config.js                    — binary task parameters (N_TRIALS_TO_RUN=2 dev; SET TO 40)
+      config.js                    — binary task parameters
     experiment-continuous.js       — entry point
     experiment-binary.js           — entry point
   sequences/
     continuous_sequences.json      — master stimulus sequences (imported by config.js)
-    continuous_sequences.pkl       — analysis version
-    binary_sequences.json          — master stimulus sequences (imported by config.js)
-    binary_sequences.pkl           — analysis version
-  generate_sequences.py            — sequence generation + seed search (--n_tries N)
+    continuous_sequences.pkl       — analysis version (includes iti_ms per trial)
+    binary_sequences.json          — master stimulus sequences
+    binary_sequences.pkl           — analysis version (includes iti_ms per trial)
+  generate_sequences.py            — sequence generation + seed search
   parse_results.py                 — JATOS JSON → tidy DataFrame → .pkl
   dev-server.js                    — local result capture server (port 3099)
   index-continuous.html            — Vite entry
@@ -368,13 +395,14 @@ task/
 ### Key parameters (src/continuous/config.js and src/binary/config.js)
 
 ```js
-const N_TRIALS_TO_RUN        = 2;      // ← SET TO 40 BEFORE DEPLOYMENT
-const SHOW_SLIDER_VALUE      = true;   // numeric label above slider thumb
-const SLIDER_DEFAULT         = 'none'; // 'none' | 'last' | 'value'
-const ITI_MS                 = 1000;
-const T_OBS_MS               = 5000;
-const SHOW_TRIAL_PERFORMANCE = true;   // post-trial summary plot
-// Practice: 5 fixed observations hardcoded in config.js
+const N_TRIALS_TO_RUN        = 40;
+const N_OBS_TO_RUN           = 15;
+const SHOW_SLIDER_VALUE      = true;    // numeric label above slider thumb
+const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
+const BTI_MS                 = 5000;    // between-trial interval (ms)
+const ITI_SHORT_MS           = 1000;    // short ITI condition (ms)
+const T_OBS_MS               = 7000;    // observation response deadline (ms)
+const SHOW_TRIAL_PERFORMANCE = true;    // post-trial summary plot
 ```
 
 ### Commands
@@ -464,6 +492,7 @@ python task/generate_jzip.py  # generates evidence-integration-{task}.jzip
 | `qid` | int | Unique sequence ID for each repeated sequence |
 | `prefix_length` | int | Number of fixed prefix observations |
 | `std_condition` | float | Observation std (continuous); NaN for binary |
+| `iti_ms` | int | ITI before this trial (1000 = short, 5000 = long) |
 | `response` | float | Participant estimate (NaN if timed out) |
 | `timed_out` | bool | True if response deadline elapsed |
 | `rt` | float | Response time in ms (NaN if timed out) |
