@@ -37,14 +37,14 @@ class ObservationPlugin {
     const unset = slider_default === 'none';
 
     display_el.innerHTML = `
-      <canvas id="timeout-clock" class="timeout-clock" width="52" height="52"></canvas>
+      <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
       <div class="obs-wrap">
         <div id="stimulus-display" class="stimulus-number">${value}</div>
         ${buildSliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
       </div>
       <div style="text-align:center;">
         <button id="submit-btn" class="jspsych-btn" disabled
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
+          style="font-size:1.6rem;padding:1rem 3.5rem;min-width:200px;">
           Submit
         </button>
       </div>`;

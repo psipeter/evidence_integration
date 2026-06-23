@@ -63,7 +63,8 @@ export const updateFloatLabel = (slider) => {
   const pct      = (slider.value - slider.min) / (slider.max - slider.min);
   const px       = thumbR + pct * usable;
   const wrapLeft = slider.closest('.slider-section').getBoundingClientRect().left;
-  lbl.style.left = (rect.left - wrapLeft + px) + 'px';
+  lbl.style.left      = (rect.left - wrapLeft + px) + 'px';
+  lbl.style.transform = 'translateX(-50%)';
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
@@ -101,5 +102,13 @@ export const initSlider = (display_el, {
         onFinish(response);
       }
     });
+
+    // Reposition label on resize/zoom
+    if (showValue && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        if (!slider.classList.contains('slider-unset')) updateFloatLabel(slider);
+      });
+      ro.observe(slider);
+    }
   }));
 };

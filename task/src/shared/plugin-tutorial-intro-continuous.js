@@ -78,15 +78,12 @@ const buildDistSVG = (mu, sigma, currentValue) => {
 
 const makeBox = (id, realHTML, isActive) => `
   <p id="${id}" class="practice-info-block"
-     style="position:relative;${isActive ? 'cursor:pointer;' : ''}">
-    <span id="${id}-real" style="visibility:hidden;">${realHTML}</span>
-    <span id="${id}-overlay" style="
-      position:absolute;inset:0;
-      display:${isActive ? 'flex' : 'none'};
-      align-items:center;justify-content:center;
-      color:#222;font-weight:bold;">
-      Click to reveal
+     style="${isActive ? 'cursor:pointer;' : ''}">
+    <span id="${id}-placeholder"
+          style="color:${isActive ? '#555' : '#ccc'};font-weight:bold;">
+      ${isActive ? 'Click to reveal' : '· · ·'}
     </span>
+    <span id="${id}-real" style="display:none;">${realHTML}</span>
   </p>`;
 
 class TutorialIntroContinuousPlugin {
@@ -129,7 +126,7 @@ class TutorialIntroContinuousPlugin {
         <div id="tut-slider-wrap" style="visibility:hidden;">
           ${buildSliderHTML({ unset: true, initPos: 0, showValue: true })}
           <button id="submit-btn" class="jspsych-btn" disabled
-                  style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
+                  style="font-size:1.6rem;padding:1rem 3.5rem;min-width:200px;">
             Submit
           </button>
         </div>
@@ -156,16 +153,17 @@ class TutorialIntroContinuousPlugin {
     };
 
     const revealBox = (id) => {
-      display_el.querySelector(`#${id}-real`).style.visibility = 'visible';
-      display_el.querySelector(`#${id}-overlay`).style.display = 'none';
+      display_el.querySelector(`#${id}-placeholder`).style.display = 'none';
+      display_el.querySelector(`#${id}-real`).style.display = 'inline';
       display_el.querySelector(`#${id}`).style.cursor = 'default';
     };
 
     const activateBox = (id, onClickFn) => {
-      const overlay = display_el.querySelector(`#${id}-overlay`);
-      overlay.style.display = 'flex';
-      display_el.querySelector(`#${id}`).style.cursor = 'pointer';
-      overlay.addEventListener('click', onClickFn, { once: true });
+      const box = display_el.querySelector(`#${id}`);
+      const ph  = display_el.querySelector(`#${id}-placeholder`);
+      box.style.cursor = 'pointer';
+      if (ph) { ph.style.display = 'inline'; ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
+      box.addEventListener('click', onClickFn, { once: true });
     };
 
     const onBox0 = () => {

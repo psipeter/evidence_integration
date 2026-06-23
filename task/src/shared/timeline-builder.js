@@ -59,9 +59,10 @@ export function buildAndRun(cfg) {
   const TrialObsPlugin        = isBinary ? ObservationBinaryPlugin          : ObservationPlugin;
   const TrialSummaryPlugin2   = isBinary ? TrialSummaryBinaryPlugin         : TrialSummaryPlugin;
 
-  // Prolific PID
+  // Prolific PID — absent for pilot participants
   const urlParams   = new URLSearchParams(window.location.search);
-  const prolificPID = urlParams.get('PROLIFIC_PID') || 'dev_pid';
+  const prolificPID = urlParams.get('PROLIFIC_PID') || null;
+  const isProlific  = prolificPID !== null;
 
   // jsPsych
   // ── beforeunload guard — warns participant before navigating away ──────────
@@ -74,19 +75,25 @@ export function buildAndRun(cfg) {
   const jsPsych = initJsPsych({
     on_finish: () => {
       window.removeEventListener('beforeunload', beforeUnloadHandler);
-      jatos.endStudyAndRedirect(
-        'https://app.prolific.com/submissions/complete?cc=C3W3TF1O',
-        jsPsych.data.get().json()
-      );
+      if (isProlific) {
+        jatos.endStudyAndRedirect(
+          'https://app.prolific.com/submissions/complete?cc=C3W3TF1O',
+          jsPsych.data.get().json()
+        );
+      } else {
+        jatos.endStudy(jsPsych.data.get().json());
+      }
     },
   });
 
-  jsPsych.data.addProperties({ prolific_pid: prolificPID, task: taskType });
+  // Use Prolific PID if present; fall back to JATOS worker ID for pilots
+  const participantId = prolificPID ?? `pilot_${jatos.workerId}`;
+  jsPsych.data.addProperties({ prolific_pid: participantId, task: taskType });
 
   // Helpers
   const makeButton = (label, extraStyle = '') =>
     `<button class="jspsych-btn"
-      style="font-size:1.1rem;padding:0.6rem 2.5rem;${extraStyle}">${label}</button>`;
+      style="font-size:1.6rem;padding:1rem 3.5rem;${extraStyle}">${label}</button>`;
 
   const timeline = [];
 
@@ -95,8 +102,8 @@ export function buildAndRun(cfg) {
     type: jsPsychHtmlButtonResponse,
     stimulus: `
       <div class="consent-outer">
-        <h2 style="text-align:center;margin-bottom:1.5rem;">Informed Consent</h2>
-        <div class="consent-scroll">
+        <h2 style="text-align:center;margin-bottom:1.5rem;font-size:2.2rem;">Informed Consent</h2>
+        <div class="consent-scroll" style="background:#fafafa;border:1px solid #d1d5db;border-radius:6px;padding:1rem;">
           <p><strong>Study title:</strong> [Placeholder Study Title]</p>
           <p><strong>Principal Investigators:</strong> Peter Duggins and Alireza Soltani,
           Dartmouth College, Department of Psychological and Brain Sciences</p>
@@ -104,7 +111,7 @@ export function buildAndRun(cfg) {
           <p><strong>Purpose:</strong> [Placeholder: research study about how people
           make judgments based on sequences of information.]</p><br>
           <p><strong>What you will do:</strong> [Placeholder: view a series of numbers
-          and use a slider to indicate your best estimate after each. ~30 minutes.]</p><br>
+          and use a slider to indicate your best estimate after each. ~45 minutes.]</p><br>
           <p><strong>Risks and benefits:</strong> [Placeholder: no known risks beyond
           everyday computer use. Compensation as advertised on Prolific.]</p><br>
           <p><strong>Confidentiality:</strong> [Placeholder: responses stored by
@@ -123,23 +130,23 @@ export function buildAndRun(cfg) {
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
             </svg>
-            <span>The study takes approximately <strong>30 minutes</strong> to complete.
+            <span style="font-size:1.4rem;">The study takes approximately <strong>45 minutes</strong> to complete.
             You will be compensated at the rate advertised on Prolific.</span>
           </div>
           <div class="consent-info-box consent-info-box--warning">
-            <span style="font-size:1.1rem;flex-shrink:0;margin-top:1px;">&#9888;</span>
-            <span>Do not close, refresh, or navigate away during the task — your data
+            <span style="font-size:1.6rem;flex-shrink:0;margin-top:1px;">&#9888;</span>
+            <span style="font-size:1.4rem;">Do not close, refresh, or navigate away during the task — your data
             will be lost and you will not be paid. If this happens accidentally,
             please request a return on Prolific.</span>
           </div>
         </div>
         <div class="consent-footer">
           <hr style="margin-bottom:1rem;">
-          <label style="display:flex;align-items:flex-start;gap:0.75rem;cursor:pointer;">
+          <label style="display:flex;align-items:center;justify-content:center;gap:0.75rem;cursor:pointer;">
             <input type="checkbox" id="consent-checkbox"
               style="margin-top:3px;width:18px;height:18px;flex-shrink:0;"
               onchange="document.getElementById('consent-btn').disabled=!this.checked;">
-            <span>I have read and understood the information above. I am at least
+            <span style="font-size:1.4rem;">I have read and understood the information above. I am at least
             18 years old and I agree to participate in this study.</span>
           </label>
         </div>
@@ -147,7 +154,7 @@ export function buildAndRun(cfg) {
     choices: ['I agree and wish to continue'],
     button_html: (c) =>
       `<button id="consent-btn" class="jspsych-btn" disabled
-        style="font-size:1.1rem;padding:0.6rem 2rem;margin-top:1.5rem;">${c}</button>`,
+        style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1.5rem;">${c}</button>`,
     data: { screen: 'consent' },
     on_finish: (data) => { data.consent_given = true; },
   });

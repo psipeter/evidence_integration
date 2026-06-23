@@ -38,9 +38,13 @@ export const buildBinarySliderHTML = ({
 } = {}) => `
   <div class="binary-slider-section">
     <div class="slider-label-float-wrap">
-      <div id="slider-float-label" class="slider-float-label"
+      <div id="slider-float-label-blue" class="slider-float-label-blue"
            style="display:${!unset && showValue ? 'block' : 'none'};">
-        ${!unset ? (initPos / 100).toFixed(2) : ''}
+        ${!unset ? Math.round(initPos) + '%' : ''}
+      </div>
+      <div id="slider-float-label-red" class="slider-float-label-red"
+           style="display:${!unset && showValue ? 'block' : 'none'};">
+        ${!unset ? Math.round(100 - initPos) + '%' : ''}
       </div>
     </div>
     <div class="binary-slider-row">
@@ -81,18 +85,27 @@ export const updateBinaryFill = (slider) => {
 // ── Float label ───────────────────────────────────────────────────────────────
 
 export const updateBinaryLabel = (slider) => {
-  const lbl = slider.closest('.binary-slider-section')?.querySelector('#slider-float-label');
-  if (!lbl) return;
-  lbl.style.display = 'block';
-  lbl.textContent   = (slider.value / 100).toFixed(2);
-  lbl.style.color   = lerpRgb(slider.value / 100);
+  const section  = slider.closest('.binary-slider-section');
+  const lblBlue  = section?.querySelector('#slider-float-label-blue');
+  const lblRed   = section?.querySelector('#slider-float-label-red');
+  if (!lblBlue || !lblRed) return;
   const thumbR   = 3;
   const rect     = slider.getBoundingClientRect();
   const usable   = rect.width - 2 * thumbR;
   const pct      = (slider.value - slider.min) / (slider.max - slider.min);
   const px       = thumbR + pct * usable;
-  const wrapLeft = slider.closest('.binary-slider-section').getBoundingClientRect().left;
-  lbl.style.left = (rect.left - wrapLeft + px) + 'px';
+  const wrapLeft = section.getBoundingClientRect().left;
+  const thumbX   = rect.left - wrapLeft + px;
+  // Blue %: left of thumb, right-aligned
+  lblBlue.style.display  = 'block';
+  lblBlue.textContent    = Math.round(slider.value) + '%';
+  lblBlue.style.left     = (thumbX - 6) + 'px';   // 6px gap left of thumb
+  lblBlue.style.transform = 'translateX(-100%)';
+  // Red %: right of thumb, left-aligned
+  lblRed.style.display   = 'block';
+  lblRed.textContent     = Math.round(100 - slider.value) + '%';
+  lblRed.style.left      = (thumbX + 6) + 'px';   // 6px gap right of thumb
+  lblRed.style.transform = 'translateX(0)';
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
@@ -137,5 +150,13 @@ export const initBinarySlider = (display_el, {
         onFinish(response);
       }
     });
+
+    // Reposition labels when slider is resized (e.g. window resize or zoom)
+    if (showValue && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        if (!slider.classList.contains('slider-unset')) updateBinaryLabel(slider);
+      });
+      ro.observe(slider);
+    }
   }));
 };

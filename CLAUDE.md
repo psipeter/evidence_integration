@@ -324,15 +324,23 @@ Never run NEF simulations through MCP tool calls (will time out).
 
 Simulates RL_lambda and NEF models on the task sequences for validation figures.
 
-### Generate sequences (seed search)
+### Generate sequences
 
+    # Regenerate with known-good seeds (ALWAYS use explicit --seed to avoid overwriting)
+    venv/bin/python task/generate_sequences.py --task continuous --seed 61
+    venv/bin/python task/generate_sequences.py --task binary --seed 170
+
+    # Seed search (only when looking for new best seeds)
     venv/bin/python task/generate_sequences.py \
-        --task both --n_tries 500 \
-        --n_unique_sequences 8 --n_repeats 5 \
-        --seq_length 15 --prefix_length 4 \
-        --mean_range -60 60 --std_fixed 20 \
-        --p_range 0.2 0.8
-    # Single seed (fast, for testing): omit --n_tries or use --n_tries 1 --seed 42
+        --task both --n_tries 200 \
+        --prefix_length 4 \
+        --rl_alpha_0 1.0 --rl_lambda 0.5
+
+    # WARNING: --task both seed search overwrites BOTH sequence files.
+    # After a search, regenerate whichever task you want to keep with --seed N.
+
+    # Quick inspect (no cache)
+    venv/bin/python scripts/inspect_sequences.py --alpha_0 1.0 --rl_lambda 0.5
 
 ### Run RL_lambda simulation (local)
 

@@ -33,16 +33,16 @@ class PracticeSummaryBinaryPlugin {
         </div>
         <div style="margin-bottom:0.75rem;">
           <p class="practice-info-block" style="text-align:center;margin:0 auto;">
-            In the experiment, you will not see the
+            <span>In the experiment, you will not see the
             <span style="color:#16a34a;font-weight:bold;">distribution</span>,
             the <span style="color:#2563eb;font-weight:bold;">probability</span>,
             or how many
             <span style="color:#888;font-weight:bold;">observations</span>
-            remain.
+            remain.</span>
           </p>
         </div>
         <button id="proceed-btn" class="jspsych-btn"
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;margin-top:1rem;">
+          style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1rem;">
           Proceed to experiment
         </button>
       </div>`;

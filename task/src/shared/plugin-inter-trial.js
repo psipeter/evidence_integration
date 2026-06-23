@@ -27,11 +27,11 @@ class InterTrialPlugin {
       <div style="
         display:flex; flex-direction:column; align-items:center;
         justify-content:center; min-height:40vh; gap:1.2rem;">
-        <div style="font-size:1.3rem; font-weight:bold; color:#555;">
+        <div style="font-size:3rem; font-weight:bold; color:#555;">
           Trial ${trial_num} / ${n_trials}
         </div>
         <div id="gen-label" style="
-          font-size:0.95rem; color:#888; font-style:italic;
+          font-size:2rem; color:#888; font-style:italic;
           opacity:0; transition:opacity 0.8s ease;">
           ${label}
         </div>

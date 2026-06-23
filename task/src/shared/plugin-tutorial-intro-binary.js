@@ -1,13 +1,9 @@
 import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
+import { buildUrnSVG } from './urn-binary.js';
 /**
  * plugin-tutorial-intro-binary.js
- *
- * Analogous to plugin-tutorial-intro-continuous.js for the binary task.
- * Three info boxes revealed progressively; each reveals corresponding SVG element.
- *
- * Box 0 click → reveal urn dots (hidden probability)
- * Box 1 click → reveal ??? probability label
- * Box 2 click → reveal highlighted ball + enable slider + show obs circles
+ * Obs 1 of the binary tutorial — progressive reveal via click.
+ * Box 0 → dots visible; Box 1 → bar+??? visible; Box 2 → highlight + slider.
  */
 
 const SAMPLE_BLUE = '#2563eb';
@@ -17,98 +13,37 @@ const DIST_COLOR  = '#16a34a';
 const info = {
   name: 'tutorial-intro-binary',
   parameters: {
-    example_value: { type: 'INT',   default: 1   }, // 1=blue, -1=red
-    true_p:        { type: 'FLOAT', default: 0.6 },
+    example_value: { type: 'INT',   default: 1   },
+    true_p:        { type: 'FLOAT', default: 0.7 },
     n_obs:         { type: 'INT',   default: 5   },
   },
 };
 
-// Build urn SVG with named groups for progressive reveal.
-// Groups: tut-urn-dots (box0), tut-urn-label (box1), tut-urn-highlight (box2)
-const buildUrnSVG = (p, currentValue) => {
-  const COLS = 5, ROWS = 4, N = COLS * ROWS;
-  const r = 13, gap = 8, step = r * 2 + gap, pad = 16;
-  const W = COLS * step + pad * 2 - gap;
-  const H = ROWS * step + pad * 2 - gap;
-
-  const nBlue = Math.round(p * N);
-  let colours = [
-    ...Array(nBlue).fill(SAMPLE_BLUE),
-    ...Array(N - nBlue).fill(SAMPLE_RED),
-  ];
-  let seed = 12345;
-  const rnd = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff; };
-  for (let i = colours.length - 1; i > 0; i--) {
-    const j = Math.floor(rnd() * (i + 1));
-    [colours[i], colours[j]] = [colours[j], colours[i]];
-  }
-
-  const matchColor   = currentValue === 1 ? SAMPLE_BLUE : SAMPLE_RED;
-  const matchIndices = colours.reduce((a, c, i) => { if (c === matchColor) a.push(i); return a; }, []);
-  const matchIdx     = matchIndices[0];
-
-  let dots = '', highlight = '';
-  colours.forEach((col, i) => {
-    const cx = pad + (i % COLS) * step + r;
-    const cy = pad + Math.floor(i / COLS) * step + r;
-    dots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}" stroke="#fff" stroke-width="1.5"/>`;
-    if (i === matchIdx) {
-      highlight += `<circle cx="${cx}" cy="${cy}" r="${r + 3}"
-        fill="none" stroke="#222" stroke-width="2.5"/>`;
-    }
-  });
-
-  // Center of the border rect for the ??? overlay
-  const rectCX = 8 + 178 / 2;
-  const rectCY = 8 + 144 / 2;
-
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%"
-    xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-    <g id="tut-urn-dots" style="opacity:0;">
-      <rect x="8" y="8" width="178" height="144" fill="none" stroke="#16a34a" stroke-width="2" rx="4"/>
-      ${dots}
-    </g>
-    <g id="tut-urn-label" style="opacity:0;">
-      <text x="${rectCX}" y="${rectCY + 8}" text-anchor="middle"
-          font-family="Arial" font-size="32" font-weight="bold"
-          stroke="#000" stroke-width="4" stroke-linejoin="round"
-          fill="none" paint-order="stroke">? ? ?</text>
-    <text x="${rectCX}" y="${rectCY + 8}" text-anchor="middle"
-          font-family="Arial" font-size="32" font-weight="bold"
-          fill="${SAMPLE_BLUE}">? ? ?</text>
-    </g>
-    <g id="tut-urn-highlight" style="opacity:0;">${highlight}</g>
-  </svg>`;
-};
-
 const makeBox = (id, realHTML, isActive) => `
   <p id="${id}" class="practice-info-block"
-     style="position:relative;${isActive ? 'cursor:pointer;' : ''}">
-    <span id="${id}-real" style="visibility:hidden;">${realHTML}</span>
-    <span id="${id}-overlay" style="
-      position:absolute;inset:0;
-      display:${isActive ? 'flex' : 'none'};
-      align-items:center;justify-content:center;
-      color:#222;font-weight:bold;">
-      Click to reveal
+     style="${isActive ? 'cursor:pointer;' : ''}">
+    <span id="${id}-placeholder"
+          style="color:${isActive ? '#555' : '#ccc'};font-weight:bold;">
+      ${isActive ? 'Click to reveal' : '· · ·'}
     </span>
+    <span id="${id}-real" style="display:none;">${realHTML}</span>
   </p>`;
 
 class TutorialIntroBinaryPlugin {
   constructor(jsPsych) { this.jsPsych = jsPsych; }
 
   trial(display_el, trial) {
-    const self = this;
     document.body.style.backgroundColor = '#f5f5f5';
-    const { example_value, true_p, n_obs } = trial;
+    const { example_value, true_p } = trial;
     const ballCol = example_value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
 
     const BOX0 = `<span style="color:${SAMPLE_BLUE};font-weight:bold;">Blue</span> or
       <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> balls
-      are drawn one-at-a-time based on a<br>
+      are drawn one-at-a-time based on a
       <span style="color:${DIST_COLOR};font-weight:bold;">hidden probability</span>.`;
-    const BOX1 = `Goal: estimate the <strong>probability</strong>
-      of drawing a <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> ball.`;
+    const BOX1 = `Goal: estimate the <strong>proportion</strong> of
+      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> and
+      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> balls.`;
     const BOX2 = `After each <span style="color:#888;font-weight:bold;">observation</span>,
       move the slider to update your estimate.`;
 
@@ -116,70 +51,64 @@ class TutorialIntroBinaryPlugin {
       <div class="tutorial-title">Tutorial</div>
       <div class="practice-wrap">
         <div class="practice-top-row">
-
           <div id="tut-left-panel" class="practice-panel">
             ${makeBox('tut-box-0', BOX0, true)}
             ${makeBox('tut-box-1', BOX1, false)}
             ${makeBox('tut-box-2', BOX2, false)}
           </div>
-
           <div class="practice-panel practice-panel-centre">
             <div id="tut-ball" class="binary-circle"
                  style="background:${ballCol};opacity:0;"></div>
           </div>
-
           <div class="practice-panel practice-panel-right">
             <div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>
           </div>
-
         </div>
-
         <div id="tut-slider-wrap" style="visibility:hidden;">
           ${buildBinarySliderHTML({ unset: true, initPos: 50, showValue: true })}
           <div style="text-align:center;margin-top:0.5rem;">
             <button id="submit-btn" class="jspsych-btn" disabled
-                    style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
+                    style="font-size:1.6rem;padding:1rem 3.5rem;min-width:200px;">
               Submit
             </button>
           </div>
         </div>
-
       </div>`;
 
+    // revealed=false: all groups hidden, revealed progressively
     display_el.querySelector('#urn-svg').innerHTML =
-      buildUrnSVG(true_p, example_value);
+      buildUrnSVG(true_p, example_value, 1, false);
 
-    const sliderWrap = display_el.querySelector('#tut-slider-wrap');
-    const jsPsych    = self.jsPsych;
+    const svg      = () => display_el.querySelector('#urn-svg');
+    const jsPsych  = this.jsPsych;
+
     const activateSlider = () => {
-      sliderWrap.style.visibility = 'visible';
+      display_el.querySelector('#tut-slider-wrap').style.visibility = 'visible';
       initBinarySlider(display_el, {
-        unset: true,
-        showValue: true,
-        onFinish: (response) => {
-          jsPsych.finishTrial({ response, timed_out: false });
-        },
+        unset: true, showValue: true,
+        onFinish: (response) => jsPsych.finishTrial({ response, timed_out: false }),
       });
     };
 
     const revealBox = (id) => {
-      display_el.querySelector(`#${id}-real`).style.visibility = 'visible';
-      display_el.querySelector(`#${id}-overlay`).style.display = 'none';
+      display_el.querySelector(`#${id}-placeholder`).style.display = 'none';
+      display_el.querySelector(`#${id}-real`).style.display = 'inline';
       display_el.querySelector(`#${id}`).style.cursor = 'default';
     };
 
     const activateBox = (id, fn) => {
-      const ov = display_el.querySelector(`#${id}-overlay`);
-      ov.style.display = 'flex';
-      display_el.querySelector(`#${id}`).style.cursor = 'pointer';
-      ov.addEventListener('click', fn, { once: true });
+      const box = display_el.querySelector(`#${id}`);
+      const ph  = display_el.querySelector(`#${id}-placeholder`);
+      box.style.cursor = 'pointer';
+      if (ph) { ph.style.display = 'inline'; ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
+      box.addEventListener('click', fn, { once: true });
     };
-
-    const svg = () => display_el.querySelector('#urn-svg');
 
     const onBox0 = () => {
       revealBox('tut-box-0');
       svg().querySelector('#tut-urn-dots').style.opacity = '1';
+      svg().querySelector('#tut-urn-highlight').style.opacity = '1';
+      display_el.querySelector('#tut-ball').style.opacity = '1';
       activateBox('tut-box-1', onBox1);
     };
     const onBox1 = () => {
@@ -189,8 +118,6 @@ class TutorialIntroBinaryPlugin {
     };
     const onBox2 = () => {
       revealBox('tut-box-2');
-      svg().querySelector('#tut-urn-highlight').style.opacity = '1';
-      display_el.querySelector('#tut-ball').style.opacity = '1';
       activateSlider();
     };
 

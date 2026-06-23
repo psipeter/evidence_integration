@@ -40,7 +40,7 @@ class ObservationBinaryPlugin {
     const ballCol  = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
 
     display_el.innerHTML = `
-      <canvas id="timeout-clock" class="timeout-clock" width="52" height="52"></canvas>
+      <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
       <div class="obs-wrap">
         <div class="binary-circle" style="background:${ballCol};"></div>
         ${buildBinarySliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
@@ -48,7 +48,7 @@ class ObservationBinaryPlugin {
       <div style="text-align:center;">
         <button id="submit-btn" class="jspsych-btn"
           ${unset ? 'disabled' : ''}
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
+          style="font-size:1.6rem;padding:1rem 3.5rem;min-width:200px;">
           Submit
         </button>
       </div>`;

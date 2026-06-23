@@ -9,7 +9,7 @@ const info = {
   parameters: {
     duration_ms: { type: 'INT',     default: 1000 },
     color:       { type: 'STRING',  default: '#2563eb' },
-    radius:      { type: 'INT',     default: 36 },
+    radius:      { type: 'INT',     default: 60 },
     timed_out:   { type: 'BOOLEAN', default: false },
     too_slow_ms: { type: 'INT',     default: 800 },
     is_repeat:   { type: 'BOOLEAN', default: false },
@@ -87,12 +87,26 @@ class ItiClockPlugin {
     };
 
     if (timed_out) {
-      const message = trial.is_repeat ? 'too slow — try again' : 'too slow';
+      // Show for 2400ms: "Too slow" big red, "Please provide a response" pulses below
+      // One full fade out+in cycle = 2 × 800ms transitions + small delays = ~2000ms
+      const displayMs = 3600;
       display_el.innerHTML = `
-        <div class="iti-wrap">
-          <span class="too-slow-text">${message}</span>
+        <div class="iti-wrap" style="flex-direction:column;gap:1.2rem;">
+          <span style="font-size:3rem;font-weight:bold;color:#ef4444;">
+            Too slow
+          </span>
+          <span id="too-slow-pulse" style="
+            font-size:2rem;font-style:italic;color:#555;
+            opacity:0;transition:opacity 0.8s ease;">
+            Please provide a response
+          </span>
         </div>`;
-      timeoutId = setTimeout(showClock, too_slow_ms);
+      // Fade in → out → in before clock starts
+      const el = display_el.querySelector('#too-slow-pulse');
+      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 100);   // fade in
+      setTimeout(() => { if (el && active) el.style.opacity = '0'; }, 1100);  // fade out
+      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 2100);  // fade in
+      setTimeout(() => { if (active) showClock(); }, displayMs);
     } else {
       showClock();
     }

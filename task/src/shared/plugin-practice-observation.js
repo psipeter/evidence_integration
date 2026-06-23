@@ -106,18 +106,18 @@ class PracticeObservationPlugin {
 
           <!-- LEFT: goal text -->
           <div class="practice-panel">
-            <p class="practice-info-block">
+            <p class="practice-info-block"><span>
               Numbers are drawn one-at-a-time from a
               <span style="color:${DIST_COLOR};font-weight:bold;">hidden distribution</span>.
-            </p>
-            <p class="practice-info-block">
+            </span></p>
+            <p class="practice-info-block"><span>
               Goal: estimate the
               <span style="color:${GOAL_COLOR};font-weight:bold;">true mean</span>
               of that distribution.
-            </p>
-            <p class="practice-info-block">
+            </span></p>
+            <p class="practice-info-block"><span>
               After each <span style="color:${SAMPLE_COLOR};font-weight:bold;">observation</span>, move the slider to update your estimate.
-            </p>
+            </span></p>
           </div>
 
           <!-- CENTRE: big number -->
@@ -137,7 +137,7 @@ class PracticeObservationPlugin {
         ${buildSliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
         <button id="submit-btn" class="jspsych-btn"
           ${unset ? 'disabled' : ''}
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;min-width:160px;">
+          style="font-size:1.6rem;padding:1rem 3.5rem;min-width:200px;">
           Submit
         </button>
 

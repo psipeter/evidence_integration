@@ -33,17 +33,17 @@ class PracticeSummaryPlugin {
                  border-radius:6px;background:#fff;padding:4px;">
         </div>
         <div style="margin-bottom:0.75rem;">
-          <p class="practice-info-block" style="text-align:center;margin:0 auto;">
+          <p class="practice-info-block" style="text-align:center;margin:0 auto;"><span>
             In the experiment, you will not see the
             <span style="color:#16a34a;font-weight:bold;">distribution</span>,
             the <span style="color:#2563eb;font-weight:bold;">mean</span>,
             or how many
             <span style="color:#ef4444;font-weight:bold;">observations</span>
             remain.
-          </p>
+          </span></p>
         </div>
         <button id="proceed-btn" class="jspsych-btn"
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;margin-top:1rem;">
+          style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1rem;">
           Proceed to experiment
         </button>
       </div>`;

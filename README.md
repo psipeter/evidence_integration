@@ -330,21 +330,30 @@ ITI/BTI clocks, 5-observation interactive tutorial, post-trial summary plot.
 ### Sequence generation
 
 ```bash
-# Generate with best known seeds (prefix_length=4, n_unique=10, n_repeats=4)
-python task/generate_sequences.py --task continuous --seed 61
-python task/generate_sequences.py --task binary --seed 170
+# Generate with best known seeds
+python task/generate_sequences.py --task continuous --seed 934
+python task/generate_sequences.py --task binary --seed 1229
 
-# Seed search (3-pass: Bayesian validity → Bayesian |Δ| gate → RL_lambda |Δ| score)
-python task/generate_sequences.py --task both --n_tries 200 \
-    --prefix_length 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+# Seed search — separate gammas per task, per metric
+python task/generate_sequences.py --task both --n_tries 1000 \
+    --prefix_length 4 --rl_alpha_0 1.0 --rl_lambda 0.5 \
+    --gamma_bay_delta_cont 0.7 --gamma_bay_rmse_cont 0.3 \
+    --gamma_rl_delta_cont 0.7  --gamma_rl_rmse_cont 0.3 \
+    --gamma_bay_delta_bin  0.2 --gamma_bay_rmse_bin  0.6 \
+    --gamma_rl_delta_bin   0.6 --gamma_rl_rmse_bin   0.6 \
+    --k_std_cont 0.7 --k_bin 0.7
 ```
 
-Best seeds: continuous=61, binary=170 (prefix_length=4).
+Best seeds: continuous=934, binary=1229 (prefix_length=4, k_std_cont=0.7).
 
 Three-pass scoring:
-- Pass 1 (structural): full-sequence mean+std within k SE; prefix/suffix drawn freely
-- Pass 2 (gate): bay_score = bay_delta + bay_rmse < 0.02
+- Pass 1 (structural): continuous mean (k=1.0) + std (k=0.7) within k×SE; binary proportion (k=0.7)
+- Pass 2 (gate): bay_score = bay_delta + bay_rmse < 0.02 (separate gammas per task)
 - Pass 3 (objective): rl_score = rl_delta + rl_rmse (RL_lambda α=1, λ=0.5)
+
+Continuous draws from rejection-sampled Normal(mean, std=20) bounded to [0,100].
+Std naturally reduced at extreme means (~16 vs 20 at mean=20) — unavoidable for bounded domain.
+Post-hoc analysis: regress behavior on observed sample std per trial.
 
 ### Directory structure
 
@@ -366,10 +375,11 @@ task/
       plugin-practice-summary-binary.js     — binary tutorial summary (bar chart)
       plugin-trial-summary.js               — continuous trial summary
       plugin-trial-summary-binary.js        — binary trial summary (bar chart)
-      draw-performance.js          — SVG distribution + ticks (continuous summary)
-      bar-chart.js                 — SVG bar chart (binary summary)
+      draw-performance.js          — SVG distribution + dot plots (continuous summary)
+      bar-chart.js                 — SVG bar + dot plots (binary summary)
+      urn-binary.js                — shared binary urn SVG (tutorial obs 1–5)
       slider.js                    — continuous slider module
-      slider-binary.js             — binary slider module (blue/red gradient)
+      slider-binary.js             — binary slider (blue/red gradient, split % labels)
       style.css                    — all shared styles (70vw default width)
     continuous/
       config.js                    — continuous task parameters
@@ -400,10 +410,18 @@ const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;    // numeric label above slider thumb
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
 const BTI_MS                 = 5000;    // between-trial interval (ms)
-const ITI_SHORT_MS           = 1000;    // short ITI condition (ms)
+const ITI_SHORT_MS           = 1000;    // short ITI condition (ms); ITI_LONG=5000 baked into sequences
 const T_OBS_MS               = 7000;    // observation response deadline (ms)
 const SHOW_TRIAL_PERFORMANCE = true;    // post-trial summary plot
 ```
+
+Key UI decisions:
+- Slider thumb label: large bold number (continuous) or blue%/red% split (binary)
+- Tutorial: 3-box progressive reveal; `urn-binary.js` shared across obs 1–5
+- Summary figures: dot plot stacking (r=3px) replaces tick marks — no overlap
+- BTI reset screen: "Trial X / 40 + pulsing text" provides perceptual trial break
+- Timeout screen: "Too slow" (red) + pulsing "Please provide a response" (black)
+- All slide widths: 70vw; flex layout; info boxes flex:1 to fill column height
 
 ### Commands
 
@@ -487,12 +505,9 @@ python task/generate_jzip.py  # generates evidence-integration-{task}.jzip
 | `observation` | int | 0-indexed observation within trial |
 | `value` | int | Stimulus (-100..100 continuous; -1/1 binary) |
 | `true_mean` | float | Generative mean (continuous); NaN for binary |
-| `true_std` | float | Generative std (continuous); NaN for binary |
 | `true_p` | float | True Bernoulli probability (binary); NaN for continuous |
 | `qid` | int | Unique sequence ID for each repeated sequence |
-| `prefix_length` | int | Number of fixed prefix observations |
-| `std_condition` | float | Observation std (continuous); NaN for binary |
-| `iti_ms` | int | ITI before this trial (1000 = short, 5000 = long) |
+| `iti_ms` | int | ITI condition for this trial (1000=short, 5000=long) |
 | `response` | float | Participant estimate (NaN if timed out) |
 | `timed_out` | bool | True if response deadline elapsed |
 | `rt` | float | Response time in ms (NaN if timed out) |

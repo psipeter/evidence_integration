@@ -33,7 +33,7 @@ class TrialSummaryBinaryPlugin {
                  border-radius:6px;background:#fff;padding:4px;">
         </div>` : ''}
         <button id="next-btn" class="jspsych-btn"
-          style="font-size:1.1rem;padding:0.6rem 2.5rem;margin-top:1rem;">
+          style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1rem;">
           ${is_last ? 'Finish' : 'Next trial'}
         </button>
       </div>`;

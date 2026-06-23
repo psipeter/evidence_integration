@@ -29,15 +29,18 @@ Mirrored sequences
   extra parameter draws, and ensures the aggregate parameter distribution
   is symmetric around the midpoint.
 
-Per-sequence plausibility (k=1.0)
-----------------------------------
-  Applied to: (a) the prefix alone, (b) the full prefix+suffix sequence.
-  Continuous: |sample_mean − true_mean| ≤ 1.0 × std/√n
-  Binary:     |fraction_blue − true_p|  ≤ 1.0 × √(p(1−p)/n)
+Per-sequence plausibility
+-------------------------
+  Applied to the full prefix+suffix sequence.
+  Continuous mean: |sample_mean − true_mean| ≤ 1.0 × std/√n
+  Continuous std:  |sample_std  − true_std|  ≤ k_std_cont × std × √(2/(n−1))  default=0.7
+  Binary:          |fraction_blue − true_p|  ≤ k_bin × √(p(1−p)/n)            default=0.7
 
 Generative distributions
 ------------------------
-  continuous : Normal(true_mean, std_fixed), clipped to [0, 100]
+  continuous : Normal(true_mean, std_fixed), rejection-sampled to [0,100].
+               Std is naturally reduced at extreme means (e.g. mean=20: std≈15.9)
+               due to truncation — same as any bounded domain, unavoidable.
   binary     : Bernoulli(true_p), values in {−1, +1}
 
 Best seeds (from 200-seed search minimising weighted RL |Δ| score)
@@ -130,6 +133,15 @@ def mirror_params(true_mean, true_std, true_p, task):
 # ---------------------------------------------------------------------------
 def draw_continuous_obs(rng, true_mean, true_std, n,
                         value_min=VALUE_MIN, value_max=VALUE_MAX):
+    """Draw n integer observations from Normal(mean, std), bounded to [0,100].
+
+    Uses fast rejection sampling: draw one at a time, keep if in bounds.
+    Clipping only applies if rejection fails after MAX_REJECTION_ATTEMPTS
+    (effectively never for typical params).  The resulting distribution is
+    equivalent to a truncated Normal — clipping at 0/100 does not bias the
+    std meaningfully since truncation itself reduces std at extreme means
+    by the same amount.
+    """
     vals, attempts = [], 0
     while len(vals) < n:
         attempts += 1
@@ -202,10 +214,15 @@ def _rl_lambda_errors(sequence, task, true_mean, true_p,
 # Per-sequence plausibility check
 # ---------------------------------------------------------------------------
 def check_sequence_plausibility(sequence, task, true_mean, true_std, true_p,
-                                k: float = 1.0) -> bool:
+                                k: float = 1.0,
+                                k_std: float = 0.7) -> bool:
     """True iff full-sequence mean AND std are within k × SE of true values.
-    Continuous: mean check + std check (std SE = std*sqrt(2/(n-1))).
-    Binary:     fraction check only (std is determined by p).
+
+    Continuous:
+      mean check: |sample_mean - true_mean| <= k     × std/sqrt(n)
+      std  check: |sample_std  - true_std|  <= k_std × std × sqrt(2/(n-1))
+    Binary:
+      proportion check: |sample_p - true_p| <= k × sqrt(p(1-p)/n)
     """
     n = len(sequence)
     if n == 0:
@@ -213,7 +230,7 @@ def check_sequence_plausibility(sequence, task, true_mean, true_std, true_p,
     if task == 'continuous':
         mean_ok = abs(np.mean(sequence) - true_mean) <= k * true_std / np.sqrt(n)
         std_ok  = abs(np.std(sequence) - true_std) \
-                  <= k * true_std * np.sqrt(2.0 / max(n - 1, 1))
+                  <= k_std * true_std * np.sqrt(2.0 / max(n - 1, 1))
         return mean_ok and std_ok
     else:
         return abs(sum(v == 1 for v in sequence) / n - true_p) \
@@ -247,9 +264,10 @@ def build_prefix_block(rng, task, param_list, prefix_length):
 # ---------------------------------------------------------------------------
 # SUFFIX BLOCK  — joint across all qids, one position at a time, per repeat
 # ---------------------------------------------------------------------------
-def build_suffix_block(rng, task, all_templates, suffix_length):
+def build_suffix_block(rng, task, all_templates, suffix_length,
+                       k_mean_cont=1.0, k_std_cont=0.7, k_bin=0.7):
     """Draw suffix observations freely, accept when full sequence passes
-    plausibility check (mean + std within k=1 SE of true values).
+    plausibility check.
 
     Returns: list of suffixes (one per template in all_templates).
     """
@@ -267,7 +285,6 @@ def build_suffix_block(rng, task, all_templates, suffix_length):
                         for q in range(n_qids)]
 
         # Accept if every full sequence passes mean + std plausibility
-        k_plaus = 0.7 if task == 'binary' else 1.0
         if all(
             check_sequence_plausibility(
                 all_templates[q]['prefix'] + suffixes[q],
@@ -275,7 +292,8 @@ def build_suffix_block(rng, task, all_templates, suffix_length):
                 all_templates[q]['true_mean'],
                 all_templates[q]['true_std'],
                 all_templates[q]['true_p'],
-                k=k_plaus)
+                k=k_bin if task == 'binary' else k_mean_cont,
+                k_std=k_std_cont)
             for q in range(n_qids)
         ):
             return suffixes
@@ -329,10 +347,9 @@ def generate_task_sequences(task, args, rng):
     templates = []
     for qid, (params, prefix) in enumerate(zip(param_list, base_prefixes)):
         true_mean, true_std, true_p = params
-        sc = float(true_std) if task == 'continuous' and not math.isnan(true_std) else float('nan')
         templates.append({
             'qid': qid, 'true_mean': true_mean, 'true_std': true_std,
-            'std_condition': sc, 'true_p': true_p, 'prefix': prefix,
+            'true_p': true_p, 'prefix': prefix,
         })
         pfx_str = ','.join(map(str, prefix))
         label   = f'mean={true_mean:.1f}' if task == 'continuous' else f'p={true_p:.3f}'
@@ -344,10 +361,9 @@ def generate_task_sequences(task, args, rng):
             base['true_mean'], base['true_std'], base['true_p'], task)
         m_prefix = mirror_sequence(base['prefix'], task)
         m_qid    = len(templates)
-        m_sc     = float(m_std) if task == 'continuous' and not math.isnan(m_std) else float('nan')
         templates.append({
             'qid': m_qid, 'true_mean': m_mean, 'true_std': m_std,
-            'std_condition': m_sc, 'true_p': m_p, 'prefix': m_prefix,
+            'true_p': m_p, 'prefix': m_prefix,
         })
         pfx_str = ','.join(map(str, m_prefix))
         label   = f'mean={m_mean:.1f}' if task == 'continuous' else f'p={m_p:.3f}'
@@ -381,7 +397,10 @@ def generate_task_sequences(task, args, rng):
                 trials.append({**tmpl, 'values': tmpl['prefix'], 'iti_ms': iti_ms})
     else:
         for _rep in range(n_repeats):
-            suffixes = build_suffix_block(rng, task, templates, suffix_length)
+            suffixes = build_suffix_block(rng, task, templates, suffix_length,
+                                         k_mean_cont=getattr(args, 'k_mean_cont', 1.0),
+                                         k_std_cont=getattr(args, 'k_std_cont', 0.7),
+                                         k_bin=getattr(args, 'k_bin', 0.7))
             for q, tmpl in enumerate(templates):
                 qid     = tmpl['qid']
                 rep_idx = rep_count.get(qid, 0)
@@ -427,22 +446,18 @@ def generate_task_sequences(task, args, rng):
     # ── Build DataFrame + JSON ───────────────────────────────────────────────
     records, json_trials = [], []
     for t, trial in enumerate(trials):
-        sc = trial['std_condition']
         for o, v in enumerate(trial['values'], start=1):
             records.append({
-                'task': task, 'trial': t, 'qid': trial['qid'],
+                'trial': t, 'qid': trial['qid'],
                 'observation': o, 'value': v,
-                'true_mean': trial['true_mean'], 'true_std': trial['true_std'],
-                'std_condition': sc, 'true_p': trial['true_p'],
-                'prefix_length': prefix_length,
+                'true_mean': trial['true_mean'],
+                'true_p': trial['true_p'],
                 'iti_ms': trial['iti_ms'],
             })
         json_trials.append({
             'trial': t, 'qid': trial['qid'],
             'true_mean': None if math.isnan(trial['true_mean']) else trial['true_mean'],
-            'true_std':  None if math.isnan(trial['true_std'])  else trial['true_std'],
             'true_p':    None if math.isnan(trial['true_p'])    else trial['true_p'],
-            'std_condition': None if (sc != sc) else sc,
             'values': trial['values'], 'prefix_length': prefix_length,
             'iti_ms': trial['iti_ms'],
         })
@@ -509,11 +524,12 @@ def _weighted_delta_score(seq_df, task, agent_fn, gamma=0.5):
     return total
 
 
-def _weighted_rmse_score(seq_df, task, agent_fn, gamma=0.5):
-    """Exponentially weighted rises in the mean RMSE curve.
+def _weighted_rmse_score(seq_df, task, agent_fn, gamma=0.0):
+    """Uniformly weighted rises in the mean RMSE curve.
 
-    Mirrors _weighted_delta_score but operates on |response − true_param|
-    (RMSE) rather than |Δresponse|.  Score = 0 iff RMSE curve is monotone.
+    Uses gamma=0 (uniform weights) so rises anywhere in the curve are
+    penalised equally — RMSE should be monotone throughout, not just early.
+    Score = 0 iff RMSE curve is perfectly monotone non-rising.
 
     agent_fn(values, task, true_mean, true_p) → list of responses
     """
@@ -567,7 +583,11 @@ def _rl_responses(values, task, true_mean, true_p,
     return resps
 
 
-def score_sequences(seq_df, task, rl_alpha_0=1.0, rl_lambda=0.5, gamma=0.5):
+def score_sequences(seq_df, task, rl_alpha_0=1.0, rl_lambda=0.5,
+                    gamma_bay_delta_cont=0.7, gamma_bay_rmse_cont=0.3,
+                    gamma_rl_delta_cont=0.7,  gamma_rl_rmse_cont=0.3,
+                    gamma_bay_delta_bin=0.3,  gamma_bay_rmse_bin=0.0,
+                    gamma_rl_delta_bin=0.3,   gamma_rl_rmse_bin=0.0):
     """Three-pass scoring for seed search.
 
     Pass 1 (generation constraint, already applied):
@@ -592,10 +612,16 @@ def score_sequences(seq_df, task, rl_alpha_0=1.0, rl_lambda=0.5, gamma=0.5):
     bay_fn    = _bayesian_responses
     rl_fn     = lambda vals, tsk, tm, tp: _rl_responses(
         vals, tsk, tm, tp, alpha_0=rl_alpha_0, lambda_=rl_lambda)
-    bay_delta = _weighted_delta_score(seq_df, task, bay_fn)
-    bay_rmse  = _weighted_rmse_score(seq_df,  task, bay_fn)
-    rl_delta  = _weighted_delta_score(seq_df, task, rl_fn)
-    rl_rmse   = _weighted_rmse_score(seq_df,  task, rl_fn)
+    if task == 'continuous':
+        gbd, gbr, grd, grr = (gamma_bay_delta_cont, gamma_bay_rmse_cont,
+                               gamma_rl_delta_cont,  gamma_rl_rmse_cont)
+    else:
+        gbd, gbr, grd, grr = (gamma_bay_delta_bin,  gamma_bay_rmse_bin,
+                               gamma_rl_delta_bin,   gamma_rl_rmse_bin)
+    bay_delta = _weighted_delta_score(seq_df, task, bay_fn, gamma=gbd)
+    bay_rmse  = _weighted_rmse_score( seq_df, task, bay_fn, gamma=gbr)
+    rl_delta  = _weighted_delta_score(seq_df, task, rl_fn,  gamma=grd)
+    rl_rmse   = _weighted_rmse_score( seq_df, task, rl_fn,  gamma=grr)
     bay_score = bay_delta + bay_rmse
     rl_score  = rl_delta  + rl_rmse
     return bay_score, rl_score, rl_score  # combined = rl_score
@@ -620,9 +646,14 @@ def _seed_search(task, args, out_dir):
     print(f"Seed search: {task.upper()} | {args.n_tries} tries | "
           f"RL_lambda α={args.rl_alpha_0} λ={args.rl_lambda}")
     print(f"Score = weighted |Δresponse| rises (lower → more monotone decay)")
-    print(f"  w(obs) = exp(-0.5*(obs-2));  score=0 iff perfectly monotone")
-    print(f"  Pass 1 (structural): full-seq mean+std within k=1 SE of true values")
-    print(f"  Pass 2 (objective):  bay_delta rises (continuous), rl_delta rises (binary)")
+    g = args
+    print(f"  gammas cont: bay_delta={g.gamma_bay_delta_cont} bay_rmse={g.gamma_bay_rmse_cont} "
+           f"rl_delta={g.gamma_rl_delta_cont} rl_rmse={g.gamma_rl_rmse_cont}")
+    print(f"  gammas bin:  bay_delta={g.gamma_bay_delta_bin} bay_rmse={g.gamma_bay_rmse_bin} "
+           f"rl_delta={g.gamma_rl_delta_bin} rl_rmse={g.gamma_rl_rmse_bin}")
+    print(f"  Pass 1 (structural): k_std_cont={args.k_std_cont} k_bin={args.k_bin}")
+    print(f"  Pass 2 gate:         bay_score < 0.02")
+    print(f"  Pass 3 objective:    rl_score = rl_delta + rl_rmse (lower is better)")
     best_score, best_scores, best_seed, best_df, best_json = \
         np.inf, (np.inf, np.inf), None, None, None
     all_scores, n_ok, n_pass2 = [], 0, 0
@@ -645,7 +676,16 @@ def _seed_search(task, args, out_dir):
             continue
         n_ok += 1
         bay, rl, combined = score_sequences(
-            df, task, rl_alpha_0=args.rl_alpha_0, rl_lambda=args.rl_lambda)
+            df, task,
+            rl_alpha_0=args.rl_alpha_0, rl_lambda=args.rl_lambda,
+            gamma_bay_delta_cont=args.gamma_bay_delta_cont,
+            gamma_bay_rmse_cont=args.gamma_bay_rmse_cont,
+            gamma_rl_delta_cont=args.gamma_rl_delta_cont,
+            gamma_rl_rmse_cont=args.gamma_rl_rmse_cont,
+            gamma_bay_delta_bin=args.gamma_bay_delta_bin,
+            gamma_bay_rmse_bin=args.gamma_bay_rmse_bin,
+            gamma_rl_delta_bin=args.gamma_rl_delta_bin,
+            gamma_rl_rmse_bin=args.gamma_rl_rmse_bin)
         if bay > 2e-2:
             continue  # pass 2 gate: bay_score must be below 0.02
         n_pass2 += 1
@@ -686,9 +726,31 @@ def parse_args():
     p.add_argument('--std_fixed',          type=float, default=20.0)
     p.add_argument('--p_range',            type=float, nargs=2, default=[0.2, 0.8])
     p.add_argument('--rl_alpha_0',         type=float, default=1.0,
-                   help='RL_lambda alpha_0 for dual-agent constraint')
+                   help='RL_lambda alpha_0')
     p.add_argument('--rl_lambda',          type=float, default=0.5,
-                   help='RL_lambda lambda for dual-agent constraint')
+                   help='RL_lambda lambda')
+    p.add_argument('--k_mean_cont',  type=float, default=1.0,
+                   help='Continuous mean plausibility k (k=1 → |mean-true|≤std/√n)')
+    p.add_argument('--k_std_cont',   type=float, default=0.7,
+                   help='Continuous std plausibility k (k=0.7 → std in [14.7,25.3] at n=15)')
+    p.add_argument('--k_bin',        type=float, default=0.7,
+                   help='Binary proportion plausibility k (k=0.7 → p±0.09 at n=15,p=0.5)')
+    p.add_argument('--gamma_bay_delta_cont', type=float, default=0.7,
+                   help='Continuous: Bayesian |Δ| gamma')
+    p.add_argument('--gamma_bay_rmse_cont',  type=float, default=0.3,
+                   help='Continuous: Bayesian RMSE gamma')
+    p.add_argument('--gamma_rl_delta_cont',  type=float, default=0.7,
+                   help='Continuous: RL |Δ| gamma')
+    p.add_argument('--gamma_rl_rmse_cont',   type=float, default=0.3,
+                   help='Continuous: RL RMSE gamma')
+    p.add_argument('--gamma_bay_delta_bin',  type=float, default=0.3,
+                   help='Binary: Bayesian |Δ| gamma')
+    p.add_argument('--gamma_bay_rmse_bin',   type=float, default=0.0,
+                   help='Binary: Bayesian RMSE gamma')
+    p.add_argument('--gamma_rl_delta_bin',   type=float, default=0.3,
+                   help='Binary: RL |Δ| gamma')
+    p.add_argument('--gamma_rl_rmse_bin',    type=float, default=0.0,
+                   help='Binary: RL RMSE gamma')
     p.add_argument('--output_dir',         default='task/sequences')
     p.add_argument('--seed',               type=int,   default=42,
                    help='Best known: continuous=51, binary=42')
