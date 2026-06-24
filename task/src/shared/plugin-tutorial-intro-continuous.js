@@ -94,7 +94,7 @@ class TutorialIntroContinuousPlugin {
     document.body.style.backgroundColor = '#f5f5f5';
     const { example_value, true_mean, true_std } = trial;
 
-    const BOX0 = `Numbers are drawn one-at-a-time from a
+    const BOX0 = `<span style="color:${SAMPLE_COLOR};font-weight:bold;">Numbers</span> are drawn one-at-a-time from a
       <span style="color:${DIST_COLOR};font-weight:bold;">hidden distribution</span>.`;
     const BOX1 = `Goal: estimate the
       <span style="color:${GOAL_COLOR};font-weight:bold;">true mean</span>
@@ -172,6 +172,7 @@ class TutorialIntroContinuousPlugin {
       const svg = display_el.querySelector('#dist-svg');
       svg.querySelector('#tut-svg-axis-labels').style.opacity = '1';
       svg.querySelector('#tut-svg-dist').style.opacity = '1';
+      display_el.querySelector('#tut-centre-number').style.opacity = '1';
       activateBox('tut-box-1', onBox1);
     };
     const onBox1 = () => {
@@ -183,7 +184,6 @@ class TutorialIntroContinuousPlugin {
       revealBox('tut-box-2');
       const svg = display_el.querySelector('#dist-svg');
       svg.querySelector('#tut-svg-obs').style.opacity = '1';
-      display_el.querySelector('#tut-centre-number').style.opacity = '1';
       activateSlider();
     };
 

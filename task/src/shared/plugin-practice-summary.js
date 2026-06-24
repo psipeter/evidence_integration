@@ -26,7 +26,6 @@ class PracticeSummaryPlugin {
     const { true_mean, true_std, values, responses } = trial;
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;width:70vw;">
-        <div class="tutorial-title">Tutorial complete</div>
         <div id="summary-svg"
           style="display:block;margin:0 auto 0.75rem;
                  width:100%;border:1px solid #e5e7eb;
@@ -44,7 +43,7 @@ class PracticeSummaryPlugin {
         </div>
         <button id="proceed-btn" class="jspsych-btn"
           style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1rem;">
-          Proceed to experiment
+          Next
         </button>
       </div>`;
 

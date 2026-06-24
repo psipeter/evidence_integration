@@ -39,7 +39,7 @@ class ObservationPlugin {
     display_el.innerHTML = `
       <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
       <div class="obs-wrap">
-        <div id="stimulus-display" class="stimulus-number">${value}</div>
+        <div id="stimulus-display" class="stimulus-number" style="color:#ef4444;">${value}</div>
         ${buildSliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
       </div>
       <div style="text-align:center;">

@@ -375,16 +375,7 @@ def generate_task_sequences(task, args, rng):
     # ITI condition: randomly assign n_repeats//2 repeats per qid to short ITI,
     # the rest to long ITI. Randomization is per-qid using a fixed seed so
     # the assignment is reproducible but not systematically ordered.
-    ITI_SHORT_MS = 1000
-    ITI_LONG_MS  = 5000
-    iti_rng = np.random.default_rng(int(rng.integers(2**31)))  # derive from main rng
-    # Pre-assign ITI schedule for each qid: shuffled list of short/long labels
-    iti_schedule = {}
-    for tmpl in templates:
-        schedule = ([ITI_SHORT_MS] * (n_repeats // 2) +
-                    [ITI_LONG_MS]  * (n_repeats - n_repeats // 2))
-        iti_rng.shuffle(schedule)
-        iti_schedule[tmpl['qid']] = schedule
+    ITI_MS    = 1000  # all trials use the same ITI
     rep_count = {}  # tracks how many repeats each qid has seen
     trials = []
     if full_repeat:
@@ -392,7 +383,7 @@ def generate_task_sequences(task, args, rng):
             qid = tmpl['qid']
             for _ in range(n_repeats):
                 rep_idx = rep_count.get(qid, 0)
-                iti_ms  = iti_schedule[qid][rep_idx]
+                iti_ms  = ITI_MS
                 rep_count[qid] = rep_idx + 1
                 trials.append({**tmpl, 'values': tmpl['prefix'], 'iti_ms': iti_ms})
     else:
@@ -404,7 +395,7 @@ def generate_task_sequences(task, args, rng):
             for q, tmpl in enumerate(templates):
                 qid     = tmpl['qid']
                 rep_idx = rep_count.get(qid, 0)
-                iti_ms  = iti_schedule[qid][rep_idx]
+                iti_ms  = ITI_MS
                 rep_count[qid] = rep_idx + 1
                 trials.append({**tmpl, 'values': tmpl['prefix'] + suffixes[q],
                                'iti_ms': iti_ms})

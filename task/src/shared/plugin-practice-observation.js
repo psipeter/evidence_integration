@@ -157,9 +157,6 @@ class PracticeObservationPlugin {
         },
       });
     });
-
-
-
   }
 }
 

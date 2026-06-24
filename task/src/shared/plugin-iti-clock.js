@@ -10,9 +10,8 @@ const info = {
     duration_ms: { type: 'INT',     default: 1000 },
     color:       { type: 'STRING',  default: '#2563eb' },
     radius:      { type: 'INT',     default: 60 },
-    timed_out:   { type: 'BOOLEAN', default: false },
-    too_slow_ms: { type: 'INT',     default: 800 },
-    is_repeat:   { type: 'BOOLEAN', default: false },
+    timed_out:          { type: 'BOOLEAN', default: false },
+    timeouts_remaining: { type: 'INT',     default: 3 },
   },
 };
 
@@ -24,7 +23,7 @@ class ItiClockPlugin {
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
 
-    const { duration_ms, color, radius, timed_out, too_slow_ms } = trial;
+    const { duration_ms, color, radius, timed_out, timeouts_remaining } = trial;
     const strokeWidth = 5;
     const size = (radius + strokeWidth) * 2;
     const cx   = size / 2;
@@ -87,9 +86,10 @@ class ItiClockPlugin {
     };
 
     if (timed_out) {
-      // Show for 2400ms: "Too slow" big red, "Please provide a response" pulses below
-      // One full fade out+in cycle = 2 × 800ms transitions + small delays = ~2000ms
-      const displayMs = 3600;
+      // Fade in(100ms) → out(1000ms) → in(2000ms) → hold → clock(3200ms)
+      // Each transition: 0.8s. Total: 100+800+200+800+200+800+400 = 3300ms
+      const FADE = 800;   // matches transition duration
+      const displayMs = 3200;
       display_el.innerHTML = `
         <div class="iti-wrap" style="flex-direction:column;gap:1.2rem;">
           <span style="font-size:3rem;font-weight:bold;color:#ef4444;">
@@ -97,15 +97,14 @@ class ItiClockPlugin {
           </span>
           <span id="too-slow-pulse" style="
             font-size:2rem;font-style:italic;color:#555;
-            opacity:0;transition:opacity 0.8s ease;">
-            Please provide a response
+            opacity:0;transition:opacity ${FADE}ms ease;">
+            ${timeouts_remaining} timeout${timeouts_remaining === 1 ? '' : 's'} remaining
           </span>
         </div>`;
-      // Fade in → out → in before clock starts
       const el = display_el.querySelector('#too-slow-pulse');
-      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 100);   // fade in
-      setTimeout(() => { if (el && active) el.style.opacity = '0'; }, 1100);  // fade out
-      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 2100);  // fade in
+      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 100);        // fade in
+      setTimeout(() => { if (el && active) el.style.opacity = '0'; }, 100+FADE+200); // fade out
+      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 100+FADE*2+400); // fade in
       setTimeout(() => { if (active) showClock(); }, displayMs);
     } else {
       showClock();

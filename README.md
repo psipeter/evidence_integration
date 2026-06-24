@@ -57,21 +57,16 @@ PTN metrics simultaneously and enable cross-task individual-differences analysis
 
 ## Scientific narrative per figure group
 
-This section captures the intended argument for each figure group so that the
-scientific logic is preserved across work sessions.
-
 ### P figures — Establishing the model as a credible fit
 
 **Intent:** Show that NEF fits human responses at least as well as other models
 across both tasks, establishing it as a viable model before making stronger claims.
-This is not the star of the paper — it is the prerequisite.
 
 **Carrabin:** NEF competitive with or better than Mean/LI/PR on RMSE. NoisyCounting
 performs best (task-specific), expected.
 **Yoo:** Same story. Mean has near-zero estimation error (it computes the exact
 running mean), but humans diverge — motivating the temporal analyses.
 **Key point:** Cross-task consistency of the fit pattern is the P-figure contribution.
-It cannot be said that NEF fits one task by overfitting — the same parameters work on both.
 
 ### V figures — Capturing the structure of response variability (carrabin only)
 
@@ -79,362 +74,197 @@ It cannot be said that NEF fits one task by overfitting — the same parameters 
 response variability, which purely deterministic models (Mean, LI, PR) cannot
 do because they produce identical responses to identical inputs.
 
-**Key results:**
-- V2: Human response variability for identical inputs is substantial and stable
-  across individuals. NEF naturally produces non-zero variability; other models
-  predict zero. This is not a parameter — it is an emergent property of spiking.
-- V3: Variability is a stable individual trait (r=0.88 split-half), not noise.
-  NEF matches this reliability; NoisyCounting (MLE) also does.
-- V1 (NLL): NEF captures the full response distribution, not just the mean.
-- NoisyCounting's role: demonstrates that RMSE fitting misses state noise
-  (sigma_c → 0 under RMSE), motivating MLE. But NoisyCounting is task-specific
-  and lacks neural interpretation — the main V story is about NEF.
+### T figures — Temporal dynamics of evidence integration
 
-**Not possible for yoo:** No repeated sequences → cannot compute V2/V3.
-This directly motivates the new task design.
+**Intent:** Show that the NEF captures the within-sequence dynamics of human
+updating behaviour: how update magnitudes decay across observations (recency
+bias), individual differences in λ, and the accumulation and persistence of
+response variability across the sequence.
 
-### T figures — Logical elimination: only NEF reproduces all temporal signatures
+### N figures — Neural predictions
 
-**Intent:** The four panels together form an elimination argument. Each model
-fails on at least one panel; only NEF passes all four.
-
-**Carrabin T (T5/T6 — state persistence):**
-- T5 (residual variance growth): Human response variance grows across obs within
-  a trial — state noise accumulates. NEF + NoisyCounting (MLE) reproduce this;
-  deterministic models produce flat variance. Mean/LI/PR fail.
-- T6 (autocorrelation): Human residuals are autocorrelated within trial (lag-1
-  r~0.62) — a state-persistence signature. NEF reproduces (r~0.78); uncorrelated
-  noise models (RMSE-fitted NoisyCounting) produce near-zero.
-- These panels cannot be run on yoo (no qid), directly motivating new task.
-
-**Yoo T (T1–T4 — power-law decay and individual differences):**
-- T1 (estimation error vs obs): Mean produces monotonically decreasing error;
-  humans show U-shaped error curves (error decreases early then rises). Mean fails.
-- T2 (|Δresponse| vs obs): LeakyIntegrator produces rapid decay to near-zero
-  updating; humans maintain substantial updating throughout. LI fails here.
-- T3 (split-half λ reliability): LeakyIntegrator's λ has *negative* split-half
-  reliability (r=-0.56) — its apparent power-law decay is not a stable individual
-  property. PrimacyRecency (r=0.94) and NEF (r=0.83) are reliable. LI fails here.
-- T4 (λ_model vs λ_human regplot): Mean (r=0.14 ns, flat), LI (r=-0.32*,
-  inverted), PR (r=0.69****), NEF (r=0.61****). Mean and LI fail. PR and NEF
-  both pass — but PR lacks neural interpretation (see N figures).
-
-**Conclusion:** Only NEF passes all panels across both tasks. This is the core
-behavioural argument.
-
-### N figures — Testable neural predictions from the same mechanism
-
-**Intent:** Show that the NEF's internal dynamics generate specific, measurable
-neural predictions that no other model can make. These are predictions for future
-empirical work, not empirical findings. The framing is: "if the NEF is the right
-model, here is what you should see in neural recordings."
-
-**Carrabin N:**
-- N1: PE timecourse shows the prediction-error signal decoded from the error
-  ensemble rises at observation onset and decays as the estimate stabilises.
-  Different α₀/n_neurons combinations produce characteristically different
-  timecourses — testable in EEG/single-unit data.
-- N2 (panel B): PE variability and response variability covary tightly across
-  participants (r=0.97****), using probe simulations run at each pid's fitted
-  α₀ and λ. Partial correlation after regressing out α₀ remains r=0.97****,
-  showing the covariation is driven by spiking noise propagating from the error
-  ensemble to the value ensemble — not by individual differences in learning
-  rate. α₀ acts as a shared scaling factor on both metrics, not an independent
-  cause of their covariation. This is confirmed by the fact that the
-  deterministic model (RL_lambda) produces zero within-qid variability
-  regardless of α₀.
-- N3 (panel C): Both response variability and PE variability decrease with
-  fitted α₀ (r≈-0.56** and r≈-0.66**), confirming that α₀ scales the
-  amplitude of spiking noise in the same direction for both metrics.
-- N4 (panel D): Both variability metrics decrease with n_neurons for fixed
-  α₀/λ (n_neurons scan). They converge to human levels at n~100-200,
-  suggesting a plausible biological parameter range.
-
-**Yoo N:**
-- N5 (panel A): Weight-neuron activity in the error ensemble decays more steeply
-  for high-λ pids — the neural signature of stronger temporal discounting.
-
-- N6 (panel B): Activity decay (obs 1 − obs 30) correlates with |Δresponse| decay
-  (early − late) per pid (r=0.68****). This coupling is mediated by λ: removing the
-  temporal discounting mechanism (λ=0 ablation) eliminates the correlation
-  (r=0.25 ns), confirming that the activity↔behaviour coupling arises from the
-  counting dynamics that implement α(t), not from spiking noise alone.
-
-- N7 (panel C): λ mediates both activity decay and |Δresponse| decay simultaneously.
-  Human per-pid |Δresponse| decay values (grey reference lines) fall within the
-  range of NEF model values, showing that the fitted NEF models span the observed
-  human distribution. Higher λ → steeper decay in both neural activity and
-  behavioural updating.
-
-- N8 (panel D): Pids with higher late |Δresponse| (obs 21-30) also have higher
-  late performance error — the U-shaped error curve seen in T1 is related to
-  continued large updates late in the sequence. NEF reproduces this relationship
-  tightly (r=0.89****); humans show the same trend (r=0.40*). This links the
-  U-shape phenomenon in T to the neural updating mechanism in N.
-
-**Connecting N to T:** λ drives both the temporal signatures in T (split-half
-reliability, λ_model vs λ_human) and the neural dynamics in N (activity decay,
-activity↔behaviour coupling). The U-shaped performance pattern in T1 is explained
-mechanistically by N8: pids who keep updating late (high λ) accumulate more error
-in the second half of the sequence because they over-weight recent noisy evidence.
-
-**Potential panel E (planned):** λ vs late performance error per pid — showing
-that both NEF and human late-error is predicted by fitted λ. This would close
-the loop from T1 (group-level U-shape) → N8 (late update→late error) → N-E
-(λ→late error), providing a complete mechanistic account.
+**Intent:** Demonstrate that the error ensemble in the NEF generates specific,
+quantitative neural predictions — PE dynamics, variability scaling with α₀ and
+n_neurons, and weight-neuron activity profiles — that are internally consistent
+with the model's behavioural fit and testable in future neural recording studies.
 
 ---
 
-## Metric taxonomy (PTN)
+## Repository structure
 
-One figure per group per task. Figures save PDF only.
-
-### P — Performance
-| Code | Metric |
-|------|--------|
-| P1 | Estimation error: RMSE to hidden probability / true mean; human + models |
-| P2 | Model fit: RMSE to human responses; model comparison |
-
-### T — Temporal
-| Code | Metric |
-|------|--------|
-| T1 | Task performance vs observation position |
-| T2 | Response change (|Δresponse|) vs observation |
-| T3 | Split-half reliability of λ (first vs second half of trials) |
-| T4 | Dynamical model fit: λ_model vs λ_human regplot |
-| T5 | Residual variance growth across obs (state noise accumulation; carrabin) |
-| T6 | Within-trial residual autocorrelation decay (state persistence; carrabin) |
-
-λ fitted via curve_fit A·n^(-λ), bounds [0,2], obs ≥ 2.
-
-### N — Neural (NEF predictions; testable in future experiments)
-| Code | Metric |
-|------|--------|
-| N1 | Decoded PE timecourse within observation window |
-| N2 | PE variability vs response variability, probe sims; partial-r control for α₀ (carrabin) |
-| N3 | Response and PE variability vs fitted α₀ — shared scaling factor (carrabin) |
-| N4 | Response and PE variability vs n_neurons scan; converge to human levels (carrabin) |
-| N5 | Weight-neuron activity vs observation, split by λ group (yoo) |
-| N6 | Mean weight-neuron activity vs mean |Δresponse| per observation (yoo) |
-| N7 | λ mediates activity change and mean |Δresponse| (yoo) |
-| N8 | Late |Δresponse| vs late estimation error, obs 21–30 (yoo) |
-
----
-
-## Models
-
-| Model | Role | Free params |
-|-------|------|-------------|
-| Mean | Optimal Bayesian baseline (running mean) | none |
-| LeakyIntegrator | Exponential forgetting | gamma |
-| PrimacyRecency | Explicit primacy + recency weighting | eps_p, eps_r |
-| NoisyCounting | Task-specific (Prat-Carrabin 2024); carrabin only | mu, sigma_c, nu |
-| RL_lambda | Mathematical theory underlying NEF (power-law delta rule) | alpha_0, lambda_ |
-| NEF | Spiking neural network (emergent power-law dynamics) | alpha_0, lambda_ |
-
-NoisyCounting: RMSE-fitted sigma_c collapses to ~0; MLE-fitted recovers
-sigma_c ~0.03–0.08. Both versions are scientifically meaningful.
+```
+evidence_integration/
+  data/
+    carrabin.pkl
+    carrabin_original.csv
+    yoo.pkl
+    counting_activities_n{n}_nc{nc}_{dataset}.pkl
+    runs/
+      carrabin/      — RMSE fits + MLE fits + extras
+      yoo/           — RMSE fits for non-NEF models
+      refit/         — NEF responses/params/activities (yoo + carrabin)
+    sim_db/          — MLE simulation database
+    optuna/          — MLE Optuna SQLite databases
+  models/
+    math_models.py
+    NEF.py
+    counting_integrator.py
+    RNN.py
+  fitting/
+    fit.py           — Optuna k-fold CV RMSE
+    fit_mle.py       — MLE via shared simulation database
+    model_params.py  — MODEL_PARAMS, MLE_PARAMS, NEF_N_NEURONS_VALUES
+    submit.py
+    collect.py
+    losses.py
+  utils/
+    paths.py
+    plot_style.py
+    slurm.py
+    carrabin_transform.py
+    save_responses.py
+  scripts/
+    figure_carrabin_performance.py
+    figure_carrabin_variability.py
+    figure_carrabin_temporal.py
+    figure_carrabin_neural.py
+    figure_yoo_performance.py
+    figure_yoo_temporal.py
+    figure_yoo_neural.py
+    extras_carrabin.py
+    extras_yoo.py
+  jobs/
+  task/              — online experiment (see task/ section below)
+  venv/
+```
 
 ---
 
-## Current figure inventory
+## task/ — Online Experiment
 
-### figure_carrabin_performance.py (P group, 1×3)
-A: schematic | B: P1 estimation error | C: P2 model fit
+Two online experiments deployed on Prolific via MindProbe/JATOS:
+- **Continuous task**: Normal(mean, std=20) stimulus; slider response [0–100]; 40 trials × 15 obs
+- **Binary task**: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 40 trials × 15 obs
 
-### figure_carrabin_variability.py (V group, 1×4)
-A: V2 KDE | B: V2 RMSE regplot | C: V3 test-retest | D: V1 NLL boxplots
+Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
+Data pipeline: JATOS JSON → `task/parse_results.py` → `data/task_results.pkl`.
+Target: ~50–80 participants per task, within-subject.
 
-### figure_carrabin_temporal.py (T group, 1×4)
-A: T1 RMSE vs obs | B: T2 |Δresponse| vs obs | C: T6 autocorrelation | D: T5 variance growth
+### Design
 
-### figure_carrabin_neural.py (N group, 1×4)
-A: N1 PE dynamics | B: N2 PE vs response variability (r=0.97, partial r excl. α₀=0.97) | C: N3 variability vs fitted α₀ | D: N4 variability vs n_neurons
-
-### figure_yoo_performance.py (P group, 1×3)
-A: schematic | B: P1 estimation error | C: P2 model fit
-Run: python scripts/figure_yoo_performance.py --run_folder yoo --nef_folder refit
-
-### figure_yoo_temporal.py (T group, 1×4)
-A: T1 + U-shape bands | B: T2 |Δresponse| | C: T3 split-half λ | D: T4 λ_model vs λ_human
-Run: python scripts/figure_yoo_temporal.py --run_folder yoo --nef_folder refit
-
-### figure_yoo_neural.py (N group, 1×4)
-A: N5 weight activity by λ group | B: N6 activity decay vs |Δresponse| decay (fitted vs λ=0 ablation) | C: N7 λ mediates both decays | D: N8 late |Δresponse| vs late error
-Run: python scripts/figure_yoo_neural.py --nef_folder refit --ablation_folder yoo_ablation
-
----
-
-## Fitting pipeline
-
-### RMSE fitting (cluster)
-    venv/bin/python -m fitting.submit carrabin NEF --n_trials 100 --run_folder carrabin --k 5
-    venv/bin/python -m fitting.submit yoo NEF --run_folder yoo --n_trials 100 --k 5
-    venv/bin/python -m fitting.collect carrabin --type params
-    venv/bin/python -m fitting.collect carrabin --type responses
-    venv/bin/python -m fitting.collect yoo --type params
-    venv/bin/python -m fitting.collect yoo --type responses
-    venv/bin/python -m fitting.collect yoo --type activities --ensembles error --timing once_per_obs
-
-### MLE fitting (NoisyCounting, carrabin only)
-    bash jobs/submit_mle_fit.sh NoisyCounting carrabin 500 100
-
-### Counting activity files (must exist on cluster before NEF fitting)
-    venv/bin/python models/counting_integrator.py --precompute_activities \
-        --n_neurons 200 --n_neurons_counting 1000 --dataset yoo --n_trials 30
-    scp data/counting_activities_n200_nc1000_yoo.pkl \
-        f007qzn@discovery.dartmouth.edu:~/evidence_integration/data/
-
----
-
-## Environment
-
-Always use: /home/psipeter/evidence_integration/venv/bin/python
-Cluster: /dartfs-hpc/rc/home/n/f007qzn/
-
----
-
-## Archive
-
-Older models/data (diederen, jiang, usher) in archive/. Do not reactivate.
-Legacy combined figures (figure_carrabin.py, figure_yoo.py) retained for reference.
-
----
-
-## New task (task/)
-
-Two online experiments sharing all infrastructure, deployed separately on
-Prolific via MindProbe/JATOS. Both use jsPsych 8 + Vite 6.
-
-### Tasks
-
-| Task | Stimulus | Response | Generative model |
-|------|----------|----------|-----------------|
-| Continuous | Integer 0..100 | Slider 0–100 | Normal(mean, std_fixed=20) |
-| Binary | Blue/red circle | Slider 0–1 (p_blue) | Bernoulli(p) |
-
-Both: 40 trials × 15 observations, prefix_length=4, response deadline per obs,
-ITI/BTI clocks, 5-observation interactive tutorial, post-trial summary plot.
-
-### Design goals
-- Continuous: repeated sequences + long sequences + continuous values — unlocks
-  all PTN metrics simultaneously; cross-task λ correlation with binary task
-- Binary: same participants (free ordering, natural counterbalancing), Bernoulli
-  generative model; enables cross-task individual-differences analysis
-- ITI manipulation: each qid gets 2 repeats with short ITI (1s) and 2 with long
-  ITI (5s), randomly assigned per qid. Longer ITI induces WM decay and increases
-  response variability — within-participant contrast for WM-mediated updating noise
-- BTI (between-trial interval): always 5s; shown as a reset screen
-  ("Trial X / 40 — generating new distribution…") to minimise cross-trial carry-over
+- **Sequences**: 10 unique sequences × 4 repeats = 40 trials; prefix_length=4; std_fixed=20
+- **ITI**: all trials use 1000ms (ITI manipulation removed — no effect observed in pilot)
+- **BTI**: 5s between-trial reset screen ("Trial X / 40 — generating new distribution…")
+- **Timeout**: 7s response deadline per observation
+  - Per-trial timeout budget: 3 timeouts before session terminates
+  - Timeout flow: "Too slow" screen (fade in/out/in, 3.2s) → replay ITI → same observation
+  - On 3rd timeout: "Too slow / 0 timeouts remaining" → "Session terminated" screen with button
+- **Tutorial**: 3-box progressive reveal → 4 practice observations → practice summary →
+  timeout demonstration (3 screens) → BTI → trial 1
 
 ### Sequence generation
 
 ```bash
-# Generate with best known seeds
+# Regenerate with best known seeds
 python task/generate_sequences.py --task continuous --seed 934
 python task/generate_sequences.py --task binary --seed 1229
-
-# Seed search — separate gammas per task, per metric
-python task/generate_sequences.py --task both --n_tries 1000 \
-    --prefix_length 4 --rl_alpha_0 1.0 --rl_lambda 0.5 \
-    --gamma_bay_delta_cont 0.7 --gamma_bay_rmse_cont 0.3 \
-    --gamma_rl_delta_cont 0.7  --gamma_rl_rmse_cont 0.3 \
-    --gamma_bay_delta_bin  0.2 --gamma_bay_rmse_bin  0.6 \
-    --gamma_rl_delta_bin   0.6 --gamma_rl_rmse_bin   0.6 \
-    --k_std_cont 0.7 --k_bin 0.7
 ```
 
-Best seeds: continuous=934, binary=1229 (prefix_length=4, k_std_cont=0.7).
-
-Three-pass scoring:
-- Pass 1 (structural): continuous mean (k=1.0) + std (k=0.7) within k×SE; binary proportion (k=0.7)
-- Pass 2 (gate): bay_score = bay_delta + bay_rmse < 0.02 (separate gammas per task)
-- Pass 3 (objective): rl_score = rl_delta + rl_rmse (RL_lambda α=1, λ=0.5)
-
-Continuous draws from rejection-sampled Normal(mean, std=20) bounded to [0,100].
-Std naturally reduced at extreme means (~16 vs 20 at mean=20) — unavoidable for bounded domain.
-Post-hoc analysis: regress behavior on observed sample std per trial.
+Best seeds: continuous=934, binary=1229 (prefix_length=4, k_std=0.7).
+All trials use ITI_MS=1000ms.
 
 ### Directory structure
 
 ```
 task/
   src/
-    shared/                        — all reusable code (both tasks)
+    shared/
+      build-trial-timeline.js      — pure-JS trial loop (importable by test harness)
       timeline-builder.js          — full timeline, parameterised by config
-      jatos-shim.js                — dev no-op shim (POSTs to dev-server.js)
-      plugin-inter-trial.js        — BTI reset screen (5s, pulsing text)
-      plugin-observation.js        — continuous obs (number + slider + timeout)
-      plugin-observation-binary.js — binary obs (circle + gradient slider + timeout)
-      plugin-iti-clock.js          — inter-obs ITI clock (1s or 5s per trial)
-      plugin-tutorial-intro-continuous.js   — continuous interactive intro (3-stage reveal)
-      plugin-tutorial-intro-binary.js       — binary interactive intro (3-stage reveal)
+      jatos-shim.js                — dev no-op shim
+      plugin-inter-trial.js        — BTI reset screen
+      plugin-observation.js        — continuous obs (number + slider + timeout clock)
+      plugin-observation-binary.js — binary obs (circle + gradient slider + timeout clock)
+      plugin-iti-clock.js          — ITI countdown clock; shows "Too slow" if timed_out=true
+      plugin-timeout-demo.js       — 3-screen timeout explanation (tutorial)
+      plugin-tutorial-intro-continuous.js   — continuous 3-stage interactive intro
+      plugin-tutorial-intro-binary.js       — binary 3-stage interactive intro
       plugin-practice-observation.js        — continuous tutorial obs 2–5
       plugin-practice-observation-binary.js — binary tutorial obs 2–5
       plugin-practice-summary.js            — continuous tutorial summary
-      plugin-practice-summary-binary.js     — binary tutorial summary (bar chart)
+      plugin-practice-summary-binary.js     — binary tutorial summary
       plugin-trial-summary.js               — continuous trial summary
-      plugin-trial-summary-binary.js        — binary trial summary (bar chart)
-      draw-performance.js          — SVG distribution + dot plots (continuous summary)
-      bar-chart.js                 — SVG bar + dot plots (binary summary)
-      urn-binary.js                — shared binary urn SVG (tutorial obs 1–5)
-      slider.js                    — continuous slider module
+      plugin-trial-summary-binary.js        — binary trial summary
+      draw-performance.js          — SVG distribution + dot plots (continuous)
+      bar-chart.js                 — SVG bar + dot plots (binary)
+      urn-binary.js                — shared binary urn SVG
+      slider.js                    — continuous slider
       slider-binary.js             — binary slider (blue/red gradient, split % labels)
-      style.css                    — all shared styles (70vw default width)
+      style.css                    — all shared styles
     continuous/
-      config.js                    — continuous task parameters
+      config.js
     binary/
-      config.js                    — binary task parameters
-    experiment-continuous.js       — entry point
-    experiment-binary.js           — entry point
+      config.js
+    experiment-continuous.js
+    experiment-binary.js
   sequences/
-    continuous_sequences.json      — master stimulus sequences (imported by config.js)
-    continuous_sequences.pkl       — analysis version (includes iti_ms per trial)
-    binary_sequences.json          — master stimulus sequences
-    binary_sequences.pkl           — analysis version (includes iti_ms per trial)
-  generate_sequences.py            — sequence generation + seed search
-  parse_results.py                 — JATOS JSON → tidy DataFrame → .pkl
-  dev-server.js                    — local result capture server (port 3099)
-  index-continuous.html            — Vite entry
-  index-binary.html                — Vite entry
-  index-dev.html                   — dev launcher (both tasks)
+    continuous_sequences.{pkl,json}   — seed=934
+    binary_sequences.{pkl,json}       — seed=1229
+  generate_sequences.py
+  parse_results.py
+  test_timeline.mjs        — Node.js logic tests (imports build-trial-timeline.js directly)
+  test_browser.mjs         — Playwright end-to-end tests (true timings)
+  index-continuous.html
+  index-binary.html
+  index-dev.html
   package.json
-  vite.config.js                   — mode-based multi-entry build
+  vite.config.js
 ```
 
-### Key parameters (src/continuous/config.js and src/binary/config.js)
+### Key parameters
 
 ```js
+// src/{task}/config.js
 const N_TRIALS_TO_RUN        = 40;
 const N_OBS_TO_RUN           = 15;
-const SHOW_SLIDER_VALUE      = true;    // numeric label above slider thumb
-const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
-const BTI_MS                 = 5000;    // between-trial interval (ms)
-const ITI_SHORT_MS           = 1000;    // short ITI condition (ms); ITI_LONG=5000 baked into sequences
-const T_OBS_MS               = 7000;    // observation response deadline (ms)
-const SHOW_TRIAL_PERFORMANCE = true;    // post-trial summary plot
+const SHOW_SLIDER_VALUE      = true;
+const SLIDER_DEFAULT         = 'none';
+const BTI_MS                 = 5000;
+const ITI_SHORT_MS           = 1000;
+const T_OBS_MS               = 7000;
+const SHOW_TRIAL_PERFORMANCE = true;
+const MAX_TIMEOUTS_PER_TRIAL = 3;      // defined in timeline-builder.js
+const EARLY_EXIT_CODE        = 'EARLYEXIT'; // TODO: replace before publishing
 ```
-
-Key UI decisions:
-- Slider thumb label: large bold number (continuous) or blue%/red% split (binary)
-- Tutorial: 3-box progressive reveal; `urn-binary.js` shared across obs 1–5
-- Summary figures: dot plot stacking (r=3px) replaces tick marks — no overlap
-- BTI reset screen: "Trial X / 40 + pulsing text" provides perceptual trial break
-- Timeout screen: "Too slow" (red) + pulsing "Please provide a response" (black)
-- All slide widths: 70vw; flex layout; info boxes flex:1 to fill column height
 
 ### Commands
 
 ```bash
 cd task
-npm install               # first time only
-npm run dev               # ← USE THIS for local testing (serves both tasks)
-npm run dev:server        # local result capture (port 3099) — separate terminal
-npm run build:continuous  # production build → dist-continuous/
-npm run build:binary      # production build → dist-binary/
-# Note: npm run dev:continuous / dev:binary use a different Vite config
-# and will NOT work correctly for local testing
+npm install                    # first time only
+npm run dev                    # local dev server (serves both tasks via index-dev.html)
+npm run build:continuous       # production build → dist-continuous/
+npm run build:binary           # production build → dist-binary/
+node test_timeline.mjs         # fast logic tests (no browser needed, ~1s)
+node test_browser.mjs          # full Playwright E2E tests (~3 min, true timings)
 ```
+
+### Testing
+
+Two complementary test systems:
+
+**`test_timeline.mjs`** — imports `build-trial-timeline.js` directly; tests all
+timeout/replay/exit scenarios in Node.js without a browser. Run after any change
+to trial loop logic. 20 scenarios, all asserting on response recording, timeout
+counts, early exit, and summary skipping.
+
+**`test_browser.mjs`** — spins up a static HTTP server, loads the full built app
+in headless Chromium via Playwright, and automates consent → tutorial → main
+experiment. Tests normal submit, timeout replay, "1 timeout remaining" text,
+3-timeout termination screen, and multi-timeout-then-submit. Uses true timings
+(7s obs clock) so takes ~3 minutes.
+
+Run both before any deployment.
 
 ### Local testing pipeline
 
@@ -454,46 +284,32 @@ python task/parse_results.py --input_dir task/dev-results/ \
 ### Deploying to MindProbe
 
 **Pre-deployment checklist:**
-- Set `N_TRIALS_TO_RUN = 40` and `N_OBS_TO_RUN = 15` in both config files
 - Fill consent form placeholders (IRB number, study title, contact email)
-- Replace `cc=PLACEHOLDER` with real Prolific completion codes (one per study)
+- Replace `EARLY_EXIT_CODE = 'EARLYEXIT'` with real Prolific partial-payment code
+- Obtain binary task completion code from Prolific (continuous: `C3W3TF1O`)
+- Fund Prolific wallet; confirm payment rate with PI
 
-**Build and package:**
 ```bash
 npm run build:continuous && npm run build:binary
-python task/generate_jzip.py  # generates evidence-integration-{task}.jzip
+python task/generate_jzip.py   # generates evidence-integration-{task}.jzip
 ```
 
-**Import to MindProbe:**
-1. Studies → **+** → **Import Study** → select `.jzip` file
-2. Repeat for binary
-3. Verify each study has one component with `reloadable: false`
-4. Set **End Redirect URL** in study properties to Prolific completion URL
-
-**Key implementation details:**
-- `jatos.js` included in HTML `<head>` — JATOS injects real object in production;
-  `jatos-shim.js` activates only in local dev (posts to `dev-server.js` on port 3099)
-- Data saved via `jatos.endStudyAndRedirect(prolificURL, jsPsych.data.get().json())`
-- `beforeunload` guard warns participant against navigating away mid-task
-- Non-completions: **request return** on Prolific (not rejection) — slot reopens
+Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
 
 ### Prolific rollout plan
 
-- Publish both studies **simultaneously** with no inter-study screening filter
-- **Free task ordering** — Prolific randomises dashboard order, giving natural counterbalancing
-- Set both studies to **auto-approve** so second task appears on participant dashboard immediately
-- End screen in both tasks: *"one half of a two-part study — look for the other on your dashboard"*
-- **Payment:** ≥$12/hr recommended; set estimated completion time conservatively (e.g. 35 min)
-- **Recruitment messaging:** after each batch of completions, message participants via Prolific
-  nudging them toward the other task (Prolific → Messages → Message all [study] participants)
-- **Order as covariate:** record which task each participant did first from MindProbe submission
-  timestamps; include task order as a between-subjects covariate in λ correlation analysis
-- **Non-completions:** request return (not rejection) — slot reopens, participant not penalised
-- **Academic discount:** use Dartmouth email for 33.3% platform fee discount
-- **Device restriction:** set desktop-only in Prolific study settings; note in study description
+- Publish both studies **simultaneously**; no inter-study screening filter
+- **Free task ordering** — natural counterbalancing via Prolific dashboard
+- Set both to **auto-approve** so second task appears immediately after first
+- End screen: *"one half of a two-part study — look for the other on your dashboard"*
+- **Payment:** ≥$12/hr; set estimated time conservatively
+- **Non-completions:** request return (not rejection) — slot reopens
+- **Partial compensation:** participants who reach 3 timeouts in one trial receive
+  partial payment via the `EARLY_EXIT_CODE` Prolific completion path
 - **Academic discount:** use Dartmouth institutional email for 33.3% platform fee discount
+- **Device restriction:** desktop-only in Prolific study settings
 
-### Data format (downloaded from MindProbe / saved by dev-server)
+### Data format
 
 `parse_results.py` filters to `screen='observation'` rows and outputs:
 
@@ -503,11 +319,11 @@ python task/generate_jzip.py  # generates evidence-integration-{task}.jzip
 | `task` | str | `'continuous'` or `'binary'` |
 | `trial` | int | 0-indexed trial number |
 | `observation` | int | 0-indexed observation within trial |
-| `value` | int | Stimulus (-100..100 continuous; -1/1 binary) |
+| `value` | int | Stimulus value |
 | `true_mean` | float | Generative mean (continuous); NaN for binary |
 | `true_p` | float | True Bernoulli probability (binary); NaN for continuous |
-| `qid` | int | Unique sequence ID for each repeated sequence |
-| `iti_ms` | int | ITI condition for this trial (1000=short, 5000=long) |
+| `qid` | int | Unique sequence ID |
+| `iti_ms` | int | ITI for this trial (always 1000ms) |
 | `response` | float | Participant estimate (NaN if timed out) |
 | `timed_out` | bool | True if response deadline elapsed |
 | `rt` | float | Response time in ms (NaN if timed out) |

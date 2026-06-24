@@ -12,9 +12,10 @@ const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;    // float label above thumb
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
 const DEFAULT_VALUE          = 50;      // midpoint of [0,100] slider
-const BTI_MS       = 5000;
-const ITI_SHORT_MS  = 1000;
-const T_OBS_MS               = 7000;
+const DEBUG_FAST = false;   // set true for fast automated testing only
+const BTI_MS             = 5000;
+const ITI_SHORT_MS       = 1000;
+const T_OBS_MS           = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
 
 // Practice (tutorial) — fixed sequence: B B R B R (+1=blue, -1=red)

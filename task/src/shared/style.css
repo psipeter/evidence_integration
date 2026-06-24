@@ -396,8 +396,8 @@ input[type="range"].slider-last::-moz-range-thumb {
 
 /* ── Binary stimulus circle ──────────────────────────────────────────────── */
 .binary-circle {
-  width: clamp(100px, 14vw, 200px);
-  height: clamp(100px, 14vw, 200px);
+  width: clamp(60px, 11vw, 160px);
+  height: clamp(60px, 11vw, 160px);
   border-radius: 50%;
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }

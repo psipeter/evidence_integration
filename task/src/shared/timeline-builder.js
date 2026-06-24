@@ -5,8 +5,7 @@
  * Config shape:
  * {
  *   taskType:             'continuous' | 'binary'
- *   sequences:            array of { trial, qid, true_mean, true_std, true_p,
- *                                    values[], prefix_length, iti_ms }
+ *   sequences:            array of { trial, qid, true_mean, true_p, values[], iti_ms }
  *   practiceValues:       number[]
  *   practiceMean:         number  (true_mean for continuous, true_p for binary)
  *   practiceStd:          number  (continuous only)
@@ -35,7 +34,9 @@ import TutorialIntroBinaryPlugin        from './plugin-tutorial-intro-binary.js'
 import PracticeSummaryBinaryPlugin  from './plugin-practice-summary-binary.js';
 import ObservationBinaryPlugin      from './plugin-observation-binary.js';
 import TrialSummaryBinaryPlugin     from './plugin-trial-summary-binary.js';
+import TimeoutDemoPlugin            from './plugin-timeout-demo.js';
 import './style.css';
+import { buildTrialTimeline } from './build-trial-timeline.js';
 
 export function buildAndRun(cfg) {
   const {
@@ -54,10 +55,11 @@ export function buildAndRun(cfg) {
   } = cfg;
 
   const isBinary = taskType === 'binary';
+  const MAX_TIMEOUTS_PER_TRIAL = 3;
+  const EARLY_EXIT_CODE        = 'EARLYEXIT'; // TODO: replace before publishing
   const TutorialObsPlugin     = isBinary ? PracticeObservationBinaryPlugin : PracticeObservationPlugin;
   const TutorialSummaryPlugin = isBinary ? PracticeSummaryBinaryPlugin     : PracticeSummaryPlugin;
-  const TrialObsPlugin        = isBinary ? ObservationBinaryPlugin          : ObservationPlugin;
-  const TrialSummaryPlugin2   = isBinary ? TrialSummaryBinaryPlugin         : TrialSummaryPlugin;
+  const TrialObsPlugin        = isBinary ? ObservationBinaryPlugin         : ObservationPlugin;
 
   // Prolific PID — absent for pilot participants
   const urlParams   = new URLSearchParams(window.location.search);
@@ -94,6 +96,56 @@ export function buildAndRun(cfg) {
   const makeButton = (label, extraStyle = '') =>
     `<button class="jspsych-btn"
       style="font-size:1.6rem;padding:1rem 3.5rem;${extraStyle}">${label}</button>`;
+
+  const earlyExit = () => {
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    const el = document.querySelector('#jspsych-content');
+    if (!el) return;
+
+    const FADE = 800;
+    const showTerminated = () => {
+      el.innerHTML = `
+        <div class='screen-wrap' style='text-align:center;'>
+          <h2>Session terminated</h2>
+          <p style='margin-top:1rem;font-size:1.4rem;color:#555;'>
+            You reached the maximum number of timed-out responses in one trial.
+          </p>
+          <p style='margin-top:0.75rem;font-size:1.4rem;color:#555;'>
+            Your data has been saved and you will receive partial compensation.
+          </p>
+          <button id='early-exit-btn' class='jspsych-btn'
+            style='font-size:1.6rem;padding:1rem 3.5rem;margin-top:2rem;'>
+            Return to Prolific
+          </button>
+        </div>`;
+      const btn = document.getElementById('early-exit-btn');
+      if (btn) btn.addEventListener('pointerdown', () => {
+        if (isProlific) {
+          jatos.endStudyAndRedirect(
+            `https://app.prolific.com/submissions/complete?cc=${EARLY_EXIT_CODE}`,
+            jsPsych.data.get().json());
+        } else {
+          jatos.endStudy(jsPsych.data.get().json());
+        }
+      });
+    };
+
+    // Show "Too slow — all timeouts used" with fade-in/out/in, then terminated screen
+    el.innerHTML = `
+      <div class="iti-wrap" style="flex-direction:column;gap:1.2rem;">
+        <span style="font-size:3rem;font-weight:bold;color:#ef4444;">Too slow</span>
+        <span id="exit-pulse" style="
+          font-size:2rem;font-style:italic;color:#555;
+          opacity:0;transition:opacity ${FADE}ms ease;">
+          0 timeouts remaining
+        </span>
+      </div>`;
+    const pulse = el.querySelector('#exit-pulse');
+    setTimeout(() => { if (pulse) pulse.style.opacity = '1'; }, 100);
+    setTimeout(() => { if (pulse) pulse.style.opacity = '0'; }, 100 + FADE + 200);
+    setTimeout(() => { if (pulse) pulse.style.opacity = '1'; }, 100 + FADE * 2 + 400);
+    setTimeout(showTerminated, 100 + FADE * 3 + 600);
+  };
 
   const timeline = [];
 
@@ -132,6 +184,14 @@ export function buildAndRun(cfg) {
             </svg>
             <span style="font-size:1.4rem;">The study takes approximately <strong>45 minutes</strong> to complete.
             You will be compensated at the rate advertised on Prolific.</span>
+          </div>
+          <div class="consent-info-box" style="border-color:#ef4444;background:#fef2f2;">
+            <span style="font-size:1.6rem;flex-shrink:0;color:#ef4444;">&#9888;</span>
+            <span style="font-size:1.4rem;color:#b91c1c;">
+              You must respond within the ${tObsMs/1000}-second time limit.
+              If you time out <strong>${MAX_TIMEOUTS_PER_TRIAL} times in one trial</strong>,
+              the experiment will terminate and you will receive partial compensation.
+            </span>
           </div>
           <div class="consent-info-box consent-info-box--warning">
             <span style="font-size:1.6rem;flex-shrink:0;margin-top:1px;">&#9888;</span>
@@ -244,6 +304,15 @@ export function buildAndRun(cfg) {
     data: { screen: 'practice_summary' },
   });
 
+  // Timeout demo — three screens explaining the timeout mechanism
+  timeline.push({
+    type:         TimeoutDemoPlugin,
+    is_binary:    isBinary,
+    t_obs_ms:     tObsMs,
+    max_timeouts: MAX_TIMEOUTS_PER_TRIAL,
+    data: { screen: 'timeout_demo' },
+  });
+
   // Inter-trial reset before trial 1
   timeline.push({
     type:        InterTrialPlugin,
@@ -255,106 +324,24 @@ export function buildAndRun(cfg) {
   });
 
   // ── Trial loop ────────────────────────────────────────────────────────────
-  let lastResponse      = defaultValue;
-  let lastTimedOut      = false;
-  let lastTrialResponses = [];
+  const { timeline: trialTimelineNodes, isExited } = buildTrialTimeline(
+    {
+      sequences, sliderDefault, defaultValue, btiMs, tObsMs,
+      showSliderValue, showTrialPerformance,
+      MAX_TIMEOUTS_PER_TRIAL,
+    },
+    {
+      ItiClockPlugin, TrialObsPlugin,
+      TrialSummaryPlugin: isBinary ? TrialSummaryBinaryPlugin : TrialSummaryPlugin,
+      InterTrialPlugin,
+      isBinary,
+    },
+    jsPsych,
+    earlyExit,
+  );
+  for (const node of trialTimelineNodes) timeline.push(node);
 
-  for (let t = 0; t < sequences.length; t++) {
-    const seq = sequences[t];
-    lastResponse = defaultValue;
-    lastTimedOut  = false;
-    const trialResponses = [];
-    lastTrialResponses   = trialResponses;
-
-    for (let o = 0; o < seq.values.length; o++) {
-      if (o > 0) {
-        timeline.push({
-          type: ItiClockPlugin,
-          duration_ms: seq.iti_ms ?? 1000,
-          timed_out:   () => lastTimedOut,
-          data: { screen: 'iti', trial: t, observation: o, iti_ms: seq.iti_ms ?? 1000 },
-        });
-      }
-
-      timeline.push({
-        type: TrialObsPlugin,
-        value:          seq.values[o],
-        trial_num:      t + 1,
-        n_trials:       sequences.length,
-        t_obs_ms:       tObsMs,
-        // obs 0 of each trial: always start fresh (no carry-over)
-        slider_default: o === 0 ? 'none' : sliderDefault,
-        init_pos:       () => sliderDefault === 'last' && o > 0 ? lastResponse : defaultValue,
-        show_value:     showSliderValue,
-        data: {
-          screen:        'observation',
-          trial:         t,
-          observation:   o,
-          value:         seq.values[o],
-          true_mean:     seq.true_mean,
-          true_std:      seq.true_std,
-          true_p:        seq.true_p   ?? null,
-          qid:           seq.qid      ?? null,
-          prefix_length: seq.prefix_length ?? null,
-          std_condition: seq.std_condition ?? null,
-        },
-        on_finish: (data) => {
-          lastTimedOut = data.timed_out;
-          if (data.response !== null) lastResponse = data.response;
-          trialResponses.push({ observation: o, value: seq.values[o], response: data.response });
-        },
-      });
-    }
-
-    const _t         = t;
-    const _trueMean  = seq.true_mean;
-    const _trueStd   = seq.true_std;
-    const _values    = [...seq.values];
-    const _responses = trialResponses;
-    const _isLast    = t === sequences.length - 1;
-
-    if (!_isLast) {
-      timeline.push({
-        type: TrialSummaryPlugin2,
-        true_mean:        _trueMean,
-        true_std:         _trueStd,
-        true_p:           seq.true_p ?? null,
-        values:           _values,
-        responses:        () => _responses.map(r => r.response),
-        show_performance: showTrialPerformance,
-        is_last:          false,
-        data: { screen: 'inter_trial', trial: _t },
-      });
-      // BTI (between-trial interval) reset screen — always 5s
-      timeline.push({
-        type:        InterTrialPlugin,
-        trial_num:   _t + 2,
-        n_trials:    sequences.length,
-        duration_ms: btiMs,
-        is_binary:   isBinary,
-        data: { screen: 'inter_trial_reset', trial: _t },
-      });
-    }
-  }
-
-  // Final trial summary
-  {
-    const _t        = sequences.length - 1;
-    const _seq      = sequences[_t];
-    const _responses = lastTrialResponses;
-    timeline.push({
-      type: TrialSummaryPlugin2,
-      true_mean:        _seq.true_mean,
-      true_std:         _seq.true_std,
-      values:           [..._seq.values],
-      responses:        () => _responses.map(r => r.response),
-      show_performance: showTrialPerformance,
-      is_last:          true,
-      data: { screen: 'inter_trial', trial: _t },
-    });
-  }
-
-  // ── End ───────────────────────────────────────────────────────────────────
+  // ── End ─────────────────────────────────────────────────────────────────────
   const endStimulus = `
       <div class="screen-wrap" style="text-align:center;">
         <h2>Thank you!</h2>
@@ -367,11 +354,14 @@ export function buildAndRun(cfg) {
       </div>`;
 
   timeline.push({
-    type: jsPsychHtmlButtonResponse,
-    stimulus: endStimulus,
-    choices: ['Return to Prolific to complete your submission'],
-    button_html: (c) => makeButton(c),
-    data: { screen: 'end' },
+    timeline: [{
+      type: jsPsychHtmlButtonResponse,
+      stimulus: endStimulus,
+      choices: ['Return to Prolific to complete your submission'],
+      button_html: (c) => makeButton(c),
+      data: { screen: 'end' },
+    }],
+    conditional_function: () => !isExited(),
   });
 
   jsPsych.run(timeline);
