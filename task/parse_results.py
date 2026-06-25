@@ -102,6 +102,8 @@ def main():
     parser = argparse.ArgumentParser(description='Parse JATOS JSON exports to .pkl')
     parser.add_argument('--input_dir', required=True,
                         help='Directory containing JATOS result JSON files')
+    parser.add_argument('--files', nargs='+', default=None,
+                        help='Specific filenames within input_dir to parse (default: all)')
     parser.add_argument('--output', default='data/task_results.pkl',
                         help='Output .pkl path (default: data/task_results.pkl)')
     parser.add_argument('--verbose', action='store_true')
@@ -111,10 +113,14 @@ def main():
     output    = pathlib.Path(args.output)
 
     # Find all JSON files recursively
-    json_files = sorted(input_dir.rglob('*.json'))
-    if not json_files:
-        # Also try plain text files JATOS sometimes exports
-        json_files = sorted(input_dir.rglob('*.txt'))
+    if args.files:
+        json_files = sorted(input_dir / f for f in args.files
+                            if (input_dir / f).exists())
+    else:
+        json_files = sorted(input_dir.rglob('*.json'))
+        if not json_files:
+            # Also try plain text files JATOS sometimes exports
+            json_files = sorted(input_dir.rglob('*.txt'))
 
     if not json_files:
         print(f"No JSON files found in {input_dir}")

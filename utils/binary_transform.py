@@ -22,13 +22,17 @@ are exempt: their output is used directly.
 
 Normalisation conventions
 -------------------------
-  continuous task : x_norm = x / 100  (maps [-100,100] → [-1,1])
-                    r_denorm = r_norm * 100
+  continuous task : x_norm = 2*x/100 - 1  (maps stimulus [0, 100] → NEF [-1, 1])
+                    r_model = (r_norm + 1) / 2  (NEF output back to [0, 1] mean scale)
+                    r_slider = r_model * 100  (back to [0, 100] slider)
   binary task     : x_norm = x  (already {-1,+1}; identity)
-                    r_denorm = (r_norm + 1) / 2  (back to [0,1] probability)
+                    r_model = r_norm on [-1, 1] after Laplace smoothing
+                    r_prob = (r_norm + 1) / 2  (probability [0, 1] for display)
   carrabin        : observations already {-1,+1}; same transform applies
+  yoo             : observations already ~[-1, 1]; no rescaling
 """
 
+import numpy as np
 import pandas as pd
 
 # Models whose internal mechanisms already handle response calibration.
@@ -88,13 +92,38 @@ def apply_binary_transform(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def normalise_continuous(x):
-    """Map continuous task values [-100, 100] → [-1, 1]."""
-    return x / 100.0
+    """Map continuous-task stimulus [0, 100] → NEF input [-1, 1]."""
+    return 2.0 * float(x) / 100.0 - 1.0
 
 
-def denormalise_continuous(x_norm):
-    """Map model responses [-1, 1] → [-100, 100]."""
-    return x_norm * 100.0
+def denormalise_continuous_response(r_norm):
+    """Map NEF response [-1, 1] → normalized mean estimate [0, 1]."""
+    return (float(r_norm) + 1.0) / 2.0
+
+
+def denormalise_continuous_slider(r_norm):
+    """Map NEF response [-1, 1] → slider [0, 100]."""
+    return denormalise_continuous_response(r_norm) * 100.0
+
+
+def denormalise_continuous(r_norm):
+    """Alias for slider-scale denormalisation (backwards compatibility)."""
+    return denormalise_continuous_slider(r_norm)
+
+
+def nef_obs_values(values: np.ndarray, dataset: str) -> np.ndarray:
+    """Observation values in the scale expected by the NEF network."""
+    vals = np.asarray(values, dtype=float)
+    if dataset == "task_continuous":
+        return np.array([normalise_continuous(v) for v in vals], dtype=float)
+    return vals
+
+
+def nef_response_to_model_scale(response: float, dataset: str) -> float:
+    """Map raw NEF readout to the response scale used by other task models."""
+    if dataset == "task_continuous":
+        return denormalise_continuous_response(response)
+    return float(response)
 
 
 def normalise_binary(x):

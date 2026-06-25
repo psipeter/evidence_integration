@@ -57,7 +57,11 @@ from models.counting_integrator import (
 from utils.paths import data_path
 
 from fitting.model_params import _NEF_FIXED
-from utils.binary_transform import apply_binary_transform
+from utils.binary_transform import (
+    apply_binary_transform,
+    nef_obs_values,
+    nef_response_to_model_scale,
+)
 
 PARAM_DEFAULTS: dict = {
     **_NEF_FIXED,
@@ -357,9 +361,7 @@ def run(
         t_trial = time.time()
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        # Normalise continuous task values from [-100,100] to [-1,1]
-        if dataset == "task_continuous":
-            obs_values = obs_values / 100.0
+        obs_values = nef_obs_values(obs_values, dataset)
         # seed = trial number directly
         p = {**pfull, "seed": int(trial)}
         if _activity_map is not None:
@@ -389,7 +391,7 @@ def run(
                 "pid": pid,
                 "trial": int(trial),
                 "observation": int(row["observation"]),
-                "response": float(responses[i]),
+                "response": nef_response_to_model_scale(float(responses[i]), dataset),
             }
             rows.append(entry)
 
