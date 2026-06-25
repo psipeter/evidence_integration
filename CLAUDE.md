@@ -4,6 +4,13 @@ This file is the source of truth for Claude when working on this project.
 Read it fully before making any changes or suggestions. Prefer this file over
 README.md when they conflict.
 
+**After any conversation compaction**: re-read this file in full before doing
+anything else. Compaction summaries omit conventions. Key ones to remember:
+- Figures save as PDF only — never convert to PNG/SVG or upload images to chat
+- Run node test_timeline.mjs before any timeline change
+- Run node test_browser.mjs before any deployment
+- All NEF simulation data → data/runs/; figures → figures/
+
 ---
 
 ## Scientific goals

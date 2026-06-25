@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from models.math_models import _run_primacy_recency
@@ -212,6 +212,15 @@ def prefix_stds(df):
                .rename('std'))
 
 
+def add_resid(df: pd.DataFrame) -> pd.DataFrame:
+    """Add resid = response - mean(response | qid, observation)."""
+    means = (df.groupby(['qid', 'observation'])['response']
+               .mean().reset_index().rename(columns={'response': 'qid_mean'}))
+    df2 = df.merge(means, on=['qid', 'observation'], how='left')
+    df2['resid'] = df2['response'] - df2['qid_mean']
+    return df2
+
+
 # ── Plot helpers ──────────────────────────────────────────────────────────────
 
 def _prefix_line(ax):
@@ -264,7 +273,7 @@ def plot_delta(ax, model_df, human_df, task, palette, title):
     sns.despine(ax=ax, top=True, right=True)
 
 
-def plot_prefix_kde(ax, nef_df, human_df, palette, title):
+def plot_prefix_kde(ax, nef_df, human_df, palette, title, x_max=None):
     """KDE of within-prefix response variability (NEF + human only)."""
     handles, labels = [], []
     all_vals = []
@@ -289,8 +298,9 @@ def plot_prefix_kde(ax, nef_df, human_df, palette, title):
         ax.set_title(title, fontsize=9, fontweight='bold')
         return
 
-    x_max = np.quantile(all_vals, 0.99) * 1.15
-    x     = np.linspace(0, x_max, 300)
+    if x_max is None:
+        x_max = np.quantile(all_vals, 0.99) * 1.15
+    x = np.linspace(0, x_max, 300)
 
     for name, vals in sources:
         c   = palette.get(name, HUM_COL)
@@ -313,17 +323,86 @@ def plot_prefix_kde(ax, nef_df, human_df, palette, title):
     sns.despine(ax=ax, top=True, right=True)
 
 
+def plot_autocorr(ax, nef_df, human_df, palette, title, max_lag=4):
+    """Within-trial residual autocorrelation vs lag (analogous to carrabin T4).
+
+    resid = response - mean(response | qid, observation)
+
+    For a deterministic model all repeats of the same qid give identical
+    responses, so resid = 0 and autocorrelation is undefined. This panel
+    is therefore only plotted for stochastic models (NEF) and human data.
+
+    With only one participant we pool residuals across all trials rather
+    than averaging per-pid correlations as in carrabin.
+    """
+    lags = list(range(1, max_lag + 1))
+    handles, labels = [], []
+
+    sources = []
+    if nef_df is not None and not nef_df.empty:
+        if 'qid' in nef_df.columns and not nef_df['qid'].isna().all():
+            sources.append(('NEF', add_resid(nef_df.copy()),
+                             palette.get('NEF', '0.5'), 1.8))
+    if human_df is not None and not human_df.empty:
+        if 'qid' in human_df.columns and not human_df['qid'].isna().all():
+            sources.append(('Human', add_resid(human_df.copy()),
+                             HUM_COL, HUM_LW))
+
+    if not sources:
+        ax.text(0.5, 0.5, 'NEF + Human only\n(deterministic models: resid = 0)',
+                ha='center', va='center', transform=ax.transAxes,
+                color='0.5', style='italic', fontsize=8)
+        sns.despine(ax=ax, left=True, bottom=True)
+        ax.set_title(title, fontsize=9, fontweight='bold')
+        return
+
+    for mt, df, color, lw in sources:
+        lag_rs = []
+        for lag in lags:
+            pairs = []
+            for (qid, obs_i), grp in df.groupby(['qid', 'observation']):
+                # Partner observations: same qid, observation = obs_i + lag
+                partner = df[(df['qid'] == qid) &
+                             (df['observation'] == obs_i + lag)]['resid'].values
+                r_i = grp['resid'].values
+                # Pair up by trial order within qid
+                n = min(len(r_i), len(partner))
+                if n >= 2:
+                    pairs.extend(zip(r_i[:n], partner[:n]))
+            if len(pairs) < 3:
+                lag_rs.append(np.nan)
+                continue
+            arr = np.array(pairs)
+            if arr[:, 0].std() < 1e-10 or arr[:, 1].std() < 1e-10:
+                lag_rs.append(np.nan)
+                continue
+            rv, _ = pearsonr(arr[:, 0], arr[:, 1])
+            lag_rs.append(rv)
+        if all(np.isnan(v) for v in lag_rs):
+            continue
+        ax.plot(lags, lag_rs, 'o-', color=color, lw=lw, ms=5)
+        handles.append(Line2D([0],[0], color=color, lw=lw)); labels.append(mt)
+
+    ax.axhline(0, color='0.7', lw=0.8, ls='--')
+    ax.set_xlabel('Lag (observations)')
+    ax.set_ylabel('Autocorrelation of residuals')
+    ax.set_xticks(lags)
+    ax.set_title(title, fontsize=9, fontweight='bold')
+    ax.legend(handles, labels, fontsize=6, frameon=True, framealpha=0.9)
+    sns.despine(ax=ax, top=True, right=True)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--alpha_0',             type=float, default=1.0)
+    p.add_argument('--alpha_0',             type=float, default=0.3)
     p.add_argument('--lambda_',             type=float, default=0.5)
     p.add_argument('--gamma',               type=float, default=0.9)
-    p.add_argument('--eps_p',               type=float, default=0.5)
-    p.add_argument('--eps_r',               type=float, default=0.5)
-    p.add_argument('--n_neurons',           type=int,   default=None)
-    p.add_argument('--n_neurons_counting',  type=int,   default=None)
+    p.add_argument('--eps_p',               type=float, default=0.1)
+    p.add_argument('--eps_r',               type=float, default=0.9)
+    p.add_argument('--n_neurons',           type=int,   default=100)
+    p.add_argument('--n_neurons_counting',  type=int,   default=200)
     p.add_argument('--seq_dir',             default='task/sequences')
     p.add_argument('--human_pkl',           default='data/task_results.pkl')
     p.add_argument('--skip_nef',            action='store_true')
@@ -353,7 +432,11 @@ def main():
     human_pkl = Path(args.human_pkl)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 3, figsize=(13, 8), constrained_layout=True)
+    fig, axes = plt.subplots(2, 4, figsize=(17, 8), constrained_layout=True)
+
+    # First pass: collect all prefix std values to compute shared KDE x_max
+    _kde_vals_all = []
+    _task_data = {}  # cache computed dataframes for second pass
 
     for row, task in enumerate(['binary', 'continuous']):
         seq_df = pd.read_pickle(seq_dir / f'{task}_sequences.pkl')
@@ -392,18 +475,41 @@ def main():
             ignore_index=True)
 
         human_df = prepare_human(human_pkl, task) if human_pkl.exists() else None
+        _task_data[task] = (seq_df, math_df, nef_df, nef_raw, all_df, human_df)
+
+        # Collect prefix stds for shared x_max
+        for _df, _name in [(nef_raw, 'nef'), (human_df, 'human')]:
+            if _df is not None and not _df.empty:
+                _stds = prefix_stds(_df)
+                if len(_stds) >= 2:
+                    _kde_vals_all.extend(_stds.values.tolist())
 
         label = 'Binary' if task == 'binary' else 'Continuous'
+
+        # Defer KDE plotting to after loop (needs shared x_max)
+        _task_data[task] = _task_data[task] + (label, disp_palette)
+
+    # Compute shared x_max for KDE panels across both tasks
+    _shared_x_max = (np.quantile(_kde_vals_all, 0.99) * 1.15
+                     if _kde_vals_all else None)
+
+    # Second pass: plot all panels
+    for row, task in enumerate(['binary', 'continuous']):
+        seq_df, math_df, nef_df, nef_raw, all_df, human_df, label, disp_palette = _task_data[task]
 
         plot_rmse(axes[row,0], all_df, human_df, task, disp_palette,
                   f'{label} — RMSE vs obs')
         plot_delta(axes[row,1], all_df, human_df, task, disp_palette,
                    f'{label} — |Δresponse| vs obs')
-        # For KDE: use raw NEF (un-display-renamed) so model_type='NEF'
         plot_prefix_kde(axes[row,2],
                         nef_raw if nef_df is not None else None,
                         human_df, palette,
-                        f'{label} — Prefix variability (KDE)')
+                        f'{label} — Prefix variability (KDE)',
+                        x_max=_shared_x_max)
+        plot_autocorr(axes[row,3],
+                      nef_raw if nef_df is not None else None,
+                      human_df, palette,
+                      f'{label} — Residual autocorrelation')
 
     for i, ax in enumerate(axes.flat):
         ax.text(-0.10, 1.05, chr(65+i), transform=ax.transAxes,
