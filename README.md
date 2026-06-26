@@ -212,7 +212,6 @@ task/
     binary_sequences.{pkl,json}       — seed=1229
   generate_sequences.py
   parse_results.py
-  test_timeline.mjs        — Node.js logic tests (imports build-trial-timeline.js directly)
   test_browser.mjs         — Playwright end-to-end tests (true timings)
   index-continuous.html
   index-binary.html
@@ -245,18 +244,12 @@ npm install                    # first time only
 npm run dev                    # local dev server (serves both tasks via index-dev.html)
 npm run build:continuous       # production build → dist-continuous/
 npm run build:binary           # production build → dist-binary/
-node test_timeline.mjs         # fast logic tests (no browser needed, ~1s)
 node test_browser.mjs          # full Playwright E2E tests (~3 min, true timings)
 ```
 
 ### Testing
 
 Two complementary test systems:
-
-**`test_timeline.mjs`** — imports `build-trial-timeline.js` directly; tests all
-timeout/replay/exit scenarios in Node.js without a browser. Run after any change
-to trial loop logic. 20 scenarios, all asserting on response recording, timeout
-counts, early exit, and summary skipping.
 
 **`test_browser.mjs`** — spins up a static HTTP server, loads the full built app
 in headless Chromium via Playwright, and automates consent → tutorial → main

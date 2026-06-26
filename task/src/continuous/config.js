@@ -7,16 +7,20 @@
 import sequencesData from '../../sequences/continuous_sequences.json';
 
 // ── Parameters ────────────────────────────────────────────────────────────
-const N_TRIALS_TO_RUN        = 40;
+// Set TEST_MODE=true for quick dev runs: skip/take tutorial, 20 trials, 500ms BTI
+const TEST_MODE              = true;
+
+const N_TRIALS_TO_RUN        = TEST_MODE ? 20  : 40;
 const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;    // float label above thumb
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
 const DEFAULT_VALUE          = 50;      // midpoint of [0, 100]
 const DEBUG_FAST = false;   // set true for fast automated testing only
-const BTI_MS             = 5000;
+const BTI_MS             = TEST_MODE ? 500  : 5000;
 const ITI_SHORT_MS       = 1000;
 const T_OBS_MS           = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
+const DISTRACTOR_TYPE        = 'popup'; // 'none' | 'iti_length' | 'popup'
 
 // ── Practice (tutorial) ───────────────────────────────────────────────────
 // Fixed sequence: 5 values drawn from Normal(20, 25), all within 1σ of mean,
@@ -41,4 +45,6 @@ export const config = {
   itiShortMs:         ITI_SHORT_MS,
   tObsMs:               T_OBS_MS,
   showTrialPerformance: SHOW_TRIAL_PERFORMANCE,
+  distractorType:       DISTRACTOR_TYPE,
+  testMode:             TEST_MODE,
 };

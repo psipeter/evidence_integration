@@ -8,10 +8,15 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   const {
     sequences, sliderDefault, defaultValue, btiMs, tObsMs,
     showSliderValue, showTrialPerformance, MAX_TIMEOUTS_PER_TRIAL = 3,
+    distractorType = 'iti_length',
   } = cfg;
 
   const { ItiClockPlugin, TrialObsPlugin, TrialSummaryPlugin,
           InterTrialPlugin, isBinary } = plugins;
+
+  // ITI duration for distract condition
+  // Only 'iti_length' extends the ITI; other types ('popup', etc.) use default
+  const ITI_DISTRACT_MS = distractorType === 'iti_length' ? 5000 : null;
 
   let lastResponse = defaultValue, timedOut = false, trialTimeouts = 0;
   let exitFlag = false, lastTrialResponses = [];
@@ -28,8 +33,16 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
 
       if (o > 0) {
         trialTimeline.push({
-          timeline: [{ type: ItiClockPlugin, duration_ms: seq.iti_ms ?? 1000,
-            data: { screen: 'iti', trial: t, observation: _o, iti_ms: seq.iti_ms ?? 1000 } }],
+          timeline: [{ type: ItiClockPlugin,
+            duration_ms: (seq.iti_condition === 'distract' && ITI_DISTRACT_MS !== null)
+              ? ITI_DISTRACT_MS : (seq.iti_ms ?? 1000),
+            iti_condition:   seq.iti_condition ?? 'control',
+            distractor_type: distractorType,
+            is_binary:       isBinary,
+            data: { screen: 'iti', trial: t, observation: _o,
+                    iti_ms: seq.iti_ms ?? 1000,
+                    iti_condition:   seq.iti_condition ?? 'control',
+                    distractor_type: distractorType } }],
           conditional_function: () => !exitFlag,
         });
       }

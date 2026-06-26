@@ -145,6 +145,61 @@ def run_nef(seq_df, task, alpha_0, lambda_, cache_path,
     return df
 
 
+def run_noisy_counting(seq_df, task, mu, sigma_c, nu, cache_path, n_seeds=10):
+    """Run NoisyCounting on binary task sequences.
+    Binary-only: operates on {-1,+1} observations.
+    Stochastic (sigma_c, nu > 0), so run n_seeds times and average.
+    Uses carrabin-fitted median params by default.
+    NoisyCounting is exempt from Laplace smoothing (self-calibrated).
+    """
+    if task != 'binary':
+        return None
+    if cache_path.exists():
+        print(f'[nc] Loading cache: {cache_path}')
+        return pd.read_pickle(cache_path)
+
+    from tqdm import tqdm
+    print(f'[nc] binary: mu={mu} sigma_c={sigma_c} nu={nu} seeds={n_seeds}')
+
+    # Build a trials list in the format math_models.run expects
+    from models.math_models import _trial_seed
+    rows = []
+    for tid in tqdm(sorted(seq_df['trial'].unique()), desc='NoisyCounting'):
+        g    = seq_df[seq_df['trial'] == tid].sort_values('observation')
+        vals = g['value'].tolist()
+        tm   = float(g['true_mean'].iloc[0])
+        tp   = float(g['true_p'].iloc[0])
+        qid  = int(g['qid'].iloc[0])
+        for seed_offset in range(n_seeds):
+            rng = np.random.RandomState(_trial_seed(tid + seed_offset * 1000, tid))
+            r = 0.0; p_hat = 0.0
+            for n, (_, row) in enumerate(g.iterrows()):
+                xi      = rng.normal(0.0, sigma_c)
+                r       = r + float(vals[n]) * mu + xi
+                epsilon = rng.normal(0.0, nu)
+                p_hat   = p_hat + (r - p_hat) * float(np.exp(epsilon))
+                p_hat   = float(np.clip(p_hat, -1.0, 1.0))
+                rows.append({'model_type': 'NoisyCounting', 'trial': int(tid),
+                             'observation': int(row['observation']),
+                             'response': p_hat, 'seed_offset': seed_offset,
+                             'true_mean': tm, 'true_p': tp, 'qid': qid,
+                             'prefix_length': PREFIX, 'task': task})
+
+    if not rows:
+        return None
+    df = pd.DataFrame(rows)
+    # Average across seeds for each (trial, obs)
+    df = df.groupby(['model_type','trial','observation','true_mean','true_p','qid',
+                     'prefix_length','task'])['response'].mean().reset_index()
+    # NoisyCounting is exempt from Laplace smoothing
+    df['response_raw'] = df['response']
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_pickle(cache_path)
+    print(f'[nc] Saved: {cache_path}')
+    return df
+
+
+
 def prepare_human(human_pkl, task):
     df = pd.read_pickle(human_pkl)
     t  = df[(df['task'] == task) & ~df['timed_out']].copy()
@@ -274,16 +329,17 @@ def plot_delta(ax, model_df, human_df, task, palette, title):
 
 
 def plot_prefix_kde(ax, nef_df, human_df, palette, title, x_max=None):
-    """KDE of within-prefix response variability (NEF + human only)."""
+    """KDE of within-prefix response variability (stochastic models + human)."""
     handles, labels = [], []
     all_vals = []
 
     sources = []
     if nef_df is not None and not nef_df.empty:
-        stds = prefix_stds(nef_df)
-        if len(stds) >= 2:
-            sources.append(('NEF', stds.values))
-            all_vals.extend(stds.values)
+        for mt in nef_df['model_type'].unique():
+            stds = prefix_stds(nef_df[nef_df['model_type'] == mt])
+            if len(stds) >= 2:
+                sources.append((mt, stds.values))
+                all_vals.extend(stds.values)
     if human_df is not None:
         stds = prefix_stds(human_df)
         if len(stds) >= 2:
@@ -330,7 +386,7 @@ def plot_autocorr(ax, nef_df, human_df, palette, title, max_lag=4):
 
     For a deterministic model all repeats of the same qid give identical
     responses, so resid = 0 and autocorrelation is undefined. This panel
-    is therefore only plotted for stochastic models (NEF) and human data.
+    is therefore only plotted for stochastic models (NEF, NoisyCounting) and human data.
 
     With only one participant we pool residuals across all trials rather
     than averaging per-pid correlations as in carrabin.
@@ -341,8 +397,10 @@ def plot_autocorr(ax, nef_df, human_df, palette, title, max_lag=4):
     sources = []
     if nef_df is not None and not nef_df.empty:
         if 'qid' in nef_df.columns and not nef_df['qid'].isna().all():
-            sources.append(('NEF', add_resid(nef_df.copy()),
-                             palette.get('NEF', '0.5'), 1.8))
+            for mt in nef_df['model_type'].unique():
+                sub = nef_df[nef_df['model_type'] == mt]
+                sources.append((mt, add_resid(sub.copy()),
+                                palette.get(mt, '0.5'), 1.8))
     if human_df is not None and not human_df.empty:
         if 'qid' in human_df.columns and not human_df['qid'].isna().all():
             sources.append(('Human', add_resid(human_df.copy()),
@@ -401,6 +459,11 @@ def main():
     p.add_argument('--gamma',               type=float, default=0.9)
     p.add_argument('--eps_p',               type=float, default=0.1)
     p.add_argument('--eps_r',               type=float, default=0.9)
+    p.add_argument('--nc_mu',               type=float, default=0.164)
+    p.add_argument('--nc_sigma_c',          type=float, default=0.001)
+    p.add_argument('--nc_nu',               type=float, default=0.058)
+    p.add_argument('--nc_seeds',            type=int,   default=10)
+    p.add_argument('--skip_nc',             action='store_true')
     p.add_argument('--n_neurons',           type=int,   default=100)
     p.add_argument('--n_neurons_counting',  type=int,   default=200)
     p.add_argument('--seq_dir',             default='task/sequences')
@@ -411,11 +474,11 @@ def main():
     args = p.parse_args()
 
     apply_style()
-    a0, lam    = args.alpha_0, args.lambda_
-    seq_dir    = Path(args.seq_dir)
+    a0, lam     = args.alpha_0, args.lambda_
+    seq_dir     = Path(args.seq_dir)
     nef_run_dir = resolve_run_folder('pilot_nef')
 
-    MODEL_NAMES = ['Bayes', 'RL_lambda', 'LI', 'PR', 'NEF']
+    MODEL_NAMES = ['Bayes', 'RL_lambda', 'LI', 'PR', 'NEF', 'NoisyCounting']
     colors  = get_palette(len(MODEL_NAMES))
     palette = dict(zip(MODEL_NAMES, colors))
     palette['Human'] = HUM_COL
@@ -430,27 +493,26 @@ def main():
     disp_palette = {DISPLAY.get(k, k): v for k, v in palette.items()}
 
     human_pkl = Path(args.human_pkl)
-
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(2, 4, figsize=(17, 8), constrained_layout=True)
 
-    # First pass: collect all prefix std values to compute shared KDE x_max
-    _kde_vals_all = []
-    _task_data = {}  # cache computed dataframes for second pass
+    # ── Per-task data collection ──────────────────────────────────────────────
+    task_data   = {}   # stores all dfs per task for second-pass plotting
+    kde_vals_all = []  # accumulate prefix stds for shared x_max
 
-    for row, task in enumerate(['binary', 'continuous']):
+    for task in ['binary', 'continuous']:
         seq_df = pd.read_pickle(seq_dir / f'{task}_sequences.pkl')
 
         # Math models
         math_df = _run_agents(seq_df, task, a0, lam,
                                args.gamma, args.eps_p, args.eps_r)
-        math_df['model_type'] = math_df['model_type'].map(lambda x: DISPLAY.get(x, x))
+        math_df['model_type'] = math_df['model_type'].map(
+            lambda x: DISPLAY.get(x, x))
 
         # NEF
-        nef_df = None
+        nef_raw = None
+        nef_df  = None
         if not args.skip_nef:
-            n_suf = (f'_n{args.n_neurons}'          if args.n_neurons          else '') + \
-                    (f'_nc{args.n_neurons_counting}' if args.n_neurons_counting else '')
+            n_suf = (f'_n{args.n_neurons}' if args.n_neurons else '') +                     (f'_nc{args.n_neurons_counting}' if args.n_neurons_counting else '')
             cache         = nef_run_dir / f'pilot_nef_{task}_a{a0:.4f}_l{lam:.4f}{n_suf}.pkl'
             inspect_cache = FIGURES_DIR / f'inspect_nef_a{a0:.4f}_l{lam:.4f}{n_suf}.pkl'
             if args.force_nef:
@@ -470,46 +532,71 @@ def main():
             nef_df = nef_raw.copy()
             nef_df['model_type'] = DISPLAY['NEF']
 
-        all_df = pd.concat(
-            [math_df] + ([nef_df] if nef_df is not None else []),
-            ignore_index=True)
+        # NoisyCounting — binary only
+        nc_raw = None
+        nc_df  = None
+        if task == 'binary' and not args.skip_nc:
+            nc_suf   = f'_mu{args.nc_mu:.3f}_sc{args.nc_sigma_c:.4f}_nu{args.nc_nu:.3f}'
+            nc_cache = nef_run_dir / f'pilot_nc_binary{nc_suf}.pkl'
+            nc_raw   = run_noisy_counting(seq_df, task, args.nc_mu,
+                                          args.nc_sigma_c, args.nc_nu,
+                                          nc_cache, args.nc_seeds)
+            if nc_raw is not None:
+                nc_df = nc_raw.copy()
+                nc_df['model_type'] = 'NoisyCounting'
 
         human_df = prepare_human(human_pkl, task) if human_pkl.exists() else None
-        _task_data[task] = (seq_df, math_df, nef_df, nef_raw, all_df, human_df)
+
+        # Restrict models to the trials present in human data (if available)
+        if human_df is not None:
+            human_trials = set(human_df['trial'].unique())
+            math_df  = math_df[math_df['trial'].isin(human_trials)]
+            if nef_df  is not None: nef_df  = nef_df[nef_df['trial'].isin(human_trials)]
+            if nef_raw is not None: nef_raw = nef_raw[nef_raw['trial'].isin(human_trials)]
+            if nc_df   is not None: nc_df   = nc_df[nc_df['trial'].isin(human_trials)]
+            if nc_raw  is not None: nc_raw  = nc_raw[nc_raw['trial'].isin(human_trials)]
+
+        # Combine all models for RMSE / delta panels
+        all_df = pd.concat(
+            [math_df]
+            + ([nef_df] if nef_df is not None else [])
+            + ([nc_df]  if nc_df  is not None else []),
+            ignore_index=True)
+
+        # Stochastic models for KDE / autocorr panels
+        stoch_df = pd.concat(
+            [d for d in [nef_raw, nc_raw] if d is not None],
+            ignore_index=True) if any(d is not None for d in [nef_raw, nc_raw]) else None
 
         # Collect prefix stds for shared x_max
-        for _df, _name in [(nef_raw, 'nef'), (human_df, 'human')]:
+        for _df in [nef_raw, nc_raw, human_df]:
             if _df is not None and not _df.empty:
                 _stds = prefix_stds(_df)
                 if len(_stds) >= 2:
-                    _kde_vals_all.extend(_stds.values.tolist())
+                    kde_vals_all.extend(_stds.values.tolist())
 
         label = 'Binary' if task == 'binary' else 'Continuous'
+        task_data[task] = dict(seq_df=seq_df, all_df=all_df, stoch_df=stoch_df,
+                               human_df=human_df, label=label, disp_palette=disp_palette)
 
-        # Defer KDE plotting to after loop (needs shared x_max)
-        _task_data[task] = _task_data[task] + (label, disp_palette)
+    # Shared x_max for KDE panels
+    shared_x_max = (np.quantile(kde_vals_all, 0.99) * 1.15 if kde_vals_all else None)
 
-    # Compute shared x_max for KDE panels across both tasks
-    _shared_x_max = (np.quantile(_kde_vals_all, 0.99) * 1.15
-                     if _kde_vals_all else None)
+    # ── Plotting ──────────────────────────────────────────────────────────────
+    fig, axes = plt.subplots(2, 4, figsize=(17, 8), constrained_layout=True)
 
-    # Second pass: plot all panels
     for row, task in enumerate(['binary', 'continuous']):
-        seq_df, math_df, nef_df, nef_raw, all_df, human_df, label, disp_palette = _task_data[task]
+        d = task_data[task]
 
-        plot_rmse(axes[row,0], all_df, human_df, task, disp_palette,
-                  f'{label} — RMSE vs obs')
-        plot_delta(axes[row,1], all_df, human_df, task, disp_palette,
-                   f'{label} — |Δresponse| vs obs')
-        plot_prefix_kde(axes[row,2],
-                        nef_raw if nef_df is not None else None,
-                        human_df, palette,
-                        f'{label} — Prefix variability (KDE)',
-                        x_max=_shared_x_max)
-        plot_autocorr(axes[row,3],
-                      nef_raw if nef_df is not None else None,
-                      human_df, palette,
-                      f'{label} — Residual autocorrelation')
+        plot_rmse(axes[row,0], d['all_df'], d['human_df'], task, d['disp_palette'],
+                  f'{d["label"]} — RMSE vs obs')
+        plot_delta(axes[row,1], d['all_df'], d['human_df'], task, d['disp_palette'],
+                   f'{d["label"]} — |Δresponse| vs obs')
+        plot_prefix_kde(axes[row,2], d['stoch_df'], d['human_df'], palette,
+                        f'{d["label"]} — Prefix variability (KDE)',
+                        x_max=shared_x_max)
+        plot_autocorr(axes[row,3], d['stoch_df'], d['human_df'], palette,
+                      f'{d["label"]} — Residual autocorrelation')
 
     for i, ax in enumerate(axes.flat):
         ax.text(-0.10, 1.05, chr(65+i), transform=ax.transAxes,

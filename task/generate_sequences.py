@@ -375,17 +375,29 @@ def generate_task_sequences(task, args, rng):
     # ITI condition: randomly assign n_repeats//2 repeats per qid to short ITI,
     # the rest to long ITI. Randomization is per-qid using a fixed seed so
     # the assignment is reproducible but not systematically ordered.
-    ITI_MS    = 1000  # all trials use the same ITI
+    ITI_MS = 1000  # base ITI duration (ms) for all trials
+    # ITI condition: assign n_repeats//2 repeats per qid to 'control',
+    # the rest to 'distract'.  Uses a derived RNG so assignment is
+    # reproducible but independent of the stimulus RNG.
+    iti_rng = np.random.default_rng(int(rng.integers(2**31)))
+    iti_condition_schedule = {}
+    for tmpl in templates:
+        schedule = (['control']  * (n_repeats // 2) +
+                    ['distract'] * (n_repeats - n_repeats // 2))
+        iti_rng.shuffle(schedule)
+        iti_condition_schedule[tmpl['qid']] = schedule
+
     rep_count = {}  # tracks how many repeats each qid has seen
     trials = []
     if full_repeat:
         for tmpl in templates:
             qid = tmpl['qid']
             for _ in range(n_repeats):
-                rep_idx = rep_count.get(qid, 0)
-                iti_ms  = ITI_MS
+                rep_idx       = rep_count.get(qid, 0)
+                iti_condition = iti_condition_schedule[qid][rep_idx]
                 rep_count[qid] = rep_idx + 1
-                trials.append({**tmpl, 'values': tmpl['prefix'], 'iti_ms': iti_ms})
+                trials.append({**tmpl, 'values': tmpl['prefix'],
+                               'iti_ms': ITI_MS, 'iti_condition': iti_condition})
     else:
         for _rep in range(n_repeats):
             suffixes = build_suffix_block(rng, task, templates, suffix_length,
@@ -393,12 +405,12 @@ def generate_task_sequences(task, args, rng):
                                          k_std_cont=getattr(args, 'k_std_cont', 0.7),
                                          k_bin=getattr(args, 'k_bin', 0.7))
             for q, tmpl in enumerate(templates):
-                qid     = tmpl['qid']
-                rep_idx = rep_count.get(qid, 0)
-                iti_ms  = ITI_MS
+                qid           = tmpl['qid']
+                rep_idx       = rep_count.get(qid, 0)
+                iti_condition = iti_condition_schedule[qid][rep_idx]
                 rep_count[qid] = rep_idx + 1
                 trials.append({**tmpl, 'values': tmpl['prefix'] + suffixes[q],
-                               'iti_ms': iti_ms})
+                               'iti_ms': ITI_MS, 'iti_condition': iti_condition})
 
     # Shuffle trials such that:
     #   1. No two consecutive trials share the same qid (same prefix).
@@ -418,6 +430,9 @@ def generate_task_sequences(task, args, rng):
                 if t['qid'] == last_qid:
                     return False
                 if is_first:
+                    # First trial must be 'distract' (for dev testing)
+                    if t.get('iti_condition') != 'distract':
+                        return False
                     if task == 'continuous':
                         return abs(t['true_mean'] - 50.0) > 10.0
                     else:
@@ -444,6 +459,7 @@ def generate_task_sequences(task, args, rng):
                 'true_mean': trial['true_mean'],
                 'true_p': trial['true_p'],
                 'iti_ms': trial['iti_ms'],
+                'iti_condition': trial['iti_condition'],
             })
         json_trials.append({
             'trial': t, 'qid': trial['qid'],
@@ -451,6 +467,7 @@ def generate_task_sequences(task, args, rng):
             'true_p':    None if math.isnan(trial['true_p'])    else trial['true_p'],
             'values': trial['values'], 'prefix_length': prefix_length,
             'iti_ms': trial['iti_ms'],
+            'iti_condition': trial['iti_condition'],
         })
 
     df = pd.DataFrame(records)

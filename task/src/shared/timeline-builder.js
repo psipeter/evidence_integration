@@ -52,6 +52,8 @@ export function buildAndRun(cfg) {
     itiShortMs = 1000,
     tObsMs,
     showTrialPerformance,
+    distractorType = 'iti_length',
+    testMode       = false,
   } = cfg;
 
   const isBinary = taskType === 'binary';
@@ -219,12 +221,31 @@ export function buildAndRun(cfg) {
     on_finish: (data) => { data.consent_given = true; },
   });
 
-  // ── Tutorial intro (continuous only) ────────────────────────────────────────
-  // The intro shows obs 0 with the interactive reveal, then finishes with a
-  // response — so the practice loop starts from obs 1 (skipping obs 0).
+  // ── Tutorial ─────────────────────────────────────────────────────────────────
+  // In test mode, show a 'Skip tutorial' button before the tutorial.
+  let skipTutorial = false;
+  if (testMode) {
+    timeline.push({
+      type: jsPsychHtmlButtonResponse,
+      stimulus: `<div class='screen-wrap' style='text-align:center;'>
+        <h2>Developer test mode</h2>
+        <p style='margin-top:1rem;font-size:1.4rem;color:#555;'>
+          20 trials · short BTI · no timeout
+        </p></div>`,
+      choices: ['Take tutorial', 'Skip tutorial'],
+      button_html: (c) => makeButton(c),
+      data: { screen: 'test_mode_choice' },
+      on_finish: (data) => { skipTutorial = data.response === 1; },
+    });
+  }
+
+  // ── Tutorial (conditionally skipped in test mode) ──────────────────────────
+  {
+    const tutorialTimeline = [];
+  // ── Tutorial intro ────────────────────────────────────────────────────────────
   const practiceStartObs = 1;  // intro handles obs 0 for both tasks
   if (!isBinary) {
-    timeline.push({
+      tutorialTimeline.push({
       type: TutorialIntroContinuousPlugin,
       example_value: practiceValues[0],
       true_mean:     practiceMean,
@@ -238,7 +259,7 @@ export function buildAndRun(cfg) {
       },
     });
   } else {
-    timeline.push({
+      tutorialTimeline.push({
       type: TutorialIntroBinaryPlugin,
       example_value: practiceValues[0],
       true_p:        practiceMean,
@@ -257,11 +278,11 @@ export function buildAndRun(cfg) {
   let practiceLastResponse = defaultValue;
   let practiceResponses    = [];
 
-  for (let o = practiceStartObs; o < practiceValues.length; o++) {
+    for (let o = practiceStartObs; o < practiceValues.length; o++) {
     const _o     = o;
     const _value = practiceValues[o];
 
-    const obsNode = {
+      const obsNode = {
       timeline: [
         {
           type: ItiClockPlugin,
@@ -289,10 +310,10 @@ export function buildAndRun(cfg) {
       ],
     };
 
-    timeline.push(obsNode);
+      tutorialTimeline.push(obsNode);
   }
 
-  timeline.push({
+    tutorialTimeline.push({
     type: TutorialSummaryPlugin,
     // continuous params
     true_mean:  practiceMean,
@@ -305,13 +326,19 @@ export function buildAndRun(cfg) {
   });
 
   // Timeout demo — three screens explaining the timeout mechanism
-  timeline.push({
+    tutorialTimeline.push({
     type:         TimeoutDemoPlugin,
     is_binary:    isBinary,
     t_obs_ms:     tObsMs,
     max_timeouts: MAX_TIMEOUTS_PER_TRIAL,
     data: { screen: 'timeout_demo' },
   });
+
+    timeline.push({
+      timeline:             tutorialTimeline,
+      conditional_function: () => !skipTutorial,
+    });
+  }
 
   // Inter-trial reset before trial 1
   timeline.push({
@@ -328,7 +355,7 @@ export function buildAndRun(cfg) {
     {
       sequences, sliderDefault, defaultValue, btiMs, tObsMs,
       showSliderValue, showTrialPerformance,
-      MAX_TIMEOUTS_PER_TRIAL,
+      MAX_TIMEOUTS_PER_TRIAL, distractorType,
     },
     {
       ItiClockPlugin, TrialObsPlugin,

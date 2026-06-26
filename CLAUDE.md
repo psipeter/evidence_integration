@@ -7,7 +7,6 @@ README.md when they conflict.
 **After any conversation compaction**: re-read this file in full before doing
 anything else. Compaction summaries omit conventions. Key ones to remember:
 - Figures save as PDF only — never convert to PNG/SVG or upload images to chat
-- Run node test_timeline.mjs before any timeline change
 - Run node test_browser.mjs before any deployment
 - All NEF simulation data → data/runs/; figures → figures/
 
@@ -139,7 +138,7 @@ New task (task/): Two online experiments deployed on Prolific via MindProbe/JATO
 Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
 Timeout system: 3 timeouts per trial; timeout → too-slow screen → replay; exhausted → terminated screen.
 Key new files: build-trial-timeline.js (pure-JS trial loop), plugin-timeout-demo.js,
-  test_timeline.mjs (logic tests), test_browser.mjs (Playwright E2E tests).
+  test_browser.mjs (Playwright E2E tests).
 Data pipeline: JATOS JSON → task/parse_results.py → data/task_results.pkl
 Target: ~50–80 participants per task, within-subject (both tasks per participant).
 See task/ section in README.md for full details.
@@ -153,8 +152,6 @@ Both RL_lambda and NEF simulations use alpha_0=1.0.
 Local dev: always use npm run dev (opens index-dev.html).
 
 Testing:
-- node test_timeline.mjs   — fast logic tests; imports build-trial-timeline.js directly;
-                             run after any change to trial loop logic (~1s)
 - node test_browser.mjs    — Playwright E2E tests; full browser automation with true
                              timings; run before any deployment (~3 min)
 
@@ -181,7 +178,7 @@ Prolific rollout plan:
   - Replace EARLY_EXIT_CODE='EARLYEXIT' with real Prolific partial-payment code
   - Obtain binary task completion code (continuous: C3W3TF1O)
   - Fund Prolific wallet; confirm payment rate with PI
-  - Run: node test_timeline.mjs && node test_browser.mjs
+  - Run: node test_browser.mjs
 
 Archived (do not reactivate): diederen, jiang, usher.
 
