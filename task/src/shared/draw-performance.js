@@ -1,114 +1,119 @@
 /**
  * draw-performance.js
- * Builds an SVG string for trial/practice summary screens.
+ * Builds an SVG string for continuous trial/practice summary screens.
  *
  * Layout (top → bottom):
- *   Green distribution curve + true mean dashed line
- *   Axis (0–100)
- *   "observations" row: red dot plot stacked upward from axis
- *   "estimates" row:    black dot plot stacked upward from a second baseline
- *
- * Dot plot stacking: circles of radius r are placed at the x position of each
- * value; if a circle would overlap an existing one at the same row it moves up
- * to the next row. This avoids any overlap while keeping exact x positions.
+ *   Row 0:   Full-width number line (0–100) with green Gaussian overlay
+ *            and blue solid true-mean line. No title, no border.
+ *   Rows 1–N: One thin row per observation, in order.
+ *             Red obs thumb (thick) drawn first; black filled circle for estimate on top.
+ *   Legend:  red thumb "Observations" | black circle "Your estimate"
+ *            | blue line "True mean"
  */
 
 export const normalPDF = (x, mu, sigma) =>
   Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
 
-// Stack dots: returns array of {x, row} for each value.
-// row=0 is the bottom row; higher rows stack upward.
-const stackDots = (values, xPos, r) => {
-  const placed = []; // {x, row}
-  return values.map(v => {
-    const x = xPos(v);
-    let row = 0;
-    while (placed.some(p => p.row === row && Math.abs(p.x - x) < r * 2)) row++;
-    placed.push({ x, row });
-    return { x, row };
-  });
-};
+const SAMPLE_RED  = '#ef4444';
+const DIST_COLOR  = '#16a34a';
+
+const BAR_H_TOP  = 40;   // height of the Gaussian row
+const BAR_H_OBS  = 4;    // height of each obs row (thin)
+const ROW_GAP    = 3;    // gap between obs rows
+const TOP_GAP    = 6;    // gap between Gaussian row and first obs row
+const ROW_STEP   = BAR_H_OBS + ROW_GAP;
+const EST_R      = 2;    // radius of estimate circle
+const PAD_T      = 8;
+const PAD_B      = 24;
+const PAD_L      = 8;
+const PAD_R      = 16;
+const W          = 480;
+const BAR_W      = W - PAD_L - PAD_R;
+
+const xPos = (v) => PAD_L + Math.round((v / 100) * BAR_W);
+
+const _numberLine = (y, h, color = '#e5e7eb') =>
+  `<rect x="${PAD_L}" y="${y}" width="${BAR_W}" height="${h}" fill="${color}" rx="1"/>`;
+
+const _obsThumb = (x, y, h) =>
+  `<line x1="${x}" y1="${y - 1}" x2="${x}" y2="${y + h + 1}"
+     stroke="${SAMPLE_RED}" stroke-width="2.5" stroke-linecap="round"/>`;
+
+const _estCircle = (x, y, h) =>
+  `<circle cx="${x}" cy="${y + h / 2}" r="${EST_R}"
+     fill="#222"/>`;
 
 export const buildPerformanceSVG = (mu, sigma, values, responses) => {
-  const W = 520;
-  const xMin = 0, xMax = 100;
-  const pad  = { l: 88, r: 88, t: 22 };
-  const plotW = W - pad.l - pad.r;
+  const vals  = values    || [];
+  const resps = responses || [];
+  const n     = Math.max(vals.length, resps.length);
 
-  const r      = 3;    // dot radius
-  const gap    = 1;    // gap between stacked dots
-  const step   = r * 2 + gap;
+  const H = PAD_T + BAR_H_TOP + TOP_GAP + n * ROW_STEP + PAD_B;
 
-  const xPos = (x) => pad.l + (x - xMin) / (xMax - xMin) * plotW;
+  const parts = [];
 
-  // Stack obs and est dots
-  const obsStacked = stackDots(values || [], xPos, r);
-  const estStacked = stackDots((responses || []).filter(r => r !== null), xPos, r);
-  const obsMaxRow  = obsStacked.reduce((m, d) => Math.max(m, d.row), 0);
-  const estMaxRow  = estStacked.reduce((m, d) => Math.max(m, d.row), 0);
+  // ── Row 0: Gaussian overlay ───────────────────────────────────────────────
+  const topY = PAD_T;
+  const muX  = xPos(mu);
 
-  // Heights: distribution area + axis + obs rows + gap + est rows + labels
-  const distH    = 90;
-  const axisY    = pad.t + distH;
-  const obsH     = (obsMaxRow + 1) * step + r;
-  const rowGap   = 12;   // gap between obs and est sections
-  const estH     = (estMaxRow + 1) * step + r;
-  const labelH   = 16;
-  const H        = axisY + obsH + rowGap + estH + labelH;
-
-  // Obs dots stack upward from axisY
-  const obsDots = obsStacked.map(({ x, row }) => {
-    const cy = axisY + r + row * step;
-    return `<circle cx="${x.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}"
-      fill="#ef4444" stroke="#fff" stroke-width="1.2" opacity="0.85"/>`;
-  }).join('');
-
-  // Est dots stack upward from estBaseY
-  const estBaseY = axisY + obsH + rowGap;
-  const estDots  = estStacked.map(({ x, row }) => {
-    const cy = estBaseY + r + row * step;
-    return `<circle cx="${x.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}"
-      fill="#222" stroke="#fff" stroke-width="1.2" opacity="0.85"/>`;
-  }).join('');
-
-  // Row labels — right-aligned in left padding
-  const obsLabelY = axisY + r + (obsMaxRow * step) / 2 + 4;
-  const estLabelY = estBaseY + r + (estMaxRow * step) / 2 + 4;
-  const obsLabel  = `<text x="${pad.l - 8}" y="${obsLabelY.toFixed(1)}"
-    font-family="Arial" font-size="11" font-weight="bold"
-    fill="#ef4444" text-anchor="end">observations</text>`;
-  const estLabel  = `<text x="${pad.l - 8}" y="${estLabelY.toFixed(1)}"
-    font-family="Arial" font-size="11" font-weight="bold"
-    fill="#222" text-anchor="end">estimates</text>`;
-
-  // Distribution curve
-  const peakP = normalPDF(mu, mu, sigma);
-  const yPos  = (p) => pad.t + distH - (p / peakP) * distH * 0.88;
-  const steps = 300;
-  const curvePts = Array.from({ length: steps + 1 }, (_, i) => {
-    const x = xMin + (i / steps) * (xMax - xMin);
-    return `${xPos(x).toFixed(2)},${yPos(normalPDF(x, mu, sigma)).toFixed(2)}`;
+  const peakP   = normalPDF(mu, mu, sigma);
+  const curveYs = (v) => topY + BAR_H_TOP - (normalPDF(v, mu, sigma) / peakP) * BAR_H_TOP * 0.92;
+  const steps   = 200;
+  const pts     = Array.from({ length: steps + 1 }, (_, i) => {
+    const v = (i / steps) * 100;
+    return `${xPos(v).toFixed(1)},${curveYs(v).toFixed(1)}`;
   }).join(' ');
-  const fillPts = curvePts +
-    ` ${xPos(xMax).toFixed(2)},${axisY} ${xPos(xMin).toFixed(2)},${axisY}`;
+  const fillPts = pts +
+    ` ${(PAD_L + BAR_W).toFixed(1)},${(topY + BAR_H_TOP).toFixed(1)}` +
+    ` ${PAD_L.toFixed(1)},${(topY + BAR_H_TOP).toFixed(1)}`;
 
-  const muX = xPos(mu);
+  parts.push(`<polygon points="${fillPts}" fill="rgba(22,163,74,0.15)"/>`);
+  parts.push(`<polyline points="${pts}" fill="none" stroke="${DIST_COLOR}" stroke-width="1.8" stroke-linejoin="round"/>`);
+  parts.push(`<line x1="${muX}" y1="${topY}" x2="${muX}" y2="${topY + BAR_H_TOP}"
+    stroke="#2563eb" stroke-width="2.5" stroke-linecap="round"/>`);
 
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg">
-    <polygon points="${fillPts}" fill="rgba(22,163,74,0.12)" stroke="none"/>
-    <polyline points="${curvePts}"
-      fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linejoin="round"/>
-    <line x1="${muX.toFixed(2)}" y1="${pad.t}"
-          x2="${muX.toFixed(2)}" y2="${axisY}"
-          stroke="#2563eb" stroke-width="2"
-          stroke-dasharray="5 3" stroke-linecap="round"/>
-    <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
-      stroke="#ccc" stroke-width="1"/>
-    <text x="${pad.l}" y="${axisY - 4}" text-anchor="middle"
-      font-family="Arial" font-size="10" fill="#bbb">0</text>
-    <text x="${pad.l + plotW}" y="${axisY - 4}" text-anchor="middle"
-      font-family="Arial" font-size="10" fill="#bbb">100</text>
-    ${obsLabel}${obsDots}
-    ${estLabel}${estDots}
+  // ── Rows 1–n: per-observation rows ────────────────────────────────────────
+  const obsStartY = PAD_T + BAR_H_TOP + TOP_GAP;
+
+  for (let i = 0; i < n; i++) {
+    const obs  = vals[i];
+    const resp = resps[i];
+    const y    = obsStartY + i * ROW_STEP;
+    const midY = y + BAR_H_OBS / 2;
+
+    parts.push(_numberLine(y, BAR_H_OBS));
+
+    // Obs: red thumb underneath; estimate: black circle on top
+    if (obs  != null) parts.push(_obsThumb(xPos(obs),  y, BAR_H_OBS));
+    if (resp != null) {
+      parts.push(_estCircle(xPos(resp), y, BAR_H_OBS));
+    } else {
+      parts.push(`<text x="${PAD_L + BAR_W / 2}" y="${midY + 3}"
+        font-family="Arial" font-size="8" fill="#bbb" text-anchor="middle">—</text>`);
+    }
+  }
+
+  // ── Legend ────────────────────────────────────────────────────────────────
+  const legY  = H - PAD_B + 12;
+  const legX0 = PAD_L;
+
+  parts.push(`
+    <line x1="${legX0 + 4}" y1="${legY - 5}" x2="${legX0 + 4}" y2="${legY + 5}"
+      stroke="${SAMPLE_RED}" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="${legX0 + 10}" y="${legY + 4}"
+      font-family="Arial" font-size="9" fill="#888">Observations</text>
+    <circle cx="${legX0 + 96}" cy="${legY}" r="${EST_R}"
+      fill="#222"/>
+    <text x="${legX0 + 102}" y="${legY + 4}"
+      font-family="Arial" font-size="9" fill="#555">Your estimate</text>
+    <line x1="${legX0 + 200}" y1="${legY - 5}" x2="${legX0 + 200}" y2="${legY + 5}"
+      stroke="#2563eb" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="${legX0 + 206}" y="${legY + 4}"
+      font-family="Arial" font-size="9" fill="#2563eb">True mean</text>
+  `);
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%"
+    xmlns="http://www.w3.org/2000/svg">
+    ${parts.join('\n    ')}
   </svg>`;
 };

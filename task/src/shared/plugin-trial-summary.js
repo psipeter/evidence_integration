@@ -25,11 +25,6 @@ class TrialSummaryPlugin {
     const { true_mean, true_std, values, responses,
             show_performance, is_last, trial_num } = trial;
 
-    const _title = document.createElement('div');
-    _title.className = 'tutorial-title';
-    _title.textContent = 'Trial summary';
-    document.body.appendChild(_title);
-
     display_el.innerHTML = `
       <div style="width:70vw;margin:0 auto;text-align:center;">
         ${show_performance ? `
@@ -51,7 +46,6 @@ class TrialSummaryPlugin {
 
     display_el.querySelector('#next-btn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      if (_title.parentNode) _title.parentNode.removeChild(_title);
       this.jsPsych.finishTrial({ screen: 'inter_trial' });
     });
   }

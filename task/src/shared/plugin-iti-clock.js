@@ -42,7 +42,7 @@ class ItiClockPlugin {
     // ── Popup distractor ──────────────────────────────────────────────────────
     // Spawns random obs popups in fixed positions while the clock runs.
     // Cleaned up on finish().
-    const POPUP_INTERVAL_MS = 100;   // new popup every 100ms
+    const POPUP_INTERVAL_MS = duration_ms * 0.1;  // new popup every 10% of ITI
     const POPUP_MAX         = 30;    // cap to avoid overflow
     const POPUP_FADE_MS     = 200;
     const popups            = [];

@@ -63,7 +63,12 @@ export const updateFloatLabel = (slider) => {
   const pct      = (slider.value - slider.min) / (slider.max - slider.min);
   const px       = thumbR + pct * usable;
   const wrapLeft = slider.closest('.slider-section').getBoundingClientRect().left;
-  lbl.style.left      = (rect.left - wrapLeft + px) + 'px';
+  // Clamp so label doesn't overflow the slider container
+  const lblHalf = lbl.offsetWidth / 2;
+  const rawLeft = rect.left - wrapLeft + px;
+  const wrapW   = slider.closest('.slider-section').getBoundingClientRect().width;
+  const clamped = Math.max(lblHalf, Math.min(rawLeft, wrapW - lblHalf));
+  lbl.style.left      = clamped + 'px';
   lbl.style.transform = 'translateX(-50%)';
 };
 

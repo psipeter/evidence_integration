@@ -54,7 +54,15 @@ export function buildAndRun(cfg) {
     showTrialPerformance,
     distractorType = 'iti_length',
     testMode       = false,
+    showTutorial   = true,
+    trialItiMs     = null,  // null = use seq.iti_ms; number = override all trial ITIs
+    nTrialsDefault = null,  // set in config; overridden by dev page
   } = cfg;
+
+  // Slice sequences to the correct number of trials
+  const activeSequences = nTrialsDefault != null
+    ? sequences.slice(0, nTrialsDefault)
+    : sequences;
 
   const isBinary = taskType === 'binary';
   const MAX_TIMEOUTS_PER_TRIAL = 3;
@@ -157,63 +165,81 @@ export function buildAndRun(cfg) {
     stimulus: `
       <div class="consent-outer">
         <h2 style="text-align:center;margin-bottom:1.5rem;font-size:2.2rem;">Informed Consent</h2>
-        <div class="consent-scroll" style="background:#fafafa;border:1px solid #d1d5db;border-radius:6px;padding:1rem;">
-          <p><strong>Study title:</strong> [Placeholder Study Title]</p>
-          <p><strong>Principal Investigators:</strong> Peter Duggins and Alireza Soltani,
-          Dartmouth College, Department of Psychological and Brain Sciences</p>
-          <p><strong>IRB Protocol:</strong> [Protocol Number]</p><br>
-          <p><strong>Purpose:</strong> [Placeholder: research study about how people
-          make judgments based on sequences of information.]</p><br>
-          <p><strong>What you will do:</strong> [Placeholder: view a series of numbers
-          and use a slider to indicate your best estimate after each. ~45 minutes.]</p><br>
-          <p><strong>Risks and benefits:</strong> [Placeholder: no known risks beyond
-          everyday computer use. Compensation as advertised on Prolific.]</p><br>
-          <p><strong>Confidentiality:</strong> [Placeholder: responses stored by
-          Prolific ID only. No personally identifying information collected.]</p><br>
-          <p><strong>Voluntary participation:</strong> [Placeholder: you may withdraw
-          at any time by closing the browser. This will not affect your Prolific
-          account.]</p><br>
-          <p><strong>Contact:</strong> [researcher@dartmouth.edu] |
-          Dartmouth IRB: [irb@dartmouth.edu]</p>
+        <div class="consent-scroll" style="background:#fafafa;border:1.5px solid #d1d5db;border-radius:6px;padding:1rem;margin-bottom:0.75rem;">
+          <p style="text-align:center;"><strong>CONSENT TO TAKE PART IN RESEARCH</strong><br>Dartmouth College</p>
+          <p style="text-align:center;"><strong>Study title:</strong> Reward learning, choice, and attention<br>
+          <strong>Principal Investigator:</strong> Alireza Soltani</p>
+          <p><strong>You are being asked to take part in a research study.  Taking part in research is voluntary.</strong></p>
+          <div style="text-align:left;">
+          <p style="margin-top:0.75rem;"><strong>Study Summary:</strong><br>
+          The purpose of this study is to better understand how we learn from reward feedback, make decisions based on that learning, and how these processes are influenced by attention. There are no physical or psychological risks associated with this study beyond the potential tiredness from looking at a computer screen and pressing keys on a keyboard. Monitoring with an infrared camera has no known health risks.</p>
+          <p>Your decision whether or not to take part will have no effect on the quality of your academic standing or job status. Please ask questions if there is anything about this study that you do not understand.</p>
+          <p style="margin-top:0.75rem;"><strong>What is the purpose of this study?</strong><br>
+          The purpose of the study is to explore how people learn from rewards, use what they have learned to make decisions, and how their attention is controlled and affects these processes.</p>
+          <p style="margin-top:0.75rem;"><strong>Will you benefit from taking part in this study?</strong><br>
+          You will not personally benefit from being in this research study.  We hope to gather information that may help people in the future.</p>
+          <p style="margin-top:0.75rem;"><strong>What does this study involve?</strong><br>
+          Your participation in this study may last up to 6 hours, which is divided across multiple sessions (over two or more days).</p>
+          <p>During the study, you will see one or more visual cues (such as images or shapes) or no cues at all, along with additional information displayed on a computer screen. You will then select between two or more choice options based on this information. On some trials, you will receive feedback, which will tell you whether your choice was correct or incorrect, or whether it was rewarded or not. At certain points, you may also be asked to report what you have learned from the cues and how confident you are about your learning or choices. You will use a keyboard, buttons, or your eye movements to make and report your decisions, etc. The visual cues you see may include photographs, drawings, simple geometric shapes, or patterns such as sinewave gratings.</p>
+          <p>We may monitor your eye movements and pupil dilation using an infrared camera placed on the table in front of you. You will be asked to rest your chin on a chinrest to minimize head movement during this process. The infrared camera works like a regular camera but is sensitive to infrared light. Additionally, you may be asked to complete a questionnaire about your learning or performance on the task.</p>
+          <p style="margin-top:0.75rem;"><strong>What are the options if you do not want to take part in this study?</strong><br>
+          The alternative is not to take part in this study.</p>
+          <p style="margin-top:0.75rem;"><strong>If you take part in this study, what activities will be done only for research purposes?</strong><br>
+          If you take part in this study, the following activities will be done only for research purposes: monitoring your eye movements, recording your choices and responses on the keyboard.</p>
+          <p style="margin-top:0.75rem;"><strong>What are the risks involved with being enrolled in this study?</strong><br>
+          This study does not involve any physical or psychological side effects or risks, other than potential tiredness from looking at a computer screen and pressing keys on a keyboard. You are free to stop participating at any time.</p>
+          <p>There are no known health risks associated with monitoring eye movements using an infrared camera.</p>
+          <p>All data collected during this study will remain confidential, and your name will not appear in any reports or publications resulting from this research.</p>
+          <p style="margin-top:0.75rem;"><strong>Will my data be deidentified and used in the future for other purposes?</strong><br>
+          Your data (choice and responses on the keyboard and eye movements) might be stripped of identifiers and used for future research.
+          Any future research that uses your data will be reviewed by the Committee for the Protection of Human Subjects at Dartmouth College, who will determine if the research requires your permission or may be properly done without further permission from you.</p>
+          <p style="margin-top:0.75rem;"><strong>Other important items you should know:</strong></p>
+          <ul style="margin:0.25rem 0 0.5rem 1.5rem;padding:0;">
+            <li><strong>Leaving the study:</strong>  You may choose to stop taking part in this study at any time. If you decide to stop taking part, it will have no effect on your academic standing, or job status.</li>
+            <li><strong>Number of people in this study:</strong>  We expect (500) people to enroll in this study here, and (0) at other study sites.</li>
+            <li><strong>Funding:</strong>  National Science Foundation provides funding to Dartmouth College for this research.</li>
+          </ul>
+          <p style="margin-top:0.75rem;"><strong>How will your privacy be protected?</strong></p>
+          <p style="margin-top:0;"><strong>The information collected as data for this study includes:</strong><br>
+          The data collected in this study include behavioral measures, such as button-press data, eye movements, and pupil dilation. Your name and age will be collected along with your answers to the questionnaire.  We will also record your gender, handedness, age, and other basic information that will not and cannot be used to identify anything private about you. We may also ask for your average household income to better understand how the incentive provided by compensation from the experiment could affect your performance.</p>
+          <p>Data collected for this study will be maintained indefinitely.</p>
+          <p>We are careful to protect the identities of the people in this study.  We also keep the information collected for this study secure and confidential.  Behavioral data and responses from computer-based questionnaires will be stored on password-protected computers in the lab and identified only by randomized IDs.</p>
+          <p>If research data is shared electronically or physically outside the institution, all identifying information will be removed to ensure anonymity.</p>
+          <p style="margin-top:0.75rem;"><strong>Will you be paid to take part in this study?</strong><br>
+          Yes or no.  You will be paid for your participation based on the number of hours you participate in the experiment, your performance, and what options you choose during the experiment (overall $10-20/hour). You may also choose to instead get one T-point for every hour of experimental data collection. Because of the nature of online experiments, the overall payment for online version of the experiment will be $5-10/hour.</p>
+          <p style="margin-top:0.75rem;"><strong>Whom should you call with questions about this study?</strong><br>
+          If you have questions about this study or concerns about a research related problem or injury, you can call the research director for this study: Dr. Alireza Soltani (603) 646-2998 during normal business hours.</p>
+          <p>If you have questions, concerns, complaints, or suggestions about human research at Dartmouth, you may call the Office of the Committee for the Protection of Human Subjects at Dartmouth College (603) 646-6482 during normal business hours.</p>
+          </div>
         </div>
         <div class="consent-info-boxes">
           <div class="consent-info-box">
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
-              fill="none" stroke="#555" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <span style="font-size:1.4rem;">The study takes approximately <strong>45 minutes</strong> to complete.
+            <span style="font-size:1.4rem;">The study takes approximately 40 minutes to complete.
             You will be compensated at the rate advertised on Prolific.</span>
           </div>
-          <div class="consent-info-box" style="border-color:#ef4444;background:#fef2f2;">
-            <span style="font-size:1.6rem;flex-shrink:0;color:#ef4444;">&#9888;</span>
-            <span style="font-size:1.4rem;color:#b91c1c;">
-              You must respond within the ${tObsMs/1000}-second time limit.
-              If you time out <strong>${MAX_TIMEOUTS_PER_TRIAL} times in one trial</strong>,
-              the experiment will terminate and you will receive partial compensation.
-            </span>
-          </div>
           <div class="consent-info-box consent-info-box--warning">
-            <span style="font-size:1.6rem;flex-shrink:0;margin-top:1px;">&#9888;</span>
             <span style="font-size:1.4rem;">Do not close, refresh, or navigate away during the task — your data
             will be lost and you will not be paid. If this happens accidentally,
             please request a return on Prolific.</span>
           </div>
+          <div class="consent-info-box" style="border:1.5px solid #ef4444;background:#fef2f2;">
+            <span style="font-size:1.4rem;color:#b91c1c;">
+              You must respond within the ${tObsMs/1000}-second time limit.
+              If you time out ${MAX_TIMEOUTS_PER_TRIAL} times in one trial,
+              the experiment will terminate and you will receive partial compensation.
+            </span>
+          </div>
         </div>
         <div class="consent-footer">
-          <hr style="margin-bottom:1rem;">
           <label style="display:flex;align-items:center;justify-content:center;gap:0.75rem;cursor:pointer;">
             <input type="checkbox" id="consent-checkbox"
               style="margin-top:3px;width:18px;height:18px;flex-shrink:0;"
               onchange="document.getElementById('consent-btn').disabled=!this.checked;">
-            <span style="font-size:1.4rem;">I have read and understood the information above. I am at least
-            18 years old and I agree to participate in this study.</span>
+            <span style="font-size:1.4rem;">I have read the above information and I agree to take part in this study.</span>
           </label>
         </div>
       </div>`,
-    choices: ['I agree and wish to continue'],
+    choices: ['Begin experiment'],
     button_html: (c) =>
       `<button id="consent-btn" class="jspsych-btn" disabled
         style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1.5rem;">${c}</button>`,
@@ -221,23 +247,8 @@ export function buildAndRun(cfg) {
     on_finish: (data) => { data.consent_given = true; },
   });
 
-  // ── Tutorial ─────────────────────────────────────────────────────────────────
-  // In test mode, show a 'Skip tutorial' button before the tutorial.
-  let skipTutorial = false;
-  if (testMode) {
-    timeline.push({
-      type: jsPsychHtmlButtonResponse,
-      stimulus: `<div class='screen-wrap' style='text-align:center;'>
-        <h2>Developer test mode</h2>
-        <p style='margin-top:1rem;font-size:1.4rem;color:#555;'>
-          20 trials · short BTI · no timeout
-        </p></div>`,
-      choices: ['Take tutorial', 'Skip tutorial'],
-      button_html: (c) => makeButton(c),
-      data: { screen: 'test_mode_choice' },
-      on_finish: (data) => { skipTutorial = data.response === 1; },
-    });
-  }
+  // Tutorial skip — controlled by showTutorial from config (set by dev setup page)
+  const skipTutorial = !showTutorial;
 
   // ── Tutorial (conditionally skipped in test mode) ──────────────────────────
   {
@@ -286,7 +297,7 @@ export function buildAndRun(cfg) {
       timeline: [
         {
           type: ItiClockPlugin,
-          duration_ms: itiShortMs,
+          duration_ms: 1000,  // tutorial ITI always 1s
           data: { screen: 'practice_iti', observation: _o },
         },
         {
@@ -344,7 +355,7 @@ export function buildAndRun(cfg) {
   timeline.push({
     type:        InterTrialPlugin,
     trial_num:   1,
-    n_trials:    sequences.length,
+    n_trials:    activeSequences.length,
     duration_ms: btiMs,
     is_binary:   isBinary,
     data: { screen: 'inter_trial_reset', trial: -1 },
@@ -353,7 +364,8 @@ export function buildAndRun(cfg) {
   // ── Trial loop ────────────────────────────────────────────────────────────
   const { timeline: trialTimelineNodes, isExited } = buildTrialTimeline(
     {
-      sequences, sliderDefault, defaultValue, btiMs, tObsMs,
+      sequences: activeSequences, sliderDefault, defaultValue,
+      btiMs, trialItiMs, tObsMs,
       showSliderValue, showTrialPerformance,
       MAX_TIMEOUTS_PER_TRIAL, distractorType,
     },

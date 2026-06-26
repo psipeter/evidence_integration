@@ -83,29 +83,26 @@ export const updateBinaryFill = (slider) => {
 };
 
 // ── Float label ───────────────────────────────────────────────────────────────
+// Blue % anchored to the left end; red % anchored to the right end.
+// Values update with the thumb but positions are fixed — no overlap, no overflow.
 
 export const updateBinaryLabel = (slider) => {
-  const section  = slider.closest('.binary-slider-section');
-  const lblBlue  = section?.querySelector('#slider-float-label-blue');
-  const lblRed   = section?.querySelector('#slider-float-label-red');
+  const section = slider.closest('.binary-slider-section');
+  const lblBlue = section?.querySelector('#slider-float-label-blue');
+  const lblRed  = section?.querySelector('#slider-float-label-red');
   if (!lblBlue || !lblRed) return;
-  const thumbR   = 3;
-  const rect     = slider.getBoundingClientRect();
-  const usable   = rect.width - 2 * thumbR;
-  const pct      = (slider.value - slider.min) / (slider.max - slider.min);
-  const px       = thumbR + pct * usable;
-  const wrapLeft = section.getBoundingClientRect().left;
-  const thumbX   = rect.left - wrapLeft + px;
-  // Blue %: left of thumb, right-aligned
-  lblBlue.style.display  = 'block';
-  lblBlue.textContent    = Math.round(slider.value) + '%';
-  lblBlue.style.left     = (thumbX - 6) + 'px';   // 6px gap left of thumb
-  lblBlue.style.transform = 'translateX(-100%)';
-  // Red %: right of thumb, left-aligned
-  lblRed.style.display   = 'block';
-  lblRed.textContent     = Math.round(100 - slider.value) + '%';
-  lblRed.style.left      = (thumbX + 6) + 'px';   // 6px gap right of thumb
-  lblRed.style.transform = 'translateX(0)';
+
+  lblBlue.textContent = Math.round(slider.value) + '%';
+  lblRed.textContent  = Math.round(100 - slider.value) + '%';
+  lblBlue.style.display = 'block';
+  lblRed.style.display  = 'block';
+
+  // Fixed positions: blue always left-aligned at 0, red always right-aligned at 100%
+  lblBlue.style.left      = '0px';
+  lblBlue.style.transform = 'none';
+  lblRed.style.right      = '0px';
+  lblRed.style.left       = 'auto';
+  lblRed.style.transform  = 'none';
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
@@ -151,7 +148,7 @@ export const initBinarySlider = (display_el, {
       }
     });
 
-    // Reposition labels when slider is resized (e.g. window resize or zoom)
+    // Reposition labels on resize
     if (showValue && typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(() => {
         if (!slider.classList.contains('slider-unset')) updateBinaryLabel(slider);

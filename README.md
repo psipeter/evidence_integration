@@ -154,13 +154,18 @@ Target: ~50–80 participants per task, within-subject.
 
 - **Sequences**: 10 unique sequences × 4 repeats = 40 trials; prefix_length=4; std_fixed=20
 - **ITI**: all trials use 1000ms (ITI manipulation removed — no effect observed in pilot)
-- **BTI**: 5s between-trial reset screen ("Trial X / 40 — generating new distribution…")
+- **BTI**: 3s between-trial reset screen ("Trial X / 40 — generating new distribution…")
+- **Distractor**: `iti_condition` per trial ('control'/'distract', 2-of-4 per qid);
+  `DISTRACTOR_TYPE` in config: 'none' | 'iti_length' | 'popup' (default: 'none')
 - **Timeout**: 7s response deadline per observation
   - Per-trial timeout budget: 3 timeouts before session terminates
   - Timeout flow: "Too slow" screen (fade in/out/in, 3.2s) → replay ITI → same observation
   - On 3rd timeout: "Too slow / 0 timeouts remaining" → "Session terminated" screen with button
 - **Tutorial**: 3-box progressive reveal → 4 practice observations → practice summary →
   timeout demonstration (3 screens) → BTI → trial 1
+- **Summary slides**: binary — per-obs bar chart (blue/red split at estimate, obs circle left);
+  continuous — per-obs number line (red obs thumb, black circle at estimate)
+- **Consent form**: verbatim IRB-approved text from task/consent_form.txt
 
 ### Sequence generation
 
@@ -241,7 +246,7 @@ const EARLY_EXIT_CODE        = 'EARLYEXIT'; // TODO: replace before publishing
 ```bash
 cd task
 npm install                    # first time only
-npm run dev                    # local dev server (serves both tasks via index-dev.html)
+npm run dev                    # local dev server; open index-dev.html for dev setup page
 npm run build:continuous       # production build → dist-continuous/
 npm run build:binary           # production build → dist-binary/
 node test_browser.mjs          # full Playwright E2E tests (~3 min, true timings)
@@ -277,7 +282,8 @@ python task/parse_results.py --input_dir task/dev-results/ \
 ### Deploying to MindProbe
 
 **Pre-deployment checklist:**
-- Fill consent form placeholders (IRB number, study title, contact email)
+- Set `TEST_MODE = false` in both configs
+- Fill IRB Protocol Number in consent form (`[Protocol Number]` in `timeline-builder.js`)
 - Replace `EARLY_EXIT_CODE = 'EARLYEXIT'` with real Prolific partial-payment code
 - Obtain binary task completion code from Prolific (continuous: `C3W3TF1O`)
 - Fund Prolific wallet; confirm payment rate with PI

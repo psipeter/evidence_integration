@@ -16,11 +16,11 @@ const SHOW_SLIDER_VALUE      = true;    // float label above thumb
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'
 const DEFAULT_VALUE          = 50;      // midpoint of [0, 100]
 const DEBUG_FAST = false;   // set true for fast automated testing only
-const BTI_MS             = TEST_MODE ? 500  : 5000;
+const BTI_MS             = TEST_MODE ? 500  : 3000;
 const ITI_SHORT_MS       = 1000;
 const T_OBS_MS           = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
-const DISTRACTOR_TYPE        = 'popup'; // 'none' | 'iti_length' | 'popup'
+const DISTRACTOR_TYPE        = 'none';  // 'none' | 'iti_length' | 'popup'
 
 // ── Practice (tutorial) ───────────────────────────────────────────────────
 // Fixed sequence: 5 values drawn from Normal(20, 25), all within 1σ of mean,
@@ -32,9 +32,10 @@ const practiceValues = [48, 75, 38, 82, 57];  // mean≈60, spread ≈ std=20
 
 export const config = {
   taskType:             'continuous',
-  sequences:            sequencesData.slice(0, N_TRIALS_TO_RUN).map(
+  sequences:            sequencesData.map(
                           s => ({ ...s, values: s.values.slice(0, N_OBS_TO_RUN) })
                         ),
+  nTrialsDefault:       N_TRIALS_TO_RUN,  // used by buildAndRun when no override
   practiceValues,
   practiceMean:         PRACTICE_MEAN,
   practiceStd:          PRACTICE_STD,

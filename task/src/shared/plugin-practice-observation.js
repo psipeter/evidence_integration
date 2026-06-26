@@ -53,7 +53,7 @@ const buildDistSVG = (mu, sigma, currentValue) => {
     <line x1="${xPos(mu).toFixed(2)}" y1="${curveTopY}"
           x2="${xPos(mu).toFixed(2)}" y2="${axisY}"
           stroke="${GOAL_COLOR}" stroke-width="2"
-          stroke-dasharray="5 3" stroke-linecap="round"/>
+          stroke-linecap="round"/>
     <text x="${xPos(mu).toFixed(2)}" y="${curveTopY - 12}"
           text-anchor="middle" font-family="Arial" font-size="14"
           font-weight="bold" fill="${GOAL_COLOR}">???</text>`;

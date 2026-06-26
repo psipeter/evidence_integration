@@ -174,7 +174,8 @@ Prolific rollout plan:
 - After recruiting: message all completers of each study nudging them toward the other
 - Order recorded from MindProbe submission timestamps; include as covariate in λ analysis
 - Pre-deployment checklist:
-  - Fill consent form placeholders (IRB number, study title, contact email)
+  - Set TEST_MODE=false in both configs
+  - Fill IRB Protocol Number in consent form (timeline-builder.js)
   - Replace EARLY_EXIT_CODE='EARLYEXIT' with real Prolific partial-payment code
   - Obtain binary task completion code (continuous: C3W3TF1O)
   - Fund Prolific wallet; confirm payment rate with PI
