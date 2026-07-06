@@ -70,15 +70,20 @@ def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
     if not trials:
         return pd.DataFrame()
 
-    rows = []
+    rows       = []
+    pilot_name = None  # PILOT ONLY: set from consent screen (remove for Prolific)
     for t in trials:
         if not isinstance(t, dict):
             continue
+        # PILOT ONLY: capture pilot_name from consent screen as participant ID
+        # (remove for Prolific production — prolific_pid will be set by jatos)
+        if t.get('screen') == 'consent' and t.get('pilot_name'):
+            pilot_name = t['pilot_name']
         if t.get('screen') != 'observation':
             continue
 
         rows.append({
-            'prolific_pid':  t.get('prolific_pid', 'unknown'),
+            'prolific_pid':  pilot_name if pilot_name else t.get('prolific_pid', 'unknown'),
             'task':          t.get('task', 'unknown'),
             'trial':         t.get('trial', np.nan),
             'observation':   t.get('observation', np.nan),

@@ -1,6 +1,7 @@
 /**
  * test_browser.mjs
- * Playwright end-to-end tests using true timings (7s obs, 5s BTI, 1s ITI).
+ * Playwright end-to-end tests for the binary task.
+ * Patches config for fast obs timeout (1500ms) and builds to dist-binary-test.
  * Run: node test_browser.mjs
  */
 import { chromium }      from 'playwright';
@@ -12,17 +13,45 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST      = path.join(__dirname, 'dist-binary-test');
+const PORT      = 7655;
 
-// ── Build test version (same as production — no timing changes) ───────────────
+// ── Patch config for fast testing and build ───────────────────────────────────
 console.log('Building test version...');
-const viteConf = path.join(__dirname, 'vite.config.js');
-const origVite = fs.readFileSync(viteConf, 'utf8');
+const configPath = path.join(__dirname, 'src/binary/config.js');
+const viteConf   = path.join(__dirname, 'vite.config.js');
+const tbPath     = path.join(__dirname, 'src/shared/timeline-builder.js');
+const origConfig = fs.readFileSync(configPath, 'utf8');
+const origVite   = fs.readFileSync(viteConf, 'utf8');
+const origTb     = fs.readFileSync(tbPath, 'utf8');
 try {
-  fs.writeFileSync(viteConf, origVite.replace("outDir: 'dist-binary'", "outDir: 'dist-binary-test'"));
+  // Short obs timeout + fast BTI + TEST_MODE
+  fs.writeFileSync(configPath, origConfig
+    .replace('const T_OBS_MS           = 7000;', 'const T_OBS_MS           = 1500;')
+    .replace('const BTI_MS             = TEST_MODE ? 500  : 3000;', 'const BTI_MS             = 500;')
+    .replace('const TEST_MODE              = false;', 'const TEST_MODE              = true;')
+  );
+  // Skip tutorial always in test mode
+  fs.writeFileSync(tbPath, origTb.replace(
+    'const skipTutorial = !showTutorial;',
+    'const skipTutorial = true; // test build: always skip'
+  ));
+  // Build to separate dir
+  fs.writeFileSync(viteConf, origVite.replace(
+    "outDir: 'dist-binary',",
+    "outDir: 'dist-binary-test',"
+  ));
   execSync('npm run build:binary', { cwd: __dirname, stdio: 'pipe' });
   console.log('Build done.\n');
 } finally {
+  fs.writeFileSync(configPath, origConfig);
   fs.writeFileSync(viteConf, origVite);
+  fs.writeFileSync(tbPath, origTb);
+}
+
+// Verify dist exists
+if (!fs.existsSync(path.join(DIST, 'index-binary.html'))) {
+  console.error('Build failed: index-binary.html not found in', DIST);
+  process.exit(1);
 }
 
 // ── Static file server ────────────────────────────────────────────────────────
@@ -30,13 +59,17 @@ const server = http.createServer((req, res) => {
   let rel  = req.url.split('?')[0];
   if (rel === '/') rel = '/index-binary.html';
   const file = path.join(DIST, rel);
-  if (!fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    res.writeHead(404); res.end(); return;
+  }
   const ext  = path.extname(file);
-  const mime = {'.html':'text/html','.js':'application/javascript','.css':'text/css'}[ext]||'application/octet-stream';
-  res.writeHead(200, {'Content-Type': mime});
+  const mime = { '.html':'text/html', '.js':'application/javascript',
+                 '.css':'text/css', '.json':'application/json' }[ext] || 'application/octet-stream';
+  res.writeHead(200, { 'Content-Type': mime });
   fs.createReadStream(file).pipe(res);
 });
-await new Promise(r => server.listen(7654, r));
+await new Promise(r => server.listen(PORT, r));
+console.log(`Server on :${PORT}\n`);
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 const browser = await chromium.launch({ headless: true });
@@ -44,10 +77,10 @@ let passed = 0, failed = 0;
 
 async function test(name, fn) {
   const page = await browser.newPage();
-  page.setDefaultTimeout(30000);
+  page.setDefaultTimeout(15000);
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
-  console.log('\n--- ' + name + ' ---');
+  console.log('--- ' + name + ' ---');
   try {
     await fn(page);
     console.log('  PASS');
@@ -62,26 +95,40 @@ async function test(name, fn) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const goto  = (p) => p.goto('http://localhost:7654/');
-const wait  = (p, ms) => p.waitForTimeout(ms);
-const has   = async (p, t) => (await p.textContent('body')).includes(t);
+const goto = (p) => p.goto(`http://localhost:${PORT}/`);
+const wait = (p, ms) => p.waitForTimeout(ms);
+const has  = async (p, t) => (await p.textContent('body')).includes(t);
 
 const doConsent = async (p) => {
-  await p.waitForSelector('#consent-checkbox');
+  await p.waitForSelector('#reveal-box-0');
+  for (const id of ['reveal-box-0', 'reveal-box-1', 'reveal-box-2']) {
+    await p.click(`#${id}`);
+    await wait(p, 80);
+  }
+  await p.fill('#pilot-name', 'TestUser');
+  await p.evaluate(() =>
+    document.getElementById('pilot-name')
+      .dispatchEvent(new Event('input', { bubbles: true })));
+  await wait(p, 80);
   await p.click('#consent-checkbox');
+  await wait(p, 80);
   await p.waitForSelector('#consent-btn:not([disabled])');
   await p.click('#consent-btn');
 };
 
-const moveSlider = async (p, pct) => {
+const doTutorial = async (p) => {
+  // Tutorial skipped — wait through 500ms BTI then first obs
+  await wait(p, 700);
   await p.waitForSelector('#response-slider');
+};
+
+const moveSlider = async (p, pct) => {
   const box = await p.$eval('#response-slider', el => {
     const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width, height: r.height };
+    return { x: r.x, y: r.y, width: r.width };
   });
   const x = box.x + (pct / 100) * box.width;
-  const y = box.y + box.height / 2;
-  await p.mouse.move(x, y);
+  await p.mouse.move(x, box.y + 10);
   await p.mouse.down();
   await wait(p, 50);
   await p.mouse.up();
@@ -93,89 +140,68 @@ const submit = async (p) => {
   await p.click('#submit-btn');
 };
 
-// Tutorial takes ~7s (obs 0 clock) + 4×1s ITI + 4 obs + demo clock
-// With true timings this is slow — skip to main experiment via timeout on obs 0
-const doTutorial = async (p) => {
-  // Tutorial obs 0: click boxes then respond
-  await p.waitForSelector('#tut-box-0');
-  await p.click('#tut-box-0');
-  await p.click('#tut-box-1');
-  await p.click('#tut-box-2');
-  await p.waitForSelector('#response-slider');
-  await moveSlider(p, 60);
-  await submit(p);
-  // Practice obs 1-4
-  for (let i = 0; i < 4; i++) {
-    await p.waitForSelector('#response-slider', { timeout: 10000 });
-    await moveSlider(p, 50);
-    await submit(p);
-  }
-  // Practice summary
-  await p.waitForSelector('#proceed-btn');
-  await p.click('#proceed-btn');
-  // Timeout demo — wait for clock (7s) then proceed
-  await p.waitForSelector('#demo-next-btn', { timeout: 10000 });
-  await p.click('#demo-next-btn');
-  await p.waitForSelector('#demo-proceed-btn');
-  await p.click('#demo-proceed-btn');
-  // BTI (5s)
-  await p.waitForSelector('#response-slider', { timeout: 10000 });
-};
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 await test('Normal submit: no too-slow, ITI appears', async (p) => {
   await goto(p); await doConsent(p); await doTutorial(p);
   await moveSlider(p, 65);
   await submit(p);
-  await wait(p, 500);
+  await wait(p, 300);
   if (await has(p, 'Too slow')) throw new Error('"Too slow" after normal submit');
   await p.waitForSelector('#iti-canvas, #response-slider', { timeout: 3000 });
 });
 
 await test('Timeout: too-slow shows 2 remaining', async (p) => {
   await goto(p); await doConsent(p); await doTutorial(p);
-  // Let obs 0 time out (7s)
-  await p.waitForTimeout(8000);
-  await p.waitForFunction(() => document.body.textContent.includes('Too slow'), { timeout: 3000 });
+  await wait(p, 2000);  // 1500ms obs clock + buffer
+  await p.waitForFunction(() => document.body.textContent.includes('Too slow'), { timeout: 2000 });
   if (!await has(p, '2 timeouts remaining')) throw new Error('Expected "2 timeouts remaining"');
 });
 
-await test('1 timeout remaining: shows "1 timeout remaining" not "last chance"', async (p) => {
+await test('1 timeout remaining text correct', async (p) => {
   await goto(p); await doConsent(p); await doTutorial(p);
-  // Time out twice
   for (let i = 0; i < 2; i++) {
-    await p.waitForTimeout(8000);                          // obs clock
-    await p.waitForTimeout(3000);                          // too-slow screen
-    await p.waitForSelector('#iti-canvas', { timeout: 3000 });  // replay ITI
-    await p.waitForTimeout(1500);                          // ITI clock
+    await wait(p, 2000);                                              // obs timeout
+    await wait(p, 3500);                                              // too-slow screen
+    await p.waitForSelector('#iti-canvas', { timeout: 2000 });       // replay ITI
+    await wait(p, 1200);                                              // ITI clock
   }
-  // Now at 3rd attempt — should see "1 timeout remaining" on 2nd too-slow
-  // Actually after 2 timeouts we're on attempt 3, last chance = 1 remaining
-  if (await has(p, 'last chance')) throw new Error('"last chance" should not appear');
+  if (await has(p, 'last chance'))         throw new Error('"last chance" should not appear');
   if (!await has(p, '1 timeout remaining')) throw new Error('Expected "1 timeout remaining"');
 });
 
-await test('3 timeouts: terminated screen with button', async (p) => {
+await test('3 timeouts: session terminated, no summary', async (p) => {
   await goto(p); await doConsent(p); await doTutorial(p);
   for (let i = 0; i < 3; i++) {
-    await p.waitForTimeout(8000);
+    await wait(p, 2000);
     if (i < 2) {
-      await p.waitForTimeout(3000);  // too-slow
-      await p.waitForSelector('#iti-canvas', { timeout: 3000 });
-      await p.waitForTimeout(1500);
+      await wait(p, 3500);
+      await p.waitForSelector('#iti-canvas', { timeout: 2000 });
+      await wait(p, 1200);
     }
   }
+  await wait(p, 3500);  // final too-slow + terminated
   await p.waitForFunction(() =>
     document.body.textContent.includes('Session terminated'), { timeout: 5000 });
   if (!await has(p, 'Return to Prolific')) throw new Error('No "Return to Prolific" button');
   if (await has(p, 'Trial summary'))       throw new Error('Summary shown after termination');
 });
 
+await test('Submit then continue to next obs', async (p) => {
+  await goto(p); await doConsent(p); await doTutorial(p);
+  await moveSlider(p, 50);
+  await submit(p);
+  await p.waitForSelector('#iti-canvas', { timeout: 3000 });
+  await wait(p, 1200);
+  await p.waitForSelector('#response-slider', { timeout: 5000 });
+  if (await has(p, 'Too slow')) throw new Error('Unexpected too-slow after submit');
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 await browser.close();
 server.close();
 try { fs.rmSync(DIST, { recursive: true, force: true }); } catch(e) {}
+
 console.log('\n' + '='.repeat(40));
-console.log('Results: ' + passed + ' passed, ' + failed + ' failed');
+console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

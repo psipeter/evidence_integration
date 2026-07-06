@@ -8,9 +8,9 @@ import sequencesData from '../../sequences/continuous_sequences.json';
 
 // ── Parameters ────────────────────────────────────────────────────────────
 // Set TEST_MODE=true for quick dev runs: skip/take tutorial, 20 trials, 500ms BTI
-const TEST_MODE              = true;
+const TEST_MODE              = false;
 
-const N_TRIALS_TO_RUN        = TEST_MODE ? 20  : 40;
+const N_TRIALS_TO_RUN        = TEST_MODE ? 20  : 24;  // 6 seqs × 4 reps
 const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;    // float label above thumb
 const SLIDER_DEFAULT         = 'none';  // 'none' | 'last'

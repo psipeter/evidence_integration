@@ -31,9 +31,6 @@ class PracticeSummaryBinaryPlugin {
                  border-radius:6px;background:#fff;padding:4px;">
         </div>
         <div style="margin-bottom:0.75rem;">
-          <p class="practice-info-block" style="text-align:center;margin:0 auto;">
-            In the experiment, you will not see the&nbsp;<span style="color:#16a34a;font-weight:bold;">true probability</span>&nbsp;or how many&nbsp;<span style="color:#888;font-weight:bold;">observations</span>&nbsp;remain.
-          </p>
         </div>
         <button id="proceed-btn" class="jspsych-btn"
           style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1rem;">

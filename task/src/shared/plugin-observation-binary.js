@@ -1,9 +1,12 @@
-import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
 /**
  * plugin-observation-binary.js
  * Single binary observation: coloured circle + binary slider + timeout clock.
- * Mirrors plugin-observation.js but for binary (Bernoulli) trials.
+ *
+ * Uses async trial(display_el, trial, on_load) pattern per jsPsych 8 best practice.
+ * on_load() is called after innerHTML is set, signalling DOM ready.
+ * initBinarySlider() attaches listeners directly — no setTimeout/rAF deferral.
  */
+import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
 
 const SAMPLE_BLUE = '#2563eb';
 const SAMPLE_RED  = '#ef4444';
@@ -11,7 +14,7 @@ const SAMPLE_RED  = '#ef4444';
 const info = {
   name: 'observation-binary',
   parameters: {
-    value:          { type: 'INT',     default: 1     }, // 1=blue, 0=red
+    value:          { type: 'INT',     default: 1     },
     trial_num:      { type: 'INT',     default: 1     },
     n_trials:       { type: 'INT',     default: 1     },
     t_obs_ms:       { type: 'INT',     default: 5000  },
@@ -26,7 +29,7 @@ class ObservationBinaryPlugin {
     this.jsPsych = jsPsych;
   }
 
-  trial(display_el, trial) {
+  async trial(display_el, trial, on_load) {
     document.body.style.backgroundColor = '#f5f5f5';
     if (document.activeElement && document.activeElement !== document.body) {
       document.activeElement.blur();
@@ -36,8 +39,8 @@ class ObservationBinaryPlugin {
             slider_default, init_pos, show_value } = trial;
     const trialStart = performance.now();
     const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 50);
-    const unset = slider_default === 'none';
-    const ballCol  = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;  // +1=blue, -1=red
+    const unset   = slider_default === 'none';
+    const ballCol = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
 
     display_el.innerHTML = `
       <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
@@ -53,6 +56,10 @@ class ObservationBinaryPlugin {
         </button>
       </div>`;
 
+    // Signal DOM is ready
+    on_load();
+
+    // ── Timeout + finish ──────────────────────────────────────────────────────
     let rafId    = null;
     let finished = false;
 
@@ -62,23 +69,23 @@ class ObservationBinaryPlugin {
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       document.body.style.backgroundColor = '#f5f5f5';
       const slider   = display_el.querySelector('#response-slider');
-      const hadUnset = slider.classList.contains('slider-unset') ||
-                       slider.classList.contains('slider-last');
+      const hadUnset = slider?.classList.contains('slider-unset') ||
+                       slider?.classList.contains('slider-last') || false;
       const response = (!timed_out && !hadUnset) ? parseInt(slider.value) : null;
-      const rt = timed_out ? null : Math.round(performance.now() - trialStart);
+      const rt       = timed_out ? null : Math.round(performance.now() - trialStart);
       this.jsPsych.finishTrial({ response, timed_out, rt });
     };
 
+    // ── Slider — wire immediately, DOM is ready after on_load() ───────────────
     initBinarySlider(display_el, {
       unset,
       showValue: show_value,
-      onFinish: () => finish(false),
+      onFinish:  () => finish(false),
     });
 
-
-    // Timeout clock
+    // ── Timeout clock ─────────────────────────────────────────────────────────
     const canvas = display_el.querySelector('#timeout-clock');
-    const tCtx   = canvas.getContext('2d');
+    const ctx    = canvas.getContext('2d');
     const sz = canvas.width, cx = sz / 2, cy = sz / 2;
     const R = sz / 2 - 5, SW = 4;
     const start = performance.now();
@@ -93,19 +100,20 @@ class ObservationBinaryPlugin {
           `rgb(${Math.round(245 + t * 9)},${Math.round(245 - t * 19)},${Math.round(245 - t * 19)})`;
       }
       const color = fraction < 0.6 ? '#aaa' : fraction < 0.85 ? '#f97316' : '#ef4444';
-      tCtx.clearRect(0, 0, sz, sz);
-      tCtx.beginPath(); tCtx.arc(cx, cy, R, 0, 2 * Math.PI);
-      tCtx.strokeStyle = '#e5e7eb'; tCtx.lineWidth = SW; tCtx.stroke();
+      ctx.clearRect(0, 0, sz, sz);
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = SW; ctx.stroke();
       const rem = 1 - fraction;
       if (rem > 0) {
-        tCtx.beginPath();
-        tCtx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + rem * 2 * Math.PI);
-        tCtx.strokeStyle = color; tCtx.lineWidth = SW; tCtx.lineCap = 'round';
-        tCtx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + rem * 2 * Math.PI);
+        ctx.strokeStyle = color; ctx.lineWidth = SW; ctx.lineCap = 'round';
+        ctx.stroke();
       }
       if (fraction < 1) { rafId = requestAnimationFrame(drawClock); }
       else               { finish(true); }
     };
+
     rafId = requestAnimationFrame(drawClock);
   }
 }

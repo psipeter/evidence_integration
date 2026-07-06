@@ -213,28 +213,39 @@ export function buildAndRun(cfg) {
           </div>
         </div>
         <div class="consent-info-boxes">
-          <div class="consent-info-box">
-            <span style="font-size:1.4rem;">The study takes approximately 40 minutes to complete.
+          <div id="reveal-box-0" class="consent-info-box" style="cursor:pointer;position:relative;">
+            <span id="reveal-box-0-ph" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.3rem;font-weight:bold;color:#1d4ed8;white-space:nowrap;">Click to reveal</span>
+            <span id="reveal-box-0-real" style="visibility:hidden;font-size:1.4rem;">The study takes approximately 20 minutes to complete.
             You will be compensated at the rate advertised on Prolific.</span>
           </div>
-          <div class="consent-info-box consent-info-box--warning">
-            <span style="font-size:1.4rem;">Do not close, refresh, or navigate away during the task — your data
+          <div id="reveal-box-1" class="consent-info-box consent-info-box--warning" style="cursor:pointer;position:relative;">
+            <span id="reveal-box-1-ph" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.3rem;font-weight:bold;color:#92400e;white-space:nowrap;">Click to reveal</span>
+            <span id="reveal-box-1-real" style="visibility:hidden;font-size:1.4rem;">Do not close, refresh, or navigate away during the task — your data
             will be lost and you will not be paid. If this happens accidentally,
             please request a return on Prolific.</span>
           </div>
-          <div class="consent-info-box" style="border:1.5px solid #ef4444;background:#fef2f2;">
-            <span style="font-size:1.4rem;color:#b91c1c;">
+          <div id="reveal-box-2" class="consent-info-box" style="cursor:pointer;position:relative;border:1.5px solid #ef4444;background:#fef2f2;">
+            <span id="reveal-box-2-ph" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.3rem;font-weight:bold;color:#b91c1c;white-space:nowrap;">Click to reveal</span>
+            <span id="reveal-box-2-real" style="visibility:hidden;font-size:1.4rem;color:#b91c1c;">
               You must respond within the ${tObsMs/1000}-second time limit.
               If you time out ${MAX_TIMEOUTS_PER_TRIAL} times in one trial,
               the experiment will terminate and you will receive partial compensation.
             </span>
           </div>
         </div>
-        <div class="consent-footer">
+        <div class="consent-footer" style="margin-top:0.75rem;">
+          <!-- PILOT ONLY: name field for within-participant ID (remove for Prolific production) -->
+          <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;justify-content:center;">
+            <label for="pilot-name" style="font-size:1.4rem;flex-shrink:0;">Name:</label>
+            <input type="text" id="pilot-name" placeholder="Enter your name"
+              style="font-size:1.4rem;padding:0.4rem 0.75rem;border:1.5px solid #d1d5db;
+                     border-radius:6px;width:220px;"
+              oninput="_updateConsentBtn()">
+          </div>
           <label style="display:flex;align-items:center;justify-content:center;gap:0.75rem;cursor:pointer;">
             <input type="checkbox" id="consent-checkbox"
               style="margin-top:3px;width:18px;height:18px;flex-shrink:0;"
-              onchange="document.getElementById('consent-btn').disabled=!this.checked;">
+              onchange="_updateConsentBtn()">
             <span style="font-size:1.4rem;">I have read the above information and I agree to take part in this study.</span>
           </label>
         </div>
@@ -244,7 +255,42 @@ export function buildAndRun(cfg) {
       `<button id="consent-btn" class="jspsych-btn" disabled
         style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1.5rem;">${c}</button>`,
     data: { screen: 'consent' },
-    on_finish: (data) => { data.consent_given = true; },
+    on_load: () => {
+      const revealed = new Set();
+      let _pilotName = '';
+
+      const revealBox = (i) => {
+        document.getElementById('reveal-box-' + i + '-ph').style.display      = 'none';
+        document.getElementById('reveal-box-' + i + '-real').style.visibility = 'visible';
+        document.getElementById('reveal-box-' + i).style.cursor = 'default';
+        revealed.add(i);
+        window._updateConsentBtn();
+      };
+
+      window._updateConsentBtn = () => {
+        const checked = document.getElementById('consent-checkbox')?.checked;
+        const name    = document.getElementById('pilot-name')?.value.trim() || '';
+        _pilotName    = name;
+        window._pilotNameCapture = name;  // accessible to on_finish after DOM cleared
+        const btn     = document.getElementById('consent-btn');
+        if (btn) btn.disabled = !(checked && name && revealed.size === 3);
+      };
+
+      [0, 1, 2].forEach(i => {
+        const box = document.getElementById('reveal-box-' + i);
+        if (box) box.addEventListener('click', () => revealBox(i), { once: true });
+      });
+    },
+    on_finish: (data) => {
+      data.consent_given = true;
+      // PILOT ONLY: save name as prolific_pid substitute (remove for Prolific production)
+      // Name captured in on_load closure (_pilotName) since DOM is cleared before on_finish
+      if (window._pilotNameCapture) {
+        data.pilot_name = window._pilotNameCapture;
+        window._pilotNameCapture = null;
+      }
+      window._updateConsentBtn = null;
+    },
   });
 
   // Tutorial skip — controlled by showTutorial from config (set by dev setup page)

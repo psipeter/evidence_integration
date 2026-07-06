@@ -3,30 +3,24 @@
  *
  * Two modes:
  *   unset=true  ('none') — thumb hidden, gray track, submit disabled
- *   unset=false ('last') — thumb at initPos, gray thumb + faded track,
- *                          submit disabled until first interaction
+ *   unset=false ('last') — thumb at initPos, submit disabled until interaction
  *
- * buildBinarySliderHTML(opts)        — HTML string
- * initBinarySlider(display_el, opts) — wires listeners, builds ruler
+ * initBinarySlider() must be called after on_load() in the plugin's async trial().
+ * No setTimeout or rAF deferral needed.
+ * Desktop/mouse only (Prolific restriction) — using 'click' for submit.
  */
 
 export const BINARY_MIN = 0;
 export const BINARY_MAX = 100;
 
-// Red → gray → blue gradient: t=0 red (p_blue=0), t=1 blue (p_blue=1)
 const BLUE_RGB = [37, 99, 235];
 const GRAY_RGB = [136, 136, 136];
 const RED_RGB  = [239, 68, 68];
 
 const lerpRgb = (t) => {
-  const [a, b] = t < 0.5
-    ? [RED_RGB, GRAY_RGB]
-    : [GRAY_RGB, BLUE_RGB];
+  const [a, b] = t < 0.5 ? [RED_RGB, GRAY_RGB] : [GRAY_RGB, BLUE_RGB];
   const s = t < 0.5 ? t * 2 : (t - 0.5) * 2;
-  const r = Math.round(a[0] + s * (b[0] - a[0]));
-  const g = Math.round(a[1] + s * (b[1] - a[1]));
-  const b2 = Math.round(a[2] + s * (b[2] - a[2]));
-  return `rgb(${r},${g},${b2})`;
+  return `rgb(${Math.round(a[0]+s*(b[0]-a[0]))},${Math.round(a[1]+s*(b[1]-a[1]))},${Math.round(a[2]+s*(b[2]-a[2]))})`;
 };
 
 // ── HTML ──────────────────────────────────────────────────────────────────────
@@ -59,7 +53,7 @@ export const buildBinarySliderHTML = ({
     </div>
   </div>`;
 
-// ── Ruler with gradient-colored ticks ────────────────────────────────────────
+// ── Ruler ─────────────────────────────────────────────────────────────────────
 
 const buildBinaryRuler = (slider) => {
   const ruler = slider.closest('.slider-track-wrap')?.querySelector('.slider-ruler');
@@ -67,10 +61,9 @@ const buildBinaryRuler = (slider) => {
   let html = '';
   for (let v = BINARY_MIN; v <= BINARY_MAX; v += 25) {
     const pct     = v + '%';
-    const t       = v / 100;
     const isMajor = v % 50 === 0;
     html += `<div class="slider-tick ${isMajor ? 'slider-tick-major' : ''}" style="left:${pct};height:${isMajor ? 8 : 5}px;"></div>`;
-    html += `<div class="slider-tick-label" style="left:${pct};">${t.toFixed(2)}</div>`;
+    html += `<div class="slider-tick-label" style="left:${pct};">${(v/100).toFixed(2)}</div>`;
   }
   ruler.innerHTML = html;
 };
@@ -82,22 +75,17 @@ export const updateBinaryFill = (slider) => {
   slider.style.setProperty('--pct', pct + '%');
 };
 
-// ── Float label ───────────────────────────────────────────────────────────────
-// Blue % anchored to the left end; red % anchored to the right end.
-// Values update with the thumb but positions are fixed — no overlap, no overflow.
+// ── Float label (fixed positions — blue left, red right) ──────────────────────
 
 export const updateBinaryLabel = (slider) => {
   const section = slider.closest('.binary-slider-section');
   const lblBlue = section?.querySelector('#slider-float-label-blue');
   const lblRed  = section?.querySelector('#slider-float-label-red');
   if (!lblBlue || !lblRed) return;
-
-  lblBlue.textContent = Math.round(slider.value) + '%';
-  lblRed.textContent  = Math.round(100 - slider.value) + '%';
-  lblBlue.style.display = 'block';
-  lblRed.style.display  = 'block';
-
-  // Fixed positions: blue always left-aligned at 0, red always right-aligned at 100%
+  lblBlue.textContent     = Math.round(slider.value) + '%';
+  lblRed.textContent      = Math.round(100 - slider.value) + '%';
+  lblBlue.style.display   = 'block';
+  lblRed.style.display    = 'block';
   lblBlue.style.left      = '0px';
   lblBlue.style.transform = 'none';
   lblRed.style.right      = '0px';
@@ -106,6 +94,7 @@ export const updateBinaryLabel = (slider) => {
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
+// Called after on_load() in plugin's async trial() — no deferral needed.
 
 export const initBinarySlider = (display_el, {
   unset     = true,
@@ -116,44 +105,39 @@ export const initBinarySlider = (display_el, {
   const btn    = display_el.querySelector('#submit-btn');
   if (!slider || !btn) return;
 
-  // Always start disabled — require explicit interaction
   btn.disabled = true;
-
   buildBinaryRuler(slider);
   if (!unset && showValue) { updateBinaryLabel(slider); updateBinaryFill(slider); }
 
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    slider.addEventListener('pointerdown', () => {
-      slider.classList.remove('slider-unset');
-      slider.classList.remove('slider-last');
-      btn.disabled = false;
-      requestAnimationFrame(() => {
-        updateBinaryFill(slider);
-        if (showValue) updateBinaryLabel(slider);
-      });
-    });
-    slider.addEventListener('input', () => {
-      slider.classList.remove('slider-unset');
-      slider.classList.remove('slider-last');
-      btn.disabled = false;
+  slider.addEventListener('mousedown', () => {
+    slider.classList.remove('slider-unset');
+    slider.classList.remove('slider-last');
+    btn.disabled = false;
+    requestAnimationFrame(() => {
       updateBinaryFill(slider);
       if (showValue) updateBinaryLabel(slider);
     });
-    btn.addEventListener('pointerdown', (e) => {
-      if (!btn.disabled) {
-        e.preventDefault();
-        const response = slider.classList.contains('slider-unset')
-          ? null : parseInt(slider.value);
-        onFinish(response);
-      }
-    });
+  });
 
-    // Reposition labels on resize
-    if (showValue && typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => {
-        if (!slider.classList.contains('slider-unset')) updateBinaryLabel(slider);
-      });
-      ro.observe(slider);
+  slider.addEventListener('input', () => {
+    slider.classList.remove('slider-unset');
+    slider.classList.remove('slider-last');
+    btn.disabled = false;
+    updateBinaryFill(slider);
+    if (showValue) updateBinaryLabel(slider);
+  });
+
+  btn.addEventListener('click', (e) => {
+    if (!btn.disabled) {
+      e.preventDefault();
+      onFinish();
     }
-  }));
+  });
+
+  if (showValue && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (!slider.classList.contains('slider-unset')) updateBinaryLabel(slider);
+    });
+    ro.observe(slider);
+  }
 };

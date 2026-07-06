@@ -4,6 +4,11 @@
  * Two modes (controlled by `unset`):
  *   unset=true  ('none') — thumb hidden, submit disabled until first interaction
  *   unset=false ('last') — thumb at initPos, submit immediately enabled
+ *
+ * initSlider() must be called after on_load() in the plugin's async trial()
+ * method — this guarantees the DOM is fully rendered before listeners attach.
+ * No setTimeout or rAF deferral needed.
+ * Desktop/mouse only (Prolific restriction) — using 'click' for submit.
  */
 
 export const SLIDER_MIN = 0;
@@ -34,7 +39,7 @@ export const buildSliderHTML = ({
     </div>
   </div>`;
 
-// ── Ruler ────────────────────────────────────────────────────────────────────
+// ── Ruler ─────────────────────────────────────────────────────────────────────
 
 const buildRuler = (slider) => {
   const ruler = slider.closest('.slider-track-wrap')?.querySelector('.slider-ruler');
@@ -63,16 +68,16 @@ export const updateFloatLabel = (slider) => {
   const pct      = (slider.value - slider.min) / (slider.max - slider.min);
   const px       = thumbR + pct * usable;
   const wrapLeft = slider.closest('.slider-section').getBoundingClientRect().left;
-  // Clamp so label doesn't overflow the slider container
-  const lblHalf = lbl.offsetWidth / 2;
-  const rawLeft = rect.left - wrapLeft + px;
-  const wrapW   = slider.closest('.slider-section').getBoundingClientRect().width;
-  const clamped = Math.max(lblHalf, Math.min(rawLeft, wrapW - lblHalf));
+  const lblHalf  = lbl.offsetWidth / 2;
+  const rawLeft  = rect.left - wrapLeft + px;
+  const wrapW    = slider.closest('.slider-section').getBoundingClientRect().width;
+  const clamped  = Math.max(lblHalf, Math.min(rawLeft, wrapW - lblHalf));
   lbl.style.left      = clamped + 'px';
   lbl.style.transform = 'translateX(-50%)';
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
+// Called after on_load() in plugin's async trial() — no deferral needed.
 
 export const initSlider = (display_el, {
   unset     = true,
@@ -86,34 +91,32 @@ export const initSlider = (display_el, {
   buildRuler(slider);
   if (!unset && showValue) updateFloatLabel(slider);
 
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    slider.addEventListener('pointerdown', () => {
-      slider.classList.remove('slider-unset');
-      slider.classList.remove('slider-last');
-      btn.disabled = false;
-      requestAnimationFrame(() => { if (showValue) updateFloatLabel(slider); });
-    });
-    slider.addEventListener('input', () => {
-      slider.classList.remove('slider-unset');
-      slider.classList.remove('slider-last');
-      btn.disabled = false;
-      if (showValue) updateFloatLabel(slider);
-    });
-    btn.addEventListener('pointerdown', (e) => {
-      if (!btn.disabled) {
-        e.preventDefault();
-        const response = slider.classList.contains('slider-unset')
-          ? null : parseInt(slider.value);
-        onFinish(response);
-      }
-    });
+  slider.addEventListener('mousedown', () => {
+    slider.classList.remove('slider-unset');
+    slider.classList.remove('slider-last');
+    btn.disabled = false;
+    requestAnimationFrame(() => { if (showValue) updateFloatLabel(slider); });
+  });
 
-    // Reposition label on resize/zoom
-    if (showValue && typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => {
-        if (!slider.classList.contains('slider-unset')) updateFloatLabel(slider);
-      });
-      ro.observe(slider);
+  slider.addEventListener('input', () => {
+    slider.classList.remove('slider-unset');
+    slider.classList.remove('slider-last');
+    btn.disabled = false;
+    if (showValue) updateFloatLabel(slider);
+  });
+
+  // 'click' is reliable for desktop/mouse — fires after mousedown+mouseup on same element
+  btn.addEventListener('click', (e) => {
+    if (!btn.disabled) {
+      e.preventDefault();
+      onFinish();
     }
-  }));
+  });
+
+  if (showValue && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (!slider.classList.contains('slider-unset')) updateFloatLabel(slider);
+    });
+    ro.observe(slider);
+  }
 };
