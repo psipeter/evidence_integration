@@ -98,7 +98,9 @@ class TutorialIntroContinuousPlugin {
         unset: true,
         showValue: true,
         ghostPos: null,
-        onFinish: (response) => {
+        onFinish: () => {
+          const slider   = display_el.querySelector('#response-slider');
+          const response = parseInt(slider.value);
           jsPsych.finishTrial({ response, timed_out: false });
         },
       });

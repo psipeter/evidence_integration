@@ -112,7 +112,8 @@ class TutorialObservationContinuousPlugin {
     initSlider(display_el, {
       unset,
       showValue: show_value,
-      onFinish: (response) => {
+      onFinish: () => {
+        const response = parseInt(display_el.querySelector('#response-slider').value);
         this.jsPsych.finishTrial({ response, timed_out: false });
       },
     });

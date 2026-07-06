@@ -56,6 +56,22 @@ export const buildBinarySliderHTML = ({
 
 // ── Ruler ─────────────────────────────────────────────────────────────────────
 
+// Each tick shows what blue%/red% WOULD BE if the slider were set to that
+// position — like axis gridline numbers, not a filled-in answer, so it
+// doesn't create a prior the way pre-filling the track itself did. The
+// blue number's font size scales with its own value (bigger number = bigger
+// text) and same for red, so the "weight" of each tick's text visually
+// echoes the proportion it represents — e.g. the v=100 tick reads a large
+// "100" in blue next to a tiny "0" in red.
+//
+// blue% == the slider's raw value (see updateBinaryLabel) and red% ==
+// 100 - value, exactly mirroring the gradient/floating-label math elsewhere
+// in this file, so this can't drift out of sync with them the way the
+// removed directional-text ticks did.
+const FONT_MIN = 0.5;    // rem, at value 0
+const FONT_MAX = 2;      // rem, at value 100
+const fontSizeFor = (value) => FONT_MIN + (value / 100) * (FONT_MAX - FONT_MIN);
+
 const buildBinaryRuler = (slider) => {
   const ruler = slider.closest('.slider-track-wrap')?.querySelector('.slider-ruler');
   if (!ruler) return;
@@ -64,7 +80,26 @@ const buildBinaryRuler = (slider) => {
     const pct     = v + '%';
     const isMajor = v % 50 === 0;
     html += `<div class="slider-tick ${isMajor ? 'slider-tick-major' : ''}" style="left:${pct};height:${isMajor ? 8 : 5}px;"></div>`;
-    html += `<div class="slider-tick-label" style="left:${pct};">${(v/100).toFixed(2)}</div>`;
+
+    const blueVal = v;
+    const redVal  = 100 - v;
+    const posStyle = v === BINARY_MIN
+      ? `left:0;transform:none;`
+      : v === BINARY_MAX
+        ? `left:auto;right:0;transform:none;`
+        : `left:${pct};transform:translateX(-50%);`;
+
+    // At the extremes, the "0" side is redundant (barely visible anyway at
+    // FONT_MIN) — just show the single large dominant number.
+    const pairHTML = v === BINARY_MIN
+      ? `<span style="color:#ef4444;font-weight:bold;font-size:${fontSizeFor(redVal).toFixed(2)}rem;">${redVal}</span>`
+      : v === BINARY_MAX
+        ? `<span style="color:#2563eb;font-weight:bold;font-size:${fontSizeFor(blueVal).toFixed(2)}rem;">${blueVal}</span>`
+        : `<span style="color:#2563eb;font-weight:bold;font-size:${fontSizeFor(blueVal).toFixed(2)}rem;">${blueVal}</span>` +
+          `<span style="color:#bbb;font-size:0.9rem;">·</span>` +
+          `<span style="color:#ef4444;font-weight:bold;font-size:${fontSizeFor(redVal).toFixed(2)}rem;">${redVal}</span>`;
+
+    html += `<div class="slider-tick-label" style="${posStyle}display:inline-flex;align-items:baseline;gap:0.25em;white-space:nowrap;">${pairHTML}</div>`;
   }
   ruler.innerHTML = html;
 };

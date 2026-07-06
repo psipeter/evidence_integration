@@ -47,8 +47,8 @@ await page.addInitScript(() => {
 await page.goto('http://localhost:7789/');
 await page.waitForTimeout(1500);
 
-// Reveal all 3 boxes
-for (const id of ['reveal-box-0', 'reveal-box-1', 'reveal-box-2']) {
+// Reveal both boxes
+for (const id of ['reveal-box-0', 'reveal-box-1']) {
   await page.click(`#${id}`).catch(() => {});
   await page.waitForTimeout(150);
 }
@@ -68,8 +68,8 @@ console.log('1. _pilotNameCapture after typing:', nameCapture);
 await page.click('#consent-checkbox');
 await page.waitForTimeout(100);
 
-const btnEnabled = !(await page.$eval('#consent-btn', b => b.disabled));
-console.log('2. Begin button enabled:', btnEnabled);
+const btnEnabled = !(await page.$eval('#consent-btn', b => b.classList.contains('consent-btn-locked')));
+console.log('2. Begin button looks ready:', btnEnabled);
 
 // Click Begin — on_finish should fire, read _pilotNameCapture, null it out
 await page.click('#consent-btn');

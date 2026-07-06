@@ -86,7 +86,10 @@ class TutorialIntroBinaryPlugin {
       display_el.querySelector('#tut-slider-wrap').style.visibility = 'visible';
       initBinarySlider(display_el, {
         unset: true, showValue: true,
-        onFinish: (response) => jsPsych.finishTrial({ response, timed_out: false }),
+        onFinish: () => {
+          const response = parseInt(display_el.querySelector('#response-slider').value);
+          jsPsych.finishTrial({ response, timed_out: false });
+        },
       });
     };
 

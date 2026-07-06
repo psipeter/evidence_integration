@@ -99,7 +99,7 @@ const waitForScreen = (p, screen, timeout = 10000) =>
 
 const doConsent = async (p) => {
   await p.waitForSelector('#reveal-box-0');
-  for (const id of ['reveal-box-0', 'reveal-box-1', 'reveal-box-2']) {
+  for (const id of ['reveal-box-0', 'reveal-box-1']) {
     await p.click(`#${id}`);
     await wait(p, 80);
   }
@@ -110,7 +110,7 @@ const doConsent = async (p) => {
   await wait(p, 80);
   await p.click('#consent-checkbox');
   await wait(p, 80);
-  await p.waitForSelector('#consent-btn:not([disabled])');
+  await p.waitForSelector('#consent-btn:not(.consent-btn-locked)');
   await p.click('#consent-btn');
 };
 

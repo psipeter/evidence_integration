@@ -1,10 +1,55 @@
 /**
  * build-consent-screen.js
- * Builds the informed-consent jsPsych timeline node (click-to-reveal boxes +
- * pilot name field + checkbox gate). Extracted from timeline-builder.js —
- * pure extraction, no behavior change.
+ * Builds the informed-consent jsPsych timeline node.
+ *
+ * Ordered disclosure (mirrors plugin-tutorial-intro-*.js's progressive-reveal
+ * pattern): box 0 is active immediately; box 1 stays locked (showing a
+ * "· · ·" placeholder, not clickable) until box 0 is revealed. The
+ * name/checkbox section stays behind its own "· · ·" locked placeholder until
+ * both boxes are revealed. Boxes are stacked vertically (not side by side)
+ * to make the top-to-bottom reading/reveal order visually obvious.
+ *
+ * Two boxes (not three) — a third box repeating Prolific's own
+ * timing/compensation listing was removed as redundant. Both remaining boxes
+ * are warnings (data loss, session termination), so both carry a plain-text
+ * "Warning:" label plus a red background/border to make that unmistakable.
+ *
+ * "Begin experiment" is NOT given a native `disabled` attribute. Disabled
+ * buttons never dispatch a `click` event at all in any browser, which meant
+ * a premature click produced zero feedback — several pilot participants
+ * reported exactly this confusion, and in at least one case the disabled
+ * *look* (opacity/color) apparently didn't render either (most likely a
+ * browser/extension override neutralizing color-based disabled styling,
+ * which is a known fragile pattern to rely on alone).
+ *
+ * Instead: the button is styled to *look* disabled via a plain CSS class
+ * (decoupled from any native pseudo-class rendering), and a capturing-phase
+ * click listener on an ancestor intercepts the click BEFORE it reaches the
+ * button — jsPsych attaches its own completion listener directly on the
+ * button itself (bubble phase), so a capturing ancestor listener runs first.
+ * If requirements aren't met, we stopPropagation() (blocking jsPsych's
+ * listener from ever firing) silently — no popup message (an earlier version
+ * had one; it shifted the layout when shown, so it was removed). If they are
+ * met, we let the event through and jsPsych's normal flow proceeds exactly
+ * as before.
  */
 import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
+
+const N_BOXES = 2;
+
+// Note: jsPsych wraps all trial content in `.jspsych-content { text-align:
+// center; }`, so these boxes are center-aligned by inheritance even without
+// an explicit override — it's made explicit below for clarity, not because
+// leaving it off would produce left-aligned text.
+const makeBox = (id, realHTML, textAlign) => `
+  <div id="${id}" class="consent-info-box" style="position:relative;">
+    <span id="${id}-placeholder"
+          style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                 font-size:1.3rem;font-weight:bold;color:#ccc;white-space:nowrap;">
+      · · ·
+    </span>
+    <span id="${id}-real" style="visibility:hidden;font-size:1.4rem;width:100%;${textAlign ? `text-align:${textAlign};` : ''}">${realHTML}</span>
+  </div>`;
 
 /**
  * @param {number} tObsMs          observation response deadline, ms
@@ -12,6 +57,11 @@ import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
  * @returns {object} jsPsych timeline node
  */
 export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
+  const BOX0_REAL = `<strong>Warning:</strong> Do not close, refresh, or navigate away during
+            the task — your data will be lost and you will not be paid.`;
+  const BOX1_REAL = `<strong>Warning:</strong> You must respond within the ${tObsMs / 1000}-second
+            time limit — if you repeatedly time out, the experiment will terminate.`;
+
   return {
     type: jsPsychHtmlButtonResponse,
     stimulus: `
@@ -65,83 +115,132 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
           </div>
         </div>
         <div class="consent-info-boxes">
-          <div id="reveal-box-0" class="consent-info-box" style="cursor:pointer;position:relative;">
-            <span id="reveal-box-0-ph" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.3rem;font-weight:bold;color:#1d4ed8;white-space:nowrap;">Click to reveal</span>
-            <span id="reveal-box-0-real" style="visibility:hidden;font-size:1.4rem;">The study takes approximately 20 minutes to complete.
-            You will be compensated at the rate advertised on Prolific.</span>
-          </div>
-          <div id="reveal-box-1" class="consent-info-box consent-info-box--warning" style="cursor:pointer;position:relative;">
-            <span id="reveal-box-1-ph" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.3rem;font-weight:bold;color:#92400e;white-space:nowrap;">Click to reveal</span>
-            <span id="reveal-box-1-real" style="visibility:hidden;font-size:1.4rem;">Do not close, refresh, or navigate away during the task — your data
-            will be lost and you will not be paid. If this happens accidentally,
-            please request a return on Prolific.</span>
-          </div>
-          <div id="reveal-box-2" class="consent-info-box" style="cursor:pointer;position:relative;border:1.5px solid #ef4444;background:#fef2f2;">
-            <span id="reveal-box-2-ph" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.3rem;font-weight:bold;color:#b91c1c;white-space:nowrap;">Click to reveal</span>
-            <span id="reveal-box-2-real" style="visibility:hidden;font-size:1.4rem;color:#b91c1c;">
-              You must respond within the ${tObsMs/1000}-second time limit.
-              If you time out ${maxTimeoutsPerTrial} times in one trial,
-              the experiment will terminate and you will receive partial compensation.
-            </span>
-          </div>
+          ${makeBox('reveal-box-0', BOX0_REAL, 'center')}
+          ${makeBox('reveal-box-1', BOX1_REAL, 'center')}
         </div>
-        <div class="consent-footer" style="margin-top:0.75rem;">
-          <!-- PILOT ONLY: name field for within-participant ID (remove for Prolific production) -->
-          <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;justify-content:center;">
-            <label for="pilot-name" style="font-size:1.4rem;flex-shrink:0;">Name:</label>
-            <input type="text" id="pilot-name" placeholder="Enter your name"
-              style="font-size:1.4rem;padding:0.4rem 0.75rem;border:1.5px solid #d1d5db;
-                     border-radius:6px;width:220px;"
-              oninput="_updateConsentBtn()">
+        <div class="consent-footer" style="margin-top:0.75rem;position:relative;">
+          <!-- consent-fields-real is ALWAYS in flow (so this block's height is
+               fixed from the start) — consent-fields-locked is an absolutely
+               positioned overlay on top of it. Hiding the overlay reveals what
+               was already there underneath, so nothing below it reflows. -->
+          <div id="consent-fields-real">
+            <!-- PILOT ONLY: name field for within-participant ID (remove for Prolific production) -->
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;justify-content:center;">
+              <label for="pilot-name" style="font-size:1.4rem;flex-shrink:0;">Name:</label>
+              <input type="text" id="pilot-name" placeholder="Enter your name"
+                style="font-size:1.4rem;padding:0.4rem 0.75rem;border:1.5px solid #d1d5db;
+                       border-radius:6px;width:220px;">
+            </div>
+            <label style="display:flex;align-items:center;justify-content:center;gap:0.75rem;cursor:pointer;">
+              <input type="checkbox" id="consent-checkbox"
+                style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
+              <span style="font-size:1.4rem;">I have read the above information and I agree to take part in this study.</span>
+            </label>
           </div>
-          <label style="display:flex;align-items:center;justify-content:center;gap:0.75rem;cursor:pointer;">
-            <input type="checkbox" id="consent-checkbox"
-              style="margin-top:3px;width:18px;height:18px;flex-shrink:0;"
-              onchange="_updateConsentBtn()">
-            <span style="font-size:1.4rem;">I have read the above information and I agree to take part in this study.</span>
-          </label>
+          <div id="consent-fields-locked" style="
+            position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+            background:#f5f5f5;">
+            <span style="font-size:1.3rem;color:#ccc;font-weight:bold;">· · ·</span>
+          </div>
         </div>
       </div>`,
     choices: ['Begin experiment'],
     button_html: (c) =>
-      `<button id="consent-btn" class="jspsych-btn" disabled
+      `<button id="consent-btn" class="jspsych-btn consent-btn-locked"
         style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1.5rem;">${c}</button>`,
     data: { screen: 'consent' },
     on_load: () => {
-      const revealed = new Set();
+      let revealedCount = 0;
+      let fieldsUnlocked = false;
       let _pilotName = '';
 
-      const revealBox = (i) => {
-        document.getElementById('reveal-box-' + i + '-ph').style.display      = 'none';
-        document.getElementById('reveal-box-' + i + '-real').style.visibility = 'visible';
-        document.getElementById('reveal-box-' + i).style.cursor = 'default';
-        revealed.add(i);
-        window._updateConsentBtn();
+      const btn = document.getElementById('consent-btn');
+
+      const setBtnLookReady = (ready) => {
+        if (!btn) return;
+        btn.classList.toggle('consent-btn-locked', !ready);
       };
 
-      window._updateConsentBtn = () => {
+      const isReady = () => {
         const checked = document.getElementById('consent-checkbox')?.checked;
         const name    = document.getElementById('pilot-name')?.value.trim() || '';
-        _pilotName    = name;
-        window._pilotNameCapture = name;  // accessible to on_finish after DOM cleared
-        const btn     = document.getElementById('consent-btn');
-        if (btn) btn.disabled = !(checked && name && revealed.size === 3);
+        return fieldsUnlocked && checked && !!name;
       };
 
-      [0, 1, 2].forEach(i => {
+      const refreshBtnLook = () => setBtnLookReady(isReady());
+
+      // Capturing-phase listener on an ancestor — fires BEFORE jsPsych's own
+      // bubble-phase click listener on the button itself (jsPsych attaches
+      // that during trial() setup, before on_load runs). If requirements
+      // aren't met, silently stop it here; otherwise let it through untouched.
+      const interceptor = (e) => {
+        if (!btn || !e.target || !e.target.closest('#consent-btn')) return;
+        if (!isReady()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      };
+      document.addEventListener('click', interceptor, { capture: true });
+
+      const revealBox = (i) => {
+        document.getElementById('reveal-box-' + i + '-placeholder').style.display      = 'none';
+        document.getElementById('reveal-box-' + i + '-real').style.visibility = 'visible';
         const box = document.getElementById('reveal-box-' + i);
-        if (box) box.addEventListener('click', () => revealBox(i), { once: true });
-      });
+        box.style.cursor = 'default';
+        revealedCount++;
+
+        if (revealedCount < N_BOXES) {
+          activateBox(revealedCount);
+        } else {
+          // All boxes done — unlock the name/checkbox section (already in
+          // flow; just hide the overlay, no layout shift).
+          fieldsUnlocked = true;
+          document.getElementById('consent-fields-locked').style.display = 'none';
+          const nameInput = document.getElementById('pilot-name');
+          const checkbox  = document.getElementById('consent-checkbox');
+          nameInput.addEventListener('input', refreshBtnLook);
+          checkbox.addEventListener('change', refreshBtnLook);
+        }
+        refreshBtnLook();
+      };
+
+      const activateBox = (i) => {
+        const box = document.getElementById('reveal-box-' + i);
+        const ph  = document.getElementById('reveal-box-' + i + '-placeholder');
+        box.style.cursor = 'pointer';
+        if (ph) { ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
+        box.addEventListener('click', () => revealBox(i), { once: true });
+      };
+
+      // Box 0 starts active; box 1 starts locked ("· · ·") until box 0 is
+      // revealed — mirrors plugin-tutorial-intro-*.js.
+      activateBox(0);
+      refreshBtnLook();
+
+      // Exposed for on_finish to read the captured name and for cleanup.
+      window._pilotNameCapture = null;
+      const nameCaptureUpdater = () => {
+        _pilotName = document.getElementById('pilot-name')?.value.trim() || '';
+        window._pilotNameCapture = _pilotName;
+      };
+      document.addEventListener('input', nameCaptureUpdater);
+
+      window._consentCleanup = () => {
+        document.removeEventListener('click', interceptor, { capture: true });
+        document.removeEventListener('input', nameCaptureUpdater);
+      };
     },
     on_finish: (data) => {
       data.consent_given = true;
       // PILOT ONLY: save name as prolific_pid substitute (remove for Prolific production)
-      // Name captured in on_load closure (_pilotName) since DOM is cleared before on_finish
       if (window._pilotNameCapture) {
         data.pilot_name = window._pilotNameCapture;
         window._pilotNameCapture = null;
       }
-      window._updateConsentBtn = null;
+      if (window._consentCleanup) {
+        window._consentCleanup();
+        window._consentCleanup = null;
+      }
     },
   };
 }

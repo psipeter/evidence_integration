@@ -234,34 +234,38 @@ input[type="range"].slider-last::-moz-range-thumb {
 .consent-info-boxes {
   flex-shrink: 0;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem 0 0;
 }
 
 .consent-info-box {
-  flex: 1;
   display: flex;
   align-items: flex-start;
   gap: 0.6rem;
   padding: 0.55rem 0.75rem;
+  min-height: 3rem;
   border-radius: 6px;
   font-size: 0.9rem;
   line-height: 1.5;
-  background: #eff6ff;
-  border: 1.5px solid #bfdbfe;
-  color: #1e3a5f;
-}
-
-.consent-info-box--warning {
-  background: #fef9c3;
-  border-color: #fde047;
-  color: #713f12;
+  background: #fef2f2;
+  border: 1.5px solid #ef4444;
+  color: #7f1d1d;
 }
 
 .consent-footer {
   flex-shrink: 0;
   padding-top: 1rem;
+}
+
+/* "Begin experiment" button, before all consent steps are complete. Plain
+   class-based dimming (not the native :disabled pseudo-class) — decoupled
+   from browser/extension color overrides that can neutralize disabled-button
+   styling. Actual click gating happens in JS (build-consent-screen.js), not
+   here; this is purely cosmetic. */
+.consent-btn-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ── Tutorial layout ────────────────────────────────────────────────────── */
@@ -428,7 +432,14 @@ input[type="range"].slider-last::-moz-range-thumb {
 .binary-ball-blue { background: #2563eb; }
 .binary-ball-red  { background: #ef4444; }
 
-/* Gradient-fill slider — CSS custom property --pct drives the fill */
+/* Gradient-fill track — CSS custom property --pct drives the split point.
+   Only visible AFTER the first interaction ('unset' state below overrides it
+   with flat gray). An earlier revision made the gradient visible from first
+   render at a default 50/50 split to help participants guess which side is
+   which — but pre-filling any specific split, even a neutral one, creates a
+   prior/anchor before the participant has made any judgment. Removed pending
+   a value-free way to convey side orientation (e.g. a fixed legend that
+   doesn't imply a proportion) instead. */
 input[type="range"].binary-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -484,7 +495,8 @@ input[type="range"].binary-slider::-moz-range-thumb {
   cursor: ew-resize;
 }
 
-/* Unset state: hide thumb */
+/* Unset state: hide thumb AND override the gradient with flat gray —
+   nothing about the color split is shown until the participant interacts. */
 input[type="range"].binary-slider.slider-unset::-webkit-slider-thumb {
   background: transparent;
   box-shadow: none;
@@ -493,8 +505,6 @@ input[type="range"].binary-slider.slider-unset::-moz-range-thumb {
   background: transparent;
   box-shadow: none;
 }
-
-/* Unset: grey track, no fill */
 input[type="range"].binary-slider.slider-unset::-webkit-slider-runnable-track {
   background: #d1d5db;
 }
@@ -502,7 +512,8 @@ input[type="range"].binary-slider.slider-unset::-moz-range-track {
   background: #d1d5db;
 }
 
-/* Last mode: gray thumb + faded gradient track */
+/* Last mode: gray thumb + full-strength gradient (slider_default='last' —
+   not currently used by either task config, but kept correct for when it is) */
 input[type="range"].binary-slider.slider-last::-webkit-slider-thumb {
   background: #ccc !important;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
@@ -510,28 +521,6 @@ input[type="range"].binary-slider.slider-last::-webkit-slider-thumb {
 input[type="range"].binary-slider.slider-last::-moz-range-thumb {
   background: #ccc !important;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
-}
-input[type="range"].binary-slider.slider-last::-webkit-slider-runnable-track {
-  height: 16px;
-  border-radius: 8px;
-  background: linear-gradient(
-    to right,
-    rgba(37,99,235,0.3) 0%,
-    rgba(37,99,235,0.3) var(--pct, 50%),
-    rgba(239,68,68,0.3) var(--pct, 50%),
-    rgba(239,68,68,0.3) 100%
-  );
-}
-input[type="range"].binary-slider.slider-last::-moz-range-track {
-  height: 16px;
-  border-radius: 8px;
-  background: linear-gradient(
-    to right,
-    rgba(37,99,235,0.3) 0%,
-    rgba(37,99,235,0.3) var(--pct, 50%),
-    rgba(239,68,68,0.3) var(--pct, 50%),
-    rgba(239,68,68,0.3) 100%
-  );
 }
 
 /* ── Urn dot grid ─────────────────────────────────────────────────────────── */
