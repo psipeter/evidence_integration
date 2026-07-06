@@ -1,0 +1,67 @@
+/**
+ * create-early-exit.js
+ * Builds the earlyExit() callback used when a participant exhausts their
+ * timeout budget mid-trial: shows a "too slow" pulse, then the session-
+ * terminated screen with a Prolific return button. Extracted from
+ * timeline-builder.js — pure extraction, no behavior change.
+ */
+
+/**
+ * @param {object} opts
+ * @param {Function} opts.beforeUnloadHandler  handler to remove once exited
+ * @param {boolean}  opts.isProlific
+ * @param {*}        opts.jsPsych
+ * @param {string}   opts.earlyExitCode         Prolific partial-payment completion code
+ * @returns {Function} earlyExit — call with no args to trigger the exit flow
+ */
+export function createEarlyExit({ beforeUnloadHandler, isProlific, jsPsych, earlyExitCode }) {
+  return function earlyExit() {
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    const el = document.querySelector('#jspsych-content');
+    if (!el) return;
+
+    const FADE = 800;
+    const showTerminated = () => {
+      el.innerHTML = `
+        <div class='screen-wrap' style='text-align:center;'>
+          <h2>Session terminated</h2>
+          <p style='margin-top:1rem;font-size:1.4rem;color:#555;'>
+            You reached the maximum number of timed-out responses in one trial.
+          </p>
+          <p style='margin-top:0.75rem;font-size:1.4rem;color:#555;'>
+            Your data has been saved and you will receive partial compensation.
+          </p>
+          <button id='early-exit-btn' class='jspsych-btn'
+            style='font-size:1.6rem;padding:1rem 3.5rem;margin-top:2rem;'>
+            Return to Prolific
+          </button>
+        </div>`;
+      const btn = document.getElementById('early-exit-btn');
+      if (btn) btn.addEventListener('pointerdown', () => {
+        if (isProlific) {
+          jatos.endStudyAndRedirect(
+            `https://app.prolific.com/submissions/complete?cc=${earlyExitCode}`,
+            jsPsych.data.get().json());
+        } else {
+          jatos.endStudy(jsPsych.data.get().json());
+        }
+      });
+    };
+
+    // Show "Too slow — all timeouts used" with fade-in/out/in, then terminated screen
+    el.innerHTML = `
+      <div class="iti-wrap" style="flex-direction:column;gap:1.2rem;">
+        <span style="font-size:3rem;font-weight:bold;color:#ef4444;">Too slow</span>
+        <span id="exit-pulse" style="
+          font-size:2rem;font-style:italic;color:#555;
+          opacity:0;transition:opacity ${FADE}ms ease;">
+          0 timeouts remaining
+        </span>
+      </div>`;
+    const pulse = el.querySelector('#exit-pulse');
+    setTimeout(() => { if (pulse) pulse.style.opacity = '1'; }, 100);
+    setTimeout(() => { if (pulse) pulse.style.opacity = '0'; }, 100 + FADE + 200);
+    setTimeout(() => { if (pulse) pulse.style.opacity = '1'; }, 100 + FADE * 2 + 400);
+    setTimeout(showTerminated, 100 + FADE * 3 + 600);
+  };
+}

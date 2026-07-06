@@ -4,7 +4,7 @@
  *
  * Used by:
  *   plugin-tutorial-intro-binary.js   (progressive reveal via group opacity)
- *   plugin-practice-observation-binary.js (fully revealed from the start)
+ *   plugin-tutorial-observation-binary.js (fully revealed from the start)
  *
  * The SVG contains three named groups:
  *   #tut-urn-dots      — dot grid + border rect

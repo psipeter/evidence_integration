@@ -1,6 +1,6 @@
 /**
- * draw-performance.js
- * Builds an SVG string for continuous trial/practice summary screens.
+ * draw-performance-continuous.js
+ * Builds an SVG string for continuous trial/tutorial summary screens.
  *
  * Layout (top → bottom):
  *   Row 0:   Full-width number line (0–100) with green Gaussian overlay

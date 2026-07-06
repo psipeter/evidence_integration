@@ -1,16 +1,22 @@
+/**
+ * plugin-tutorial-observation-binary.js
+ * Obs 2-5 of the binary tutorial — same layout as obs 1 but fully revealed.
+ *
+ * No timeout clock, deliberately — participants need unhurried time to read
+ * and think during the tutorial. Wires the slider synchronously right after
+ * setting innerHTML (Pattern A: no on_load, no async, no rAF/setTimeout
+ * deferral).
+ */
+
 import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
 import { buildUrnSVG } from './urn-binary.js';
-/**
- * plugin-practice-observation-binary.js
- * Obs 2-5 of the binary tutorial — same layout as obs 1 but fully revealed.
- */
 
 const SAMPLE_BLUE = '#2563eb';
 const SAMPLE_RED  = '#ef4444';
 const DIST_COLOR  = '#16a34a';
 
 const info = {
-  name: 'practice-observation-binary',
+  name: 'tutorial-observation-binary',
   parameters: {
     value:          { type: 'INT',     default: 1      },
     obs_num:        { type: 'INT',     default: 1      },
@@ -22,7 +28,7 @@ const info = {
   },
 };
 
-class PracticeObservationBinaryPlugin {
+class TutorialObservationBinaryPlugin {
   constructor(jsPsych) { this.jsPsych = jsPsych; }
 
   trial(display_el, trial) {
@@ -48,17 +54,17 @@ class PracticeObservationBinaryPlugin {
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
-      <div class="practice-wrap">
-        <div class="practice-top-row">
-          <div class="practice-panel">
-            <p class="practice-info-block"><span>${BOX0}</span></p>
-            <p class="practice-info-block"><span>${BOX1}</span></p>
-            <p class="practice-info-block"><span>${BOX2}</span></p>
+      <div class="tutorial-wrap">
+        <div class="tutorial-top-row">
+          <div class="tutorial-panel">
+            <p class="tutorial-info-block"><span>${BOX0}</span></p>
+            <p class="tutorial-info-block"><span>${BOX1}</span></p>
+            <p class="tutorial-info-block"><span>${BOX2}</span></p>
           </div>
-          <div class="practice-panel practice-panel-centre">
+          <div class="tutorial-panel tutorial-panel-centre">
             <div class="binary-circle" style="background:${ballCol};"></div>
           </div>
-          <div class="practice-panel practice-panel-right">
+          <div class="tutorial-panel tutorial-panel-right">
             <div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>
           </div>
         </div>
@@ -83,5 +89,5 @@ class PracticeObservationBinaryPlugin {
   }
 }
 
-PracticeObservationBinaryPlugin.info = info;
-export default PracticeObservationBinaryPlugin;
+TutorialObservationBinaryPlugin.info = info;
+export default TutorialObservationBinaryPlugin;

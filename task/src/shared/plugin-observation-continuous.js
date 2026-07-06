@@ -1,15 +1,31 @@
 /**
- * plugin-observation.js
+ * plugin-observation-continuous.js
  * jsPsych 8 — one observation: stimulus number + slider + submit + timeout clock.
  *
- * Uses async trial(display_el, trial, on_load) pattern per jsPsych 8 best practice.
+ * IMPORTANT: trial() must NOT be declared `async`. jsPsych 8.2.3 advances the
+ * timeline once a trial() method's returned Promise resolves — for an async
+ * function with no internal `await`, that happens essentially synchronously
+ * (right after registering the rAF timeout loop below), long before
+ * finishTrial() is actually called. That caused a serious concurrency bug:
+ * a new observation instance was spawned roughly every ITI cycle regardless
+ * of whether the visible one had finished, with old instances' timeout loops
+ * continuing to run invisibly in the background and calling finishTrial()
+ * on trials jsPsych had already moved past. Completion must be signaled
+ * exclusively via the explicit jsPsych.finishTrial() call below — trial()
+ * itself just needs to render, call on_load(), and return.
+ *
  * on_load() is called after innerHTML is set, signalling DOM ready.
  * initSlider() attaches listeners directly — no setTimeout/rAF deferral.
+ *
+ * The countdown-clock rendering itself lives in observation-timeout-clock.js,
+ * shared with plugin-observation-binary.js (this logic used to be duplicated
+ * verbatim in both files).
  */
-import { buildSliderHTML, initSlider } from './slider.js';
+import { buildSliderHTML, initSlider } from './slider-continuous.js';
+import { startTimeoutClock } from './observation-timeout-clock.js';
 
 const info = {
-  name: 'observation',
+  name: 'observation-continuous',
   parameters: {
     value:          { type: 'INT',     default: 50 },
     trial_num:      { type: 'INT',     default: 1 },
@@ -21,12 +37,12 @@ const info = {
   },
 };
 
-class ObservationPlugin {
+class ObservationContinuousPlugin {
   constructor(jsPsych) {
     this.jsPsych = jsPsych;
   }
 
-  async trial(display_el, trial, on_load) {
+  trial(display_el, trial, on_load) {
     document.body.style.backgroundColor = '#f5f5f5';
     if (document.activeElement && document.activeElement !== document.body) {
       document.activeElement.blur();
@@ -55,13 +71,13 @@ class ObservationPlugin {
     on_load();
 
     // ── Timeout + finish ──────────────────────────────────────────────────────
-    let rafId    = null;
-    let finished = false;
+    let stopClock = null;
+    let finished   = false;
 
     const finish = (timed_out) => {
       if (finished) return;
       finished = true;
-      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      if (stopClock) stopClock();
       document.body.style.backgroundColor = '#f5f5f5';
       const slider   = display_el.querySelector('#response-slider');
       const hadUnset = slider?.classList.contains('slider-unset') ?? true;
@@ -79,50 +95,9 @@ class ObservationPlugin {
 
     // ── Timeout clock ─────────────────────────────────────────────────────────
     const canvas = display_el.querySelector('#timeout-clock');
-    const ctx    = canvas.getContext('2d');
-    const size   = canvas.width;
-    const cx = size / 2, cy = size / 2;
-    const R = size / 2 - 5, SW = 4;
-    const start = performance.now();
-
-    const drawClock = (now) => {
-      const fraction = Math.min((now - start) / t_obs_ms, 1);
-
-      if (fraction < 0.6) {
-        document.body.style.backgroundColor = '#f5f5f5';
-      } else {
-        const t = (fraction - 0.6) / 0.4;
-        document.body.style.backgroundColor =
-          `rgb(${Math.round(245 + t * 9)},${Math.round(245 - t * 19)},${Math.round(245 - t * 19)})`;
-      }
-
-      const color = fraction < 0.6 ? '#aaa'
-                  : fraction < 0.85 ? '#f97316'
-                  : '#ef4444';
-
-      ctx.clearRect(0, 0, size, size);
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, 2 * Math.PI);
-      ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = SW; ctx.stroke();
-
-      const remaining = 1 - fraction;
-      if (remaining > 0) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + remaining * 2 * Math.PI);
-        ctx.strokeStyle = color; ctx.lineWidth = SW; ctx.lineCap = 'round';
-        ctx.stroke();
-      }
-
-      if (fraction < 1) {
-        rafId = requestAnimationFrame(drawClock);
-      } else {
-        finish(true);
-      }
-    };
-
-    rafId = requestAnimationFrame(drawClock);
+    stopClock = startTimeoutClock(canvas, t_obs_ms, () => finish(true));
   }
 }
 
-ObservationPlugin.info = info;
-export default ObservationPlugin;
+ObservationContinuousPlugin.info = info;
+export default ObservationContinuousPlugin;

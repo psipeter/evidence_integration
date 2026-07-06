@@ -1,12 +1,12 @@
 /**
- * plugin-trial-summary.js
+ * plugin-trial-summary-continuous.js
  * Inter-trial summary — continuous task.
- * Identical layout to plugin-practice-summary.js; no title, no text box.
+ * Identical layout to plugin-tutorial-summary-continuous.js; no title, no text box.
  */
-import { buildPerformanceSVG } from './draw-performance.js';
+import { buildPerformanceSVG } from './draw-performance-continuous.js';
 
 const info = {
-  name: 'trial-summary',
+  name: 'trial-summary-continuous',
   parameters: {
     true_mean:        { type: 'FLOAT',   default: 54    },
     true_std:         { type: 'FLOAT',   default: 10    },
@@ -17,7 +17,7 @@ const info = {
   },
 };
 
-class TrialSummaryPlugin {
+class TrialSummaryContinuousPlugin {
   constructor(jsPsych) { this.jsPsych = jsPsych; }
 
   trial(display_el, trial) {
@@ -51,5 +51,5 @@ class TrialSummaryPlugin {
   }
 }
 
-TrialSummaryPlugin.info = info;
-export default TrialSummaryPlugin;
+TrialSummaryContinuousPlugin.info = info;
+export default TrialSummaryContinuousPlugin;

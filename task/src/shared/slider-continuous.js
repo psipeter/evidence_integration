@@ -1,13 +1,14 @@
 /**
- * slider.js — shared slider component for the continuous task.
+ * slider-continuous.js — shared slider component for the continuous task.
  *
  * Two modes (controlled by `unset`):
  *   unset=true  ('none') — thumb hidden, submit disabled until first interaction
  *   unset=false ('last') — thumb at initPos, submit immediately enabled
  *
- * initSlider() must be called after on_load() in the plugin's async trial()
- * method — this guarantees the DOM is fully rendered before listeners attach.
- * No setTimeout or rAF deferral needed.
+ * initSlider() must be called after on_load() in the plugin's trial()
+ * method (trial() must NOT be async — see plugin-observation-continuous.js
+ * header for why) — this guarantees the DOM is fully rendered before
+ * listeners attach. No setTimeout or rAF deferral needed.
  * Desktop/mouse only (Prolific restriction) — using 'click' for submit.
  */
 
@@ -77,7 +78,7 @@ export const updateFloatLabel = (slider) => {
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
-// Called after on_load() in plugin's async trial() — no deferral needed.
+// Called after on_load() in plugin's trial() — no deferral needed.
 
 export const initSlider = (display_el, {
   unset     = true,

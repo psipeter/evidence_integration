@@ -165,6 +165,21 @@
   import { buildAndRun }                from '/src/shared/timeline-builder.js';
   import '/src/shared/jatos-shim.js';
 
+  // ── URL param overrides ──────────────────────────────────────────────────
+  // Lets automated tests (and quick manual links) drive this page without
+  // touching source files: e.g.
+  //   index-dev.html?task=binary&tObsMs=1500&btiMs=200&tutorial=false&trials=3&autostart=1
+  //
+  // task/tutorial/distractor are constrained to the same fixed options as the
+  // button groups (pre-selects a button if the value matches).
+  //
+  // trials/btiMs/itiMs/tObsMs are free-form numeric overrides — NOT limited
+  // to the button-group presets (those exist for convenient manual clicking;
+  // automated tests need arbitrary values like trials=3 or btiMs=200, which
+  // may not correspond to any button). These win over the button selection
+  // whenever present in the URL.
+  const qp = new URLSearchParams(window.location.search);
+
   // ── Toggle button groups ─────────────────────────────────────────────────
   document.querySelectorAll('.btn-group').forEach(group => {
     group.querySelectorAll('.opt-btn').forEach(btn => {
@@ -175,15 +190,40 @@
     });
   });
 
-  const pick = (id) => document.querySelector(`#${id} .opt-btn.active`)?.dataset.val;
+  // Pre-select a button group value from a URL param, if present and valid.
+  const applyParamToGroup = (groupId, paramName) => {
+    const val = qp.get(paramName);
+    if (val == null) return;
+    const group = document.getElementById(groupId);
+    const btn   = group?.querySelector(`.opt-btn[data-val="${val}"]`);
+    if (btn) {
+      group.querySelectorAll('.opt-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+  };
+  applyParamToGroup('opt-task',       'task');
+  applyParamToGroup('opt-tutorial',   'tutorial');
+  applyParamToGroup('opt-distractor', 'distractor');
 
-  document.getElementById('start-btn').addEventListener('click', () => {
+  const pick    = (id) => document.querySelector(`#${id} .opt-btn.active`)?.dataset.val;
+  const numParam = (name, fallbackFromGroupId) => {
+    if (qp.has(name)) return parseInt(qp.get(name), 10);
+    return parseInt(pick(fallbackFromGroupId), 10);
+  };
+
+  function start() {
     const task           = pick('opt-task');
     const showTutorial   = pick('opt-tutorial') === 'true';
-    const nTrials        = parseInt(pick('opt-trials'), 10);
-    const btiMs          = parseInt(pick('opt-bti'), 10);
-    const trialItiMs     = parseInt(pick('opt-iti'), 10);
     const distractorType = pick('opt-distractor');
+
+    // Free-form numeric overrides (see comment above) — fall back to the
+    // active button value when not present in the URL.
+    const nTrials    = numParam('trials', 'opt-trials');
+    const btiMs      = numParam('btiMs',  'opt-bti');
+    const trialItiMs = numParam('itiMs',  'opt-iti');
+    // tObsMs (observation response deadline) has no button in the UI at
+    // all — it's only ever a URL override, primarily for fast E2E tests.
+    const tObsMsOverride = qp.has('tObsMs') ? parseInt(qp.get('tObsMs'), 10) : null;
 
     const baseConfig = task === 'binary' ? configBinary : configContinuous;
 
@@ -199,8 +239,14 @@
       distractorType,
       testMode:     true,
       showTutorial,
+      ...(tObsMsOverride != null ? { tObsMs: tObsMsOverride } : {}),
     });
-  });
+  }
+
+  document.getElementById('start-btn').addEventListener('click', start);
+
+  // ?autostart=1 — used by Playwright tests to skip the manual click entirely.
+  if (qp.get('autostart') === '1') start();
 </script>
 </body>
 </html>

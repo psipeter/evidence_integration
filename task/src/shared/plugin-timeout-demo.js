@@ -9,8 +9,9 @@
  * Screen 3: "Tutorial complete" + "Proceed to experiment" button.
  */
 
-import { buildSliderHTML }       from './slider.js';
+import { buildSliderHTML }       from './slider-continuous.js';
 import { buildBinarySliderHTML } from './slider-binary.js';
+import { startTimeoutClock }     from './observation-timeout-clock.js';
 
 const SAMPLE_BLUE = '#2563eb';
 const SAMPLE_RED  = '#ef4444';
@@ -80,49 +81,13 @@ class TimeoutDemoPlugin {
           </button>
         </div>`;
 
-      const canvas   = display_el.querySelector('#demo-clock');
-      const ctx      = canvas.getContext('2d');
-      const size     = canvas.width;
-      const cx = size / 2, cy = size / 2;
-      const R = size / 2 - 5, SW = 4;
-      const start    = performance.now();
-      let rafId      = null;
-      let active     = true;
-
-      const drawClock = (now) => {
-        if (!active) return;
-        const fraction = Math.min((now - start) / _tObs, 1);
-        const color = fraction < 0.6 ? '#aaa' : fraction < 0.85 ? '#f97316' : '#ef4444';
-
-        if (fraction < 0.6) {
-          document.body.style.backgroundColor = '#f5f5f5';
-        } else {
-          const t = (fraction - 0.6) / 0.4;
-          document.body.style.backgroundColor =
-            `rgb(${Math.round(245+t*9)},${Math.round(245-t*19)},${Math.round(245-t*19)})`;
-        }
-
-        ctx.clearRect(0, 0, size, size);
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2*Math.PI);
-        ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = SW; ctx.stroke();
-        const rem = 1 - fraction;
-        if (rem > 0) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, R, -Math.PI/2, -Math.PI/2 + rem*2*Math.PI);
-          ctx.strokeStyle = color; ctx.lineWidth = SW; ctx.lineCap = 'round';
-          ctx.stroke();
-        }
-        if (fraction < 1) {
-          rafId = requestAnimationFrame(drawClock);
-        } else {
-          active = false;
-          document.body.style.backgroundColor = '#f5f5f5';
-          const n = document.getElementById('timeout-demo-note');
-          if (n) n.parentNode.removeChild(n);
-          showScreen2();
-        }
-      };
-      rafId = requestAnimationFrame(drawClock);
+      const canvas = display_el.querySelector('#demo-clock');
+      startTimeoutClock(canvas, _tObs, () => {
+        document.body.style.backgroundColor = '#f5f5f5';
+        const n = document.getElementById('timeout-demo-note');
+        if (n) n.parentNode.removeChild(n);
+        showScreen2();
+      });
     };
 
     // ── Screen 2 ─────────────────────────────────────────────────────────────

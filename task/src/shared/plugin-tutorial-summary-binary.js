@@ -1,29 +1,28 @@
 /**
- * plugin-practice-summary.js
- * End-of-practice summary using the same performance canvas as trial summary.
+ * plugin-tutorial-summary-binary.js
+ * End-of-tutorial summary for the binary task — bar chart + info boxes.
  */
 
-import { buildPerformanceSVG } from './draw-performance.js';
+import { buildSummaryBarSVG } from './draw-performance-binary.js';
 
 const info = {
-  name: 'practice-summary',
+  name: 'tutorial-summary-binary',
   parameters: {
-    true_mean:  { type: 'FLOAT',  default: 54 },
-    true_std:   { type: 'FLOAT',  default: 10 },
-    values:     { type: 'OBJECT', default: [] },
-    responses:  { type: 'OBJECT', default: [] },
+    true_p:    { type: 'FLOAT',  default: 0.6 },
+    values:    { type: 'OBJECT', default: []  },
+    responses: { type: 'OBJECT', default: []  },
   },
 };
 
-class PracticeSummaryPlugin {
+class TutorialSummaryBinaryPlugin {
   constructor(jsPsych) {
     this.jsPsych = jsPsych;
   }
 
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
+    const { true_p, values, responses } = trial;
 
-    const { true_mean, true_std, values, responses } = trial;
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;width:70vw;">
         <div id="summary-svg"
@@ -39,14 +38,15 @@ class PracticeSummaryPlugin {
         </button>
       </div>`;
 
-    display_el.querySelector('#summary-svg').innerHTML = buildPerformanceSVG(true_mean, true_std, values, responses);
+    display_el.querySelector('#summary-svg').innerHTML =
+      buildSummaryBarSVG(true_p, values, responses);
 
     display_el.querySelector('#proceed-btn').addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      this.jsPsych.finishTrial({ screen: 'practice_summary' });
+      this.jsPsych.finishTrial({ screen: 'tutorial_summary' });
     });
   }
 }
 
-PracticeSummaryPlugin.info = info;
-export default PracticeSummaryPlugin;
+TutorialSummaryBinaryPlugin.info = info;
+export default TutorialSummaryBinaryPlugin;

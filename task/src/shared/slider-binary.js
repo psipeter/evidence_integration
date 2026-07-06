@@ -5,8 +5,9 @@
  *   unset=true  ('none') — thumb hidden, gray track, submit disabled
  *   unset=false ('last') — thumb at initPos, submit disabled until interaction
  *
- * initBinarySlider() must be called after on_load() in the plugin's async trial().
- * No setTimeout or rAF deferral needed.
+ * initBinarySlider() must be called after on_load() in the plugin's trial()
+ * method (trial() must NOT be async — see plugin-observation-binary.js header
+ * for why) — no setTimeout or rAF deferral needed.
  * Desktop/mouse only (Prolific restriction) — using 'click' for submit.
  */
 
@@ -94,7 +95,7 @@ export const updateBinaryLabel = (slider) => {
 };
 
 // ── Wire-up ───────────────────────────────────────────────────────────────────
-// Called after on_load() in plugin's async trial() — no deferral needed.
+// Called after on_load() in plugin's trial() — no deferral needed.
 
 export const initBinarySlider = (display_el, {
   unset     = true,

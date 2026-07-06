@@ -161,7 +161,7 @@ Target: ~50–80 participants per task, within-subject.
   - Per-trial timeout budget: 3 timeouts before session terminates
   - Timeout flow: "Too slow" screen (fade in/out/in, 3.2s) → replay ITI → same observation
   - On 3rd timeout: "Too slow / 0 timeouts remaining" → "Session terminated" screen with button
-- **Tutorial**: 3-box progressive reveal → 4 practice observations → practice summary →
+- **Tutorial**: 3-box progressive reveal → 4 tutorial observations → tutorial summary →
   timeout demonstration (3 screens) → BTI → trial 1
 - **Summary slides**: binary — per-obs bar chart (blue/red split at estimate, obs circle left);
   continuous — per-obs number line (red obs thumb, black circle at estimate)
@@ -184,26 +184,34 @@ All trials use ITI_MS=1000ms.
 task/
   src/
     shared/
+      timeline-builder.js          — orchestrator: builds full timeline from config
       build-trial-timeline.js      — pure-JS trial loop (importable by test harness)
-      timeline-builder.js          — full timeline, parameterised by config
+      build-tutorial-timeline.js   — tutorial sub-timeline (intro → obs → summary → timeout demo)
+      build-consent-screen.js      — informed-consent screen
+      build-end-screen.js          — final "Thank you" screen
+      create-early-exit.js         — session-terminated flow (3-timeout exhaustion)
+      config-base.js               — shared config factory for continuous/binary configs
       jatos-shim.js                — dev no-op shim
       plugin-inter-trial.js        — BTI reset screen
-      plugin-observation.js        — continuous obs (number + slider + timeout clock)
-      plugin-observation-binary.js — binary obs (circle + gradient slider + timeout clock)
+      plugin-observation-continuous.js — continuous obs (number + slider + timeout clock)
+      plugin-observation-binary.js     — binary obs (circle + gradient slider + timeout clock)
+      observation-timeout-clock.js — shared countdown-clock renderer (used by both
+                                      observation plugins AND plugin-timeout-demo.js)
       plugin-iti-clock.js          — ITI countdown clock; shows "Too slow" if timed_out=true
       plugin-timeout-demo.js       — 3-screen timeout explanation (tutorial)
-      plugin-tutorial-intro-continuous.js   — continuous 3-stage interactive intro
-      plugin-tutorial-intro-binary.js       — binary 3-stage interactive intro
-      plugin-practice-observation.js        — continuous tutorial obs 2–5
-      plugin-practice-observation-binary.js — binary tutorial obs 2–5
-      plugin-practice-summary.js            — continuous tutorial summary
-      plugin-practice-summary-binary.js     — binary tutorial summary
-      plugin-trial-summary.js               — continuous trial summary
-      plugin-trial-summary-binary.js        — binary trial summary
-      draw-performance.js          — SVG distribution + dot plots (continuous)
-      bar-chart.js                 — SVG bar + dot plots (binary)
-      urn-binary.js                — shared binary urn SVG
-      slider.js                    — continuous slider
+      plugin-tutorial-intro-continuous.js       — continuous 3-stage interactive intro
+      plugin-tutorial-intro-binary.js           — binary 3-stage interactive intro
+      plugin-tutorial-observation-continuous.js — continuous tutorial obs 2–5 (no timeout clock)
+      plugin-tutorial-observation-binary.js     — binary tutorial obs 2–5 (no timeout clock)
+      plugin-tutorial-summary-continuous.js     — continuous tutorial summary
+      plugin-tutorial-summary-binary.js         — binary tutorial summary
+      plugin-trial-summary-continuous.js        — continuous trial summary
+      plugin-trial-summary-binary.js            — binary trial summary
+      distribution-continuous.js   — shared continuous distribution SVG (revealed flag)
+      draw-performance-continuous.js — SVG distribution + dot plots (continuous)
+      draw-performance-binary.js     — SVG bar + dot plots (binary)
+      urn-binary.js                 — shared binary urn SVG (revealed flag)
+      slider-continuous.js         — continuous slider
       slider-binary.js             — binary slider (blue/red gradient, split % labels)
       style.css                    — all shared styles
     continuous/
@@ -217,13 +225,17 @@ task/
     binary_sequences.{pkl,json}       — seed=1229
   generate_sequences.py
   parse_results.py
-  test_browser.mjs         — Playwright end-to-end tests (true timings)
+  test_browser.mjs         — Playwright E2E tests (Chromium/Firefox/WebKit, both tasks)
   index-continuous.html
   index-binary.html
-  index-dev.html
+  index-dev.html            — dev setup page; also accepts URL param overrides for tests
   package.json
   vite.config.js
 ```
+
+Naming convention: every file/class with a continuous/binary pair uses an
+explicit `-continuous`/`-binary` suffix on both sides — never leave one side
+as an implicit unsuffixed default. See CLAUDE.md for the fuller rationale.
 
 ### Key parameters
 
@@ -249,20 +261,32 @@ npm install                    # first time only
 npm run dev                    # local dev server; open index-dev.html for dev setup page
 npm run build:continuous       # production build → dist-continuous/
 npm run build:binary           # production build → dist-binary/
-node test_browser.mjs          # full Playwright E2E tests (~3 min, true timings)
+node test_browser.mjs          # Playwright E2E tests (~2-3 min); see Testing below
 ```
 
 ### Testing
 
-Two complementary test systems:
+**`test_browser.mjs`** — spawns the real Vite dev server (not a patched build) and
+drives `index-dev.html` via Playwright across Chromium, Firefox, and WebKit, for
+both tasks (30 scenarios total: normal submit, timeout replay, "N timeouts
+remaining" text, 3-timeout termination screen, submit-then-continue). Fast
+timings and tutorial-skip are requested via URL params
+(`?tObsMs=&btiMs=&itiMs=&trials=&tutorial=false&autostart=1`) rather than by
+editing source files, so an interrupted run can't corrupt anything. Screen
+transitions are detected via `body[data-screen="..."]` rather than guessed
+sleep durations.
 
-**`test_browser.mjs`** — spins up a static HTTP server, loads the full built app
-in headless Chromium via Playwright, and automates consent → tutorial → main
-experiment. Tests normal submit, timeout replay, "1 timeout remaining" text,
-3-timeout termination screen, and multi-timeout-then-submit. Uses true timings
-(7s obs clock) so takes ~3 minutes.
+Takes ~2–3 minutes for the full matrix — run it after big `task/` changes or
+when asked, not after every small edit.
 
-Run both before any deployment.
+```bash
+node test_browser.mjs                                   # full matrix
+node test_browser.mjs --task=binary --browser=chromium  # a subset
+```
+
+Firefox/WebKit need their browser binaries installed once:
+`npx playwright install firefox webkit` (plus `sudo npx playwright install-deps`
+for system libraries if missing).
 
 ### Local testing pipeline
 

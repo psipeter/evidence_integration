@@ -264,8 +264,8 @@ input[type="range"].slider-last::-moz-range-thumb {
   padding-top: 1rem;
 }
 
-/* ── Practice layout ────────────────────────────────────────────────────── */
-.practice-wrap {
+/* ── Tutorial layout ────────────────────────────────────────────────────── */
+.tutorial-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -275,7 +275,7 @@ input[type="range"].slider-last::-moz-range-thumb {
 }
 
 /* Top row: three equal-width panels */
-.practice-top-row {
+.tutorial-top-row {
   display: flex;
   align-items: stretch;
   justify-content: center;
@@ -283,29 +283,29 @@ input[type="range"].slider-last::-moz-range-thumb {
   width: 70vw;
 }
 
-.practice-panel {
+.tutorial-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.practice-panel-centre {
+.tutorial-panel-centre {
   align-items: center;
   justify-content: center;
 }
 
-.practice-panel-right {
+.tutorial-panel-right {
   align-items: stretch;
 }
 
-.practice-info-block > span {
+.tutorial-info-block > span {
   font-size: inherit;
   line-height: inherit;
   color: inherit;
 }
 
-.practice-info-block {
+.tutorial-info-block {
   flex: 1;
   font-size: 1.4rem;
   color: #333;
@@ -320,7 +320,7 @@ input[type="range"].slider-last::-moz-range-thumb {
   text-align: center;
 }
 
-.practice-sample-label {
+.tutorial-sample-label {
   font-size: 0.8rem;
   font-weight: bold;
   letter-spacing: 0.04em;
@@ -339,9 +339,9 @@ input[type="range"].slider-last::-moz-range-thumb {
   min-height: 120px;
 }
 
-/* Slider in practice uses same .slider-section/.slider-wrap as main task,
-   constrained to 50vw by the parent .practice-wrap */
-.practice-wrap .slider-section {
+/* Slider in the tutorial uses same .slider-section/.slider-wrap as main task,
+   constrained to 70vw by the parent .tutorial-wrap */
+.tutorial-wrap .slider-section {
   width: 70vw;
 }
 
@@ -386,7 +386,7 @@ input[type="range"].slider-last::-moz-range-thumb {
   margin: 0 auto;
 }
 
-.summary-info-row .practice-info-block {
+.summary-info-row .tutorial-info-block {
   flex: 1;
   text-align: left;
   font-size: 0.85rem;
@@ -684,36 +684,3 @@ input[type="range"].binary-slider.slider-last::-moz-range-track {
  * on a 16px track. Track centre = 96/2 = 48px from input top.
  * Ghost visible rect: 40px tall, centred at 48px → top = 48-20 = 28px. */
 
-/* ── Dev settings panel ──────────────────────────────────────────────────── */
-.dev-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-.dev-label {
-  width: 9rem;
-  font-size: 1.4rem;
-  font-weight: 600;
-  color: #444;
-  flex-shrink: 0;
-}
-.dev-options {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.dev-btn {
-  font-size: 1.3rem;
-  padding: 0.4rem 1rem;
-  border: 2px solid #d1d5db;
-  border-radius: 6px;
-  background: #fff;
-  cursor: pointer;
-  color: #555;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.dev-btn.active {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
-  color: #fff;
-}

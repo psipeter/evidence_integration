@@ -7,7 +7,8 @@ README.md when they conflict.
 **After any conversation compaction**: re-read this file in full before doing
 anything else. Compaction summaries omit conventions. Key ones to remember:
 - Figures save as PDF only — never convert to PNG/SVG or upload images to chat
-- Run node test_browser.mjs before any deployment
+- Run node test_browser.mjs only after big task/ changes or when explicitly asked —
+  it's slow (3 browsers × 2 tasks); don't run it reflexively after every small edit
 - All NEF simulation data → data/runs/; figures → figures/
 
 ---
@@ -137,8 +138,17 @@ New task (task/): Two online experiments deployed on Prolific via MindProbe/JATO
 - Binary task: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 24 trials × 15 obs
 Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
 Timeout system: 3 timeouts per trial; timeout → too-slow screen → replay; exhausted → terminated screen.
-Key files: build-trial-timeline.js (pure-JS trial loop), plugin-observation.js,
-  plugin-observation-binary.js, slider.js, slider-binary.js, timeline-builder.js.
+Naming convention (IMPORTANT): every file/class that has a continuous/binary pair
+  uses an explicit -continuous/-binary suffix on BOTH sides (e.g.
+  plugin-observation-continuous.js / plugin-observation-binary.js). Never leave one
+  side unsuffixed as an implicit default — that drifted into real inconsistency
+  once (plugin-observation.js vs -binary.js, draw-performance.js vs bar-chart.js)
+  and was cleaned up in a dedicated pass; don't reintroduce it.
+Key files: timeline-builder.js (orchestrator), build-trial-timeline.js (pure-JS
+  trial loop), build-tutorial-timeline.js, build-consent-screen.js, build-end-screen.js,
+  create-early-exit.js, plugin-observation-continuous.js, plugin-observation-binary.js,
+  observation-timeout-clock.js (shared countdown-clock renderer — see below),
+  slider-continuous.js, slider-binary.js.
 Data pipeline: JATOS JSON → task/parse_results.py → data/task_results.pkl
 Consent form: verbatim IRB text from task/consent_form.txt — do not paraphrase or edit.
 Pilot name field: PILOT ONLY — saves name as prolific_pid substitute.
@@ -151,15 +161,48 @@ Current task status (as of latest session):
 - TEST_MODE=false, N_TRIALS_TO_RUN=24, BTI_MS=3000ms, DISTRACTOR_TYPE='none'
 - Consent: click-to-reveal 3 boxes + name field + checkbox before Begin
 - Summary slides redesigned: binary = per-obs bar chart; continuous = per-obs number line
-- Slider refactor COMPLETE: both observation plugins use async trial(display_el, trial, on_load)
-  pattern (jsPsych 8 best practice); initSlider/initBinarySlider attach listeners directly
-  after on_load() — no setTimeout/rAF deferral; mousedown + click (desktop/mouse only)
-- Known outstanding bug: test_browser.mjs Playwright tests hang in shell environment —
-  run manually in terminal. The test itself is correct; the issue is the shell tool
-  timing out on browser automation.
+- Slider refactor COMPLETE (revised): both observation plugins use
+  trial(display_el, trial, on_load) — NOT async — with on_load() called after
+  innerHTML is set, then initSlider/initBinarySlider attach listeners directly.
+  No setTimeout/rAF deferral; mousedown + click (desktop/mouse only).
+- FIXED (critical, found via browser test harness): trial() must never be
+  declared `async`. jsPsych 8.2.3 advances the timeline once an async trial()
+  method's returned Promise resolves, not when finishTrial() is called — and
+  since these methods never `await` anything, that resolution happens almost
+  synchronously, right after the rAF timeout loop is registered. This spawned
+  a new observation instance roughly every ITI cycle regardless of whether the
+  visible one had finished, with orphaned instances' timeout loops still
+  running in the background and calling finishTrial() on trials jsPsych had
+  already moved past. Removing `async` fixed it — confirmed via per-instance
+  start/end wall-clock logging showing true overlap before the fix and clean
+  sequential execution after. This may have subtly corrupted timeout/response
+  data in earlier pilots whenever a real participant timeout occurred.
+- test_browser.mjs hang (FIXED): was not a shell-tool limitation as previously
+  believed — see "Testing" section below for the actual harness rewrite.
 - Pilot feedback bug (FIXED): first obs of first trial submit button unclickable —
   was caused by double-rAF deferral firing before browser layout complete; fixed by
-  async/on_load refactor above.
+  the on_load() refactor above (the `async` keyword added during that same fix was
+  itself the cause of the concurrency bug above — removed, rest of the pattern kept).
+- "practice" → "tutorial" rename COMPLETE: every file, class, info.name, data.screen
+  label, config key (tutorialValues/Mean/Std), and CSS class that referred to
+  "practice" now says "tutorial" instead, consistently. Zero "practice" references
+  remain anywhere in task/src (verified by grep). The tutorial observation plugins
+  have NO timeout clock, deliberately — participants need unhurried time to read
+  and think; only plugin-timeout-demo.js (which exists specifically to demonstrate
+  the real deadline before trial 1) shows a countdown during the tutorial.
+- File naming/consolidation pass COMPLETE: every continuous/binary file pair now
+  has an explicit suffix on both sides (see "Naming convention" above). Two
+  real duplications were extracted into shared modules:
+    - observation-timeout-clock.js — the countdown-ring canvas renderer, previously
+      duplicated verbatim across plugin-observation-continuous.js,
+      plugin-observation-binary.js, AND plugin-timeout-demo.js (3 copies → 1).
+    - distribution-continuous.js — the continuous tutorial's distribution SVG
+      (with a `revealed` boolean flag), mirroring urn-binary.js's already-correct
+      pattern; previously two independently-drifting local implementations in
+      plugin-tutorial-intro-continuous.js and plugin-tutorial-observation-continuous.js.
+  Also removed: dead plugin-dev-settings.js (never imported), dead .dev-* CSS rules,
+  dead buildBarOnly() in draw-performance-binary.js. Old files under _trash/ pending
+  your `git rm`.
 - Distractor system exists (iti_condition per trial, popup/iti_length/none) but
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
 
@@ -174,16 +217,50 @@ Local dev: open http://localhost:5173/index-dev.html (TEST_MODE=true in configs)
 
 Testing:
 - node test_consent_name.mjs — verifies pilot name saved to jsPsych data (fast, ~5s)
-- node test_browser.mjs      — Playwright E2E tests; run manually in terminal (not via
-                               shell tool — hangs). Patches config for 1500ms obs
-                               timeout. Tests: submit, timeout, session-terminated.
+- node test_browser.mjs      — Playwright E2E tests across Chromium, Firefox, and
+                               WebKit, both tasks (30 scenarios total). SLOW (~2-3 min) —
+                               only run after big task/ changes or when explicitly asked,
+                               not after every small edit. Runs fine via shell tool now
+                               (previous "hangs in shell" note was wrong — the real issue
+                               was a destructive config-patching harness that could leave
+                               source files corrupted and orphan the dev-server process on
+                               interrupt). Rewritten to:
+                                 - spawn the real `vite` dev server (not a patched build)
+                                 - drive it via URL params on index-dev.html (?task=,
+                                   ?tObsMs=, ?btiMs=, ?itiMs=, ?trials=, ?tutorial=,
+                                   ?autostart=1) — free-form overrides, not limited to
+                                   the dev-page's button presets — see index-dev.html
+                                 - detect screen transitions via body[data-screen="..."]
+                                   (set by on_trial_start in timeline-builder.js) instead
+                                   of guessing sleep durations
+                                 - kill the dev server by process group on exit
+                               Run a subset: node test_browser.mjs --task=binary --browser=chromium
+                               Firefox/WebKit require: npx playwright install firefox webkit
+                               (+ system deps via `sudo npx playwright install-deps` if missing —
+                               watch for unrelated broken third-party apt repos blocking this)
 
 jsPsych 8 plugin conventions (IMPORTANT — do not regress):
-- Custom plugins use: async trial(display_el, trial, on_load)
+- Custom plugins use: trial(display_el, trial, on_load) — NEVER declare this `async`.
+  jsPsych 8.2.3 advances the timeline when an async trial()'s Promise resolves, not
+  when finishTrial() is called; since these methods never await anything, that
+  resolution happens almost immediately, causing overlapping/duplicate trial
+  instances (see "Current task status" above — this was a real, previously
+  undetected bug in production). Completion must come exclusively from finishTrial().
 - Set innerHTML, call on_load(), then wire all interactivity synchronously
 - Never use setTimeout or double-rAF to defer listener attachment
 - Desktop/mouse only: mousedown for slider drag, click for submit button
 - Use jsPsych.pluginAPI.setTimeout() not raw setTimeout for timed events
+- Two consistent patterns only — do not introduce a third:
+    Pattern A (no timeout clock — consent/tutorial/summary screens): plain
+      trial(display_el, trial), wire listeners synchronously right after
+      setting innerHTML. No on_load, no async, no rAF/setTimeout deferral.
+    Pattern B (has a timeout clock — real observation plugins):
+      trial(display_el, trial, on_load), call on_load() after innerHTML is
+      set, wire listeners synchronously, then start the countdown via
+      observation-timeout-clock.js's startTimeoutClock(canvas, t_obs_ms, onTimeout).
+  The tutorial observation plugins (plugin-tutorial-observation-continuous.js,
+  plugin-tutorial-observation-binary.js) are Pattern A — no timeout clock,
+  deliberately, since participants need unhurried time during the tutorial.
 
 JATOS/MindProbe deployment:
 - .jzip files generated by task/generate_jzip.py (build + package in one step)

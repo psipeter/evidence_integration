@@ -1,9 +1,9 @@
 /**
  * plugin-trial-summary-binary.js
  * Inter-trial summary — binary task.
- * Identical layout to plugin-practice-summary-binary.js; no title, no text box.
+ * Identical layout to plugin-tutorial-summary-binary.js; no title, no text box.
  */
-import { buildSummaryBarSVG } from './bar-chart.js';
+import { buildSummaryBarSVG } from './draw-performance-binary.js';
 
 const info = {
   name: 'trial-summary-binary',

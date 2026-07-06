@@ -1,103 +1,101 @@
 /**
  * test_browser.mjs
- * Playwright end-to-end tests for the binary task.
- * Patches config for fast obs timeout (1500ms) and builds to dist-binary-test.
- * Run: node test_browser.mjs
+ * Playwright end-to-end tests for both tasks (continuous + binary) across
+ * Chromium, Firefox, and WebKit.
+ *
+ * Non-destructive: no source files are patched. Fast timings/skip-tutorial
+ * are requested via URL query params on index-dev.html (see the "URL param
+ * overrides" block on that file), which the dev server reads at runtime.
+ * This runs against the real Vite dev server serving the actual task code —
+ * nothing is rebuilt or rewritten on disk, so a crash mid-run can't corrupt
+ * source files.
+ *
+ * Screen transitions are detected via `body[data-screen="..."]`, set by a
+ * `on_trial_start` hook in timeline-builder.js (harmless in production —
+ * just a DOM attribute). This avoids racing against guessed sleep durations,
+ * which is what caused early flakiness/hangs while building this harness:
+ * a screen with no visible text (e.g. the ITI clock, which is canvas-only)
+ * looks identical to "stuck" if you're only checking textContent, so tests
+ * must wait for the actual screen to change, not for a fixed amount of time
+ * to pass.
+ *
+ * The dev server is spawned in its own process group and killed by group
+ * (not just by PID) on exit, so an interrupted run can't leave an orphaned
+ * Vite process holding the port — if you ever see "Port 7655 is already in
+ * use", run: lsof -ti:7655 | xargs -r kill -9
+ *
+ * Run:              node test_browser.mjs
+ * Run a subset:      node test_browser.mjs --task=binary --browser=chromium
  */
-import { chromium }      from 'playwright';
-import http              from 'http';
-import fs                from 'fs';
+import { chromium, firefox, webkit } from 'playwright';
+import { spawn }         from 'child_process';
 import path              from 'path';
-import { execSync }      from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST      = path.join(__dirname, 'dist-binary-test');
 const PORT      = 7655;
+const BASE_URL  = `http://localhost:${PORT}`;
 
-// ── Patch config for fast testing and build ───────────────────────────────────
-console.log('Building test version...');
-const configPath = path.join(__dirname, 'src/binary/config.js');
-const viteConf   = path.join(__dirname, 'vite.config.js');
-const tbPath     = path.join(__dirname, 'src/shared/timeline-builder.js');
-const origConfig = fs.readFileSync(configPath, 'utf8');
-const origVite   = fs.readFileSync(viteConf, 'utf8');
-const origTb     = fs.readFileSync(tbPath, 'utf8');
-try {
-  // Short obs timeout + fast BTI + TEST_MODE
-  fs.writeFileSync(configPath, origConfig
-    .replace('const T_OBS_MS           = 7000;', 'const T_OBS_MS           = 1500;')
-    .replace('const BTI_MS             = TEST_MODE ? 500  : 3000;', 'const BTI_MS             = 500;')
-    .replace('const TEST_MODE              = false;', 'const TEST_MODE              = true;')
-  );
-  // Skip tutorial always in test mode
-  fs.writeFileSync(tbPath, origTb.replace(
-    'const skipTutorial = !showTutorial;',
-    'const skipTutorial = true; // test build: always skip'
-  ));
-  // Build to separate dir
-  fs.writeFileSync(viteConf, origVite.replace(
-    "outDir: 'dist-binary',",
-    "outDir: 'dist-binary-test',"
-  ));
-  execSync('npm run build:binary', { cwd: __dirname, stdio: 'pipe' });
-  console.log('Build done.\n');
-} finally {
-  fs.writeFileSync(configPath, origConfig);
-  fs.writeFileSync(viteConf, origVite);
-  fs.writeFileSync(tbPath, origTb);
+const ENGINES = { chromium, firefox, webkit };
+
+// ── CLI filters ──────────────────────────────────────────────────────────────
+const argTask    = process.argv.find(a => a.startsWith('--task='))?.split('=')[1];
+const argBrowser = process.argv.find(a => a.startsWith('--browser='))?.split('=')[1];
+
+const TASKS    = argTask    ? [argTask]    : ['binary', 'continuous'];
+const BROWSERS = argBrowser ? [argBrowser] : ['chromium', 'firefox', 'webkit'];
+
+// Fast-test overrides applied via URL params (see index-dev.html).
+// obs timeout 1500ms, BTI 400ms, ITI 400ms, no tutorial, 3 trials.
+// trials/btiMs/itiMs/tObsMs are free-form overrides (NOT limited to the
+// dev-page's button-group presets) — see index-dev.html for details.
+const T_OBS_MS = 1500;
+const testUrl = (task) =>
+  `${BASE_URL}/index-dev.html?task=${task}&tObsMs=${T_OBS_MS}&btiMs=400&itiMs=400` +
+  `&tutorial=false&trials=3&autostart=1`;
+
+// ── Start / stop Vite dev server (own process group, killed by group) ──────
+function startDevServer() {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      'npx', ['vite', '--port', String(PORT), '--strictPort'],
+      { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'], detached: true }
+    );
+    let resolved = false;
+    const onData = (buf) => {
+      const s = buf.toString();
+      if (!resolved && /ready in|Local:/i.test(s)) {
+        resolved = true;
+        resolve(proc);
+      }
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.on('error', reject);
+    proc.on('exit', (code) => {
+      if (!resolved) reject(new Error(`Vite dev server exited early (code ${code})`));
+    });
+    setTimeout(() => { if (!resolved) reject(new Error('Vite dev server did not start in time')); }, 15000);
+  });
 }
 
-// Verify dist exists
-if (!fs.existsSync(path.join(DIST, 'index-binary.html'))) {
-  console.error('Build failed: index-binary.html not found in', DIST);
-  process.exit(1);
-}
-
-// ── Static file server ────────────────────────────────────────────────────────
-const server = http.createServer((req, res) => {
-  let rel  = req.url.split('?')[0];
-  if (rel === '/') rel = '/index-binary.html';
-  const file = path.join(DIST, rel);
-  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); res.end(); return;
-  }
-  const ext  = path.extname(file);
-  const mime = { '.html':'text/html', '.js':'application/javascript',
-                 '.css':'text/css', '.json':'application/json' }[ext] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': mime });
-  fs.createReadStream(file).pipe(res);
-});
-await new Promise(r => server.listen(PORT, r));
-console.log(`Server on :${PORT}\n`);
-
-// ── Test runner ───────────────────────────────────────────────────────────────
-const browser = await chromium.launch({ headless: true });
-let passed = 0, failed = 0;
-
-async function test(name, fn) {
-  const page = await browser.newPage();
-  page.setDefaultTimeout(15000);
-  const errs = [];
-  page.on('pageerror', e => errs.push(e.message));
-  console.log('--- ' + name + ' ---');
+function stopDevServer(proc) {
+  if (!proc || proc.killed) return;
   try {
-    await fn(page);
-    console.log('  PASS');
-    passed++;
-  } catch (e) {
-    console.log('  FAIL: ' + e.message);
-    if (errs.length) console.log('  JS errors: ' + errs.join('; '));
-    failed++;
-  } finally {
-    await page.close();
+    process.kill(-proc.pid, 'SIGKILL');  // kill the whole process group
+  } catch {
+    try { proc.kill('SIGKILL'); } catch {}
   }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const goto = (p) => p.goto(`http://localhost:${PORT}/`);
-const wait = (p, ms) => p.waitForTimeout(ms);
-const has  = async (p, t) => (await p.textContent('body')).includes(t);
+const wait   = (p, ms) => p.waitForTimeout(ms);
+const hasTxt = async (p, t) => (await p.textContent('body')).includes(t);
+
+// Wait for a specific jsPsych screen (see data.screen in each plugin node)
+// rather than guessing how long a transition takes.
+const waitForScreen = (p, screen, timeout = 10000) =>
+  p.waitForSelector(`body[data-screen="${screen}"]`, { timeout });
 
 const doConsent = async (p) => {
   await p.waitForSelector('#reveal-box-0');
@@ -116,9 +114,10 @@ const doConsent = async (p) => {
   await p.click('#consent-btn');
 };
 
+// Tutorial is skipped via ?tutorial=false — next real screen is the first
+// observation ('observation' screen, set by build-trial-timeline.js).
 const doTutorial = async (p) => {
-  // Tutorial skipped — wait through 500ms BTI then first obs
-  await wait(p, 700);
+  await waitForScreen(p, 'observation', 10000);
   await p.waitForSelector('#response-slider');
 };
 
@@ -140,68 +139,125 @@ const submit = async (p) => {
   await p.click('#submit-btn');
 };
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// Let an observation time out without responding, then land on the
+// "too slow" replay screen (data-screen="iti_replay").
+const letObsTimeOut = (p) => waitForScreen(p, 'iti_replay', T_OBS_MS + 5000);
 
-await test('Normal submit: no too-slow, ITI appears', async (p) => {
-  await goto(p); await doConsent(p); await doTutorial(p);
-  await moveSlider(p, 65);
-  await submit(p);
-  await wait(p, 300);
-  if (await has(p, 'Too slow')) throw new Error('"Too slow" after normal submit');
-  await p.waitForSelector('#iti-canvas, #response-slider', { timeout: 3000 });
-});
+// ── Test scenarios (task-agnostic — same jsPsych plugin IDs for both tasks) ──
+// MAX_TIMEOUTS_PER_TRIAL is 3 (see timeline-builder.js) — these scenarios
+// deliberately stay under/at that budget; going one timeout further always
+// triggers session termination instead of a "too slow" replay screen.
+const SCENARIOS = [
+  {
+    name: 'Normal submit: no too-slow, ITI appears',
+    fn: async (p) => {
+      await doConsent(p); await doTutorial(p);
+      await moveSlider(p, 65);
+      await submit(p);
+      // Next screen is either the between-obs ITI or straight to obs 2 —
+      // either is fine, but it must NOT be the too-slow replay screen.
+      await p.waitForSelector('body[data-screen="iti"], body[data-screen="observation"]', { timeout: 3000 });
+      if (await hasTxt(p, 'Too slow')) throw new Error('"Too slow" after normal submit');
+    },
+  },
+  {
+    name: 'Timeout: too-slow shows 2 remaining',
+    fn: async (p) => {
+      await doConsent(p); await doTutorial(p);
+      await letObsTimeOut(p);  // 1st timeout — 2 of 3 remaining
+      if (!await hasTxt(p, '2 timeouts remaining')) throw new Error('Expected "2 timeouts remaining"');
+    },
+  },
+  {
+    name: '1 timeout remaining text correct',
+    fn: async (p) => {
+      await doConsent(p); await doTutorial(p);
+      await letObsTimeOut(p);                              // 1st timeout
+      await waitForScreen(p, 'observation', T_OBS_MS + 5000);  // loop_function replays same obs
+      await letObsTimeOut(p);                              // 2nd timeout — 1 of 3 remaining
+      if (await hasTxt(p, 'last chance'))       throw new Error('"last chance" should not appear');
+      if (!await hasTxt(p, '1 timeout remaining')) throw new Error('Expected "1 timeout remaining"');
+    },
+  },
+  {
+    name: '3 timeouts: session terminated, no summary',
+    fn: async (p) => {
+      await doConsent(p); await doTutorial(p);
+      await letObsTimeOut(p);                              // 1st timeout
+      await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+      await letObsTimeOut(p);                              // 2nd timeout
+      await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+      // 3rd timeout exhausts the budget and triggers earlyExit(), which is a
+      // manual DOM injection (not a jsPsych trial), so wait for its text
+      // rather than a data-screen attribute.
+      await p.waitForFunction(() =>
+        document.body.textContent.includes('Session terminated'),
+        { timeout: T_OBS_MS + 8000 });
+      if (!await hasTxt(p, 'Return to Prolific')) throw new Error('No "Return to Prolific" button');
+      if (await hasTxt(p, 'Trial summary'))       throw new Error('Summary shown after termination');
+    },
+  },
+  {
+    name: 'Submit then continue to next obs',
+    fn: async (p) => {
+      await doConsent(p); await doTutorial(p);
+      await moveSlider(p, 50);
+      await submit(p);
+      await waitForScreen(p, 'observation', 5000);
+      if (await hasTxt(p, 'Too slow')) throw new Error('Unexpected too-slow after submit');
+    },
+  },
+];
 
-await test('Timeout: too-slow shows 2 remaining', async (p) => {
-  await goto(p); await doConsent(p); await doTutorial(p);
-  await wait(p, 2000);  // 1500ms obs clock + buffer
-  await p.waitForFunction(() => document.body.textContent.includes('Too slow'), { timeout: 2000 });
-  if (!await has(p, '2 timeouts remaining')) throw new Error('Expected "2 timeouts remaining"');
-});
+// ── Runner ────────────────────────────────────────────────────────────────────
+let passed = 0, failed = 0;
+const failures = [];
 
-await test('1 timeout remaining text correct', async (p) => {
-  await goto(p); await doConsent(p); await doTutorial(p);
-  for (let i = 0; i < 2; i++) {
-    await wait(p, 2000);                                              // obs timeout
-    await wait(p, 3500);                                              // too-slow screen
-    await p.waitForSelector('#iti-canvas', { timeout: 2000 });       // replay ITI
-    await wait(p, 1200);                                              // ITI clock
-  }
-  if (await has(p, 'last chance'))         throw new Error('"last chance" should not appear');
-  if (!await has(p, '1 timeout remaining')) throw new Error('Expected "1 timeout remaining"');
-});
-
-await test('3 timeouts: session terminated, no summary', async (p) => {
-  await goto(p); await doConsent(p); await doTutorial(p);
-  for (let i = 0; i < 3; i++) {
-    await wait(p, 2000);
-    if (i < 2) {
-      await wait(p, 3500);
-      await p.waitForSelector('#iti-canvas', { timeout: 2000 });
-      await wait(p, 1200);
+async function runSuite(browserName, task) {
+  const engine  = ENGINES[browserName];
+  const browser = await engine.launch();
+  console.log(`\n### ${browserName} / ${task} ###`);
+  for (const { name, fn } of SCENARIOS) {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(15000);
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    console.log('--- ' + name + ' ---');
+    try {
+      await page.goto(testUrl(task));
+      await fn(page);
+      console.log('  PASS');
+      passed++;
+    } catch (e) {
+      console.log('  FAIL: ' + e.message);
+      if (errs.length) console.log('  JS errors: ' + errs.join('; '));
+      failed++;
+      failures.push(`${browserName} / ${task} / ${name}: ${e.message}`);
+    } finally {
+      await page.close();
     }
   }
-  await wait(p, 3500);  // final too-slow + terminated
-  await p.waitForFunction(() =>
-    document.body.textContent.includes('Session terminated'), { timeout: 5000 });
-  if (!await has(p, 'Return to Prolific')) throw new Error('No "Return to Prolific" button');
-  if (await has(p, 'Trial summary'))       throw new Error('Summary shown after termination');
-});
+  await browser.close();
+}
 
-await test('Submit then continue to next obs', async (p) => {
-  await goto(p); await doConsent(p); await doTutorial(p);
-  await moveSlider(p, 50);
-  await submit(p);
-  await p.waitForSelector('#iti-canvas', { timeout: 3000 });
-  await wait(p, 1200);
-  await p.waitForSelector('#response-slider', { timeout: 5000 });
-  if (await has(p, 'Too slow')) throw new Error('Unexpected too-slow after submit');
-});
+console.log('Starting Vite dev server...');
+const devServer = await startDevServer();
+console.log(`Dev server ready on :${PORT}\n`);
 
-// ── Results ───────────────────────────────────────────────────────────────────
-await browser.close();
-server.close();
-try { fs.rmSync(DIST, { recursive: true, force: true }); } catch(e) {}
+try {
+  for (const browserName of BROWSERS) {
+    for (const task of TASKS) {
+      await runSuite(browserName, task);
+    }
+  }
+} finally {
+  stopDevServer(devServer);
+}
 
 console.log('\n' + '='.repeat(40));
 console.log(`Results: ${passed} passed, ${failed} failed`);
+if (failures.length) {
+  console.log('\nFailures:');
+  failures.forEach(f => console.log('  - ' + f));
+}
 if (failed > 0) process.exit(1);

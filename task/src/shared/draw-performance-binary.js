@@ -1,6 +1,6 @@
 /**
- * bar-chart.js
- * SVG for binary trial/practice summary screens.
+ * draw-performance-binary.js
+ * SVG for binary trial/tutorial summary screens.
  *
  * Layout (top → bottom):
  *   Row 0:   True-p bar — full height, no title label
@@ -54,18 +54,6 @@ const _splitCircle = (cx, cy, r) => `
   <circle cx="${cx}" cy="${cy}" r="${r}" fill="${SAMPLE_BLUE}" clip-path="url(#lc-left)"/>
   <circle cx="${cx}" cy="${cy}" r="${r}" fill="${SAMPLE_RED}" clip-path="url(#lc-right)"/>
   <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#fff" stroke-width="1"/>`;
-
-export const buildBarOnly = (W2 = 344, barH = 20) => {
-  const midX = Math.round(W2 / 2);
-  return `<svg viewBox="0 0 ${W2} ${barH}" width="100%" height="auto"
-      xmlns="http://www.w3.org/2000/svg">
-    <rect x="0" y="0" width="${midX}" height="${barH}" fill="${SAMPLE_BLUE}" rx="3"/>
-    <rect x="${midX}" y="0" width="${W2 - midX}" height="${barH}" fill="${SAMPLE_RED}" rx="3"/>
-    <rect x="0" y="0" width="${W2}" height="${barH}" fill="none" stroke="#222" stroke-width="1.5" rx="3"/>
-    <line x1="${midX}" y1="0" x2="${midX}" y2="${barH}"
-      stroke="${DIST_COLOR}" stroke-width="5" stroke-linecap="round"/>
-  </svg>`;
-};
 
 export const buildSummaryBarSVG = (true_p, values, responses) => {
   const vals  = values    || [];

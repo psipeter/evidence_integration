@@ -20,7 +20,7 @@ const info = {
 };
 
 const makeBox = (id, realHTML, isActive) => `
-  <p id="${id}" class="practice-info-block"
+  <p id="${id}" class="tutorial-info-block"
      style="${isActive ? 'cursor:pointer;' : ''}">
     <span id="${id}-placeholder"
           style="color:${isActive ? '#555' : '#ccc'};font-weight:bold;">
@@ -49,18 +49,18 @@ class TutorialIntroBinaryPlugin {
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
-      <div class="practice-wrap">
-        <div class="practice-top-row">
-          <div id="tut-left-panel" class="practice-panel">
+      <div class="tutorial-wrap">
+        <div class="tutorial-top-row">
+          <div id="tut-left-panel" class="tutorial-panel">
             ${makeBox('tut-box-0', BOX0, true)}
             ${makeBox('tut-box-1', BOX1, false)}
             ${makeBox('tut-box-2', BOX2, false)}
           </div>
-          <div class="practice-panel practice-panel-centre">
+          <div class="tutorial-panel tutorial-panel-centre">
             <div id="tut-ball" class="binary-circle"
                  style="background:${ballCol};opacity:0;"></div>
           </div>
-          <div class="practice-panel practice-panel-right">
+          <div class="tutorial-panel tutorial-panel-right">
             <div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>
           </div>
         </div>
