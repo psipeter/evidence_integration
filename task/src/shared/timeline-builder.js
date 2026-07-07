@@ -109,6 +109,23 @@ export function buildAndRun(cfg) {
       if (trial?.data?.observation != null) document.body.dataset.observation = String(trial.data.observation);
     },
     on_finish: () => {
+      // Guard against the timeline's own "natural end" firing this before the
+      // participant ever sees/clicks a button: once the timeout budget is
+      // exhausted, all remaining trial-loop nodes become conditionally
+      // skipped, so jsPsych reaches the end of its OWN timeline array and
+      // fires this callback immediately — well before the early-exit
+      // "Too slow" animation even starts, let alone the button click.
+      // create-early-exit.js's earlyExit() is the ONLY correct place to call
+      // jatos.endStudy/endStudyAndRedirect in that case; without this guard,
+      // endStudy fires twice — once automatically here, once from the actual
+      // button click — and on real JATOS a second call after the session is
+      // already closed can silently fail to redirect (a real participant
+      // reaching this path might never get sent back to Prolific to submit
+      // their completion code, even though their data was saved by the
+      // first call). Confirmed via mocked-jatos E2E test: without this
+      // guard, endStudy is called once immediately when the timeout budget
+      // is exhausted, then again on the visible button's click.
+      if (isExited()) return;
       window.removeEventListener('beforeunload', beforeUnloadHandler);
       if (isProlific) {
         jatos.endStudyAndRedirect(
@@ -187,7 +204,7 @@ export function buildAndRun(cfg) {
   for (const node of trialTimelineNodes) timeline.push(node);
 
   // ── End ─────────────────────────────────────────────────────────────────────
-  timeline.push(buildEndScreen(isExited, jsPsychHtmlButtonResponse));
+  timeline.push(buildEndScreen(isExited, jsPsychHtmlButtonResponse, isProlific));
 
   jsPsych.run(timeline);
 }

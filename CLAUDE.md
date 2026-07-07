@@ -6,6 +6,17 @@ README.md when they conflict.
 
 **After any conversation compaction**: re-read this file in full before doing
 anything else. Compaction summaries omit conventions. Key ones to remember:
+- **Tool routing (critical)**: `str_replace`, `create_file`, and `view` operate
+  on Claude's own local sandbox container, NOT this remote host. Only
+  `filesystem:read_text_file` / `filesystem:write_file` / `filesystem:edit_file`
+  and `shell:run_command` touch actual project files here. Using the wrong
+  tool silently "succeeds" (writes to a local copy that looks identical) with
+  no error — this caused a real bug where several edits to
+  generate_sequences_momentmatch.py appeared to work but never reached the
+  remote file, and the mismatch wasn't caught until a CLI flag failed at
+  runtime. Always use the filesystem/shell MCP tools for anything under
+  /home/psipeter/evidence_integration/; if unsure whether an edit landed,
+  grep the remote file for the new content before trusting it.
 - Figures save as PDF only — never convert to PNG/SVG or upload images to chat.
   This also applies to task/ UI screenshots: don't upload Playwright screenshots
   to context to verify UI work — use DOM/computed-style assertions instead
@@ -292,10 +303,107 @@ distribution" would overclaim novelty it can't always guarantee.
 - Distractor system exists (iti_condition per trial, popup/iti_length/none) but
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
 
-Sequence design: 6×4 (24 trials); run --n_unique_sequences 6 --n_repeats 4 --n_tries 500
-All trials use ITI_MS=1000ms, prefix_length=4, std_fixed=20.
+Sequence design: 6×4 (24 trials) is the CURRENT PILOT production design, generated
+  via the original task/generate_sequences.py (k-constrained rejection sampling,
+  std_fixed=20). This is stable and unchanged for the ongoing pilot.
+
+  For the full 10×4 (40 trials) experiment, three generation methods now exist
+  and are under active evaluation — see "Sequence generation methods" below.
+  The full-experiment design is NOT yet finalized: pending PI consultation on
+  which method (i.i.d. vs moment-matched) to promote to production.
+
 Single master copy in task/sequences/{task}_sequences.{pkl,json}.
 task/src/{task}/config.js imports directly from task/sequences/ — no copy step needed.
+
+### Sequence generation methods (task/)
+
+Three separate scripts, kept deliberately distinct rather than one script with
+a tunable knob — see rationale below.
+
+**task/generate_sequences.py** (original; being phased out for new work):
+  Draws i.i.d. observations, then rejects and redraws whole blocks until the
+  realized sample statistics fall within k × SE of the true parameter
+  (rejection sampling). Two problems discovered during the 10×4 push:
+  1. The joint constraint (ALL qids must pass simultaneously in one draw)
+     scales very badly with n_unique_sequences — going from 6 to 10 qids
+     collapsed the binary structural pass rate from ~12% to ~0% at k=0.5,
+     and to only ~6% even at the old k=0.7.
+  2. At extreme means (e.g. mean=10 or 90 with std=15), the [0,100] bound
+     truncates the achievable std so far below the nominal value that NO
+     amount of resampling can pass a tight k — a structural mismatch between
+     target and bound, not a sampling problem.
+  **Key finding**: k-constrained rejection sampling and exact quota sampling
+  turned out to be the SAME underlying object at different points on one
+  continuum — i.i.d. sampling conditioned on the final composition falling
+  within k × SE of the target. Exact enumeration (n=11, p=0.5) showed the
+  variance of the LAST observation's predictability at the production k=0.7
+  is already ~10x smaller than true i.i.d., ~90% of the way to quota's hard
+  zero. There is no way to tighten k for smoothness without buying into
+  finite-population predictability — they are the same lever.
+  Still used for the current 6×4 pilot sequences; not recommended for new work.
+
+**task/generate_sequences_iid.py** (pure i.i.d. branch):
+  Genuinely unconstrained sampling — no k, no plausibility gate, no rejection
+  loop, and deliberately NO seed search or best-of-N ranking either (any
+  outcome-dependent seed selection is itself a form of conditioning, which
+  would pull back toward the same finite-population structure this branch
+  exists to avoid). Single draw, save, done. Matches the closest published
+  precedent (Nassar/Behrens/Glaze-style predictive-inference tasks draw
+  outcomes directly from the generative distribution with no correction).
+  `--report` gives a diagnostic (achieved vs target moments) that never
+  feeds back into generation.
+
+**task/generate_sequences_momentmatch.py** (quota / moment-matching branch):
+  Constructs each block (prefix/suffix) to hit the target sample mean/std
+  (continuous, via iterative rescale+clip) or exact blue/red quota (binary),
+  then randomizes order/realization. No rejection loop — scales to any
+  n_unique_sequences for free, and resolves the mean=10/90+std=15 truncation
+  problem directly (verified: achieved std within ~0.5 of nominal even at
+  the range edges, vs ~4.5 off under rejection sampling).
+  Literature check: no support found for exact quota matching as a
+  behaviorally-neutral stimulus-generation choice in the probability-learning/
+  evidence-integration literature — every precedent found (gambler's-fallacy,
+  probability-matching studies) uses this kind of composition constraint as
+  a deliberate, studied manipulation, not a neutral background choice. Real
+  methodological tradeoff, not free.
+  Seed search via `--score_mode {bump, isotonic}` (default: isotonic):
+    - 'bump': original approach, penalizes only upward steps in the aggregate
+      |Δresponse| curve; includes an RMSE-vs-ground-truth component and a
+      bay_score<0.02 gate. Any non-increasing curve scores as "perfect"
+      regardless of how irregularly it decreases.
+    - 'isotonic' (default): Pool-Adjacent-Violators (PAVA) residual —
+      penalizes ANY deviation from the best-fitting smooth non-increasing
+      curve, in either direction, with NO assumption about the decay's
+      functional form (not power-law-specific, not exponential-specific).
+      No RMSE component (curve shape is independent of which ground truth
+      downstream analyses use — see gt_mode below), no gate (every seed
+      ranked by bay_resid + rl_resid, lowest wins). This is the currently
+      preferred method: at 10×4 (mean_range=[20,80], std_fixed=15,
+      p_range=[0.2,0.8], n_tries=300) found residuals ~3.1e-7 (binary, seed=68)
+      and ~2.0e-7 (continuous, seed=245) — curves visually indistinguishable
+      from perfectly smooth decay.
+
+Current best candidates for the 10×4 full experiment (NOT yet promoted to
+production filenames — saved as task/sequences/{task}_momentmatch_sequences.*):
+  continuous: seed=245 (momentmatch, isotonic, mean_range=[20,80], std_fixed=15)
+  binary:     seed=68  (momentmatch, isotonic, p_range=[0.2,0.8])
+std_fixed=15 is the new default for continuous going forward (down from 20
+in the 6×4 pilot) — confirmed to resolve within the achievable range via
+moment-matching; NOT confirmed compatible with the original rejection-sampling
+script at k<0.7 (truncation issues near mean_range edges, see above).
+Wider ranges (mean_range=[10,90], p_range=[0.1,0.9]) were tested and found
+to fail structurally under rejection sampling (truncation) but work fine
+under moment-matching — not yet chosen for production either way.
+
+### Open items (as of latest session)
+
+- **PI decision pending**: i.i.d. vs moment-matched for the 10×4 production
+  sequences (see literature-precedent tradeoff above). Nothing is promoted
+  to production filenames yet.
+- **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
+  running-mean overlay requested (matching inspect_sequences.py's --gt_mode
+  running_mean) but explicitly deferred as a separate, bigger UI change —
+  not started.
 
 Local dev: open http://localhost:5173/index-dev.html (TEST_MODE=true in configs).
   Dev setup page: task/index-dev.html — select task, tutorial, nTrials, BTI, distractor.
@@ -527,27 +635,62 @@ Never run NEF simulations through MCP tool calls (will time out).
 
 ---
 
-## Task simulation pipeline (scripts/test_sequences.py)
+## Task simulation pipeline (scripts/test_sequences.py, scripts/inspect_sequences.py)
 
 Simulates RL_lambda and NEF models on the task sequences for validation figures.
 
 ### Generate sequences
 
-    # Regenerate with known-good seeds (ALWAYS use explicit --seed to avoid overwriting)
+See "Sequence generation methods" above for the three scripts. Quick reference:
+
+    # Original (6x4 pilot; k-constrained rejection sampling)
     venv/bin/python task/generate_sequences.py --task continuous --n_unique_sequences 6 --n_repeats 4 --n_tries 500
     venv/bin/python task/generate_sequences.py --task binary    --n_unique_sequences 6 --n_repeats 4 --n_tries 500
 
-    # Seed search (only when looking for new best seeds)
-    venv/bin/python task/generate_sequences.py \
-        --task both --n_tries 200 \
-        --prefix_length 4 \
+    # Pure i.i.d. (single draw, no search)
+    venv/bin/python task/generate_sequences_iid.py --task both --seed 0 \
+        --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
+
+    # Moment-matched / quota (isotonic seed search, default score_mode)
+    venv/bin/python task/generate_sequences_momentmatch.py --task both --n_tries 300 \
+        --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8 \
         --rl_alpha_0 1.0 --rl_lambda 0.5
 
-    # WARNING: --task both seed search overwrites BOTH sequence files.
+    # WARNING (all three scripts): --task both overwrites BOTH sequence files.
     # After a search, regenerate whichever task you want to keep with --seed N.
 
-    # Quick inspect (no cache)
-    venv/bin/python scripts/inspect_sequences.py --alpha_0 1.0 --rl_lambda 0.5
+### Inspect sequences (scripts/inspect_sequences.py)
+
+    venv/bin/python scripts/inspect_sequences.py --alpha_0 1.0 --rl_lambda 0.5 --skip_nef
+
+Reads exact filenames {task}_sequences.pkl/json from --seq_dir (default
+task/sequences/) — NOT the _iid/_momentmatch suffixed branch outputs. To
+inspect a branch's output, copy/rename into a temp subfolder first:
+
+    mkdir -p task/sequences/_inspect_tmp
+    cp task/sequences/continuous_momentmatch_sequences.pkl  task/sequences/_inspect_tmp/continuous_sequences.pkl
+    cp task/sequences/continuous_momentmatch_sequences.json task/sequences/_inspect_tmp/continuous_sequences.json
+    cp task/sequences/binary_momentmatch_sequences.pkl       task/sequences/_inspect_tmp/binary_sequences.pkl
+    cp task/sequences/binary_momentmatch_sequences.json      task/sequences/_inspect_tmp/binary_sequences.json
+    venv/bin/python scripts/inspect_sequences.py --seq_dir task/sequences/_inspect_tmp --skip_nef
+    rm -rf task/sequences/_inspect_tmp   # clean up when done
+
+`--gt_mode {true, running_mean}` (default: running_mean) controls the RMSE
+panels' ground truth:
+  - 'true': constant per trial (true_mean/true_p) — the original behavior.
+  - 'running_mean' (default): per-observation moving target = the running
+    sample mean of the observed stimulus stream so far. Note: the Bayes
+    agent's response IS exactly this running mean by construction (the
+    incremental-mean update fully overwrites any prior at n=1), so under
+    this mode the Bayes curve should flatline at exactly zero for BOTH
+    tasks — for binary this requires passing the running-mean trajectory
+    through the same apply_binary_transform (Laplace smoothing) as the
+    agent responses, or a spurious nonzero gap appears (this was a real
+    bug, now fixed — if a future edit touches gt_traj construction for
+    binary, keep the transform applied to both sides).
+  - `|Δresponse|` panels never depend on gt_mode (no ground truth involved).
+  - NEF cache path is keyed by gt_mode (`_running_mean` suffix) so switching
+    modes doesn't silently reuse a stale cache.
 
 ### Run RL_lambda simulation (local)
 
@@ -793,6 +936,9 @@ change (e.g. "change X to Y", "add Z", "remove W").
 
 ## What NOT to do
 
+- Do not use str_replace/create_file/view for anything under
+  /home/psipeter/evidence_integration/ — they write to Claude's local sandbox,
+  not this remote host, and fail silently (see compaction-reminder note at top)
 - Do not add diederen, jiang, or usher back without explicit plan
 - Do not add loss_type, shape_loss, joint_loss, beta hooks
 - Do not use trial_seed / base_seed for NEF — seed = int(trial) directly
@@ -807,3 +953,9 @@ change (e.g. "change X to Y", "add Z", "remove W").
 - Do not compute metrics in extras scripts — save raw data, compute in figure scripts
 - Do not save figures as PNG or SVG — PDF only
 - Do not upload figure images unnecessarily — use numerical checks first
+- Do not promote generate_sequences_iid.py or generate_sequences_momentmatch.py
+  output to the production {task}_sequences.{pkl,json} filenames without
+  explicit go-ahead — PI consultation on i.i.d. vs moment-matched is pending
+- Do not add a seed search / best-of-N ranking to generate_sequences_iid.py —
+  this was deliberately removed; any outcome-dependent seed selection
+  reintroduces the conditioning this branch exists to avoid

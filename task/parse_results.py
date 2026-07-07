@@ -14,19 +14,28 @@ This produces a directory (or zip) where each file is one participant's JSON arr
 of jsPsych trial objects. Both continuous and binary exports can be pointed at the
 same --input_dir, or separate dirs can be merged by running twice and concatenating.
 
+Design note: only genuinely participant-generated fields are kept here
+(prolific_pid, task, trial, observation, value, response, timed_out, rt,
+time_elapsed). `value` isn't in the raw export either (build-trial-timeline.js
+only exports trial/observation for observation rows), but it's simple enough
+to look up from task/sequences/{task}_sequences.json (trial order is identical
+for every participant, nothing is shuffled) that it's worth including directly
+rather than requiring a second join step downstream.
+
+Everything else about a given (task, trial) — true_mean, true_p, true_std,
+qid, prefix_length, iti_ms, iti_condition — is intentionally left out of this
+pickle. All of it is still fully recoverable later the same way (a join
+against the sequence files on (task, trial)) if a given analysis needs it;
+it just doesn't need to live in every copy of this file.
+
 Output columns (observation rows only)
 ---------------------------------------
-    prolific_pid   : str    Prolific participant ID
+    prolific_pid   : str    Prolific participant ID (or pilot_name for pilots)
     task           : str    'continuous' or 'binary'
     trial          : int    0-indexed trial number
     observation    : int    0-indexed observation within trial
-    value          : int    Stimulus value (-100..100 continuous; -1/1 binary)
-    true_mean      : float  Generative mean (continuous)
-    true_std       : float  Generative std (continuous); NaN for binary
-    true_p         : float  True Bernoulli probability (binary); NaN for continuous
-    qid            : int    Unique sequence ID for each repeated sequence
-    prefix_length  : int    Number of fixed prefix observations
-    std_condition  : float  Observation std value (continuous); NaN for binary
+    value          : int    Stimulus value (0..100 continuous; -1/1 binary) —
+                            looked up from the sequence file, not the raw export
     response       : float  Participant estimate (NaN if timed out or no response)
     timed_out      : bool   True if response deadline elapsed
     rt             : float  Response time in ms (NaN if timed out)
@@ -39,9 +48,25 @@ import pathlib
 import pandas as pd
 import numpy as np
 
+TASK_DIR      = pathlib.Path(__file__).resolve().parent
+SEQUENCES_DIR = TASK_DIR / 'sequences'
+
+
+def load_values_lookup(task: str) -> pd.DataFrame:
+    """Load task/sequences/{task}_sequences.json into a per-trial lookup of
+    just the `values` list, for the per-observation value lookup below."""
+    seq_path = SEQUENCES_DIR / f'{task}_sequences.json'
+    with open(seq_path) as f:
+        seqs = json.load(f)
+    df = pd.DataFrame(seqs)
+    df['task'] = task
+    return df[['task', 'trial', 'values']]
+
 
 def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
-    """Parse one participant's JSON file into a DataFrame of observation rows."""
+    """Parse one participant's JSON file into a DataFrame of observation rows.
+    Only genuinely participant-generated fields are extracted here — see
+    module docstring for what's looked up afterward instead."""
     try:
         raw = fpath.read_text(encoding='utf-8').strip()
         # JATOS sometimes wraps multiple result sets with a separator line
@@ -87,13 +112,6 @@ def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
             'task':          t.get('task', 'unknown'),
             'trial':         t.get('trial', np.nan),
             'observation':   t.get('observation', np.nan),
-            'value':         t.get('value', np.nan),
-            'true_mean':     t.get('true_mean', np.nan),
-            'true_std':      t.get('true_std', np.nan),
-            'true_p':        t.get('true_p', np.nan) if t.get('true_p') is not None else np.nan,
-            'qid':           t.get('qid', np.nan),
-            'prefix_length': t.get('prefix_length', np.nan),
-            'std_condition': t.get('std_condition', np.nan) if t.get('std_condition') is not None else np.nan,
             'response':      t.get('response', np.nan) if t.get('response') is not None else np.nan,
             'timed_out':     bool(t.get('timed_out', False)),
             'rt':            t.get('rt', np.nan) if t.get('rt') is not None else np.nan,
@@ -147,11 +165,42 @@ def main():
 
     combined = pd.concat(dfs, ignore_index=True)
 
-    # Cast types
-    for col in ['trial', 'observation', 'value', 'qid', 'prefix_length']:
+    # Cast participant-generated columns
+    for col in ['trial', 'observation']:
         combined[col] = pd.to_numeric(combined[col], errors='coerce').astype('Int64')
-    for col in ['true_mean', 'true_std', 'true_p', 'std_condition', 'response', 'rt']:
+    for col in ['response', 'rt']:
         combined[col] = pd.to_numeric(combined[col], errors='coerce')
+
+    # ── Look up `value` from the saved sequence files — see module docstring.
+    #    Only look up per task actually present in the data.
+    tasks_present = [t for t in combined['task'].unique() if t in ('continuous', 'binary')]
+    lookups = {task: load_values_lookup(task) for task in tasks_present}
+
+    parts = []
+    for task in tasks_present:
+        sub    = combined[combined['task'] == task].copy()
+        sub    = sub.merge(lookups[task], on=['task', 'trial'], how='left')
+
+        # Per-observation value lookup from the trial's `values` list —
+        # vectorised column-merge can't index into a list column, so this
+        # needs an explicit row-wise lookup.
+        def _lookup_value(row):
+            vals = row['values']
+            obs  = row['observation']
+            if isinstance(vals, list) and pd.notna(obs) and int(obs) < len(vals):
+                return vals[int(obs)]
+            return np.nan
+        sub['value'] = sub.apply(_lookup_value, axis=1)
+        sub = sub.drop(columns=['values'])
+
+        parts.append(sub)
+
+    combined = pd.concat(parts, ignore_index=True)
+    combined['value'] = pd.to_numeric(combined['value'], errors='coerce')
+
+    # Column order matches the documented schema above
+    combined = combined[['prolific_pid', 'task', 'trial', 'observation', 'value',
+                          'response', 'timed_out', 'rt', 'time_elapsed']]
 
     # Sort
     combined = combined.sort_values(

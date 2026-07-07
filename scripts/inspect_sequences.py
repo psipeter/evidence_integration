@@ -55,6 +55,16 @@ def _ground_truth(task: str, true_mean: float, true_p: float) -> float:
     return float(true_p) * 2.0 - 1.0
 
 
+# gt_mode='true'         -> constant ground truth per trial (_ground_truth above)
+# gt_mode='running_mean' -> per-observation moving target = the running sample
+#   mean of the observed stimulus stream so far. Note _bayes_responses (below)
+#   is EXACTLY this: the incremental-mean update running += (obs-running)/n,
+#   starting from any prior at n=1, fully overwrites the prior and reduces to
+#   the plain running mean of the actual observations -- no separate tracker
+#   needed, we just reuse _bayes_responses as the moving-target trajectory.
+GT_MODES = ("true", "running_mean")
+
+
 def _obs_norm(value, task: str) -> float:
     if task == "continuous":
         return value / 100.0
@@ -138,18 +148,37 @@ def _trial_metrics(vals, task, tm, tp, resp_fn):
     return rows
 
 
-def _metrics_from_responses(seq_df, task, response_df):
-    """Build err/delta metrics from NEF responses (post apply_binary_transform)."""
+def _metrics_from_responses(seq_df, task, response_df, gt_mode="true"):
+    """Build err/delta metrics from NEF responses (post apply_binary_transform).
+
+    gt_mode='true': err = |response - true_mean/true_p| (constant per trial).
+    gt_mode='running_mean': err = |response - running_mean(observations so far)|
+      (moving target, recomputed per observation -- see GT_MODES note above).
+      For binary, the running-mean trajectory is passed through the SAME
+      apply_binary_transform as the agent responses -- otherwise Bayes
+      (which literally IS the running mean) would show a spurious nonzero
+      error against an untransformed target, unlike continuous where Bayes
+      correctly flatlines at zero.
+    """
+    dataset = f"task_{task}"
     rows = []
     for trial in sorted(seq_df["trial"].unique()):
         g = seq_df[seq_df["trial"] == trial].sort_values("observation")
         nef_t = response_df[response_df["trial"] == trial].sort_values("observation")
         tm = float(g["true_mean"].iloc[0])
         tp = float(g["true_p"].iloc[0]) if task == "binary" else float("nan")
-        gt = _ground_truth(task, tm, tp)
+        if gt_mode == "running_mean":
+            gt_traj = _bayes_responses(g["value"].tolist(), task)
+            if task == "binary":
+                gt_df = pd.DataFrame({"observation": list(range(len(gt_traj))),
+                                     "response": gt_traj})
+                gt_traj = apply_binary_transform(gt_df, dataset)["response"].tolist()
+        else:
+            gt_const = _ground_truth(task, tm, tp)
         prev = None
-        for _, nrow in nef_t.iterrows():
+        for i, (_, nrow) in enumerate(nef_t.iterrows()):
             r = float(nrow["response"])
+            gt = gt_traj[i] if gt_mode == "running_mean" else gt_const
             rows.append(
                 {
                     "observation": int(nrow["observation"]),
@@ -170,6 +199,7 @@ def simulate_nef_task(
     n_neurons: int | None = None,
     n_neurons_counting: int | None = None,
     show_progress: bool = True,
+    gt_mode: str = "true",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run NEF on one task's sequences; return (metrics_df, response_df).
 
@@ -247,7 +277,7 @@ def simulate_nef_task(
             )
 
     response_df = apply_binary_transform(pd.DataFrame(rows), dataset)
-    metrics_df = _metrics_from_responses(seq_df, task, response_df)
+    metrics_df = _metrics_from_responses(seq_df, task, response_df, gt_mode=gt_mode)
     return metrics_df, response_df
 
 
@@ -255,12 +285,15 @@ def default_nef_cache_path(
     alpha_0: float, lambda_: float,
     n_neurons: int | None = None,
     n_neurons_counting: int | None = None,
+    gt_mode: str = "true",
 ) -> Path:
     suffix = ""
     if n_neurons is not None:
         suffix += f"_n{n_neurons}"
     if n_neurons_counting is not None:
         suffix += f"_nc{n_neurons_counting}"
+    if gt_mode != "true":
+        suffix += f"_{gt_mode}"
     return FIGURES_DIR / f"inspect_nef_a{alpha_0:.4f}_l{lambda_:.4f}{suffix}.pkl"
 
 
@@ -314,6 +347,7 @@ def load_or_simulate_nef(
     show_progress: bool = True,
     n_neurons: int | None = None,
     n_neurons_counting: int | None = None,
+    gt_mode: str = "true",
 ) -> pd.DataFrame | None:
     if not force:
         cached = load_nef_cache(cache_path, alpha_0, lambda_)
@@ -336,6 +370,7 @@ def load_or_simulate_nef(
             n_neurons=n_neurons,
             n_neurons_counting=n_neurons_counting,
             show_progress=show_progress,
+            gt_mode=gt_mode,
         )
 
     if not metrics:
@@ -345,7 +380,7 @@ def load_or_simulate_nef(
     return metrics
 
 
-def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r):
+def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="true"):
     from utils.binary_transform import apply_binary_transform
 
     agents = {
@@ -367,7 +402,14 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r):
             vals = g["value"].tolist()
             tm = float(g["true_mean"].iloc[0])
             tp = float(g["true_p"].iloc[0]) if task == "binary" else float("nan")
-            gt = _ground_truth(task, tm, tp)
+            if gt_mode == "running_mean":
+                gt_traj = _bayes_responses(vals, task)
+                if task == "binary":
+                    gt_df = pd.DataFrame({"observation": list(range(len(gt_traj))),
+                                         "response": gt_traj})
+                    gt_traj = apply_binary_transform(gt_df, dataset)["response"].tolist()
+            else:
+                gt_const = _ground_truth(task, tm, tp)
             resp = fn(vals, tm, tp)
             # Build a minimal DataFrame so apply_binary_transform can operate
             resp_df = pd.DataFrame({
@@ -377,6 +419,7 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r):
             resp_df = apply_binary_transform(resp_df, dataset)
             prev = None
             for obs_i, r in enumerate(resp_df["response"].tolist()):
+                gt = gt_traj[obs_i] if gt_mode == "running_mean" else gt_const
                 rows.append({
                     "observation": obs_i + 1,
                     "err": abs(r - gt),
@@ -417,9 +460,11 @@ def make_figure(
     nef_cache: Path | None = None,
     n_neurons: int | None = None,
     n_neurons_counting: int | None = None,
+    gt_mode: str = "running_mean",
 ):
+    assert gt_mode in GT_MODES, f"gt_mode must be one of {GT_MODES}"
     seq_dir = Path(seq_dir)
-    cache_path = nef_cache or default_nef_cache_path(alpha_0, rl_lambda)
+    cache_path = nef_cache or default_nef_cache_path(alpha_0, rl_lambda, gt_mode=gt_mode)
     nef_metrics = None
     if not skip_nef:
         nef_metrics = load_or_simulate_nef(
@@ -430,11 +475,14 @@ def make_figure(
             force=force_nef,
             n_neurons=n_neurons,
             n_neurons_counting=n_neurons_counting,
+            gt_mode=gt_mode,
         )
 
     n_models = 5 if nef_metrics else 4
     colors = get_palette(n_models)
     fig, axes = plt.subplots(2, 2, figsize=(9, 6), constrained_layout=True)
+
+    gt_label = "RMSE vs running mean" if gt_mode == "running_mean" else "RMSE vs true param"
 
     for row, task in enumerate(["binary", "continuous"]):
         pkl = seq_dir / f"{task}_sequences.pkl"
@@ -442,7 +490,8 @@ def make_figure(
             print(f"[skip] {pkl}")
             continue
         seq_df = pd.read_pickle(pkl)
-        agent_data = run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r)
+        agent_data = run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r,
+                                gt_mode=gt_mode)
         if nef_metrics and task in nef_metrics:
             agent_data[f"NEF(α={alpha_0},λ={rl_lambda})"] = nef_metrics[task]
 
@@ -455,7 +504,7 @@ def make_figure(
             agent_data,
             "err",
             f"{label} — RMSE (prefix={prefix})",
-            "RMSE vs true param",
+            gt_label,
             colors,
         )
         _plot_panel(
@@ -471,7 +520,7 @@ def make_figure(
             ax.axvline(prefix + 0.5, color="#999", lw=0.8, ls="--", alpha=0.6)
 
     fig.suptitle(
-        f"Sequence diagnostics  |  RL/NEF α={alpha_0} λ={rl_lambda}  "
+        f"Sequence diagnostics ({gt_mode})  |  RL/NEF α={alpha_0} λ={rl_lambda}  "
         f"LI γ={gamma}  PR εp={eps_p} εr={eps_r}",
         fontsize=10,
         fontweight="bold",
@@ -519,6 +568,10 @@ def parse_args():
         "--n_neurons_counting", type=int, default=None,
         help="Override n_neurons_counting for NEF (default: from MODEL_PARAMS)",
     )
+    p.add_argument(
+        "--gt_mode", choices=list(GT_MODES), default="running_mean",
+        help="Ground truth for RMSE panels: 'running_mean' (default) or 'true'",
+    )
     return p.parse_args()
 
 
@@ -528,6 +581,7 @@ if __name__ == "__main__":
         args.alpha_0, args.rl_lambda,
         n_neurons=args.n_neurons,
         n_neurons_counting=args.n_neurons_counting,
+        gt_mode=args.gt_mode,
     )
 
     if args.nef_only:
@@ -539,6 +593,7 @@ if __name__ == "__main__":
             force=args.force_nef,
             n_neurons=args.n_neurons,
             n_neurons_counting=args.n_neurons_counting,
+            gt_mode=args.gt_mode,
         )
         print("JOB_COMPLETE")
         raise SystemExit(0)
@@ -558,5 +613,6 @@ if __name__ == "__main__":
         nef_cache=cache_path,
         n_neurons=args.n_neurons,
         n_neurons_counting=args.n_neurons_counting,
+        gt_mode=args.gt_mode,
     )
     print("JOB_COMPLETE")

@@ -45,8 +45,8 @@ theory that the NEF realises biophysically, not a point of direct comparison.
 |------|---|-------------|--------|
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
-| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std_fixed=20); 40 trials; prefix_length=4 | **Under development** |
-| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 40 trials; prefix_length=4 | **Under development** |
+| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 24 trials (pilot, std=20) / 40 trials (full, std=15, TBD); prefix_length=4 | **Under development** |
+| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 24 trials (pilot) / 40 trials (full, TBD); prefix_length=4 | **Under development** |
 
 task-continuous and task-binary are designed to be completed within-subject
 (same participants recruited via Prolific allowlist). Together they unlock all
@@ -143,8 +143,8 @@ evidence_integration/
 ## task/ — Online Experiment
 
 Two online experiments deployed on Prolific via MindProbe/JATOS:
-- **Continuous task**: Normal(mean, std=20) stimulus; slider response [0–100]; 40 trials × 15 obs
-- **Binary task**: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 40 trials × 15 obs
+- **Continuous task**: Normal(mean, std) stimulus; slider response [0–100]; 24 trials (pilot) or 40 trials (full, TBD) × 15 obs
+- **Binary task**: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 24 trials (pilot) or 40 trials (full, TBD) × 15 obs
 
 Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
 Data pipeline: JATOS JSON → `task/parse_results.py` → `data/task_results.pkl`.
@@ -185,14 +185,34 @@ Target: ~50–80 participants per task, within-subject.
 
 ### Sequence generation
 
+Three generation methods now exist (see CLAUDE.md's "Sequence generation
+methods" section for the full rationale and tradeoffs):
+
 ```bash
-# Regenerate with best known seeds
-python task/generate_sequences.py --task continuous --seed 934
-python task/generate_sequences.py --task binary --seed 1229
+# Original (current 6x4 pilot; k-constrained rejection sampling, std=20)
+python task/generate_sequences.py --task continuous --seed <N>
+python task/generate_sequences.py --task binary --seed <N>
+
+# Pure i.i.d. (no smoothing, no seed search — single draw)
+python task/generate_sequences_iid.py --task both --seed 0 \
+    --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
+
+# Moment-matched / quota (isotonic-residual seed search, default score_mode)
+python task/generate_sequences_momentmatch.py --task both --n_tries 300 \
+    --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8 \
+    --rl_alpha_0 1.0 --rl_lambda 0.5
 ```
 
-Best seeds: continuous=934, binary=1229 (prefix_length=4, k_std=0.7).
-All trials use ITI_MS=1000ms.
+**Current 6x4 pilot** (unchanged, in production): rejection sampling,
+prefix_length=4, std_fixed=20, ITI_MS=1000ms.
+
+**10x4 full experiment**: NOT yet finalized. Best candidates found so far
+(moment-matched, isotonic score_mode, mean_range=[20,80], p_range=[0.2,0.8],
+std_fixed=15): continuous seed=245, binary seed=68 — saved under
+`{task}_momentmatch_sequences.*`, not yet promoted to the production
+filenames. Choice between the i.i.d. and moment-matched branches is pending
+PI consultation (moment-matching introduces a real, literature-documented
+behavioral tradeoff — see CLAUDE.md — it is not a free smoothness win).
 
 ### Directory structure
 
@@ -242,9 +262,15 @@ task/
     experiment-continuous.js
     experiment-binary.js
   sequences/
-    continuous_sequences.{pkl,json}   — seed=934
-    binary_sequences.{pkl,json}       — seed=1229
-  generate_sequences.py
+    continuous_sequences.{pkl,json}   — current 6x4 pilot (rejection sampling, std=20)
+    binary_sequences.{pkl,json}       — current 6x4 pilot
+    continuous_momentmatch_sequences.{pkl,json} — 10x4 candidate (seed=245, not yet production)
+    binary_momentmatch_sequences.{pkl,json}     — 10x4 candidate (seed=68, not yet production)
+    continuous_iid_sequences.{pkl,json}         — 10x4 candidate (i.i.d. branch)
+    binary_iid_sequences.{pkl,json}             — 10x4 candidate (i.i.d. branch)
+  generate_sequences.py             — original: k-constrained rejection sampling
+  generate_sequences_iid.py         — pure i.i.d., no smoothing, no seed search
+  generate_sequences_momentmatch.py — quota/moment-matching, isotonic seed search
   parse_results.py
   test_browser.mjs         — Playwright E2E tests (Chromium/Firefox/WebKit, both tasks)
   index-continuous.html

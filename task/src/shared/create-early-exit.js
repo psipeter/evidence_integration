@@ -2,7 +2,9 @@
  * create-early-exit.js
  * Builds the earlyExit() callback used when a participant exhausts their
  * timeout budget mid-trial: shows a "too slow" pulse, then the session-
- * terminated screen with a Prolific return button. Extracted from
+ * terminated screen with a save-and-exit button (text/behavior depend on
+ * isProlific — pilots get generic wording, real Prolific participants get
+ * "Return to Prolific" plus the partial-compensation note). Extracted from
  * timeline-builder.js — pure extraction, no behavior change.
  */
 
@@ -29,11 +31,11 @@ export function createEarlyExit({ beforeUnloadHandler, isProlific, jsPsych, earl
             You reached the maximum number of timed-out responses in one trial.
           </p>
           <p style='margin-top:0.75rem;font-size:1.4rem;color:#555;'>
-            Your data has been saved and you will receive partial compensation.
+            Click the button below to save your data and exit the study${isProlific ? '. You will receive partial compensation.' : '.'}
           </p>
           <button id='early-exit-btn' class='jspsych-btn'
             style='font-size:1.6rem;padding:1rem 3.5rem;margin-top:2rem;'>
-            Return to Prolific
+            ${isProlific ? 'Return to Prolific' : 'Finish and exit'}
           </button>
         </div>`;
       const btn = document.getElementById('early-exit-btn');

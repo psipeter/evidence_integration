@@ -205,6 +205,15 @@ def prepare_human(human_pkl, task):
     t  = df[(df['task'] == task) & ~df['timed_out']].copy()
     if t.empty:
         return None
+
+    # qid/true_mean/true_p are no longer stored in the human pickle (fully
+    # determined by (task, trial) since trial order is identical for every
+    # participant — see parse_results.py's docstring) — join them in here,
+    # the same way parse_results.py used to, from the saved sequence file.
+    seq_path = Path(__file__).resolve().parents[1] / 'task' / 'sequences' / f'{task}_sequences.json'
+    seq_df   = pd.read_json(seq_path)[['trial', 'qid', 'true_mean', 'true_p']]
+    t = t.merge(seq_df, on='trial', how='left')
+
     # Keep only pids with >= 10 trials
     counts = t.groupby('prolific_pid')['trial'].nunique()
     t = t[t['prolific_pid'].isin(counts[counts >= 10].index)].copy()
@@ -233,31 +242,66 @@ def prepare_human(human_pkl, task):
 # ── Metrics ───────────────────────────────────────────────────────────────────
 
 def rmse_by_obs(df, task):
+    """Mean RMSE-to-ground-truth per observation.
+
+    If `df` has a `prolific_pid` column (human data), the per-observation mean
+    is computed WITHIN each pid first (across that pid's trials), returning
+    one row per (model_type, prolific_pid, observation) — the caller draws
+    each pid as its own line, then aggregates across pids for the mean+CI
+    band, rather than pooling every pid's trials into a single mean directly
+    (which silently blends together participants who may have quite
+    different update patterns — see plot_rmse/plot_delta).
+
+    Otherwise (model data — deterministic, no natural per-pid variation since
+    every pid sees identical trial sequences) returns one row per
+    (model_type, observation), same as before.
+    """
+    has_pid    = 'prolific_pid' in df.columns
+    group_cols = ['model_type', 'trial'] + (['prolific_pid'] if has_pid else [])
     rows = []
-    for (mt, tid), g in df.groupby(['model_type', 'trial']):
-        g  = g.sort_values('observation')
-        gt = _gt(task, g['true_mean'].iloc[0], g['true_p'].iloc[0])
+    for key, g in df.groupby(group_cols):
+        g   = g.sort_values('observation')
+        mt  = key[0]
+        pid = key[2] if has_pid else None
+        gt  = _gt(task, g['true_mean'].iloc[0], g['true_p'].iloc[0])
         for _, r in g.iterrows():
-            rows.append({'model_type': mt, 'observation': int(r['observation']),
-                         'err': abs(r['response'] - gt)})
-    return pd.DataFrame(rows).groupby(['model_type','observation'])['err'].mean().reset_index() \
-           if rows else pd.DataFrame()
+            row = {'model_type': mt, 'observation': int(r['observation']),
+                   'err': abs(r['response'] - gt)}
+            if has_pid:
+                row['prolific_pid'] = pid
+            rows.append(row)
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows)
+    group = ['model_type', 'observation'] + (['prolific_pid'] if has_pid else [])
+    return out.groupby(group)['err'].mean().reset_index()
 
 
 def delta_by_obs(df):
+    """Mean |Δresponse| per observation — same within-pid-first logic as
+    rmse_by_obs (see there for why)."""
+    has_pid    = 'prolific_pid' in df.columns
+    group_cols = ['model_type', 'trial'] + (['prolific_pid'] if has_pid else [])
     rows = []
-    for (mt, tid), g in df.groupby(['model_type', 'trial']):
+    for key, g in df.groupby(group_cols):
         g = g.sort_values('observation').copy()
         g['delta'] = g['response'].diff().abs()
-        rows.append(g[['model_type','observation','delta']])
+        mt, pid = key[0], (key[2] if has_pid else None)
+        gg = g[['observation', 'delta']].dropna(subset=['delta']).copy()
+        gg['model_type'] = mt
+        if has_pid:
+            gg['prolific_pid'] = pid
+        rows.append(gg)
     if not rows:
         return pd.DataFrame()
-    return pd.concat(rows, ignore_index=True).dropna(subset=['delta']) \
-             .groupby(['model_type','observation'])['delta'].mean().reset_index()
+    out = pd.concat(rows, ignore_index=True)
+    group = ['model_type', 'observation'] + (['prolific_pid'] if has_pid else [])
+    return out.groupby(group)['delta'].mean().reset_index()
 
 
 def prefix_stds(df):
-    """Within-qid response std during prefix, one value per (qid, obs)."""
+    """Within-qid response std during prefix, one value per (qid, obs).
+    Used for model curves (no natural per-pid grouping)."""
     pre = df[df['observation'] <= PREFIX].copy()
     if pre.empty:
         return pd.Series(dtype=float, name='std')
@@ -265,6 +309,31 @@ def prefix_stds(df):
                .std()
                .dropna()
                .rename('std'))
+
+
+def pid_prefix_std_summary(df, min_repeats=3):
+    """One prefix-variability value PER PID, mirroring
+    figure_carrabin_variability.py's _qid_response_std (panel A): std is
+    computed WITHIN each pid's own repeats of a (qid, observation) cell
+    first (needs >= min_repeats within that pid to count), then averaged
+    across (qid, observation) cells within that pid to get one summary
+    number per participant.
+
+    Grouping by (qid, observation) alone across a multi-pid df (the old
+    behaviour) pools DIFFERENT participants' repeats together, which mixes
+    between-subject differences in bias into what's supposed to be a
+    within-subject noise measure — the same class of issue as the RMSE/delta
+    pooling fixed earlier. This keeps each pid's own repeats separate.
+    """
+    pre = df[df['observation'] <= PREFIX].copy()
+    if pre.empty or 'prolific_pid' not in pre.columns:
+        return pd.Series(dtype=float, name='std')
+    cell_std = (pre.groupby(['prolific_pid', 'qid', 'observation'])['response']
+                   .apply(lambda x: x.std() if len(x) >= min_repeats else np.nan)
+                   .dropna())
+    if cell_std.empty:
+        return pd.Series(dtype=float, name='std')
+    return cell_std.groupby('prolific_pid').mean().rename('std')
 
 
 def add_resid(df: pd.DataFrame) -> pd.DataFrame:
@@ -282,6 +351,17 @@ def _prefix_line(ax):
     ax.axvline(PREFIX + 0.5, color='0.65', lw=0.9, ls='--', alpha=0.7)
 
 
+def _plot_human_with_pids(ax, herr, value_col, zorder_base=3):
+    """Mean+CI across pids for the bold Human line. Computed within-pid-first
+    (see rmse_by_obs/delta_by_obs) even though individual pid lines aren't
+    drawn here anymore — they were too noisy to read with only a few pids;
+    removed for now, CI band alone conveys the between-pid spread.
+    herr must have one row per (prolific_pid, observation)."""
+    sns.lineplot(data=herr, x='observation', y=value_col, color=HUM_COL,
+                 lw=HUM_LW, errorbar=('ci', 95), ax=ax, zorder=zorder_base + 2,
+                 legend=False)
+
+
 def plot_rmse(ax, model_df, human_df, task, palette, title):
     err = rmse_by_obs(model_df, task)
     handles, labels = [], []
@@ -291,12 +371,10 @@ def plot_rmse(ax, model_df, human_df, task, palette, title):
         ax.plot(d['observation'], d['err'], color=c, lw=1.8)
         handles.append(Line2D([0],[0], color=c, lw=1.8)); labels.append(mt)
     if human_df is not None:
-        herr = rmse_by_obs(human_df, task)
+        herr = rmse_by_obs(human_df, task)  # one row per (pid, observation)
         if not herr.empty:
-            d = herr.sort_values('observation')
-            ax.plot(d['observation'], d['err'],
-                    color=HUM_COL, lw=HUM_LW, zorder=5)
-            handles.append(Line2D([0],[0], color=HUM_COL, lw=HUM_LW)); labels.append('Human')
+            _plot_human_with_pids(ax, herr, 'err')
+            handles.append(Line2D([0],[0], color=HUM_COL, lw=HUM_LW)); labels.append('Human (mean ± CI)')
     _prefix_line(ax)
     ax.set_xlabel('Observation'); ax.set_ylabel('RMSE')
     ax.set_ylim(bottom=0)
@@ -314,12 +392,10 @@ def plot_delta(ax, model_df, human_df, task, palette, title):
         ax.plot(d['observation'], d['delta'], color=c, lw=1.8)
         handles.append(Line2D([0],[0], color=c, lw=1.8)); labels.append(mt)
     if human_df is not None:
-        hdlt = delta_by_obs(human_df)
+        hdlt = delta_by_obs(human_df)  # one row per (pid, observation)
         if not hdlt.empty:
-            d = hdlt.sort_values('observation')
-            ax.plot(d['observation'], d['delta'],
-                    color=HUM_COL, lw=HUM_LW, zorder=5)
-            handles.append(Line2D([0],[0], color=HUM_COL, lw=HUM_LW)); labels.append('Human')
+            _plot_human_with_pids(ax, hdlt, 'delta')
+            handles.append(Line2D([0],[0], color=HUM_COL, lw=HUM_LW)); labels.append('Human (mean ± CI)')
     _prefix_line(ax)
     ax.set_xlabel('Observation'); ax.set_ylabel('Mean |Δresponse|')
     ax.set_ylim(bottom=0)
@@ -329,11 +405,20 @@ def plot_delta(ax, model_df, human_df, task, palette, title):
 
 
 def plot_prefix_kde(ax, nef_df, human_df, palette, title, x_max=None):
-    """KDE of within-prefix response variability (stochastic models + human)."""
+    """KDE of within-prefix response variability (stochastic models + human).
+
+    Human: one value PER PID (pid_prefix_std_summary — mirrors
+    figure_carrabin_variability.py panel A), with a rug of thin vertical
+    ticks marking each pid's own value, scaled to the KDE curve's height at
+    that point (same convention as that panel). Model curves (NEF/
+    NoisyCounting) have no natural per-pid grouping, so they keep using the
+    pooled per-(qid,observation) values via prefix_stds().
+    """
     handles, labels = [], []
     all_vals = []
 
-    sources = []
+    sources    = []
+    human_vals = None
     if nef_df is not None and not nef_df.empty:
         for mt in nef_df['model_type'].unique():
             stds = prefix_stds(nef_df[nef_df['model_type'] == mt])
@@ -341,13 +426,14 @@ def plot_prefix_kde(ax, nef_df, human_df, palette, title, x_max=None):
                 sources.append((mt, stds.values))
                 all_vals.extend(stds.values)
     if human_df is not None:
-        stds = prefix_stds(human_df)
+        stds = pid_prefix_std_summary(human_df)
         if len(stds) >= 2:
-            sources.append(('Human', stds.values))
-            all_vals.extend(stds.values)
+            human_vals = stds.values
+            sources.append(('Human', human_vals))
+            all_vals.extend(human_vals)
 
     if not sources:
-        ax.text(0.5, 0.5, 'Insufficient data\n(need ≥2 qid repeats)',
+        ax.text(0.5, 0.5, 'Insufficient data\n(need ≥2 pids with ≥3 qid repeats)',
                 ha='center', va='center', transform=ax.transAxes,
                 color='0.5', style='italic', fontsize=8)
         sns.despine(ax=ax, left=True, bottom=True)
@@ -363,10 +449,26 @@ def plot_prefix_kde(ax, nef_df, human_df, palette, title, x_max=None):
         lw  = HUM_LW if name == 'Human' else 1.8
         try:
             kde = gaussian_kde(vals, bw_method='scott')
-            y   = kde(x)
-            y   = y / y.max()       # normalise to peak = 1
+            raw = kde(x)
+            grid_peak = float(raw.max())
+            y   = raw / grid_peak if grid_peak > 0 else raw
+            # cut=0: zero out density outside the actual data range (matches
+            # figure_carrabin_variability.py panel A)
+            y[x < float(np.min(vals))] = 0
+            y[x > float(np.max(vals))] = 0
             ax.plot(x, y, color=c, lw=lw)
             ax.fill_between(x, y, color=c, alpha=0.12)
+            if name == 'Human':
+                # Rug: one thin vertical tick per pid, normalised by the SAME
+                # grid_peak as the plotted curve, so a tick can never exceed
+                # the curve's own height at that x. Using a separately
+                # computed peak (density AT the data points, rather than the
+                # grid max) can make ticks taller than the curve when there
+                # are few points — the KDE's true peak often sits between
+                # points rather than exactly at one of them.
+                for v in vals:
+                    top = float(kde([v])[0]) / grid_peak if grid_peak > 0 else 0
+                    ax.vlines(v, 0, top, color=c, lw=0.6, alpha=0.5, zorder=2)
         except Exception:
             pass
         handles.append(Line2D([0],[0], color=c, lw=lw)); labels.append(name)
@@ -379,6 +481,39 @@ def plot_prefix_kde(ax, nef_df, human_df, palette, title, x_max=None):
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _lag_corr(df, lag):
+    """Pearson r between resid at obs=i and resid at obs=i+lag, pooling all
+    (qid, obs_i) pairs within `df` (one participant's own data, or a model's).
+    Returns NaN if too few pairs or either side has ~zero variance."""
+    pairs = []
+    for (qid, obs_i), grp in df.groupby(['qid', 'observation']):
+        partner = df[(df['qid'] == qid) & (df['observation'] == obs_i + lag)]['resid'].values
+        r_i = grp['resid'].values
+        n = min(len(r_i), len(partner))
+        if n >= 2:
+            pairs.extend(zip(r_i[:n], partner[:n]))
+    if len(pairs) < 3:
+        return np.nan
+    arr = np.array(pairs)
+    if arr[:, 0].std() < 1e-10 or arr[:, 1].std() < 1e-10:
+        return np.nan
+    rv, _ = pearsonr(arr[:, 0], arr[:, 1])
+    return rv
+
+
+def _pid_lagcorrs(df, lags):
+    """Per-pid lag-correlations, one row per (prolific_pid, lag, r).
+    resid is computed WITHIN each pid separately (each pid's own qid-repeat
+    mean is their own baseline, not pooled across pids) — mirrors add_resid()
+    but scoped per pid so one pid's residuals never leak into another's."""
+    rows = []
+    for pid, sub in df.groupby('prolific_pid'):
+        sub = add_resid(sub.copy())
+        for lag in lags:
+            rows.append({'prolific_pid': pid, 'lag': lag, 'r': _lag_corr(sub, lag)})
+    return pd.DataFrame(rows)
+
+
 def plot_autocorr(ax, nef_df, human_df, palette, title, max_lag=4):
     """Within-trial residual autocorrelation vs lag (analogous to carrabin T4).
 
@@ -386,60 +521,48 @@ def plot_autocorr(ax, nef_df, human_df, palette, title, max_lag=4):
 
     For a deterministic model all repeats of the same qid give identical
     responses, so resid = 0 and autocorrelation is undefined. This panel
-    is therefore only plotted for stochastic models (NEF, NoisyCounting) and human data.
+    is therefore only plotted for stochastic models (NEF, NoisyCounting) and
+    human data.
 
-    With only one participant we pool residuals across all trials rather
-    than averaging per-pid correlations as in carrabin.
+    Human: computed PER PID first (own qid-repeat baseline per pid), each pid
+    drawn as a thin gray line, then averaged with a CI across pids for the
+    bold Human line — same rationale as plot_rmse/plot_delta. Model lines
+    (NEF/NoisyCounting) have no natural per-pid grouping (every simulated
+    instance sees identical trials) so they stay as a single pooled line.
     """
     lags = list(range(1, max_lag + 1))
     handles, labels = [], []
+    any_plotted = False
 
-    sources = []
     if nef_df is not None and not nef_df.empty:
         if 'qid' in nef_df.columns and not nef_df['qid'].isna().all():
             for mt in nef_df['model_type'].unique():
-                sub = nef_df[nef_df['model_type'] == mt]
-                sources.append((mt, add_resid(sub.copy()),
-                                palette.get(mt, '0.5'), 1.8))
+                sub = add_resid(nef_df[nef_df['model_type'] == mt].copy())
+                lag_rs = [_lag_corr(sub, lag) for lag in lags]
+                if all(np.isnan(v) for v in lag_rs):
+                    continue
+                c = palette.get(mt, '0.5')
+                ax.plot(lags, lag_rs, 'o-', color=c, lw=1.8, ms=5)
+                handles.append(Line2D([0],[0], color=c, lw=1.8)); labels.append(mt)
+                any_plotted = True
+
     if human_df is not None and not human_df.empty:
         if 'qid' in human_df.columns and not human_df['qid'].isna().all():
-            sources.append(('Human', add_resid(human_df.copy()),
-                             HUM_COL, HUM_LW))
+            pidcorrs = _pid_lagcorrs(human_df, lags)
+            if not pidcorrs.empty and pidcorrs['r'].notna().any():
+                sns.lineplot(data=pidcorrs, x='lag', y='r', color=HUM_COL,
+                             lw=HUM_LW, errorbar=('ci', 95), ax=ax,
+                             marker='o', markersize=5, zorder=5, legend=False)
+                handles.append(Line2D([0],[0], color=HUM_COL, lw=HUM_LW, marker='o')); labels.append('Human (mean ± CI)')
+                any_plotted = True
 
-    if not sources:
+    if not any_plotted:
         ax.text(0.5, 0.5, 'NEF + Human only\n(deterministic models: resid = 0)',
                 ha='center', va='center', transform=ax.transAxes,
                 color='0.5', style='italic', fontsize=8)
         sns.despine(ax=ax, left=True, bottom=True)
         ax.set_title(title, fontsize=9, fontweight='bold')
         return
-
-    for mt, df, color, lw in sources:
-        lag_rs = []
-        for lag in lags:
-            pairs = []
-            for (qid, obs_i), grp in df.groupby(['qid', 'observation']):
-                # Partner observations: same qid, observation = obs_i + lag
-                partner = df[(df['qid'] == qid) &
-                             (df['observation'] == obs_i + lag)]['resid'].values
-                r_i = grp['resid'].values
-                # Pair up by trial order within qid
-                n = min(len(r_i), len(partner))
-                if n >= 2:
-                    pairs.extend(zip(r_i[:n], partner[:n]))
-            if len(pairs) < 3:
-                lag_rs.append(np.nan)
-                continue
-            arr = np.array(pairs)
-            if arr[:, 0].std() < 1e-10 or arr[:, 1].std() < 1e-10:
-                lag_rs.append(np.nan)
-                continue
-            rv, _ = pearsonr(arr[:, 0], arr[:, 1])
-            lag_rs.append(rv)
-        if all(np.isnan(v) for v in lag_rs):
-            continue
-        ax.plot(lags, lag_rs, 'o-', color=color, lw=lw, ms=5)
-        handles.append(Line2D([0],[0], color=color, lw=lw)); labels.append(mt)
 
     ax.axhline(0, color='0.7', lw=0.8, ls='--')
     ax.set_xlabel('Lag (observations)')
@@ -569,9 +692,9 @@ def main():
             ignore_index=True) if any(d is not None for d in [nef_raw, nc_raw]) else None
 
         # Collect prefix stds for shared x_max
-        for _df in [nef_raw, nc_raw, human_df]:
+        for _df, is_human in [(nef_raw, False), (nc_raw, False), (human_df, True)]:
             if _df is not None and not _df.empty:
-                _stds = prefix_stds(_df)
+                _stds = pid_prefix_std_summary(_df) if is_human else prefix_stds(_df)
                 if len(_stds) >= 2:
                     kde_vals_all.extend(_stds.values.tolist())
 

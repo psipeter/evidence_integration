@@ -3,6 +3,15 @@
  * Pure JS — builds the trial loop portion of the jsPsych timeline.
  * No jsPsych imports, no DOM, no CSS.
  * Used by timeline-builder.js (production) and test_timeline.mjs (tests).
+ *
+ * Observation rows only export what's genuinely participant-generated
+ * (trial, observation, response, timed_out, rt, time_elapsed — the latter
+ * three come from the observation plugin's own finishTrial() call, not this
+ * file). Everything else (value, true_mean, true_p, true_std, qid,
+ * prefix_length, iti_ms, iti_condition) is fully determined by (task, trial)
+ * alone — trial order is identical for every participant, no shuffling — so
+ * it's reconstructed via a join against task/sequences/{task}_sequences.json
+ * in parse_results.py instead of being duplicated into every raw export.
  */
 export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   const {
@@ -55,8 +64,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
             n_trials: sequences.length, t_obs_ms: tObsMs,
             slider_default: sliderDefault, init_pos: () => lastResponse,
             show_value: showSliderValue,
-            data: { screen: 'observation', trial: t, observation: _o, value: _val,
-                    true_mean: seq.true_mean, true_p: seq.true_p ?? null, qid: seq.qid ?? null },
+            data: { screen: 'observation', trial: t, observation: _o },
             on_finish: (data) => {
               timedOut = data.timed_out;
               if (data.timed_out) {
