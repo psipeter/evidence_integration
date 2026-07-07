@@ -304,8 +304,16 @@ distribution" would overclaim novelty it can't always guarantee.
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
 
 Sequence design: 6×4 (24 trials) is the CURRENT PILOT production design, generated
-  via the original task/generate_sequences.py (k-constrained rejection sampling,
-  std_fixed=20). This is stable and unchanged for the ongoing pilot.
+  via task/generate_sequences_momentmatch.py (quota/moment-matching, isotonic
+  score_mode): continuous seed=175, binary seed=198, std_fixed=15,
+  mean_range=[10,90], p_range=[0.1,0.9]. This is the widened-range version --
+  we tested how far the moment-matching approach could push toward [0,100]
+  before the continuous side's boundary-clipping bias becomes a problem (see
+  below); [10,90]/[0.1,0.9] was confirmed as the practical limit and adopted
+  for the pilot. Switched from the original rejection-sampling method
+  (std_fixed=20) as of the latest session -- this was an explicit choice for
+  the pilot specifically, separate from the still-pending 10×4 full-experiment
+  decision below.
 
   For the full 10×4 (40 trials) experiment, three generation methods now exist
   and are under active evaluation — see "Sequence generation methods" below.
@@ -340,7 +348,9 @@ a tunable knob — see rationale below.
   is already ~10x smaller than true i.i.d., ~90% of the way to quota's hard
   zero. There is no way to tighten k for smoothness without buying into
   finite-population predictability — they are the same lever.
-  Still used for the current 6×4 pilot sequences; not recommended for new work.
+  Still used only by whichever pilot/production sequences were last generated
+  with it -- currently NOT the active pilot method (the 6×4 pilot switched to
+  moment-matching, see "Sequence design" above). Not recommended for new work.
 
 **task/generate_sequences_iid.py** (pure i.i.d. branch):
   Genuinely unconstrained sampling — no k, no plausibility gate, no rejection
@@ -391,15 +401,47 @@ std_fixed=15 is the new default for continuous going forward (down from 20
 in the 6×4 pilot) — confirmed to resolve within the achievable range via
 moment-matching; NOT confirmed compatible with the original rejection-sampling
 script at k<0.7 (truncation issues near mean_range edges, see above).
+
+How far can moment-matching push mean_range/p_range toward [0,100]/[0,1]?
+Tested empirically (moment_match_continuous/binary directly, 300 draws per
+target, std_fixed=15, n=15 obs):
+
+  target mean | achieved mean (bias)  | achieved std (target 15)
+  ----------- | --------------------- | -------------------------
+  50          | 49.99 (-0.01)         | 15.00
+  30          | 30.00 (+0.00)         | 14.99
+  20          | 20.06 (+0.06)         | 14.91
+  15          | 15.26 (+0.26)         | 14.72
+  10          | 10.95 (+0.95)         | 14.23
+  8           | 9.43  (+1.43)         | 13.98
+  5           | 7.67  (+2.67)         | 13.34
+  2           | 6.14  (+4.14)         | 12.86
+  0           | 5.45  (+5.45)         | 12.44
+
+Bias grows smoothly (not a hard cutoff) as the target approaches the [0,100]
+bound -- moment-matching pushes the usable range much further than rejection
+sampling did, but does NOT eliminate the boundary-clipping problem, just
+shrinks it. [10,90] (bias +0.95, std 14.23) was judged an acceptable tradeoff
+and adopted for the 6×4 pilot; below ~mean=10 the bias becomes large enough
+to matter. Binary has NO equivalent problem -- quota is exact for any p in
+(0,1), the only limitation is 1/n rounding granularity (e.g. p=0.02 at n=15
+rounds to an exact 0, same as p=0.00 -- not a degradation, just coarseness),
+so p_range can go far more extreme than mean_range if ever needed.
+
 Wider ranges (mean_range=[10,90], p_range=[0.1,0.9]) were tested and found
 to fail structurally under rejection sampling (truncation) but work fine
-under moment-matching — not yet chosen for production either way.
+under moment-matching — this is now the adopted 6×4 pilot range (see
+"Sequence design" above).
 
 ### Open items (as of latest session)
 
+- **Pilot decision made**: 6×4 pilot now uses moment-matched sequences
+  (continuous seed=175, mean_range=[10,90]; binary seed=198, p_range=[0.1,0.9];
+  std_fixed=15), replacing the previous rejection-sampling pilot sequences.
 - **PI decision pending**: i.i.d. vs moment-matched for the 10×4 production
-  sequences (see literature-precedent tradeoff above). Nothing is promoted
-  to production filenames yet.
+  sequences (see literature-precedent tradeoff above) is still open — the
+  pilot decision above does not resolve this; nothing for the 10×4 full
+  experiment is promoted to production filenames yet.
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
   running-mean overlay requested (matching inspect_sequences.py's --gt_mode
   running_mean) but explicitly deferred as a separate, bigger UI change —
@@ -643,7 +685,7 @@ Simulates RL_lambda and NEF models on the task sequences for validation figures.
 
 See "Sequence generation methods" above for the three scripts. Quick reference:
 
-    # Original (6x4 pilot; k-constrained rejection sampling)
+    # Original rejection sampling (currently unused for the pilot; kept for comparison)
     venv/bin/python task/generate_sequences.py --task continuous --n_unique_sequences 6 --n_repeats 4 --n_tries 500
     venv/bin/python task/generate_sequences.py --task binary    --n_unique_sequences 6 --n_repeats 4 --n_tries 500
 
@@ -651,9 +693,11 @@ See "Sequence generation methods" above for the three scripts. Quick reference:
     venv/bin/python task/generate_sequences_iid.py --task both --seed 0 \
         --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
 
-    # Moment-matched / quota (isotonic seed search, default score_mode)
+    # Moment-matched / quota (isotonic seed search, default score_mode) --
+    # this is what generated the CURRENT 6x4 pilot (seed=175/198, mean_range=[10,90],
+    # p_range=[0.1,0.9], n_unique_sequences=6)
     venv/bin/python task/generate_sequences_momentmatch.py --task both --n_tries 300 \
-        --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8 \
+        --n_unique_sequences 6 --n_repeats 4 --mean_range 10 90 --std_fixed 15 --p_range 0.1 0.9 \
         --rl_alpha_0 1.0 --rl_lambda 0.5
 
     # WARNING (all three scripts): --task both overwrites BOTH sequence files.

@@ -45,8 +45,8 @@ theory that the NEF realises biophysically, not a point of direct comparison.
 |------|---|-------------|--------|
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
-| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 24 trials (pilot, std=20) / 40 trials (full, std=15, TBD); prefix_length=4 | **Under development** |
-| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 24 trials (pilot) / 40 trials (full, TBD); prefix_length=4 | **Under development** |
+| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 24 trials (pilot, std=15, moment-matched) / 40 trials (full, TBD); prefix_length=4 | **Under development** |
+| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 24 trials (pilot, moment-matched) / 40 trials (full, TBD); prefix_length=4 | **Under development** |
 
 task-continuous and task-binary are designed to be completed within-subject
 (same participants recruited via Prolific allowlist). Together they unlock all
@@ -203,8 +203,15 @@ python task/generate_sequences_momentmatch.py --task both --n_tries 300 \
     --rl_alpha_0 1.0 --rl_lambda 0.5
 ```
 
-**Current 6x4 pilot** (unchanged, in production): rejection sampling,
-prefix_length=4, std_fixed=20, ITI_MS=1000ms.
+**Current 6x4 pilot** (in production): moment-matched/quota generation
+(generate_sequences_momentmatch.py, isotonic score_mode), continuous
+seed=175 (mean_range=[10,90]), binary seed=198 (p_range=[0.1,0.9]),
+prefix_length=4, std_fixed=15, ITI_MS=1000ms. Switched from the original
+rejection-sampling method (std_fixed=20, mean_range=[20,80]) as of the
+latest session; [10,90]/[0.1,0.9] was empirically confirmed as the practical
+limit for how far moment-matching's continuous side can push toward [0,100]
+before boundary-clipping bias becomes significant (see CLAUDE.md for the
+full bias table). Binary has no equivalent limit — quota is exact for any p.
 
 **10x4 full experiment**: NOT yet finalized. Best candidates found so far
 (moment-matched, isotonic score_mode, mean_range=[20,80], p_range=[0.2,0.8],
@@ -262,8 +269,8 @@ task/
     experiment-continuous.js
     experiment-binary.js
   sequences/
-    continuous_sequences.{pkl,json}   — current 6x4 pilot (rejection sampling, std=20)
-    binary_sequences.{pkl,json}       — current 6x4 pilot
+    continuous_sequences.{pkl,json}   — current 6x4 pilot (moment-matched, seed=175, mean_range=[10,90], std=15)
+    binary_sequences.{pkl,json}       — current 6x4 pilot (moment-matched, seed=198, p_range=[0.1,0.9])
     continuous_momentmatch_sequences.{pkl,json} — 10x4 candidate (seed=245, not yet production)
     binary_momentmatch_sequences.{pkl,json}     — 10x4 candidate (seed=68, not yet production)
     continuous_iid_sequences.{pkl,json}         — 10x4 candidate (i.i.d. branch)
