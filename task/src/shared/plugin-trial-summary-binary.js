@@ -8,7 +8,7 @@ import { buildSummaryBarSVG } from './draw-performance-binary.js';
 const info = {
   name: 'trial-summary-binary',
   parameters: {
-    true_p:           { type: 'FLOAT',   default: 0.5   },
+    true_p:           { type: 'FLOAT'   },
     values:           { type: 'OBJECT',  default: []    },
     responses:        { type: 'OBJECT',  default: []    },
     show_performance: { type: 'BOOLEAN', default: false },

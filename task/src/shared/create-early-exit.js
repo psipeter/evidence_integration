@@ -24,6 +24,15 @@ export function createEarlyExit({ beforeUnloadHandler, isProlific, jsPsych, earl
 
     const FADE = 800;
     const showTerminated = () => {
+      // Mirrors on_trial_start's `document.body.dataset.screen = ...` in
+      // timeline-builder.js -- this flow is a manual DOM injection outside
+      // jsPsych's trial system (see module docstring), so it never fires
+      // that hook on its own; setting the attribute here keeps automated
+      // tests able to wait for `body[data-screen="terminated"]` the same
+      // way they wait for every other screen, instead of falling back to
+      // matching this screen's own copy (which is intentionally variable --
+      // see isProlific below).
+      document.body.dataset.screen = 'terminated';
       el.innerHTML = `
         <div class='screen-wrap' style='text-align:center;'>
           <h2>Session terminated</h2>

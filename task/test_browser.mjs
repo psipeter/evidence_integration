@@ -90,12 +90,20 @@ function stopDevServer(proc) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const wait   = (p, ms) => p.waitForTimeout(ms);
-const hasTxt = async (p, t) => (await p.textContent('body')).includes(t);
+const hasEl  = (p, sel) => p.$(sel).then(el => el !== null);
 
 // Wait for a specific jsPsych screen (see data.screen in each plugin node)
-// rather than guessing how long a transition takes.
+// rather than guessing how long a transition takes. Also covers
+// create-early-exit.js's manual DOM injection ('terminated'), which sets
+// the same attribute by hand since it runs outside jsPsych's trial system.
 const waitForScreen = (p, screen, timeout = 10000) =>
   p.waitForSelector(`body[data-screen="${screen}"]`, { timeout });
+
+// Wait for the too-slow pulse to show a specific remaining-timeout count,
+// via its data attribute rather than matching the countdown phrase's exact
+// wording (which is expected to vary/change over time).
+const waitForTimeoutsRemaining = (p, n, timeout = 10000) =>
+  p.waitForSelector(`#too-slow-pulse[data-timeouts-remaining="${n}"]`, { timeout });
 
 const doConsent = async (p) => {
   await p.waitForSelector('#reveal-box-0');
@@ -157,7 +165,7 @@ const SCENARIOS = [
       // Next screen is either the between-obs ITI or straight to obs 2 —
       // either is fine, but it must NOT be the too-slow replay screen.
       await p.waitForSelector('body[data-screen="iti"], body[data-screen="observation"]', { timeout: 3000 });
-      if (await hasTxt(p, 'Too slow')) throw new Error('"Too slow" after normal submit');
+      if (await hasEl(p, '#too-slow-pulse')) throw new Error('Too-slow pulse shown after normal submit');
     },
   },
   {
@@ -165,7 +173,7 @@ const SCENARIOS = [
     fn: async (p) => {
       await doConsent(p); await doTutorial(p);
       await letObsTimeOut(p);  // 1st timeout — 2 of 3 remaining
-      if (!await hasTxt(p, '2 timeouts remaining')) throw new Error('Expected "2 timeouts remaining"');
+      await waitForTimeoutsRemaining(p, 2);
     },
   },
   {
@@ -175,8 +183,7 @@ const SCENARIOS = [
       await letObsTimeOut(p);                              // 1st timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);  // loop_function replays same obs
       await letObsTimeOut(p);                              // 2nd timeout — 1 of 3 remaining
-      if (await hasTxt(p, 'last chance'))       throw new Error('"last chance" should not appear');
-      if (!await hasTxt(p, '1 timeout remaining')) throw new Error('Expected "1 timeout remaining"');
+      await waitForTimeoutsRemaining(p, 1);
     },
   },
   {
@@ -187,14 +194,12 @@ const SCENARIOS = [
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);
       await letObsTimeOut(p);                              // 2nd timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);
-      // 3rd timeout exhausts the budget and triggers earlyExit(), which is a
-      // manual DOM injection (not a jsPsych trial), so wait for its text
-      // rather than a data-screen attribute.
-      await p.waitForFunction(() =>
-        document.body.textContent.includes('Session terminated'),
-        { timeout: T_OBS_MS + 8000 });
-      if (!await hasTxt(p, 'Return to Prolific')) throw new Error('No "Return to Prolific" button');
-      if (await hasTxt(p, 'Trial summary'))       throw new Error('Summary shown after termination');
+      // 3rd timeout exhausts the budget and triggers earlyExit(), a manual
+      // DOM injection (not a jsPsych trial) that sets data-screen='terminated'
+      // by hand (see create-early-exit.js) for exactly this reason.
+      await waitForScreen(p, 'terminated', T_OBS_MS + 8000);
+      if (!await hasEl(p, '#early-exit-btn')) throw new Error('No early-exit button');
+      if (await hasEl(p, '#summary-svg'))     throw new Error('Summary shown after termination');
     },
   },
   {
@@ -204,7 +209,7 @@ const SCENARIOS = [
       await moveSlider(p, 50);
       await submit(p);
       await waitForScreen(p, 'observation', 5000);
-      if (await hasTxt(p, 'Too slow')) throw new Error('Unexpected too-slow after submit');
+      if (await hasEl(p, '#too-slow-pulse')) throw new Error('Unexpected too-slow pulse after submit');
     },
   },
 ];

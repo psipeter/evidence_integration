@@ -388,7 +388,9 @@ Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
 
 ### Data format
 
-`parse_results.py` filters to `screen='observation'` rows and outputs:
+`parse_results.py` filters to `screen='observation'` rows and outputs only
+genuinely participant-generated fields (plus `value`, looked up from the
+sequence file since it's simple and avoids a second join downstream):
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -396,14 +398,17 @@ Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
 | `task` | str | `'continuous'` or `'binary'` |
 | `trial` | int | 0-indexed trial number |
 | `observation` | int | 0-indexed observation within trial |
-| `value` | int | Stimulus value |
-| `true_mean` | float | Generative mean (continuous); NaN for binary |
-| `true_p` | float | True Bernoulli probability (binary); NaN for continuous |
-| `qid` | int | Unique sequence ID |
-| `iti_ms` | int | ITI for this trial (always 1000ms) |
+| `value` | int | Stimulus value — looked up from task/sequences/{task}_sequences.json, not the raw export |
 | `response` | float | Participant estimate (NaN if timed out) |
 | `timed_out` | bool | True if response deadline elapsed |
 | `rt` | float | Response time in ms (NaN if timed out) |
 | `time_elapsed` | int | ms since experiment start |
+
+`true_mean`, `true_std`, `true_p`, `qid`, `prefix_length`, `iti_ms`,
+`iti_condition` are intentionally NOT included — all are fully determined by
+(task, trial) alone (trial order is identical for every participant), so
+they're recovered via a join against task/sequences/{task}_sequences.json
+when a given analysis needs them, rather than duplicated into every raw
+export. See parse_results.py's module docstring for the same note.
 
 Both tasks share the same output file — use `df[df.task == 'continuous']` to split.

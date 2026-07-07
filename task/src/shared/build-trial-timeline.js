@@ -49,10 +49,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
             iti_condition:   seq.iti_condition ?? 'control',
             distractor_type: distractorType,
             is_binary:       isBinary,
-            data: { screen: 'iti', trial: t, observation: _o,
-                    iti_ms: seq.iti_ms ?? 1000,
-                    iti_condition:   seq.iti_condition ?? 'control',
-                    distractor_type: distractorType } }],
+            data: { screen: 'iti', trial: t, observation: _o } }],
           conditional_function: () => !exitFlag,
         });
       }

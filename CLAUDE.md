@@ -323,6 +323,48 @@ Sequence design: 6×4 (24 trials) is the CURRENT PILOT production design, genera
 Single master copy in task/sequences/{task}_sequences.{pkl,json}.
 task/src/{task}/config.js imports directly from task/sequences/ — no copy step needed.
 
+### Sequences.json schema, tutorial derivation, and participant-data columns
+
+**sequences.json per-trial fields**: trial, qid, true_mean, true_std, true_p,
+values, prefix_length, iti_ms, iti_condition (continuous has true_p=null;
+binary has true_std=null). true_mean/true_std/true_p are NEEDED here —
+they're the canonical generative ground truth, not re-derivable from a
+small ~15-observation sample without loss (exactly the distinction between
+the "vs true param" and "vs running mean" analysis branches — see
+inspect_sequences.py's --gt_mode above). All three generation scripts now
+write true_std (it existed internally in every script's templates dict
+already, just wasn't serialized) — previously the browser's main-task
+summary screens silently fell back to a stale hardcoded default (see plugin
+conventions below) because seq.true_std was always undefined.
+
+**Tutorial example** (task/src/shared/config-base.js's `pickTutorialExample`):
+derives tutorialValues/tutorialMean/tutorialStd/true_p from a REAL trial in
+sequencesData — picks the trial whose true_mean/true_p is closest to the
+midpoint (50/0.5), subject to a visual-spread check on the first 5 values
+(>=2 above/below the mean for continuous; >=2 of each color for binary),
+falling through to the next-closest candidate if the top match fails the
+spread check. Replaced hand-picked literals (`tutorialValues = [48, 75, 38,
+82, 57]`, `TUTORIAL_STD = 20`) that silently drifted out of sync the moment
+sequences.json's actual std_fixed changed (this happened once already: the
+tutorial kept showing std=20 after the pilot moved to std=15). Never
+hand-pick a new tutorial example again — if the pedagogical example ever
+needs different qualities, change pickTutorialExample's selection logic,
+not the values.
+
+**Participant-data columns** (parse_results.py, build-trial-timeline.js):
+only genuinely participant-generated fields are recorded/saved —
+prolific_pid, task, trial, observation, value, response, timed_out, rt,
+time_elapsed. true_mean, true_std, true_p, qid, prefix_length, iti_ms,
+iti_condition are intentionally NOT duplicated into the raw export or the
+final pickle — all are fully determined by (task, trial) alone (trial order
+is identical for every participant), so they're recovered via a join
+against sequences.json when analysis needs them. This was found VIOLATED
+once already (build-trial-timeline.js's 'iti' screen was duplicating
+iti_ms/iti_condition/distractor_type into every recorded ITI row, despite
+the file's own docstring saying otherwise) and fixed — if a new screen/
+plugin's `data:{...}` block is ever added, check it against this principle
+before assuming it's fine.
+
 ### Sequence generation methods (task/)
 
 Three separate scripts, kept deliberately distinct rather than one script with
@@ -475,6 +517,30 @@ Testing:
                                (+ system deps via `sudo npx playwright install-deps` if missing —
                                watch for unrelated broken third-party apt repos blocking this)
 
+  Avoid brittle exact-string assertions in E2E tests — copy/wording changes
+  frequently (e.g. the early-exit button's text is now conditional on
+  isProlific), so a test that greps for literal text breaks on legitimate
+  content changes, not just regressions. Prefer structural checks:
+    - `body[data-screen="..."]` for screen transitions — set automatically
+      by on_trial_start in timeline-builder.js for jsPsych trials;
+      create-early-exit.js sets `document.body.dataset.screen = 'terminated'`
+      BY HAND for its own screen, since that flow is a manual DOM injection
+      outside jsPsych's trial system and never fires on_trial_start on its
+      own — if a new non-jsPsych screen is ever added, remember to set this
+      attribute manually there too.
+    - Element presence/absence via stable ids (#early-exit-btn, #summary-svg,
+      #too-slow-pulse) rather than `.textContent.includes(...)`.
+    - `data-*` attributes for dynamic values with a semantic meaning
+      independent of wording — e.g. `data-timeouts-remaining="N"` on
+      #too-slow-pulse (plugin-iti-clock.js), rather than matching the phrase
+      "N timeouts remaining".
+  Found and fixed a real instance of this: the E2E suite hardcoded 'Return
+  to Prolific', which broke the moment the button text became conditional
+  on isProlific (a legitimate content change, not a regression) — and two
+  dead checks ('last chance', 'Trial summary') were testing for phrases
+  that had never existed anywhere in the source at all. All 30 scenarios
+  pass cleanly post-fix.
+
 jsPsych 8 plugin conventions (IMPORTANT — do not regress):
 - Custom plugins use: trial(display_el, trial, on_load) — NEVER declare this `async`.
   jsPsych 8.2.3 advances the timeline when an async trial()'s Promise resolves, not
@@ -497,6 +563,25 @@ jsPsych 8 plugin conventions (IMPORTANT — do not regress):
   The tutorial observation plugins (plugin-tutorial-observation-continuous.js,
   plugin-tutorial-observation-binary.js) are Pattern A — no timeout clock,
   deliberately, since participants need unhurried time during the tutorial.
+- Parameters that the app ALWAYS supplies explicitly (true_mean, true_std,
+  true_p across observation/summary/tutorial-intro plugins) must have NO
+  `default` key in info.parameters — omitting `default` makes jsPsych treat
+  it as required and throw `You must specify a value for the "X" parameter
+  in the "Y" plugin.` if ever missing (confirmed against jsPsych's own
+  source, node_modules/jspsych/dist/index.cjs). Several of these plugins
+  had stale, mutually inconsistent numeric defaults (true_mean: 20/54,
+  true_std: 10/20, true_p: 0.5/0.6/0.7) that were never actually triggered
+  (every real call site always supplied a value) but silently masked
+  exactly the true_std bug above for a long time — had they been required
+  instead of defaulted, the missing-field bug would have thrown immediately
+  instead of silently rendering a wrong Gaussian curve width. One file
+  (plugin-tutorial-observation-binary.js) also had an EXTRA internal
+  fallback beyond the parameter default (`trial.true_p ?? trial.true_mean
+  ?? 0.7`) that masked a related hazard (binary sequence objects sometimes
+  carrying a stray true_mean field equal to true_p) — removing a stale
+  default only helps if you also check for fallback chains like this one.
+  Prefer no default (fail loudly) over a plausible-looking fallback for
+  anything the app is supposed to always provide.
 
 JATOS/MindProbe deployment:
 - .jzip files generated by task/generate_jzip.py (build + package in one step)

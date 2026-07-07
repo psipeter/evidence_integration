@@ -401,6 +401,7 @@ def generate_task_sequences_momentmatch(task, args, rng):
                 'trial': t, 'qid': trial['qid'],
                 'observation': o, 'value': v,
                 'true_mean': trial['true_mean'],
+                'true_std': trial['true_std'],
                 'true_p': trial['true_p'],
                 'iti_ms': trial['iti_ms'],
                 'iti_condition': trial['iti_condition'],
@@ -408,6 +409,7 @@ def generate_task_sequences_momentmatch(task, args, rng):
         json_trials.append({
             'trial': t, 'qid': trial['qid'],
             'true_mean': None if math.isnan(trial['true_mean']) else trial['true_mean'],
+            'true_std': None if math.isnan(trial['true_std']) else trial['true_std'],
             'true_p':    None if math.isnan(trial['true_p'])    else trial['true_p'],
             'values': trial['values'], 'prefix_length': prefix_length,
             'iti_ms': trial['iti_ms'],

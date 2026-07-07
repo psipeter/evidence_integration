@@ -19,8 +19,8 @@ const info = {
   name: 'tutorial-intro-continuous',
   parameters: {
     example_value: { type: 'INT',   default: 23 },
-    true_mean:     { type: 'FLOAT', default: 20 },
-    true_std:      { type: 'FLOAT', default: 20 },
+    true_mean:     { type: 'FLOAT' },
+    true_std:      { type: 'FLOAT' },
   },
 };
 

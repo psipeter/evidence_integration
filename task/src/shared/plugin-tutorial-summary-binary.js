@@ -8,7 +8,7 @@ import { buildSummaryBarSVG } from './draw-performance-binary.js';
 const info = {
   name: 'tutorial-summary-binary',
   parameters: {
-    true_p:    { type: 'FLOAT',  default: 0.6 },
+    true_p:    { type: 'FLOAT' },
     values:    { type: 'OBJECT', default: []  },
     responses: { type: 'OBJECT', default: []  },
   },

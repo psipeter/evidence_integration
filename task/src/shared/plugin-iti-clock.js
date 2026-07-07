@@ -193,7 +193,7 @@ class ItiClockPlugin {
           <span style="font-size:3rem;font-weight:bold;color:#ef4444;">
             Too slow
           </span>
-          <span id="too-slow-pulse" style="
+          <span id="too-slow-pulse" data-timeouts-remaining="${timeouts_remaining}" style="
             font-size:2rem;font-style:italic;color:#555;
             opacity:0;transition:opacity ${FADE}ms ease;">
             ${timeouts_remaining} timeout${timeouts_remaining === 1 ? '' : 's'} remaining

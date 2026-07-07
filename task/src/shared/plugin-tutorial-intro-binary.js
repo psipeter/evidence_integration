@@ -18,7 +18,7 @@ const info = {
   name: 'tutorial-intro-binary',
   parameters: {
     example_value: { type: 'INT',   default: 1   },
-    true_p:        { type: 'FLOAT', default: 0.7 },
+    true_p:        { type: 'FLOAT' },
     n_obs:         { type: 'INT',   default: 5   },
   },
 };

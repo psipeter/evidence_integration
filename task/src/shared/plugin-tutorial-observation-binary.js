@@ -21,7 +21,7 @@ const info = {
     value:          { type: 'INT',     default: 1      },
     obs_num:        { type: 'INT',     default: 1      },
     n_obs:          { type: 'INT',     default: 5      },
-    true_p:         { type: 'FLOAT',   default: 0.7    },
+    true_p:         { type: 'FLOAT' },
     slider_default: { type: 'STRING',  default: 'none' },
     init_pos:       { type: 'INT',     default: 50     },
     show_value:     { type: 'BOOLEAN', default: true   },
@@ -36,9 +36,8 @@ class TutorialObservationBinaryPlugin {
     if (document.activeElement && document.activeElement !== document.body)
       document.activeElement.blur();
 
-    const { value, obs_num,
+    const { value, obs_num, true_p,
             slider_default, init_pos, show_value } = trial;
-    const true_p = trial.true_p ?? trial.true_mean ?? 0.7;
     const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 50);
     const unset = slider_default === 'none';
 

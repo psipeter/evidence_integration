@@ -9,8 +9,8 @@ import { buildPerformanceSVG } from './draw-performance-continuous.js';
 const info = {
   name: 'tutorial-summary-continuous',
   parameters: {
-    true_mean:  { type: 'FLOAT',  default: 54 },
-    true_std:   { type: 'FLOAT',  default: 10 },
+    true_mean:  { type: 'FLOAT' },
+    true_std:   { type: 'FLOAT' },
     values:     { type: 'OBJECT', default: [] },
     responses:  { type: 'OBJECT', default: [] },
   },
