@@ -1,19 +1,15 @@
-/**
- * plugin-tutorial-intro-continuous.js
- *
- * Each box contains real content (invisible, for sizing) + absolute overlay.
- * SVG height matches left panel height via ResizeObserver.
- * Axis labels hidden until box 0 clicked; slider hidden until box 2 clicked.
- *
- * The distribution SVG itself is built by the shared distribution-continuous.js
- * (revealed=false here — group opacities start hidden, toggled to '1' below as
- * boxes are clicked), mirroring plugin-tutorial-observation-continuous.js which
- * uses the same builder with revealed=true. These used to be two separate,
- * drifting local implementations of nearly the same SVG.
- */
-
 import { buildDistributionSVG } from './distribution-continuous.js';
 import { buildSliderHTML, initSlider } from './slider-continuous.js';
+import { startContinuousDrawAnimation } from './continuous-draw-animation.js';
+/**
+ * plugin-tutorial-intro-continuous.js
+ * Obs 1 of the continuous tutorial — progressive reveal via click.
+ * Box 0 (text) → image box (click to reveal distribution + falling-bubble
+ * draw animation) → Box 1 (goal text) → Box 2 (slider instructions) → slider.
+ * The image reveal is its own step, separate from box 0's text, so
+ * participants aren't reading and watching the animation at the same time —
+ * mirrors plugin-tutorial-intro-binary.js's structure exactly.
+ */
 
 const GOAL_COLOR   = '#2563eb';
 const SAMPLE_COLOR = '#ef4444';
@@ -29,14 +25,14 @@ const info = {
 };
 
 const makeBox = (id, realHTML, isActive) => `
-  <p id="${id}" class="tutorial-info-block"
-     style="${isActive ? 'cursor:pointer;' : ''}">
+  <div id="${id}" class="tutorial-info-block" style="position:relative;${isActive ? 'cursor:pointer;' : ''}">
     <span id="${id}-placeholder"
-          style="color:${isActive ? '#555' : '#ccc'};font-weight:bold;">
+          style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                 font-weight:bold;color:${isActive ? '#555' : '#ccc'};white-space:nowrap;">
       ${isActive ? 'Click to reveal' : '· · ·'}
     </span>
-    <span id="${id}-real" style="display:none;">${realHTML}</span>
-  </p>`;
+    <span id="${id}-real" style="visibility:hidden;">${realHTML}</span>
+  </div>`;
 
 class TutorialIntroContinuousPlugin {
   constructor(jsPsych) { this.jsPsych = jsPsych; }
@@ -46,12 +42,19 @@ class TutorialIntroContinuousPlugin {
     document.body.style.backgroundColor = '#f5f5f5';
     const { example_value, true_mean, true_std } = trial;
 
-    const BOX0 = `<span style="color:${SAMPLE_COLOR};font-weight:bold;">Numbers</span> are drawn one-at-a-time from a
-      <span style="color:${DIST_COLOR};font-weight:bold;">hidden distribution</span>.`;
-    const BOX1 = `Goal: estimate the
-      <span style="color:${GOAL_COLOR};font-weight:bold;">true mean</span>
-      of that distribution.`;
-    const BOX2 = `After each <span style="color:${SAMPLE_COLOR};font-weight:bold;">observation</span>, move the slider to update your estimate.`;
+    const BOX0 = `In this task, you'll see a sequence of
+      <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>. Each number is
+      randomly drawn from a hidden
+      <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>.`;
+    const BOX1 = `Your <strong>goal</strong> is to estimate that distribution's
+      <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>, based on
+      all the numbers you've seen so far.`;
+    const BOX2 = `<strong>Move</strong> the slider to show your estimate of the
+      <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>.`;
+    const DIST_CAPTION = `This curve shows the true
+      <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>. In the
+      experiment, you will only see the individual
+      <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>.`;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
@@ -70,7 +73,19 @@ class TutorialIntroContinuousPlugin {
           </div>
 
           <div class="tutorial-panel tutorial-panel-right">
-            <div id="dist-svg" class="dist-canvas" style="line-height:0;"></div>
+            <div id="tut-image-box" style="position:relative;flex:1;">
+              <div id="dist-svg" class="dist-canvas" style="line-height:0;"></div>
+              <div id="tut-image-placeholder"
+                   style="position:absolute;inset:0;display:flex;align-items:center;
+                          justify-content:center;background:#fff;border-radius:6px;
+                          cursor:default;color:#ccc;font-weight:bold;">
+                · · ·
+              </div>
+            </div>
+            <p id="dist-caption" class="tutorial-info-block"
+               style="margin-top:0.5rem;opacity:0;background:#fffbeb;border:1px solid #fbbf24;">
+              <span>${DIST_CAPTION}</span>
+            </p>
           </div>
 
         </div>
@@ -89,6 +104,8 @@ class TutorialIntroContinuousPlugin {
     display_el.querySelector('#dist-svg').innerHTML =
       buildDistributionSVG(true_mean, true_std, example_value, false);
 
+    const svgRoot    = () => display_el.querySelector('#dist-svg svg');
+    const centerEl   = () => display_el.querySelector('#tut-centre-number');
     const sliderWrap = display_el.querySelector('#tut-slider-wrap');
 
     const jsPsych = self.jsPsych;
@@ -108,7 +125,7 @@ class TutorialIntroContinuousPlugin {
 
     const revealBox = (id) => {
       display_el.querySelector(`#${id}-placeholder`).style.display = 'none';
-      display_el.querySelector(`#${id}-real`).style.display = 'inline';
+      display_el.querySelector(`#${id}-real`).style.visibility = 'visible';
       display_el.querySelector(`#${id}`).style.cursor = 'default';
     };
 
@@ -116,28 +133,57 @@ class TutorialIntroContinuousPlugin {
       const box = display_el.querySelector(`#${id}`);
       const ph  = display_el.querySelector(`#${id}-placeholder`);
       box.style.cursor = 'pointer';
-      if (ph) { ph.style.display = 'inline'; ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
+      if (ph) { ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
       box.addEventListener('click', onClickFn, { once: true });
+    };
+
+    const showDist = () => {
+      const svg = svgRoot();
+      const axis = svg?.querySelector('#tut-svg-axis-labels');
+      const dist = svg?.querySelector('#tut-svg-dist');
+      if (axis) axis.style.opacity = '1';
+      if (dist) dist.style.opacity = '1';
+    };
+
+    // Image box is its own click-to-reveal step, AFTER box 0's text and
+    // BEFORE box 1's goal text — participants aren't reading and watching
+    // the animation at the same moment.
+    const activateImageBox = () => {
+      const ph = display_el.querySelector('#tut-image-placeholder');
+      if (!ph) return;
+      ph.style.cursor = 'pointer';
+      ph.style.color  = '#555';
+      ph.textContent  = 'Click to reveal';
+      ph.addEventListener('click', onImageBox, { once: true });
+    };
+
+    const onImageBox = () => {
+      display_el.querySelector('#tut-image-placeholder')?.remove();
+      showDist();
+      startContinuousDrawAnimation({
+        svgRoot:    svgRoot(),
+        centerEl:   centerEl(),
+        true_mean,
+        true_std,
+        obsNum:     1,
+      });
+      activateBox('tut-box-1', onBox1);
     };
 
     const onBox0 = () => {
       revealBox('tut-box-0');
-      // Axis labels + dist curve appear together
-      const svg = display_el.querySelector('#dist-svg');
-      svg.querySelector('#tut-svg-axis-labels').style.opacity = '1';
-      svg.querySelector('#tut-svg-dist').style.opacity = '1';
-      display_el.querySelector('#tut-centre-number').style.opacity = '1';
-      activateBox('tut-box-1', onBox1);
+      activateImageBox();
     };
     const onBox1 = () => {
       revealBox('tut-box-1');
-      display_el.querySelector('#dist-svg').querySelector('#tut-svg-mean').style.opacity = '1';
+      const meanGroup = svgRoot()?.querySelector('#tut-svg-mean');
+      if (meanGroup) meanGroup.style.opacity = '1';
+      const caption = display_el.querySelector('#dist-caption');
+      if (caption) caption.style.opacity = '1';
       activateBox('tut-box-2', onBox2);
     };
     const onBox2 = () => {
       revealBox('tut-box-2');
-      const svg = display_el.querySelector('#dist-svg');
-      svg.querySelector('#tut-svg-obs').style.opacity = '1';
       activateSlider();
     };
 

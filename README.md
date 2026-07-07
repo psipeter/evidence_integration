@@ -154,18 +154,34 @@ Target: ~50–80 participants per task, within-subject.
 
 - **Sequences**: 10 unique sequences × 4 repeats = 40 trials; prefix_length=4; std_fixed=20
 - **ITI**: all trials use 1000ms (ITI manipulation removed — no effect observed in pilot)
-- **BTI**: 3s between-trial reset screen ("Trial X / 40 — generating new distribution…")
+- **BTI**: 3s between-trial reset screen ("Trial X / 40 — generating new sequence…") —
+  same wording for both tasks (continuous used to say "generating new distribution…";
+  "sequence" is the more defensible word since the underlying hidden parameter can
+  repeat across trials — 6 unique parameter sets × 4 repeats — so "new distribution"
+  would sometimes overclaim novelty)
 - **Distractor**: `iti_condition` per trial ('control'/'distract', 2-of-4 per qid);
   `DISTRACTOR_TYPE` in config: 'none' | 'iti_length' | 'popup' (default: 'none')
 - **Timeout**: 7s response deadline per observation
   - Per-trial timeout budget: 3 timeouts before session terminates
   - Timeout flow: "Too slow" screen (fade in/out/in, 3.2s) → replay ITI → same observation
   - On 3rd timeout: "Too slow / 0 timeouts remaining" → "Session terminated" screen with button
-- **Tutorial**: 3-box progressive reveal → 4 tutorial observations → tutorial summary →
-  timeout demonstration (3 screens) → BTI → trial 1
+- **Tutorial**: box 1 (text) → image box (separate click-to-reveal step, showing a
+  bubbling generative animation — binary: bubbles rise inside the blue/red bar;
+  continuous: bubbles fall from under the Gaussian curve to the x-axis, weighted by
+  density) → box 2 (goal text, alongside a yellow tutorial-only-visualization warning
+  box) → box 3 (slider instructions) → slider, across 5 tutorial observations →
+  tutorial summary → timeout demonstration (3 screens, same fade-in as real
+  observations) → BTI → trial 1. The main obs circle/number, and the tutorial's own
+  observation marker, fade in (1000ms) rather than appearing instantly, for a
+  consistent feel between tutorial and real trials.
 - **Summary slides**: binary — per-obs bar chart (blue/red split at estimate, obs circle left);
   continuous — per-obs number line (red obs thumb, black circle at estimate)
-- **Consent form**: verbatim IRB-approved text from task/consent_form.txt
+- **Consent form**: verbatim IRB-approved text from task/consent_form.txt, followed by
+  2 warning boxes (data-loss / response-deadline, red background) with ordered
+  disclosure — box 2 stays locked until box 1 is revealed. "Begin experiment" doesn't
+  use the native `disabled` attribute (disabled buttons never dispatch `click`, so a
+  premature click got silently swallowed with zero feedback) — a capturing-phase
+  click listener gates it instead.
 
 ### Sequence generation
 
@@ -211,8 +227,13 @@ task/
       draw-performance-continuous.js — SVG distribution + dot plots (continuous)
       draw-performance-binary.js     — SVG bar + dot plots (binary)
       urn-binary.js                 — shared binary urn SVG (revealed flag)
+      continuous-draw-animation.js  — tutorial bubbling animation (continuous):
+                                      bubbles fall from under the curve to the x-axis
+      binary-draw-animation.js      — tutorial bubbling animation (binary):
+                                      bubbles rise inside the blue/red bar
       slider-continuous.js         — continuous slider
-      slider-binary.js             — binary slider (blue/red gradient, split % labels)
+      slider-binary.js             — binary slider (blue/red gradient after first
+                                      interaction; 2-row axis ruler below)
       style.css                    — all shared styles
     continuous/
       config.js

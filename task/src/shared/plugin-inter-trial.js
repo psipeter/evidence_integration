@@ -1,8 +1,13 @@
 /**
  * plugin-inter-trial.js
  * 5-second inter-trial reset screen.
- * Shows "Trial X / 40" and a pulsing "generating new distribution…" message
- * to provide a clear perceptual break between trials.
+ * Shows "Trial X / 40" and a pulsing "generating new sequence…" message
+ * to provide a clear perceptual break between trials. Same wording for both
+ * tasks — "sequence" describes the observable data stream and stays
+ * accurate regardless of whether the hidden generative parameter
+ * (probability / mean+std) happens to repeat from an earlier trial (the
+ * task design reuses 6 unique parameter sets across 24 trials), whereas
+ * "new distribution" would overclaim novelty it can't always guarantee.
  */
 
 const info = {
@@ -20,8 +25,8 @@ class InterTrialPlugin {
 
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
-    const { trial_num, n_trials, duration_ms, is_binary } = trial;
-    const label = is_binary ? 'generating new sequence…' : 'generating new distribution…';
+    const { trial_num, n_trials, duration_ms } = trial;
+    const label = 'generating new sequence…';
 
     display_el.innerHTML = `
       <div style="

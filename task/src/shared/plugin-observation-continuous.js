@@ -24,6 +24,11 @@
 import { buildSliderHTML, initSlider } from './slider-continuous.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
 
+const FADE_MS = 1000; // mirrors the tutorial's continuous-draw-animation.js
+                       // fade-in, for a consistent feel between tutorial and
+                       // main task (same duration as plugin-observation-binary.js's
+                       // circle fade too)
+
 const info = {
   name: 'observation-continuous',
   parameters: {
@@ -57,7 +62,7 @@ class ObservationContinuousPlugin {
     display_el.innerHTML = `
       <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
       <div class="obs-wrap">
-        <div id="stimulus-display" class="stimulus-number" style="color:#ef4444;">${value}</div>
+        <div id="stimulus-display" class="stimulus-number" style="color:#ef4444;opacity:0;">${value}</div>
         ${buildSliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
       </div>
       <div style="text-align:center;">
@@ -69,6 +74,17 @@ class ObservationContinuousPlugin {
 
     // Signal DOM is ready — jsPsych will mark trial as loaded
     on_load();
+
+    // Fade the number in — purely cosmetic (mirrors the tutorial's centre-
+    // number fade in continuous-draw-animation.js), doesn't gate
+    // interactivity: the timeout clock and slider start immediately below
+    // regardless of whether this transition has finished.
+    const stimulus = display_el.querySelector('#stimulus-display');
+    requestAnimationFrame(() => {
+      if (!stimulus) return;
+      stimulus.style.transition = `opacity ${FADE_MS}ms ease`;
+      stimulus.style.opacity = '1';
+    });
 
     // ── Timeout + finish ──────────────────────────────────────────────────────
     let stopClock = null;

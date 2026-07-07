@@ -11,14 +11,22 @@
  * (which is what existed here before — one plugin had progressive-reveal
  * opacity groups, the other didn't, and they drifted independently).
  *
- * The SVG contains four named groups:
+ * The SVG contains these named groups/elements:
  *   #tut-svg-axis-labels — 0/100 axis line + labels
  *   #tut-svg-dist        — filled distribution curve
  *   #tut-svg-mean        — true-mean tick + "???" label
- *   #tut-svg-obs         — current-observation tick + value label
+ *   #tut-svg-obs         — current-observation tick + value label. Always
+ *                          starts at opacity 0 regardless of `revealed` —
+ *                          its reveal is owned exclusively by
+ *                          continuous-draw-animation.js's resolve step, the
+ *                          same way urn-binary.js's #tut-urn-draw circle is
+ *                          managed independently of the shared `revealed` flag.
+ *   #tut-svg-bubbles     — ephemeral bubble <circle>s (filled by the animation),
+ *                          clipped to the plot area
  *
- * Pass revealed=true to show all groups immediately (obs 2-5).
- * Pass revealed=false to hide all groups initially (obs 1, progressive reveal).
+ * Pass revealed=true to show axis/dist/mean immediately (obs 2–5). #tut-svg-obs
+ * still starts hidden either way — see above.
+ * Pass revealed=false to hide axis/dist/mean initially (obs 1, progressive reveal).
  */
 import { normalPDF } from './draw-performance-continuous.js';
 
@@ -26,10 +34,16 @@ const GOAL_COLOR   = '#2563eb';
 const SAMPLE_COLOR = '#ef4444';
 const DIST_COLOR   = '#16a34a';
 
+export const LAYOUT = {
+  W:    220,
+  H:    160,
+  xMin: 0,
+  xMax: 100,
+  pad:  { l: 20, r: 20, t: 26, b: 44 },
+};
+
 export const buildDistributionSVG = (mu, sigma, currentValue, revealed = false) => {
-  const W = 220, H = 160;
-  const xMin = 0, xMax = 100;
-  const pad  = { l: 20, r: 20, t: 26, b: 44 };
+  const { W, H, xMin, xMax, pad } = LAYOUT;
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
   const axisY = pad.t + plotH;
@@ -49,6 +63,11 @@ export const buildDistributionSVG = (mu, sigma, currentValue, revealed = false) 
     + ` ${xPos(xMax).toFixed(2)},${axisY} ${xPos(xMin).toFixed(2)},${axisY}`;
 
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <clipPath id="tut-svg-plot-clip">
+        <rect x="${pad.l}" y="${pad.t}" width="${plotW}" height="${plotH}"/>
+      </clipPath>
+    </defs>
     <g id="tut-svg-axis-labels" style="opacity:${vis};">
       <line x1="${pad.l}" y1="${axisY}" x2="${pad.l + plotW}" y2="${axisY}"
         stroke="#bbb" stroke-width="1"/>
@@ -71,7 +90,8 @@ export const buildDistributionSVG = (mu, sigma, currentValue, revealed = false) 
             text-anchor="middle" font-family="Arial" font-size="14"
             font-weight="bold" fill="${GOAL_COLOR}">???</text>
     </g>
-    <g id="tut-svg-obs" style="opacity:${vis};">
+    <g id="tut-svg-bubbles" clip-path="url(#tut-svg-plot-clip)" style="opacity:1;"></g>
+    <g id="tut-svg-obs" style="opacity:0;">
       <line x1="${xPos(currentValue).toFixed(2)}" y1="${axisY}"
             x2="${xPos(currentValue).toFixed(2)}" y2="${axisY + tickH}"
             stroke="${SAMPLE_COLOR}" stroke-width="3" stroke-linecap="round"/>

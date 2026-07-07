@@ -643,6 +643,13 @@ input[type="range"].binary-slider.slider-last::-moz-range-thumb {
   pointer-events: none;  /* clicks pass through to slider */
 }
 
+/* Binary ruler needs more vertical room than the continuous one — two
+   stacked rows (blue values, then red values) instead of one row of
+   numeric ticks. See buildBinaryRuler() in slider-binary.js. */
+.binary-ruler {
+  height: 66px;
+}
+
 .slider-tick {
   position: absolute;
   width: 1px;

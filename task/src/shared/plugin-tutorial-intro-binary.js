@@ -1,9 +1,13 @@
 import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
 import { buildUrnSVG } from './urn-binary.js';
+import { startBinaryDrawAnimation } from './binary-draw-animation.js';
 /**
  * plugin-tutorial-intro-binary.js
  * Obs 1 of the binary tutorial — progressive reveal via click.
- * Box 0 → dots visible; Box 1 → bar+??? visible; Box 2 → highlight + slider.
+ * Box 0 (text) → image box (click to reveal bar + draw animation) →
+ * Box 1 (goal text) → Box 2 (slider instructions) → slider.
+ * The image reveal is its own step, separate from box 0's text, so
+ * participants aren't reading and watching the animation at the same time.
  */
 
 const SAMPLE_BLUE = '#2563eb';
@@ -20,14 +24,14 @@ const info = {
 };
 
 const makeBox = (id, realHTML, isActive) => `
-  <p id="${id}" class="tutorial-info-block"
-     style="${isActive ? 'cursor:pointer;' : ''}">
+  <div id="${id}" class="tutorial-info-block" style="position:relative;${isActive ? 'cursor:pointer;' : ''}">
     <span id="${id}-placeholder"
-          style="color:${isActive ? '#555' : '#ccc'};font-weight:bold;">
+          style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                 font-weight:bold;color:${isActive ? '#555' : '#ccc'};white-space:nowrap;">
       ${isActive ? 'Click to reveal' : '· · ·'}
     </span>
-    <span id="${id}-real" style="display:none;">${realHTML}</span>
-  </p>`;
+    <span id="${id}-real" style="visibility:hidden;">${realHTML}</span>
+  </div>`;
 
 class TutorialIntroBinaryPlugin {
   constructor(jsPsych) { this.jsPsych = jsPsych; }
@@ -35,17 +39,24 @@ class TutorialIntroBinaryPlugin {
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
     const { example_value, true_p } = trial;
-    const ballCol = example_value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
 
-    const BOX0 = `<span style="color:${SAMPLE_BLUE};font-weight:bold;">Blue</span> or
-      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> balls
-      are drawn one-at-a-time based on a
-      <span style="color:${DIST_COLOR};font-weight:bold;">hidden probability</span>.`;
-    const BOX1 = `Goal: estimate the <strong>proportion</strong> of
-      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> and
-      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> balls.`;
-    const BOX2 = `After each <span style="color:#888;font-weight:bold;">observation</span>,
-      move the slider to update your estimate.`;
+    const BOX0 = `In this task, you'll see a sequence of balls. Each ball is
+      randomly colored
+      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> or
+      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> according to a
+      hidden <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>.`;
+    const BOX1 = `Your <strong>goal</strong> is to estimate that
+      <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>, based on
+      all the balls you've seen so far.`;
+    const BOX2 = `<strong>Move</strong> the slider toward
+      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> or
+      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> to show
+      which you think is more likely, and by how much.`;
+    const URN_CAPTION = `This bar shows the true
+      <span style="color:${DIST_COLOR};font-weight:bold;">probability</span> of
+      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> vs
+      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span>. In the
+      experiment, you will only see the colored balls.`;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
@@ -57,11 +68,22 @@ class TutorialIntroBinaryPlugin {
             ${makeBox('tut-box-2', BOX2, false)}
           </div>
           <div class="tutorial-panel tutorial-panel-centre">
-            <div id="tut-ball" class="binary-circle"
-                 style="background:${ballCol};opacity:0;"></div>
+            <div id="tut-ball" class="binary-circle" style="opacity:0;"></div>
           </div>
           <div class="tutorial-panel tutorial-panel-right">
-            <div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>
+            <div id="tut-image-box" style="position:relative;flex:1;">
+              <div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>
+              <div id="tut-image-placeholder"
+                   style="position:absolute;inset:0;display:flex;align-items:center;
+                          justify-content:center;background:#fff;border-radius:6px;
+                          cursor:default;color:#ccc;font-weight:bold;">
+                · · ·
+              </div>
+            </div>
+            <p id="urn-caption" class="tutorial-info-block"
+               style="margin-top:0.5rem;opacity:0;background:#fffbeb;border:1px solid #fbbf24;">
+              <span>${URN_CAPTION}</span>
+            </p>
           </div>
         </div>
         <div id="tut-slider-wrap" style="visibility:hidden;">
@@ -75,12 +97,11 @@ class TutorialIntroBinaryPlugin {
         </div>
       </div>`;
 
-    // revealed=false: all groups hidden, revealed progressively
-    display_el.querySelector('#urn-svg').innerHTML =
-      buildUrnSVG(true_p, example_value, 1, false);
+    display_el.querySelector('#urn-svg').innerHTML = buildUrnSVG(true_p, false);
 
-    const svg      = () => display_el.querySelector('#urn-svg');
-    const jsPsych  = this.jsPsych;
+    const svgRoot   = () => display_el.querySelector('#urn-svg svg');
+    const centerEl  = () => display_el.querySelector('#tut-ball');
+    const jsPsych = this.jsPsych;
 
     const activateSlider = () => {
       display_el.querySelector('#tut-slider-wrap').style.visibility = 'visible';
@@ -95,7 +116,7 @@ class TutorialIntroBinaryPlugin {
 
     const revealBox = (id) => {
       display_el.querySelector(`#${id}-placeholder`).style.display = 'none';
-      display_el.querySelector(`#${id}-real`).style.display = 'inline';
+      display_el.querySelector(`#${id}-real`).style.visibility = 'visible';
       display_el.querySelector(`#${id}`).style.cursor = 'default';
     };
 
@@ -103,20 +124,53 @@ class TutorialIntroBinaryPlugin {
       const box = display_el.querySelector(`#${id}`);
       const ph  = display_el.querySelector(`#${id}-placeholder`);
       box.style.cursor = 'pointer';
-      if (ph) { ph.style.display = 'inline'; ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
+      if (ph) { ph.style.color = '#555'; ph.textContent = 'Click to reveal'; }
       box.addEventListener('click', fn, { once: true });
+    };
+
+    const showBar = () => {
+      const bar = svgRoot()?.querySelector('#tut-urn-bar');
+      const bub = svgRoot()?.querySelector('#tut-urn-bubbles');
+      if (bar) bar.style.opacity = '1';
+      if (bub) bub.style.opacity = '1';
+    };
+
+    // Image box is its own click-to-reveal step, AFTER box 0's text and
+    // BEFORE box 1's goal text — previously the image appeared automatically
+    // alongside box 0, which split attention between reading and watching the
+    // animation at the same moment.
+    const activateImageBox = () => {
+      const ph = display_el.querySelector('#tut-image-placeholder');
+      if (!ph) return;
+      ph.style.cursor = 'pointer';
+      ph.style.color  = '#555';
+      ph.textContent  = 'Click to reveal';
+      ph.addEventListener('click', onImageBox, { once: true });
+    };
+
+    const onImageBox = () => {
+      display_el.querySelector('#tut-image-placeholder')?.remove();
+      showBar();
+      startBinaryDrawAnimation({
+        svgRoot:       svgRoot(),
+        centerEl:      centerEl(),
+        true_p,
+        currentValue:  example_value,
+        obsNum:        1,
+      });
+      activateBox('tut-box-1', onBox1);
     };
 
     const onBox0 = () => {
       revealBox('tut-box-0');
-      svg().querySelector('#tut-urn-dots').style.opacity = '1';
-      svg().querySelector('#tut-urn-highlight').style.opacity = '1';
-      display_el.querySelector('#tut-ball').style.opacity = '1';
-      activateBox('tut-box-1', onBox1);
+      activateImageBox();
     };
     const onBox1 = () => {
       revealBox('tut-box-1');
-      svg().querySelector('#tut-urn-label').style.opacity = '1';
+      const qmark = svgRoot()?.querySelector('#tut-urn-qmark');
+      if (qmark) qmark.style.opacity = '1';
+      const caption = display_el.querySelector('#urn-caption');
+      if (caption) caption.style.opacity = '1';
       activateBox('tut-box-2', onBox2);
     };
     const onBox2 = () => {

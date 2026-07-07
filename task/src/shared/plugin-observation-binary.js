@@ -26,6 +26,9 @@ import { startTimeoutClock } from './observation-timeout-clock.js';
 
 const SAMPLE_BLUE = '#2563eb';
 const SAMPLE_RED  = '#ef4444';
+const FADE_MS     = 1000; // slower than the tutorial's 380ms fade — more
+                          // noticeable in the main task where there's no
+                          // preceding bubbling animation to build anticipation
 
 const info = {
   name: 'observation-binary',
@@ -61,7 +64,7 @@ class ObservationBinaryPlugin {
     display_el.innerHTML = `
       <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
       <div class="obs-wrap">
-        <div class="binary-circle" style="background:${ballCol};"></div>
+        <div id="obs-circle" class="binary-circle" style="background:#fff;"></div>
         ${buildBinarySliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
       </div>
       <div style="text-align:center;">
@@ -74,6 +77,17 @@ class ObservationBinaryPlugin {
 
     // Signal DOM is ready
     on_load();
+
+    // Fade the circle white → its actual color — purely cosmetic (mirrors the
+    // tutorial's centre-circle fade in binary-draw-animation.js), doesn't gate
+    // interactivity: the timeout clock and slider start immediately below
+    // regardless of whether this transition has finished.
+    const circle = display_el.querySelector('#obs-circle');
+    requestAnimationFrame(() => {
+      if (!circle) return;
+      circle.style.transition = `background ${FADE_MS}ms ease`;
+      circle.style.background = ballCol;
+    });
 
     // ── Timeout + finish ──────────────────────────────────────────────────────
     let stopClock = null;

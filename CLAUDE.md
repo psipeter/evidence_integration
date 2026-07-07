@@ -6,7 +6,11 @@ README.md when they conflict.
 
 **After any conversation compaction**: re-read this file in full before doing
 anything else. Compaction summaries omit conventions. Key ones to remember:
-- Figures save as PDF only — never convert to PNG/SVG or upload images to chat
+- Figures save as PDF only — never convert to PNG/SVG or upload images to chat.
+  This also applies to task/ UI screenshots: don't upload Playwright screenshots
+  to context to verify UI work — use DOM/computed-style assertions instead
+  (textContent, getComputedStyle, attribute checks) and only pull an actual
+  image when a genuine visual judgment call is needed.
 - Run node test_browser.mjs only after big task/ changes or when explicitly asked —
   it's slow (3 browsers × 2 tasks); don't run it reflexively after every small edit
 - All NEF simulation data → data/runs/; figures → figures/
@@ -147,8 +151,11 @@ Naming convention (IMPORTANT): every file/class that has a continuous/binary pai
 Key files: timeline-builder.js (orchestrator), build-trial-timeline.js (pure-JS
   trial loop), build-tutorial-timeline.js, build-consent-screen.js, build-end-screen.js,
   create-early-exit.js, plugin-observation-continuous.js, plugin-observation-binary.js,
-  observation-timeout-clock.js (shared countdown-clock renderer — see below),
-  slider-continuous.js, slider-binary.js.
+  observation-timeout-clock.js (shared countdown-clock renderer),
+  slider-continuous.js, slider-binary.js, distribution-continuous.js (continuous
+  tutorial SVG builder), urn-binary.js (binary tutorial SVG builder),
+  continuous-draw-animation.js / binary-draw-animation.js (tutorial bubbling
+  animations, see below).
 Data pipeline: JATOS JSON → task/parse_results.py → data/task_results.pkl
 Consent form: verbatim IRB text from task/consent_form.txt — do not paraphrase or edit.
 Pilot name field: PILOT ONLY — saves name as prolific_pid substitute.
@@ -159,50 +166,129 @@ See task/ section in README.md for full details.
 
 Current task status (as of latest session):
 - TEST_MODE=false, N_TRIALS_TO_RUN=24, BTI_MS=3000ms, DISTRACTOR_TYPE='none'
-- Consent: click-to-reveal 3 boxes + name field + checkbox before Begin
-- Summary slides redesigned: binary = per-obs bar chart; continuous = per-obs number line
-- Slider refactor COMPLETE (revised): both observation plugins use
-  trial(display_el, trial, on_load) — NOT async — with on_load() called after
-  innerHTML is set, then initSlider/initBinarySlider attach listeners directly.
-  No setTimeout/rAF deferral; mousedown + click (desktop/mouse only).
-- FIXED (critical, found via browser test harness): trial() must never be
-  declared `async`. jsPsych 8.2.3 advances the timeline once an async trial()
-  method's returned Promise resolves, not when finishTrial() is called — and
-  since these methods never `await` anything, that resolution happens almost
-  synchronously, right after the rAF timeout loop is registered. This spawned
-  a new observation instance roughly every ITI cycle regardless of whether the
-  visible one had finished, with orphaned instances' timeout loops still
-  running in the background and calling finishTrial() on trials jsPsych had
-  already moved past. Removing `async` fixed it — confirmed via per-instance
-  start/end wall-clock logging showing true overlap before the fix and clean
-  sequential execution after. This may have subtly corrupted timeout/response
-  data in earlier pilots whenever a real participant timeout occurred.
-- test_browser.mjs hang (FIXED): was not a shell-tool limitation as previously
-  believed — see "Testing" section below for the actual harness rewrite.
-- Pilot feedback bug (FIXED): first obs of first trial submit button unclickable —
-  was caused by double-rAF deferral firing before browser layout complete; fixed by
-  the on_load() refactor above (the `async` keyword added during that same fix was
-  itself the cause of the concurrency bug above — removed, rest of the pattern kept).
-- "practice" → "tutorial" rename COMPLETE: every file, class, info.name, data.screen
-  label, config key (tutorialValues/Mean/Std), and CSS class that referred to
-  "practice" now says "tutorial" instead, consistently. Zero "practice" references
-  remain anywhere in task/src (verified by grep). The tutorial observation plugins
-  have NO timeout clock, deliberately — participants need unhurried time to read
-  and think; only plugin-timeout-demo.js (which exists specifically to demonstrate
-  the real deadline before trial 1) shows a countdown during the tutorial.
-- File naming/consolidation pass COMPLETE: every continuous/binary file pair now
-  has an explicit suffix on both sides (see "Naming convention" above). Two
-  real duplications were extracted into shared modules:
-    - observation-timeout-clock.js — the countdown-ring canvas renderer, previously
-      duplicated verbatim across plugin-observation-continuous.js,
-      plugin-observation-binary.js, AND plugin-timeout-demo.js (3 copies → 1).
-    - distribution-continuous.js — the continuous tutorial's distribution SVG
-      (with a `revealed` boolean flag), mirroring urn-binary.js's already-correct
-      pattern; previously two independently-drifting local implementations in
-      plugin-tutorial-intro-continuous.js and plugin-tutorial-observation-continuous.js.
-  Also removed: dead plugin-dev-settings.js (never imported), dead .dev-* CSS rules,
-  dead buildBarOnly() in draw-performance-binary.js. Old files under _trash/ pending
-  your `git rm`.
+
+Stable architecture (established, do not regress):
+- jsPsych plugin conventions: see "jsPsych 8 plugin conventions" section below.
+  Pattern A (no timeout) vs Pattern B (has timeout) are the only two shapes;
+  trial() must never be async (see that section for why — this was a real,
+  previously undetected production bug that likely corrupted some pilot data).
+- "practice" → "tutorial" rename is complete throughout task/src (files,
+  classes, info.name, data.screen, config keys, CSS classes) — zero "practice"
+  references remain (verified by grep). Tutorial observation plugins have NO
+  timeout clock, deliberately; only plugin-timeout-demo.js shows a countdown
+  during the tutorial (it exists specifically to demonstrate the real deadline).
+- Naming convention: every continuous/binary file pair has an explicit suffix
+  on both sides (see "Naming convention" above) — don't reintroduce an
+  unsuffixed default on either side.
+- Shared modules to reuse, not reimplement: observation-timeout-clock.js
+  (countdown-ring canvas renderer, used by both observation plugins AND
+  plugin-timeout-demo.js), distribution-continuous.js / urn-binary.js (SVG
+  builders with a `revealed` boolean flag), binary-draw-animation.js /
+  continuous-draw-animation.js (tutorial bubbling animations — see below).
+- Old/removed files live under _trash/ pending your `git rm` — this directory
+  accumulates across sessions and is never committed; clear it out periodically.
+
+Consent screen (build-consent-screen.js):
+- 2 boxes (a redundant 3rd repeating Prolific's own timing/pay listing was
+  removed), both styled as warnings (red background/border, bold "Warning:"
+  label) — stacked vertically, ordered disclosure (box 2 locked with a "· · ·"
+  placeholder until box 1 is revealed, mirroring the tutorial-intro pattern).
+  Name/checkbox section stays behind its own "· · ·" placeholder until both
+  boxes are done.
+- "Begin experiment" does NOT use the native `disabled` attribute — disabled
+  buttons never dispatch `click` at all, which silently ate premature clicks
+  with zero feedback (a real pilot complaint) and in one case the disabled
+  *look* apparently didn't render (likely a browser/extension override
+  neutralizing color-based disabled styling — a reminder not to rely on
+  color/opacity alone for a state that matters). Instead: `.consent-btn-locked`
+  is a plain CSS class for the look, and a capturing-phase click listener on
+  an ancestor intercepts the click before jsPsych's own bubble-phase listener
+  (attached directly to the button during trial() setup) ever fires — if
+  requirements aren't met it's stopped silently (no popup message; an earlier
+  version had one but it shifted the layout when shown).
+- Layout-shift note: reveal boxes and the name/checkbox section reserve their
+  final height from the start via `visibility:hidden` (not `display:none`) on
+  the real content, with the placeholder absolutely-positioned on top — the
+  same pattern used in the tutorial-intro plugins. `display:none` removes an
+  element from layout, so revealing it later changes the container's height
+  and shifts everything below; this bit both the consent screen and both
+  tutorial-intro plugins before being fixed.
+
+Binary slider (slider-binary.js):
+- Gradient track shows the blue/red split, but ONLY after first interaction —
+  the `.slider-unset` state overrides it with flat gray. An earlier revision
+  tried showing the gradient from first render (at a default 50/50 split) to
+  help participants guess which side is which, but pre-filling any specific
+  split — even a neutral one — creates a prior/anchor before the participant
+  has made a judgment. Reverted; the value-free cue is the ruler instead.
+- Ruler: 5 tick marks, 2 stacked rows below the slider — row 1 shows all 5
+  blue values (0,25,...,100), row 2 shows the mirrored red values
+  (100,75,...,0), same x-positions, all numbers the same fixed size (1.3rem).
+  Earlier versions tried directional text labels ("← more red"/"more blue
+  →") and font-size-scaled-by-value pairs on one row — both were reported
+  confusing; a two-row axis-style layout is a legend, not an implied answer,
+  so it doesn't create a prior the way pre-filling the track did.
+
+Binary + continuous tutorials (plugin-tutorial-intro-*.js /
+plugin-tutorial-observation-*.js):
+- Both intro plugins now separate the image reveal from box 1's text into its
+  own click-to-reveal step (box 1 text → image box → box 2 goal text → box 3
+  slider instructions → slider), so participants aren't reading and watching
+  an animation at the same moment. NOTE: this restructuring was applied to
+  BOTH continuous and binary (originally binary-only, then ported to
+  continuous alongside the falling-bubble animation below) — both are now in
+  sync structurally.
+- Bubbling draw animations (binary-draw-animation.js / continuous-draw-
+  animation.js, same overall structure, ~1050ms bubble phase + 1000ms fade):
+  binary bubbles rise inside the blue/red bar; continuous bubbles fall
+  downward from under the Gaussian curve to the x-axis, x-position weighted
+  by the density via rejection sampling (so they cluster near the mean).
+  Continuous bubbles have a gray stroke (`#94a3b8`) — plain white had low
+  contrast against the curve's pale green fill.
+  Binary: the CENTRE circle is the persistent empty ring (white/gray border)
+  visible throughout bubbling; the circle above the bar stays fully invisible
+  until it pops in and fades to color with the centre circle at resolve —
+  this was deliberately swapped from an earlier version where the roles were
+  reversed, per explicit design feedback.
+  Continuous: the centre NUMBER fades in (opacity 0→1) at resolve, together
+  with the #tut-svg-obs marker (which always starts at opacity 0 regardless
+  of the shared `revealed` flag — its reveal is owned exclusively by the
+  animation, mirroring how urn-binary.js's draw circle is independent of its
+  shared `revealed` flag too).
+  A critical bug was found and fixed here: resolveDraw() must clear the
+  bubble-spawn `setInterval`, not just cancel the aging `requestAnimationFrame`
+  loop — otherwise bubbles keep spawning into a dead loop forever after each
+  draw resolves (confirmed 30+ orphaned bubbles accumulating within 2s in one
+  case). Both animation modules do this correctly now; if a third one is ever
+  added, copy this carefully.
+- Yellow warning-style caption box (`#fffbeb`/`#fbbf24`, same colors as
+  plugin-timeout-demo.js's own warning box) below the image on both tasks,
+  appearing alongside box 2 (goal text) — discloses that the
+  bar/curve visualization is tutorial-only and won't appear in the real task.
+- Box copy: all 3 boxes follow a source → goal → response-mapping structure
+  ("you'll see a sequence of X" / "your goal is to estimate Y" / "move the
+  slider to Z"). Uses "sequence" (not "series") throughout, matching the BTI
+  screen's wording (see below). "probability"/"distribution" are always green
+  (DIST_COLOR); "hidden" itself is never colored. "balls"/"numbers" are
+  colored to match their task's sample color. Binary intentionally uses
+  "balls" language (reintroducing the urn metaphor at the TEXT level, even
+  though the dot-grid VISUAL metaphor was removed — a deliberate choice to
+  keep "sequence" meaningful, not an oversight).
+
+Main-task fades (plugin-observation-binary.js / plugin-observation-continuous.js
+/ plugin-timeout-demo.js): each real observation's circle/number, and the
+timeout-demo's illustrative circle/number, fade in on render (1000ms) —
+binary circle: white→color; continuous number: opacity 0→1. Purely cosmetic,
+mirrors the tutorial's animations for a consistent feel; never gates the
+timeout clock or slider, which start immediately regardless.
+
+BTI screen (plugin-inter-trial.js): both tasks now show the same "generating
+new sequence…" label (continuous used to say "generating new distribution…").
+"Sequence" describes the observable data stream and stays accurate regardless
+of whether the hidden generative parameter happens to repeat from an earlier
+trial (the task reuses 6 unique parameter sets across 24 trials) — "new
+distribution" would overclaim novelty it can't always guarantee.
+
 - Distractor system exists (iti_condition per trial, popup/iti_length/none) but
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
 

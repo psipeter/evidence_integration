@@ -56,51 +56,50 @@ export const buildBinarySliderHTML = ({
 
 // ── Ruler ─────────────────────────────────────────────────────────────────────
 
-// Each tick shows what blue%/red% WOULD BE if the slider were set to that
-// position — like axis gridline numbers, not a filled-in answer, so it
-// doesn't create a prior the way pre-filling the track itself did. The
-// blue number's font size scales with its own value (bigger number = bigger
-// text) and same for red, so the "weight" of each tick's text visually
-// echoes the proportion it represents — e.g. the v=100 tick reads a large
-// "100" in blue next to a tiny "0" in red.
-//
-// blue% == the slider's raw value (see updateBinaryLabel) and red% ==
-// 100 - value, exactly mirroring the gradient/floating-label math elsewhere
-// in this file, so this can't drift out of sync with them the way the
-// removed directional-text ticks did.
-const FONT_MIN = 0.5;    // rem, at value 0
-const FONT_MAX = 2;      // rem, at value 100
-const fontSizeFor = (value) => FONT_MIN + (value / 100) * (FONT_MAX - FONT_MIN);
+// Two separate rows instead of one row of blue·red pairs — pairing them on
+// the same row/position was reported as confusing. Row 1 (closer to the
+// track) shows all 5 blue values 0,25,...,100; row 2 (below it) shows the
+// mirrored red values 100,75,...,0, at the SAME x positions as row 1 so the
+// two rows read as a matched pair vertically rather than side-by-side.
+// All numbers share one fixed size — an earlier version scaled font size by
+// each number's own value, but that made the rows harder to scan as a
+// simple axis; a uniform size reads more like a normal ruler.
+const TICK_FONT_SIZE = 1.3; // rem, all tick numbers
+
+const ROW1_TOP = 8;    // px — blue row
+const ROW2_TOP = 40;   // px — red row, below blue row
 
 const buildBinaryRuler = (slider) => {
   const ruler = slider.closest('.slider-track-wrap')?.querySelector('.slider-ruler');
   if (!ruler) return;
   let html = '';
+
   for (let v = BINARY_MIN; v <= BINARY_MAX; v += 25) {
     const pct     = v + '%';
     const isMajor = v % 50 === 0;
     html += `<div class="slider-tick ${isMajor ? 'slider-tick-major' : ''}" style="left:${pct};height:${isMajor ? 8 : 5}px;"></div>`;
-
-    const blueVal = v;
-    const redVal  = 100 - v;
-    const posStyle = v === BINARY_MIN
-      ? `left:0;transform:none;`
-      : v === BINARY_MAX
-        ? `left:auto;right:0;transform:none;`
-        : `left:${pct};transform:translateX(-50%);`;
-
-    // At the extremes, the "0" side is redundant (barely visible anyway at
-    // FONT_MIN) — just show the single large dominant number.
-    const pairHTML = v === BINARY_MIN
-      ? `<span style="color:#ef4444;font-weight:bold;font-size:${fontSizeFor(redVal).toFixed(2)}rem;">${redVal}</span>`
-      : v === BINARY_MAX
-        ? `<span style="color:#2563eb;font-weight:bold;font-size:${fontSizeFor(blueVal).toFixed(2)}rem;">${blueVal}</span>`
-        : `<span style="color:#2563eb;font-weight:bold;font-size:${fontSizeFor(blueVal).toFixed(2)}rem;">${blueVal}</span>` +
-          `<span style="color:#bbb;font-size:0.9rem;">·</span>` +
-          `<span style="color:#ef4444;font-weight:bold;font-size:${fontSizeFor(redVal).toFixed(2)}rem;">${redVal}</span>`;
-
-    html += `<div class="slider-tick-label" style="${posStyle}display:inline-flex;align-items:baseline;gap:0.25em;white-space:nowrap;">${pairHTML}</div>`;
   }
+
+  const buildRow = (getValue, color, top) => {
+    let row = '';
+    for (let v = BINARY_MIN; v <= BINARY_MAX; v += 25) {
+      const pct = v + '%';
+      const val = getValue(v);
+      const posStyle = v === BINARY_MIN
+        ? `left:0;transform:none;`
+        : v === BINARY_MAX
+          ? `left:auto;right:0;transform:none;`
+          : `left:${pct};transform:translateX(-50%);`;
+      row += `<div style="position:absolute;top:${top}px;${posStyle}` +
+             `color:${color};font-weight:bold;line-height:1;white-space:nowrap;` +
+             `font-size:${TICK_FONT_SIZE}rem;">${val}</div>`;
+    }
+    return row;
+  };
+
+  html += buildRow(v => v,       '#2563eb', ROW1_TOP);
+  html += buildRow(v => 100 - v, '#ef4444', ROW2_TOP);
+
   ruler.innerHTML = html;
 };
 

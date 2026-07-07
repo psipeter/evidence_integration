@@ -87,6 +87,7 @@ export function buildTutorialTimeline(cfg, plugins) {
           n_obs:          tutorialValues.length,
           true_mean:      tutorialMean,
           true_std:       tutorialStd,
+          true_p:         tutorialMean,
           slider_default: sliderDefault,
           init_pos:       () => tutorialLastResponse,
           show_value:     showSliderValue,

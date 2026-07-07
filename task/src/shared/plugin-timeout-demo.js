@@ -15,6 +15,9 @@ import { startTimeoutClock }     from './observation-timeout-clock.js';
 
 const SAMPLE_BLUE = '#2563eb';
 const SAMPLE_RED  = '#ef4444';
+const FADE_MS     = 1000; // matches plugin-observation-binary.js /
+                          // plugin-observation-continuous.js / both
+                          // tutorial draw-animation modules
 
 const info = {
   name: 'timeout-demo',
@@ -44,8 +47,8 @@ class TimeoutDemoPlugin {
         : buildSliderHTML({ unset: true, initPos: 50, showValue: true });
 
       const stimulus = is_binary
-        ? `<div class="binary-circle" style="background:${demo_binary_value === 1 ? SAMPLE_BLUE : SAMPLE_RED};"></div>`
-        : `<div class="stimulus-number" style="color:#ef4444;">${demo_value}</div>`;
+        ? `<div id="demo-stimulus" class="binary-circle" style="background:#fff;"></div>`
+        : `<div id="demo-stimulus" class="stimulus-number" style="color:#ef4444;opacity:0;">${demo_value}</div>`;
 
       // Callout injected into body so it renders near the fixed clock
       const note = document.createElement('div');
@@ -82,6 +85,22 @@ class TimeoutDemoPlugin {
         </div>`;
 
       const canvas = display_el.querySelector('#demo-clock');
+
+      // Fade the stimulus in — purely cosmetic, matches the same fade used
+      // for real observations and the tutorial's draw animations. Doesn't
+      // gate anything: the clock below starts immediately regardless.
+      const stimEl = display_el.querySelector('#demo-stimulus');
+      requestAnimationFrame(() => {
+        if (!stimEl) return;
+        if (is_binary) {
+          stimEl.style.transition = `background ${FADE_MS}ms ease`;
+          stimEl.style.background = demo_binary_value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
+        } else {
+          stimEl.style.transition = `opacity ${FADE_MS}ms ease`;
+          stimEl.style.opacity = '1';
+        }
+      });
+
       startTimeoutClock(canvas, _tObs, () => {
         document.body.style.backgroundColor = '#f5f5f5';
         const n = document.getElementById('timeout-demo-note');
