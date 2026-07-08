@@ -7,24 +7,59 @@
  */
 if (typeof jatos === 'undefined') {
   console.warn('[dev mode] jatos not found — using local dev shim');
+
+  // Shared save logic -- endStudy/endStudyAndRedirect both route through
+  // this, so testing either path genuinely proves data was saved locally,
+  // not just logged.
+  const saveData = async (data) => {
+    console.log('[dev mode] saving data...');
+    try {
+      const resp = await fetch('http://localhost:3099/submit', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    typeof data === 'string' ? data : JSON.stringify(data),
+      });
+      const result = await resp.json();
+      console.log('[dev mode] Saved:', result.file);
+    } catch (e) {
+      console.warn('[dev mode] Could not reach dev server — data logged below');
+      console.log(data);
+    }
+  };
+
   window.jatos = {
     studySessionData: {},
     submitResultData: async (data, onSuccess) => {
-      console.log('[dev mode] submitResultData — posting to local server...');
-      try {
-        const resp = await fetch('http://localhost:3099/submit', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    typeof data === 'string' ? data : JSON.stringify(data),
-        });
-        const result = await resp.json();
-        console.log('[dev mode] Saved:', result.file);
-      } catch (e) {
-        console.warn('[dev mode] Could not reach dev server — data logged below');
-        console.log(data);
-      }
+      await saveData(data);
       if (onSuccess) onSuccess();
     },
-    endStudy: () => console.log('[dev mode] endStudy'),
+    // Passing the results-data JSON directly as the argument here (single
+    // call, no separate submitResultData) is the historically PROVEN
+    // mechanism -- confirmed directly against a real downloaded MindProbe
+    // result file (task/dev-results/pilot7cont.txt: a complete 24-trial
+    // continuous session, non-Prolific/pilot_undefined, ending in the
+    // normal on_finish "Thank you!" screen, not the early-exit path). A
+    // prior revision of this shim (and the real app code) switched to a
+    // two-call submitResultData-then-endStudyAndRedirect(url) pattern based
+    // on an unverified documentation claim that endStudy/endStudyAndRedirect
+    // don't accept data -- that claim directly contradicts the real
+    // evidence above and was never independently re-confirmed, so it was
+    // reverted. Keep this shim's behavior matching the single-call shape
+    // exactly, since that's the one with actual proof it works.
+    endStudy: async (data) => {
+      await saveData(data);
+      console.log('[dev mode] endStudy (no redirect requested)');
+    },
+    // Real jatos.js redirects to `url` after saving -- this mirrors that
+    // exactly, rather than just logging, so a real navigation happens
+    // even in local/dev testing. This is what makes "did save + redirect
+    // actually work" visually verifiable while testing locally: the
+    // confirmation page in public/exit-complete.html only appears if this
+    // genuinely ran end-to-end.
+    endStudyAndRedirect: async (url, data) => {
+      await saveData(data);
+      console.log('[dev mode] endStudyAndRedirect — navigating to', url);
+      window.location.href = url;
+    },
   };
 }

@@ -7,7 +7,7 @@
  *            and blue solid true-mean line. No title, no border.
  *   Rows 1–N: One thin row per observation, in order.
  *             Red obs thumb (thick) drawn first; black filled circle for estimate on top.
- *   Legend:  red thumb "Observations" | black circle "Your estimate"
+ *   Legend:  red thumb "Observations" | black circle "Your estimates"
  *            | blue line "True mean"
  */
 
@@ -101,11 +101,11 @@ export const buildPerformanceSVG = (mu, sigma, values, responses) => {
     <line x1="${legX0 + 4}" y1="${legY - 5}" x2="${legX0 + 4}" y2="${legY + 5}"
       stroke="${SAMPLE_RED}" stroke-width="2.5" stroke-linecap="round"/>
     <text x="${legX0 + 10}" y="${legY + 4}"
-      font-family="Arial" font-size="9" fill="#888">Observations</text>
+      font-family="Arial" font-size="9" fill="${SAMPLE_RED}">Observations</text>
     <circle cx="${legX0 + 96}" cy="${legY}" r="${EST_R}"
       fill="#222"/>
     <text x="${legX0 + 102}" y="${legY + 4}"
-      font-family="Arial" font-size="9" fill="#555">Your estimate</text>
+      font-family="Arial" font-size="9" fill="#555">Your estimates</text>
     <line x1="${legX0 + 200}" y1="${legY - 5}" x2="${legX0 + 200}" y2="${legY + 5}"
       stroke="#2563eb" stroke-width="2.5" stroke-linecap="round"/>
     <text x="${legX0 + 206}" y="${legY + 4}"

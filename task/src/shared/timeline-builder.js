@@ -52,9 +52,21 @@ import { buildConsentScreen }      from './build-consent-screen.js';
 import { buildTutorialTimeline }   from './build-tutorial-timeline.js';
 import { createEarlyExit }         from './create-early-exit.js';
 import { buildEndScreen }          from './build-end-screen.js';
+import { resolveExitUrl }          from './resolve-exit-url.js';
 
 const MAX_TIMEOUTS_PER_TRIAL = 3;
-const EARLY_EXIT_CODE        = 'EARLYEXIT'; // TODO: replace before publishing
+// TODO: all 4 of these are still placeholders -- none obtained from
+// Prolific yet, including continuous's completion code (the previously-real
+// 'C3W3TF1O' was discarded: it belonged to an old study configuration and
+// shouldn't be assumed valid for the upcoming one without re-confirming it
+// with Prolific first). Fill all 4 in before real Prolific deployment.
+// Grouped by task first (each task is a separate Prolific study with its
+// own pair of codes) rather than as two same-shaped completion/early-exit
+// objects side by side.
+const PROLIFIC_CODES = {
+  continuous: { completion: 'TODO_CONTINUOUS_COMPLETION_CODE', earlyExit: 'TODO_CONTINUOUS_EARLY_EXIT_CODE' },
+  binary:     { completion: 'TODO_BINARY_COMPLETION_CODE',     earlyExit: 'TODO_BINARY_EARLY_EXIT_CODE' },
+};
 
 export function buildAndRun(cfg) {
   const {
@@ -124,14 +136,18 @@ export function buildAndRun(cfg) {
       // is exhausted, then again on the visible button's click.
       if (isExited()) return;
       window.removeEventListener('beforeunload', beforeUnloadHandler);
-      if (isProlific) {
-        jatos.endStudyAndRedirect(
-          'https://app.prolific.com/submissions/complete?cc=C3W3TF1O',
-          jsPsych.data.get().json()
-        );
-      } else {
-        jatos.endStudy(jsPsych.data.get().json());
-      }
+      // jatos.endStudyAndRedirect(url, data) -- single call, data passed
+      // directly as the second argument -- is the historically PROVEN
+      // mechanism, confirmed directly against a real downloaded MindProbe
+      // result file (task/dev-results/pilot7cont.txt: a complete 24-trial
+      // continuous session, non-Prolific/pilot_undefined, ending in this
+      // exact on_finish path). A prior revision switched to a two-call
+      // submitResultData-then-endStudyAndRedirect(url) pattern based on an
+      // unverified documentation claim that real JATOS doesn't accept data
+      // this way -- that claim directly contradicts the real evidence above
+      // and was never independently re-confirmed, so it was reverted.
+      const url = resolveExitUrl(isProlific, PROLIFIC_CODES[taskType].completion);
+      jatos.endStudyAndRedirect(url, jsPsych.data.get().json());
     },
   });
 
@@ -143,7 +159,7 @@ export function buildAndRun(cfg) {
     beforeUnloadHandler,
     isProlific,
     jsPsych,
-    earlyExitCode: EARLY_EXIT_CODE,
+    earlyExitCode: PROLIFIC_CODES[taskType].earlyExit,
   });
 
   const timeline = [];

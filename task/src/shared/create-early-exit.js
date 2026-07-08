@@ -8,6 +8,8 @@
  * timeline-builder.js — pure extraction, no behavior change.
  */
 
+import { resolveExitUrl } from './resolve-exit-url.js';
+
 /**
  * @param {object} opts
  * @param {Function} opts.beforeUnloadHandler  handler to remove once exited
@@ -49,13 +51,21 @@ export function createEarlyExit({ beforeUnloadHandler, isProlific, jsPsych, earl
         </div>`;
       const btn = document.getElementById('early-exit-btn');
       if (btn) btn.addEventListener('pointerdown', () => {
-        if (isProlific) {
-          jatos.endStudyAndRedirect(
-            `https://app.prolific.com/submissions/complete?cc=${earlyExitCode}`,
-            jsPsych.data.get().json());
-        } else {
-          jatos.endStudy(jsPsych.data.get().json());
-        }
+        // jatos.endStudyAndRedirect(url, data) -- single call, data passed
+        // directly as the second argument -- is the historically PROVEN
+        // mechanism, confirmed directly against a real downloaded MindProbe
+        // result file (task/dev-results/pilot7cont.txt). A prior revision
+        // switched to a two-call submitResultData-then-endStudyAndRedirect(url)
+        // pattern based on an unverified documentation claim that real JATOS
+        // doesn't accept data this way -- that claim directly contradicts
+        // the real evidence above and was never independently re-confirmed,
+        // so it was reverted. resolveExitUrl (shared with timeline-builder.js's
+        // on_finish) is the single place that knows the isProlific ? <Prolific
+        // completion URL> : <local exit-complete.html> shape, so there's only
+        // one copy of that URL template across both files, not two that could
+        // silently drift.
+        const url = resolveExitUrl(isProlific, earlyExitCode);
+        jatos.endStudyAndRedirect(url, jsPsych.data.get().json());
       });
     };
 

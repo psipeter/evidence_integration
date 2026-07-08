@@ -66,7 +66,7 @@ class TutorialObservationContinuousPlugin {
       <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>.`;
     const BOX1 = `Your <strong>goal</strong> is to estimate that distribution's
       <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>, based on
-      all the numbers you've seen so far.`;
+      all the numbers you've seen in this sequence.`;
     const BOX2 = `<strong>Move</strong> the slider to show your estimate of the
       <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>.`;
 

@@ -245,6 +245,10 @@ task/
       build-consent-screen.js      — informed-consent screen
       build-end-screen.js          — final "Thank you" screen
       create-early-exit.js         — session-terminated flow (3-timeout exhaustion)
+      resolve-exit-url.js           — shared isProlific ? Prolific completion URL :
+                                      exit-complete.html resolution (single source of
+                                      truth, used by both create-early-exit.js and
+                                      timeline-builder.js's on_finish)
       config-base.js               — shared config factory for continuous/binary configs
       jatos-shim.js                — dev no-op shim
       plugin-inter-trial.js        — BTI reset screen
@@ -282,6 +286,13 @@ task/
     experiment-binary.js
     test-harness.js         — test-ONLY entry (index-test.html); never bundled into
                               any production build, never linked from production code
+  public/
+    exit-complete.html       — static confirmation page for non-Prolific
+                              participants (local dev/test AND non-Prolific
+                              JATOS/MindProbe pilots); copied into every build's
+                              output root automatically by Vite (no separate
+                              wiring needed). See "Exit/redirect and
+                              data-saving architecture" in CLAUDE.md.
   sequences/
     continuous_sequences.{pkl,json}   — current 6x4 pilot (moment-matched, seed=175, mean_range=[10,90], std=15)
     binary_sequences.{pkl,json}       — current 6x4 pilot (moment-matched, seed=198, p_range=[0.1,0.9])
@@ -320,8 +331,11 @@ const T_OBS_MS                = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
 const DISTRACTOR_TYPE        = 'none';
 const MAX_TIMEOUTS_PER_TRIAL = 3;      // defined in timeline-builder.js
-const EARLY_EXIT_CODE        = 'EARLYEXIT'; // TODO: replace before publishing
 ```
+
+Prolific completion/early-exit codes (4 total: {continuous,binary} ×
+{completion,earlyExit}) live in timeline-builder.js's `PROLIFIC_CODES`, not
+config-base.js — see "Deploying to MindProbe" below.
 
 Trial count is NOT a config constant anymore — it's fully implicit from
 however many trials task/sequences/{task}_sequences.json contains.
@@ -389,8 +403,12 @@ python task/parse_results.py --input_dir task/dev-results/ \
 **Pre-deployment checklist:**
 - Confirm task/sequences/{continuous,binary}_sequences.json holds the intended final trial count/parameters
 - Fill IRB Protocol Number in consent form (`[Protocol Number]` in `timeline-builder.js`)
-- Replace `EARLY_EXIT_CODE = 'EARLYEXIT'` with real Prolific partial-payment code
-- Obtain binary task completion code from Prolific (continuous: `C3W3TF1O`)
+- Fill all 4 Prolific code placeholders in timeline-builder.js's `PROLIFIC_CODES`
+  (completion + early-exit codes, for both continuous and binary — none are
+  real yet; a previously-real continuous completion code was deliberately
+  discarded since it belonged to an old study configuration and shouldn't be
+  assumed valid without re-confirming with Prolific first — see CLAUDE.md's
+  "Exit/redirect and data-saving architecture" for the full rationale)
 - Fund Prolific wallet; confirm payment rate with PI
 
 ```bash
@@ -409,7 +427,8 @@ Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
 - **Payment:** ≥$12/hr; set estimated time conservatively
 - **Non-completions:** request return (not rejection) — slot reopens
 - **Partial compensation:** participants who reach 3 timeouts in one trial receive
-  partial payment via the `EARLY_EXIT_CODE` Prolific completion path
+  partial payment via the per-task `earlyExit` code in `PROLIFIC_CODES`
+  (timeline-builder.js)
 - **Academic discount:** use Dartmouth institutional email for 33.3% platform fee discount
 - **Device restriction:** desktop-only in Prolific study settings
 

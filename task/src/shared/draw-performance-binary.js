@@ -7,7 +7,7 @@
  *   Rows 1–N: Thin bars, no border. Split at estimate (vertical thumb).
  *             All observation circles on the LEFT of the bar column.
  *             Blue circle (+1) or red circle (−1).
- *   Legend:  Half-blue/half-red circle "Observations" | thumb "Your estimate"
+ *   Legend:  Half-blue/half-red circle "Observations" | thumb "Your estimates"
  *            | green line "True probability"
  */
 
@@ -106,7 +106,7 @@ export const buildSummaryBarSVG = (true_p, values, responses) => {
     <line x1="${legX0 + 100}" y1="${legY - 5}" x2="${legX0 + 100}" y2="${legY + 5}"
       stroke="#222" stroke-width="2.5" stroke-linecap="round"/>
     <text x="${legX0 + 105}" y="${legY + 4}"
-      font-family="Arial" font-size="9" fill="#555">Your estimate</text>
+      font-family="Arial" font-size="9" fill="#555">Your estimates</text>
     <line x1="${legX0 + 210}" y1="${legY - 5}" x2="${legX0 + 210}" y2="${legY + 5}"
       stroke="${DIST_COLOR}" stroke-width="3" stroke-linecap="round"/>
     <text x="${legX0 + 215}" y="${legY + 4}"

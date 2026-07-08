@@ -1,4 +1,4 @@
-import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
+import { buildBinarySliderHTMLv2 as buildBinarySliderHTML, initBinarySliderV2 as initBinarySlider } from './slider-binary.js';
 import { buildUrnSVG } from './urn-binary.js';
 import { startBinaryDrawAnimation } from './binary-draw-animation.js';
 /**
@@ -47,7 +47,7 @@ class TutorialIntroBinaryPlugin {
       hidden <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>.`;
     const BOX1 = `Your <strong>goal</strong> is to estimate that
       <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>, based on
-      all the balls you've seen so far.`;
+      all the balls you've seen in this sequence.`;
     const BOX2 = `<strong>Move</strong> the slider toward
       <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> or
       <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> to show

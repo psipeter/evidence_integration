@@ -59,14 +59,17 @@ body {
   font-weight: bold;
   color: #1f2937;
   letter-spacing: 0.01em;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2.5rem;
 }
 .welcome-subtitle {
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: clamp(1.4rem, 3vw, 1.9rem);
-  font-style: italic;
-  color: #4b5563;
+  font-size: clamp(2rem, 4.5vw, 3rem);
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  margin-top: 0.5rem;
 }
+.welcome-subtitle-a { color: #2563eb; }
+.welcome-subtitle-b { color: #ef4444; }
 .welcome-begin-btn {
   font-size: 1.6rem;
   padding: 1rem 3.5rem;
@@ -470,6 +473,170 @@ input[type="range"].slider-last::-moz-range-thumb {
 }
 .binary-ball-blue { background: #2563eb; }
 .binary-ball-red  { background: #ef4444; }
+
+/* ── Binary slider v2 layout (experimental) ─────────────────────────────── */
+/* Purely static blue/red tick axis above/below the track (constraint #3);
+   the dynamic %s live INSIDE the bar itself now, flanking the thumb (see
+   .binary-input-wrap/.binary-inbar-value below and slider-binary.js's
+   updateBinaryInBarValues) -- NOT in this axis. Two earlier attempts tried
+   putting the dynamic value in this axis space (first centered over the
+   ticks, then offset toward the numbers with a small occluding
+   background); both kept leaking a visible sliver of whatever was
+   "underneath" once the actual rendered text size didn't match the
+   approximated occlusion box. Moving the dynamic value out of this space
+   entirely sidesteps that whole class of bug. Kept alongside the original
+   .binary-slider-section/.binary-ruler layout above (unchanged) -- this is
+   a deliberate A/B, not a replacement; see slider-binary.js's
+   buildBinarySliderHTMLv2 for how to revert (switch the plugin's import
+   back to the non-v2 functions). */
+.binary-slider-section-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 85vw;   /* wider than the original/default .binary-slider-section */
+  margin-top: 0.5rem;
+}
+.slider-track-wrap-v2 {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.5rem;
+  box-sizing: border-box;
+}
+.slider-track-wrap-v2 input[type="range"] {
+  width: 100%;
+}
+/* Reserves the band's full height (numbers row + gap + ticks row + top/bottom
+   padding) from the very first render, BEFORE slider-binary.js's
+   buildBinaryRulerV2 ever populates .binary-ruler-inner's actual content --
+   without this, an empty band collapses to 0 height (nothing inside it yet
+   to give it size), then jumps to its real height once the ruler content is
+   built. In the tutorial intro specifically, that build is deferred until
+   the participant clicks through to reveal the slider (see
+   plugin-tutorial-intro-binary.js's activateSlider), so the collapse-then-
+   grow was visible as the surrounding boxes shifting at that exact click --
+   the same class of layout-shift bug this codebase already guards against
+   elsewhere via reserved space (see the consent-screen/tutorial-intro-box
+   notes on visibility:hidden vs display:none), just via a different
+   mechanism here (missing explicit size vs a display toggle). */
+.binary-ruler-band {
+  position: relative;
+  min-height: 2rem;
+}
+.binary-ruler-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0.05rem 0;   /* minimal -- brings ticks/numbers close to the bar */
+}
+/* Same child HTML/order as the top band -- reversed visually via flexbox so
+   ticks stay nearest the track, mirroring the top band without duplicating
+   HTML-building logic. */
+.binary-ruler-band-bottom .binary-ruler-inner {
+  flex-direction: column-reverse;
+}
+.binary-ruler-numbers {
+  position: relative;
+  height: 1.3rem;
+}
+.binary-ruler-num {
+  position: absolute;
+  top: 0;
+  font-weight: bold;
+  font-size: 1.3rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.binary-ruler-ticks {
+  position: relative;
+  height: 8px;
+}
+.binary-ruler-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 5px;
+  background: #aaa;
+  transform: translateX(-50%);
+}
+.binary-ruler-tick-major {
+  height: 8px;
+  width: 1.5px;
+  background: #666;
+}
+
+/* Wraps ONLY the input + its in-bar value overlay (not the ruler bands
+   above/below) -- position:relative here scopes the overlay's inset:0 to
+   exactly the input's own box, not the whole 3-row .slider-track-wrap-v2.
+   height is explicit (matching input's own 44px hit-area override below)
+   rather than left to shrink-to-fit auto-sizing -- measured directly: the
+   wrap was rendering ~8px TALLER than the input's own true box (a default
+   inline-block line-height quirk), and since .binary-inbar-value centres
+   on the WRAP not the input, that extra height silently pushed the text
+   down by half of it (~4px) -- exactly the "not quite centered, sitting a
+   bit low" reported. An explicit, matching height removes the ambiguity
+   entirely rather than compensating with a manual offset. */
+.binary-input-wrap {
+  position: relative;
+  height: 44px;
+}
+.binary-inbar-values {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;   /* above the input's own z-index:1, or the numbers/badges
+                   would render but sit invisibly behind the track/thumb */
+}
+.binary-inbar-value {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.7rem;   /* as large as comfortably fits the 34px bar below */
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  /* Arial has no true 800-weight glyph, so font-weight alone likely renders
+     identically to plain bold (700) -- this adds real, visible extra
+     boldness on top of that, regardless of what the browser's synthetic
+     bold rendering does for the font-weight value alone. */
+  -webkit-text-stroke: 0.6px currentColor;
+  paint-order: stroke fill;
+}
+/* Taller bar than the original/default .binary-slider -- gives the in-bar
+   %s comfortable room. Scoped to .binary-slider-v2 specifically (an
+   ADDITIONAL class alongside the shared .binary-slider, applied only in
+   buildBinarySliderHTMLv2) so this doesn't affect the original non-v2
+   slider at all.
+
+   The HIT-AREA height is also overridden here (44px, down from the shared
+   96px default) -- this matters beyond just visual size: .binary-input-wrap
+   has no explicit height of its own, it just wraps snugly around the
+   input's own box, and .binary-inbar-value is vertically centred (top:50%)
+   relative to THAT wrap. With the original 96px hit-area, the visible
+   track/thumb don't necessarily render exactly centred within that much
+   taller invisible click-target box, so centring text on the wrap's full
+   height visibly drifted off the actual bar (reported as "numbers sitting
+   closer to the bottom"). Shrinking the hit-area close to the visible
+   track's own height removes most of that slack, so centring on the wrap
+   now closely tracks centring on the bar itself. */
+input[type="range"].binary-slider.binary-slider-v2 {
+  height: 44px;
+}
+input[type="range"].binary-slider.binary-slider-v2::-webkit-slider-runnable-track {
+  height: 34px;
+}
+input[type="range"].binary-slider.binary-slider-v2::-moz-range-track {
+  height: 34px;
+}
+input[type="range"].binary-slider.binary-slider-v2::-webkit-slider-thumb {
+  height: 42px;
+  margin-top: -4px;   /* (42-34)/2 = 4, keeps thumb centred on the taller track */
+}
+input[type="range"].binary-slider.binary-slider-v2::-moz-range-thumb {
+  height: 42px;
+}
 
 /* Gradient-fill track — CSS custom property --pct drives the split point.
    Only visible AFTER the first interaction ('unset' state below overrides it

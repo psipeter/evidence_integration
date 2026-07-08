@@ -128,6 +128,175 @@ export const updateBinaryLabel = (slider) => {
   lblRed.style.transform  = 'none';
 };
 
+// ── v2 layout (experimental) ──────────────────────────────────────────────────
+// Blue band ABOVE the slider track, red band BELOW it -- PURELY STATIC axis
+// (just the tick marks + reference numbers 0/25/50/75/100, no moving
+// content at all). Kept fully separate from the original
+// buildBinarySliderHTML/initBinarySlider above (unchanged) -- this is a
+// deliberate A/B: switching a plugin's import back to the original
+// functions reverts completely, no digging through git history needed.
+//
+// Design history/why the dynamic value moved OUT of this axis entirely:
+// two earlier attempts put a moving "current value" badge in this same
+// axis space -- first centered over the ticks (which pushed the tick marks
+// away from the slider AND left the badge too close to the thumb at the
+// same time), then offset toward the numbers side with a small occluding
+// background (which still let a sliver of the numbers/ticks leak out from
+// under it, since the occluding box's height was only an approximation of
+// what needed covering). Rather than keep tuning that occlusion, the
+// dynamic value now lives INSIDE the colored bar itself, flanking the
+// thumb directly (see buildBinaryInBarValues below) -- this axis goes back
+// to being purely the static calibration guide (constraint #3), with no
+// moving parts to keep in sync with anything else.
+const buildBandInnerHTML = (getValue, color) => {
+  let numbersHtml = '', ticksHtml = '';
+  for (let v = BINARY_MIN; v <= BINARY_MAX; v += 25) {
+    const pct     = v + '%';
+    const isMajor = v % 50 === 0;
+    const val     = getValue(v);
+    const posStyle = v === BINARY_MIN
+      ? `left:0;transform:none;`
+      : v === BINARY_MAX
+        ? `left:auto;right:0;transform:none;`
+        : `left:${pct};transform:translateX(-50%);`;
+    numbersHtml += `<div class="binary-ruler-num" style="${posStyle}color:${color};">${val}</div>`;
+    ticksHtml   += `<div class="binary-ruler-tick ${isMajor ? 'binary-ruler-tick-major' : ''}" style="left:${pct};"></div>`;
+  }
+  return `
+    <div class="binary-ruler-inner">
+      <div class="binary-ruler-numbers">${numbersHtml}</div>
+      <div class="binary-ruler-ticks">${ticksHtml}</div>
+    </div>`;
+};
+
+const buildBinaryRulerV2 = (display_el) => {
+  const top    = display_el.querySelector('#slider-ruler-top');
+  const bottom = display_el.querySelector('#slider-ruler-bottom');
+  if (!top || !bottom) return;
+  top.innerHTML    = buildBandInnerHTML(v => v,       '#2563eb');
+  bottom.innerHTML = buildBandInnerHTML(v => 100 - v, '#ef4444');
+};
+
+// ── In-bar dynamic values ──────────────────────────────────────────────────────
+// The moving %s live INSIDE the colored bar itself, flanking the thumb --
+// white bold text directly on the gradient fill, each number sitting in its
+// own color's zone (blue % to the left of the thumb, red % to the right).
+// Near the extremes, one zone can get too narrow to hold its own number
+// without overflowing past the track edge or crowding the thumb -- rather
+// than shrink/wrap/truncate the text, that number is simply not drawn at
+// all once it wouldn't fit (e.g. "95%" blue shows fine with no red number
+// visible at all, rather than a cramped or overflowing "5%"). Measures the
+// actual rendered width of each number (not an estimate from character
+// count) before deciding whether it fits, so this stays correct regardless
+// of font/size changes later.
+const INBAR_THUMB_HALF_WIDTH = 4;  // px, half of the thumb's own 6px-wide flat rectangle (approximate clearance around the thumb, not pixel-exact -- the thumb's true rendered position can vary slightly by browser)
+const INBAR_GAP             = 8;   // px, minimum clearance between a number and the thumb
+
+export const updateBinaryInBarValues = (slider) => {
+  const wrap = slider.closest('.slider-track-wrap-v2');
+  if (!wrap) return;
+  const blueEl = wrap.querySelector('#binary-inbar-blue');
+  const redEl  = wrap.querySelector('#binary-inbar-red');
+  if (!blueEl || !redEl) return;
+
+  const val         = Number(slider.value);
+  const pct         = (val - slider.min) / (slider.max - slider.min);
+  const trackWidth  = slider.getBoundingClientRect().width;
+  const thumbX      = pct * trackWidth;
+
+  blueEl.textContent = Math.round(val) + '%';
+  redEl.textContent  = Math.round(100 - val) + '%';
+  // Must be visible (display:block) to measure offsetWidth below -- if it
+  // ends up not fitting, this gets set back to 'none' immediately after.
+  blueEl.style.display = 'block';
+  redEl.style.display  = 'block';
+
+  const blueAvail = thumbX - INBAR_THUMB_HALF_WIDTH - INBAR_GAP;
+  const redAvail  = trackWidth - thumbX - INBAR_THUMB_HALF_WIDTH - INBAR_GAP;
+
+  if (blueEl.offsetWidth > blueAvail) {
+    blueEl.style.display = 'none';
+  } else {
+    blueEl.style.left  = (thumbX - INBAR_THUMB_HALF_WIDTH - INBAR_GAP - blueEl.offsetWidth) + 'px';
+    blueEl.style.right = 'auto';
+  }
+  if (redEl.offsetWidth > redAvail) {
+    redEl.style.display = 'none';
+  } else {
+    redEl.style.left  = (thumbX + INBAR_THUMB_HALF_WIDTH + INBAR_GAP) + 'px';
+    redEl.style.right = 'auto';
+  }
+};
+
+export const buildBinarySliderHTMLv2 = ({
+  unset     = true,
+  initPos   = 50,
+  showValue = false,
+} = {}) => `
+  <div class="binary-slider-section-v2">
+    <div class="slider-track-wrap-v2">
+      <div class="binary-ruler-band binary-ruler-band-top" id="slider-ruler-top"></div>
+      <div class="binary-input-wrap">
+        <input type="range" id="response-slider"
+               class="binary-slider binary-slider-v2 ${unset ? 'slider-unset' : 'slider-last'}"
+               min="${BINARY_MIN}" max="${BINARY_MAX}"
+               value="${initPos}" step="1"
+               style="--pct:${unset ? '50' : initPos}%">
+        <div class="binary-inbar-values">
+          <div id="binary-inbar-blue" class="binary-inbar-value" style="display:none;"></div>
+          <div id="binary-inbar-red"  class="binary-inbar-value" style="display:none;"></div>
+        </div>
+      </div>
+      <div class="binary-ruler-band binary-ruler-band-bottom" id="slider-ruler-bottom"></div>
+    </div>
+  </div>`;
+
+export const initBinarySliderV2 = (display_el, {
+  unset     = true,
+  showValue = false,
+  onFinish,
+} = {}) => {
+  const slider = display_el.querySelector('#response-slider');
+  const btn    = display_el.querySelector('#submit-btn');
+  if (!slider || !btn) return;
+
+  btn.disabled = true;
+  buildBinaryRulerV2(display_el);
+  if (!unset && showValue) { updateBinaryInBarValues(slider); updateBinaryFill(slider); }
+
+  slider.addEventListener('mousedown', () => {
+    slider.classList.remove('slider-unset');
+    slider.classList.remove('slider-last');
+    btn.disabled = false;
+    requestAnimationFrame(() => {
+      updateBinaryFill(slider);
+      if (showValue) updateBinaryInBarValues(slider);
+    });
+  });
+
+  slider.addEventListener('input', () => {
+    slider.classList.remove('slider-unset');
+    slider.classList.remove('slider-last');
+    btn.disabled = false;
+    updateBinaryFill(slider);
+    if (showValue) updateBinaryInBarValues(slider);
+  });
+
+  btn.addEventListener('click', (e) => {
+    if (!btn.disabled) {
+      e.preventDefault();
+      onFinish();
+    }
+  });
+
+  if (showValue && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (!slider.classList.contains('slider-unset')) updateBinaryInBarValues(slider);
+    });
+    ro.observe(slider);
+  }
+};
+
 // ── Wire-up ───────────────────────────────────────────────────────────────────
 // Called after on_load() in plugin's trial() — no deferral needed.
 

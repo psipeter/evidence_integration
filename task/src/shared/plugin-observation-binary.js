@@ -21,7 +21,7 @@
  * shared with plugin-observation-continuous.js (this logic used to be
  * duplicated verbatim in both files).
  */
-import { buildBinarySliderHTML, initBinarySlider } from './slider-binary.js';
+import { buildBinarySliderHTMLv2 as buildBinarySliderHTML, initBinarySliderV2 as initBinarySlider } from './slider-binary.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
 
 const SAMPLE_BLUE = '#2563eb';
