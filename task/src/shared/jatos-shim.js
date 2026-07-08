@@ -52,10 +52,11 @@ if (typeof jatos === 'undefined') {
     },
     // Real jatos.js redirects to `url` after saving -- this mirrors that
     // exactly, rather than just logging, so a real navigation happens
-    // even in local/dev testing. This is what makes "did save + redirect
-    // actually work" visually verifiable while testing locally: the
-    // confirmation page in public/exit-complete.html only appears if this
-    // genuinely ran end-to-end.
+    // even in local/dev testing. Only called for real Prolific participants
+    // now (see finish-session.js) -- everyone else gets a DOM update and
+    // plain endStudy(data) above, no redirect, since redirecting to a
+    // same-origin confirmation page after ending the session was confirmed
+    // broken on real JATOS (access-rights error).
     endStudyAndRedirect: async (url, data) => {
       await saveData(data);
       console.log('[dev mode] endStudyAndRedirect — navigating to', url);

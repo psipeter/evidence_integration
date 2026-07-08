@@ -30,14 +30,26 @@ export const DEFAULTS = {
  *
  * Selection: among all trials, find the one whose true_mean (continuous) or
  * true_p (binary) is closest to the midpoint (50 / 0.5) — i.e. a
- * pedagogically "typical", non-extreme example — subject to a spread check
- * on the first `n` values (>=2 above and >=2 below the mean for continuous;
- * >=2 of each color for binary), falling through to the next-closest
- * candidate if the top match fails it. The spread check exists because
- * moment-matched generation only guarantees the FULL ~15-observation
- * sequence hits the target statistics, not any small window within it —
- * a first-5 slice can occasionally look one-sided by chance even in a
- * well-behaved full sequence.
+ * pedagogically "typical", non-extreme example — subject to two checks on
+ * the first `n` values, falling through to the next-closest candidate if
+ * the top match fails either:
+ *   1. Spread: >=2 above and >=2 below the mean for continuous; >=2 of each
+ *      color for binary. Exists because moment-matched generation only
+ *      guarantees the FULL ~15-observation sequence hits the target
+ *      statistics, not any small window within it — a first-5 slice can
+ *      occasionally look one-sided by chance even in a well-behaved full
+ *      sequence.
+ *   2. Directional consistency: the shown slice's OWN apparent direction
+ *      (which color is more frequent, for binary; which side of the
+ *      midpoint the slice's sample mean falls on, for continuous) must
+ *      match the true parameter's actual direction. Spread alone doesn't
+ *      guarantee this — e.g. 3 blue/2 red passes the spread check just
+ *      fine even when true_p favors red, which visually teaches the exact
+ *      opposite of what the tutorial is trying to demonstrate (confirmed
+ *      as a real occurrence, not just a theoretical risk: qid 2 in the
+ *      6-level binary design, true_p=0.4, drew a first-5 slice of
+ *      3 blue/2 red). Skipped when the true value sits exactly at the
+ *      midpoint, since there's no direction to be inconsistent with.
  *
  * For continuous, tutorialStd is the sample std of the FULL chosen trial
  * (not just the shown 5-value slice) — this tracks the true generative
@@ -54,16 +66,24 @@ export function pickTutorialExample(sequencesData, { isBinary, n = 5 } = {}) {
   );
 
   const passesSpread = (trial) => {
-    const vals = trial.values.slice(0, n);
+    const vals     = trial.values.slice(0, n);
+    const trueSide = Math.sign(trial[field] - target);
+
     if (isBinary) {
       const nBlue = vals.filter(v => v === 1).length;
       const nRed  = vals.filter(v => v === -1).length;
-      return nBlue >= 2 && nRed >= 2;
+      if (!(nBlue >= 2 && nRed >= 2)) return false;
+      if (trueSide === 0) return true;
+      return Math.sign(nBlue - nRed) === trueSide;
     }
-    const m = trial[field];
-    const nAbove = vals.filter(v => v > m).length;
-    const nBelow = vals.filter(v => v < m).length;
-    return nAbove >= 2 && nBelow >= 2;
+
+    const m       = trial[field];
+    const nAbove  = vals.filter(v => v > m).length;
+    const nBelow  = vals.filter(v => v < m).length;
+    if (!(nAbove >= 2 && nBelow >= 2)) return false;
+    if (trueSide === 0) return true;
+    const sliceMean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return Math.sign(sliceMean - target) === trueSide;
   };
 
   const chosen = candidates.find(passesSpread) ?? candidates[0];

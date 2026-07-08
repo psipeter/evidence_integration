@@ -162,8 +162,8 @@ Naming convention (IMPORTANT): every file/class that has a continuous/binary pai
 Key files: timeline-builder.js (orchestrator), build-trial-timeline.js (pure-JS
   trial loop), build-tutorial-timeline.js, build-welcome-screen.js, build-consent-screen.js,
   build-end-screen.js,
-  create-early-exit.js, resolve-exit-url.js (shared isProlific ? Prolific-URL :
-  exit-complete.html resolution, see "Exit/redirect and data-saving
+  create-early-exit.js, finish-session.js (shared "how does a session
+  actually end" implementation, see "Exit/redirect and data-saving
   architecture" below), plugin-observation-continuous.js, plugin-observation-binary.js,
   observation-timeout-clock.js (shared countdown-clock renderer),
   slider-continuous.js, slider-binary.js, distribution-continuous.js (continuous
@@ -366,10 +366,27 @@ conventions below) because seq.true_std was always undefined.
 **Tutorial example** (task/src/shared/config-base.js's `pickTutorialExample`):
 derives tutorialValues/tutorialMean/tutorialStd/true_p from a REAL trial in
 sequencesData — picks the trial whose true_mean/true_p is closest to the
-midpoint (50/0.5), subject to a visual-spread check on the first 5 values
-(>=2 above/below the mean for continuous; >=2 of each color for binary),
-falling through to the next-closest candidate if the top match fails the
-spread check. Replaced hand-picked literals (`tutorialValues = [48, 75, 38,
+midpoint (50/0.5), subject to two checks on the first 5 values, falling
+through to the next-closest candidate if the top match fails either:
+  1. Spread (>=2 above/below the mean for continuous; >=2 of each color for
+     binary) — guards against a first-5 slice that looks one-sided by chance
+     even in a well-behaved full sequence.
+  2. Directional consistency — the shown slice's OWN apparent direction
+     (majority color for binary; which side of the midpoint the slice's own
+     mean falls on for continuous) must match the true parameter's actual
+     direction. Spread alone does NOT guarantee this: a real bug was found
+     where the binary tutorial showed 3 blue/2 red in its first 5 balls
+     while true_p=0.4 actually favored red — passed the spread check fine
+     (>=2 of each color), but visually taught the opposite of the true
+     direction, undermining the tutorial's whole point. Fixed by adding
+     this check rather than hardcoding a specific example (which would
+     reintroduce the exact drift problem pickTutorialExample exists to
+     avoid — see below); confirmed the fix picks a genuinely consistent
+     example for both tasks against the real production sequences (binary
+     falls through past all of the closest qid's repeats, since every one
+     of them happened to show a majority-mismatched slice, to the
+     next-closest qid, which then shows the correct direction).
+Replaced hand-picked literals (`tutorialValues = [48, 75, 38,
 82, 57]`, `TUTORIAL_STD = 20`) that silently drifted out of sync the moment
 sequences.json's actual std_fixed changed (this happened once already: the
 tutorial kept showing std=20 after the pilot moved to std=15). Never
@@ -743,10 +760,10 @@ JATOS/MindProbe deployment:
 
 ### Exit/redirect and data-saving architecture
 
-**The mechanism**: a single call, `jatos.endStudyAndRedirect(url, data)`, with
-the full `jsPsych.data.get().json()` results passed directly as the second
-argument. This is used identically everywhere a session can end -- there is
-no separate `jatos.submitResultData()` call anywhere in the app code (the
+**The save mechanism**: a single call, `jatos.endStudyAndRedirect(url, data)`
+(Prolific) or `jatos.endStudy(data)` (everyone else), with the full
+`jsPsych.data.get().json()` results passed directly as the argument. There
+is no separate `jatos.submitResultData()` call anywhere in the app code (the
 shim still exposes one for API-surface parity, but nothing calls it). This
 is a deliberately restored, EMPIRICALLY VERIFIED choice, not an assumption:
 a prior revision switched to a two-call `submitResultData(data)` then
@@ -755,39 +772,57 @@ documentation claim that `endStudy`/`endStudyAndRedirect` don't accept data
 at all. That claim was never independently re-confirmed and directly
 contradicted real evidence: `task/dev-results/pilot7cont.txt`, a complete
 24-trial continuous session downloaded directly from MindProbe, was
-produced using exactly the single-call `endStudyAndRedirect(url, data)`
-shape (non-Prolific, ending via the normal on_finish path, not early-exit).
-Given a real downloaded result file directly contradicting an unverifiable
-doc claim, the single-call pattern was restored everywhere and the
-two-call pattern fully removed. If this is ever revisited, get independent
-confirmation (e.g. a live MindProbe dry-run checked against the admin
-panel) before trusting a documentation claim over a real prior result.
+produced using exactly the single-call, data-as-argument shape. If this is
+ever revisited, get independent confirmation (e.g. a live MindProbe dry-run
+checked against the admin panel) before trusting a documentation claim over
+a real prior result -- this has now bitten the project twice (see the
+redirect bug below, found the same way: real MindProbe testing catching
+what no amount of local shim testing could).
 
-**Where participants land** (`resolve-exit-url.js`, shared by both exit
-paths below): real Prolific participants (`PROLIFIC_PID` present in the
-URL) redirect to a Prolific completion URL with a per-task, per-exit-reason
-code (see PROLIFIC_CODES below); everyone else (local dev/test AND
-non-Prolific JATOS/MindProbe pilots -- both have `isProlific=false`, there's
-no separate case for "real JATOS but not Prolific") redirects to
-`exit-complete.html`, a plain static confirmation page in `task/public/`
-(Vite copies `public/`'s contents into every build automatically, so this
-needs no separate build wiring and works identically in dev, dist-*, and
-the deployed jzip). Before this existed, non-Prolific participants got NO
-redirect at all after clicking their exit button -- silently indistinguishable
-from the click doing nothing.
+**Where participants land, and why non-Prolific gets NO redirect**
+(`finish-session.js`, shared by both exit paths below): real Prolific
+participants (`PROLIFIC_PID` present in the URL) redirect to a Prolific
+completion URL with a per-task, per-exit-reason code (see PROLIFIC_CODES
+below) -- an EXTERNAL domain (app.prolific.com), entirely outside anything
+JATOS itself controls access to.
+
+Everyone else (local dev/test AND non-Prolific JATOS/MindProbe pilots) gets
+NO redirect at all -- confirmation is shown via a DOM update in the
+CURRENTLY loaded page instead. This was NOT the original design: an earlier
+version redirected non-Prolific participants to a same-origin confirmation
+page (`public/exit-complete.html`) the same way the Prolific branch
+redirects to an external one. **This failed on a real MindProbe pilot run**:
+deliberately timing out 3 times and clicking "Finish and exit" produced a
+JATOS error page -- "You tried to access the file
+.../exit-complete.html but it seems you have no access rights." Best
+explanation: `jatos.endStudyAndRedirect` ends/closes the session as part of
+its own execution, and by the time the browser's follow-up navigation to
+that file actually fires, JATOS's access-control layer sees the session is
+no longer active and rejects the request for that study asset -- a
+restriction that Prolific's redirect was never subject to in the first
+place, since it's not a JATOS-served file at all. This is exactly the kind
+of failure the automated E2E suite (which only exercises the local shim,
+never real JATOS access control) cannot catch -- found only because a real
+pilot run was actually tested against real JATOS before wider rollout.
+`public/exit-complete.html` has been deleted; nothing redirects to it
+anymore, locally or otherwise (kept the local shim and production on the
+SAME code path deliberately, rather than diverging behavior between them --
+see "Task testing architecture" for why that principle matters generally).
 
 **Two screens in sequence, always** -- an in-app screen gates the actual
-save+redirect behind a deliberate button click, then the redirect target is
-a separate, final landing page:
+save behind a deliberate button click, and (for non-Prolific) that SAME
+screen is where the confirmation message appears, updated in place:
   - Normal completion: `build-end-screen.js`'s "Thank you!" screen -> click
-    -> `on_finish` in timeline-builder.js fires the save+redirect.
+    -> `on_finish` in timeline-builder.js fires `finishSession`, which
+    updates `#jspsych-content` in place for non-Prolific (no navigation).
   - Early exit (3 timeouts in one trial): `create-early-exit.js`'s "Session
-    terminated" screen -> click -> its own button handler fires the
-    save+redirect. `on_finish` has a guard (`if (isExited()) return;`)
-    specifically so it doesn't ALSO fire here -- jsPsych's own timeline
-    naturally reaches its end (all remaining trial-loop nodes become
-    conditionally skipped) well before the participant ever sees this
-    screen or clicks anything, which would otherwise double-call the exit.
+    terminated" screen -> click -> its own button handler fires
+    `finishSession` the same way. `on_finish` has a guard
+    (`if (isExited()) return;`) specifically so it doesn't ALSO fire here --
+    jsPsych's own timeline naturally reaches its end (all remaining
+    trial-loop nodes become conditionally skipped) well before the
+    participant ever sees this screen or clicks anything, which would
+    otherwise double-call the exit.
 
 **PROLIFIC_CODES** (timeline-builder.js): one object grouped by task, each
 with a `completion` and `earlyExit` code -- 4 values total, ALL still
@@ -796,17 +831,6 @@ code (`C3W3TF1O`, from an earlier study configuration) was deliberately
 discarded rather than kept around unverified -- don't reintroduce it
 without first re-confirming it's still valid for the upcoming Prolific
 study. Must be filled in before real Prolific deployment (see checklist).
-
-**Consolidation note**: `resolve-exit-url.js` is the single place that
-knows the `isProlific ? <Prolific URL> : 'exit-complete.html'` shape --
-both `on_finish` and `create-early-exit.js`'s button handler call it rather
-than each keeping an independent copy of the URL template (this WAS
-duplicated once; keep it that way). The two call sites still each do their
-own `jatos.endStudyAndRedirect(resolveExitUrl(...), jsPsych.data.get().json())`
--- a further consolidation into one `saveAndExit(isProlific, code, jsPsych)`
-helper was considered and explicitly deferred (would mix a raw global
-`jatos` call into what's currently a pure URL-string-computation module);
-revisit only if a third call site ever needs this exact pattern.
 
 Pre-deployment checklist (before Prolific production):
   - Confirm task/sequences/{continuous,binary}_sequences.json holds the intended
@@ -1328,3 +1352,10 @@ change (e.g. "change X to Y", "add Z", "remove W").
   — these were deliberately removed along with index-dev.html; any test-only
   need for different config values belongs in src/test-harness.js building a
   modified config object, never inside the production code path itself
+- Do not redirect non-Prolific participants to a same-origin file (e.g. via
+  jatos.endStudyAndRedirect) after ending a JATOS study session — confirmed
+  broken on a real MindProbe pilot run ("you have no access rights" trying
+  to serve public/exit-complete.html post-session-end; see "Exit/redirect
+  and data-saving architecture"). Only redirect to an EXTERNAL domain
+  (Prolific); for everyone else, use finish-session.js's DOM-update-in-place
+  approach instead

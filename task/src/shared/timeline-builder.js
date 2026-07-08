@@ -52,7 +52,7 @@ import { buildConsentScreen }      from './build-consent-screen.js';
 import { buildTutorialTimeline }   from './build-tutorial-timeline.js';
 import { createEarlyExit }         from './create-early-exit.js';
 import { buildEndScreen }          from './build-end-screen.js';
-import { resolveExitUrl }          from './resolve-exit-url.js';
+import { finishSession }          from './finish-session.js';
 
 const MAX_TIMEOUTS_PER_TRIAL = 3;
 // TODO: all 4 of these are still placeholders -- none obtained from
@@ -136,18 +136,18 @@ export function buildAndRun(cfg) {
       // is exhausted, then again on the visible button's click.
       if (isExited()) return;
       window.removeEventListener('beforeunload', beforeUnloadHandler);
-      // jatos.endStudyAndRedirect(url, data) -- single call, data passed
-      // directly as the second argument -- is the historically PROVEN
-      // mechanism, confirmed directly against a real downloaded MindProbe
-      // result file (task/dev-results/pilot7cont.txt: a complete 24-trial
-      // continuous session, non-Prolific/pilot_undefined, ending in this
-      // exact on_finish path). A prior revision switched to a two-call
-      // submitResultData-then-endStudyAndRedirect(url) pattern based on an
-      // unverified documentation claim that real JATOS doesn't accept data
-      // this way -- that claim directly contradicts the real evidence above
-      // and was never independently re-confirmed, so it was reverted.
-      const url = resolveExitUrl(isProlific, PROLIFIC_CODES[taskType].completion);
-      jatos.endStudyAndRedirect(url, jsPsych.data.get().json());
+      // finishSession (shared with create-early-exit.js's button handler) is
+      // the single place that knows how a session actually ends -- see its
+      // own docstring for why non-Prolific participants get a DOM update +
+      // no redirect, not a redirect to a same-origin confirmation page
+      // (confirmed broken on real JATOS: an access-rights error trying to
+      // serve that file after the session had already ended).
+      finishSession({
+        isProlific,
+        prolificCode: PROLIFIC_CODES[taskType].completion,
+        jsPsych,
+        contentEl: document.querySelector('#jspsych-content'),
+      });
     },
   });
 

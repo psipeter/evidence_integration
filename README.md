@@ -261,10 +261,15 @@ task/
       build-consent-screen.js      — informed-consent screen
       build-end-screen.js          — final "Thank you" screen
       create-early-exit.js         — session-terminated flow (3-timeout exhaustion)
-      resolve-exit-url.js           — shared isProlific ? Prolific completion URL :
-                                      exit-complete.html resolution (single source of
-                                      truth, used by both create-early-exit.js and
-                                      timeline-builder.js's on_finish)
+      finish-session.js             — shared "how does a session actually end"
+                                      implementation (single call, data passed
+                                      as the argument; Prolific redirects
+                                      externally, everyone else gets a DOM
+                                      update + no redirect at all -- see
+                                      "Exit/redirect and data-saving
+                                      architecture" in CLAUDE.md for why a
+                                      same-origin redirect after ending the
+                                      session failed on a real MindProbe pilot)
       config-base.js               — shared config factory for continuous/binary configs
       jatos-shim.js                — dev no-op shim
       plugin-inter-trial.js        — BTI reset screen
@@ -302,13 +307,6 @@ task/
     experiment-binary.js
     test-harness.js         — test-ONLY entry (index-test.html); never bundled into
                               any production build, never linked from production code
-  public/
-    exit-complete.html       — static confirmation page for non-Prolific
-                              participants (local dev/test AND non-Prolific
-                              JATOS/MindProbe pilots); copied into every build's
-                              output root automatically by Vite (no separate
-                              wiring needed). See "Exit/redirect and
-                              data-saving architecture" in CLAUDE.md.
   sequences/
     continuous_sequences.{pkl,json}   — PRODUCTION 6x4 pilot (moment-matched,
                                         evenly-spaced levels [10,26,42,58,74,90],
