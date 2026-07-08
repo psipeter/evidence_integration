@@ -314,20 +314,37 @@ distribution" would overclaim novelty it can't always guarantee.
 
 Sequence design: 6×4 (24 trials) is the CURRENT PILOT production design, generated
   via task/generate_sequences_momentmatch.py (quota/moment-matching, isotonic
-  score_mode): continuous seed=175, binary seed=198, std_fixed=15,
-  mean_range=[10,90], p_range=[0.1,0.9]. This is the widened-range version --
-  we tested how far the moment-matching approach could push toward [0,100]
-  before the continuous side's boundary-clipping bias becomes a problem (see
-  below); [10,90]/[0.1,0.9] was confirmed as the practical limit and adopted
-  for the pilot. Switched from the original rejection-sampling method
-  (std_fixed=20) as of the latest session -- this was an explicit choice for
-  the pilot specifically, separate from the still-pending 10×4 full-experiment
-  decision below.
+  score_mode, 1000-try seed search), std_fixed=15. Promoted to production
+  (task/sequences/{continuous,binary}_sequences.{pkl,json}) as of the latest
+  session, superseding the earlier seed=175/198 sequences (still fully
+  recoverable via git history if ever needed -- nothing was deleted, only
+  overwritten in the working tree, and task/sequences/ is git-tracked).
+
+  **Design**: --n_levels=6 evenly-spaced qid levels (NOT random-then-mirrored
+  -- see "Sequence generation methods" below for why mirroring was removed),
+  automatically split 3-lower/3-upper around each range's midpoint:
+    Continuous: --mean_range=[10,90] -> true_mean levels exactly
+      [10, 26, 42, 58, 74, 90].
+    Binary: --blue_range=[2,13] (blue-ball count out of 15, not a p fraction)
+      -> exactly [2, 4, 6, 9, 11, 13] blue balls, i.e. true_p =
+      [0.133, 0.267, 0.4, 0.6, 0.733, 0.867].
+  Verified directly against the saved files (not just the generation script's
+  own assertions) before promoting: exactly 4 repeats per qid for both tasks;
+  continuous true_mean/true_std levels exactly as above; binary true_p levels
+  exactly as above AND every individual 15-observation trial hits its exact
+  target blue-ball count with zero deviation (binary quota-matching has no
+  rounding slop at all, unlike continuous's boundary bias -- see below).
+  Check figure: copy the four {task}_sequences.{pkl,json} files to a temp dir
+  and run scripts/inspect_sequences.py --seq_dir <temp dir> --skip_nef (the
+  script hardcodes the plain {task}_sequences.* filenames, so it can't be
+  pointed at a differently-named file directly).
 
   For the full 10×4 (40 trials) experiment, three generation methods now exist
   and are under active evaluation — see "Sequence generation methods" below.
   The full-experiment design is NOT yet finalized: pending PI consultation on
-  which method (i.i.d. vs moment-matched) to promote to production.
+  which method (i.i.d. vs moment-matched) to promote to production, AND on
+  what --n_levels/range to use (the 6×4 pilot's choices above are not
+  automatically the right ones at a larger scale).
 
 Single master copy in task/sequences/{task}_sequences.{pkl,json}.
 task/src/{task}/config.js imports directly from task/sequences/ — no copy step needed.
@@ -417,16 +434,42 @@ a tunable knob — see rationale below.
 **task/generate_sequences_momentmatch.py** (quota / moment-matching branch):
   Constructs each block (prefix/suffix) to hit the target sample mean/std
   (continuous, via iterative rescale+clip) or exact blue/red quota (binary),
-  then randomizes order/realization. No rejection loop — scales to any
-  n_unique_sequences for free, and resolves the mean=10/90+std=15 truncation
-  problem directly (verified: achieved std within ~0.5 of nominal even at
-  the range edges, vs ~4.5 off under rejection sampling).
+  then randomizes order/realization. No rejection loop — resolves the
+  mean=10/90+std=15 truncation problem directly (verified: achieved std
+  within ~0.5 of nominal even at the range edges, vs ~4.5 off under
+  rejection sampling).
   Literature check: no support found for exact quota matching as a
   behaviorally-neutral stimulus-generation choice in the probability-learning/
   evidence-integration literature — every precedent found (gambler's-fallacy,
   probability-matching studies) uses this kind of composition constraint as
   a deliberate, studied manipulation, not a neutral background choice. Real
   methodological tradeoff, not free.
+  **Parameter levels are an evenly-spaced grid, not random+mirrored** (as of
+  the latest session): earlier versions (and generate_sequences.py /
+  generate_sequences_iid.py, which still work this way) drew true_mean/
+  true_p randomly within stratified bins across the LOWER half of
+  mean_range/p_range, then mirrored each draw (mean -> 100-mean, p -> 1-p)
+  to get the upper half "for free" and guarantee symmetry. Removed from
+  this script specifically: mirroring's point was compute-saving under
+  rejection sampling (no rejection loop here to save on) and guaranteeing
+  symmetry (redundant once you specify an already-symmetric explicit grid
+  directly). `--n_levels` (default 6 -- this reproduces the original "6
+  unique sequences x n_repeats" structure exactly, just deterministic
+  instead of random+mirrored) evenly-spaced levels are built via
+  np.linspace across `--mean_range` (continuous, default [10,90]) or
+  `--blue_range` (binary, default [2,13] -- an exact blue-ball COUNT out of
+  --seq_length, not a p fraction, since binary's moment-matching already has
+  no boundary-bias tradeoff at all to route around -- see the achieved-p
+  exactness note above). Both are automatically split evenly between the
+  lower/upper half of the range whenever --n_levels is even (e.g. n_levels=6
+  over mean_range=[10,90] gives exactly [10,26,42,58,74,90]; n_levels=6 over
+  blue_range=[2,13] gives exactly [2,4,6,9,11,13]). Number of qids is
+  DERIVED from --n_levels, not a separate --n_unique_sequences. Continuous's
+  boundary bias (achieved-mean-vs-target table below) is unchanged by any of
+  this -- the difference under an explicit grid is that EVERY trial at
+  whichever level sits nearest the range edge shows it consistently, where
+  previously only whichever single random stratified draw happened to land
+  near an edge did.
   Seed search via `--score_mode {bump, isotonic}` (default: isotonic):
     - 'bump': original approach, penalizes only upward steps in the aggregate
       |Δresponse| curve; includes an RMSE-vs-ground-truth component and a
@@ -444,14 +487,23 @@ a tunable knob — see rationale below.
       and ~2.0e-7 (continuous, seed=245) — curves visually indistinguishable
       from perfectly smooth decay.
 
-Current best candidates for the 10×4 full experiment (NOT yet promoted to
-production filenames — saved as task/sequences/{task}_momentmatch_sequences.*):
+Current best candidates for the 10×4 full experiment (found under the OLD
+random+mirrored design, since removed -- see "Parameter levels" note in
+generate_sequences_momentmatch.py's own section above; these predate the
+evenly-spaced/no-mirroring redesign and would need regenerating under it to
+be current). NOT promoted to production filenames, and no longer present at
+task/sequences/{task}_momentmatch_sequences.* either (that path now holds a
+copy of the 6x4 PILOT data instead, overwritten by the more recent 6x4
+search -- see "Sequence design" above) -- still fully recoverable via git
+(commit 274b598, confirmed by directly checking out and inspecting that
+version: 10 qids, 40 trials each):
   continuous: seed=245 (momentmatch, isotonic, mean_range=[20,80], std_fixed=15)
   binary:     seed=68  (momentmatch, isotonic, p_range=[0.2,0.8])
 std_fixed=15 is the new default for continuous going forward (down from 20
-in the 6×4 pilot) — confirmed to resolve within the achievable range via
-moment-matching; NOT confirmed compatible with the original rejection-sampling
-script at k<0.7 (truncation issues near mean_range edges, see above).
+in the original rejection-sampling design) — confirmed to resolve within the
+achievable range via moment-matching; NOT confirmed compatible with the
+original rejection-sampling script at k<0.7 (truncation issues near
+mean_range edges, see above).
 
 How far can moment-matching push mean_range/p_range toward [0,100]/[0,1]?
 Tested empirically (moment_match_continuous/binary directly, 300 draws per
@@ -486,13 +538,23 @@ under moment-matching — this is now the adopted 6×4 pilot range (see
 
 ### Open items (as of latest session)
 
-- **Pilot decision made**: 6×4 pilot now uses moment-matched sequences
-  (continuous seed=175, mean_range=[10,90]; binary seed=198, p_range=[0.1,0.9];
-  std_fixed=15), replacing the previous rejection-sampling pilot sequences.
+- **6×4 pilot regenerated and promoted**: new sequences generated under
+  generate_sequences_momentmatch.py's evenly-spaced/no-mirroring design
+  (--n_levels=6, continuous --mean_range=[10,90], binary --blue_range=[2,13],
+  1000-try seed search) and promoted to task/sequences/{continuous,binary}_
+  sequences.{pkl,json}, superseding the old seed=175/198 sequences. Verified
+  directly against the saved files before promoting (repeat counts, exact
+  levels, exact per-trial blue-ball counts for binary) -- see "Sequence
+  design" above for the full verification. NOTE: a real pilot already
+  collected some participant data under the OLD sequences (see "Pilot data
+  files" below) -- going forward, new participants run on a DIFFERENT
+  stimulus set than those earlier ones; keep this in mind for any analysis
+  that pools across them.
 - **PI decision pending**: i.i.d. vs moment-matched for the 10×4 production
-  sequences (see literature-precedent tradeoff above) is still open — the
-  pilot decision above does not resolve this; nothing for the 10×4 full
-  experiment is promoted to production filenames yet.
+  sequences (see literature-precedent tradeoff above) is still open, as is
+  what --n_levels/range the 10×4 scale should use (not automatically the
+  same as the 6×4 pilot's choices above) -- both need resolving before
+  10×4 is finalized.
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
   running-mean overlay requested (matching inspect_sequences.py's --gt_mode
   running_mean) but explicitly deferred as a separate, bigger UI change —
@@ -946,11 +1008,17 @@ See "Sequence generation methods" above for the three scripts. Quick reference:
         --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
 
     # Moment-matched / quota (isotonic seed search, default score_mode) --
-    # this is what generated the CURRENT 6x4 pilot (seed=175/198, mean_range=[10,90],
-    # p_range=[0.1,0.9], n_unique_sequences=6)
-    venv/bin/python task/generate_sequences_momentmatch.py --task both --n_tries 300 \
-        --n_unique_sequences 6 --n_repeats 4 --mean_range 10 90 --std_fixed 15 --p_range 0.1 0.9 \
-        --rl_alpha_0 1.0 --rl_lambda 0.5
+    # this is what generated the CURRENT PRODUCTION 6x4 pilot (evenly-spaced
+    # levels, NOT random+mirrored -- see "Sequence generation methods" above):
+    venv/bin/python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \
+        --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+    # Defaults used above (all overridable): --n_levels 6, --mean_range 10 90
+    # (continuous), --blue_range 2 13 (binary, blue-ball count out of
+    # --seq_length -- NOT a p fraction). Output goes to
+    # task/sequences/{task}_momentmatch_sequences.{pkl,json} by default (NOT
+    # the production filenames) -- promote by copying over
+    # {task}_sequences.{pkl,json} once verified (see "Sequence design" above
+    # for the verification steps actually used for the current pilot).
 
     # WARNING (all three scripts): --task both overwrites BOTH sequence files.
     # After a search, regenerate whichever task you want to keep with --seed N.

@@ -200,7 +200,8 @@ Three generation methods now exist (see CLAUDE.md's "Sequence generation
 methods" section for the full rationale and tradeoffs):
 
 ```bash
-# Original (current 6x4 pilot; k-constrained rejection sampling, std=20)
+# Original (k-constrained rejection sampling, std=20) -- not used for the
+# pilot since it switched to moment-matching; kept for comparison
 python task/generate_sequences.py --task continuous --seed <N>
 python task/generate_sequences.py --task binary --seed <N>
 
@@ -208,28 +209,43 @@ python task/generate_sequences.py --task binary --seed <N>
 python task/generate_sequences_iid.py --task both --seed 0 \
     --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
 
-# Moment-matched / quota (isotonic-residual seed search, default score_mode)
-python task/generate_sequences_momentmatch.py --task both --n_tries 300 \
-    --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8 \
-    --rl_alpha_0 1.0 --rl_lambda 0.5
+# Moment-matched / quota (isotonic-residual seed search, default score_mode) --
+# this is what generated the CURRENT PRODUCTION 6x4 pilot. Evenly-spaced
+# level grid, NOT random+mirrored (see CLAUDE.md for why mirroring was
+# removed):
+python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \
+    --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+# Defaults used above (all overridable): --n_levels 6, --mean_range 10 90
+# (continuous), --blue_range 2 13 (binary, blue-ball count out of
+# --seq_length -- NOT a p fraction).
 ```
 
 **Current 6x4 pilot** (in production): moment-matched/quota generation
-(generate_sequences_momentmatch.py, isotonic score_mode), continuous
-seed=175 (mean_range=[10,90]), binary seed=198 (p_range=[0.1,0.9]),
-prefix_length=4, std_fixed=15, ITI_MS=1000ms. Switched from the original
-rejection-sampling method (std_fixed=20, mean_range=[20,80]) as of the
-latest session; [10,90]/[0.1,0.9] was empirically confirmed as the practical
-limit for how far moment-matching's continuous side can push toward [0,100]
-before boundary-clipping bias becomes significant (see CLAUDE.md for the
-full bias table). Binary has no equivalent limit — quota is exact for any p.
+(generate_sequences_momentmatch.py, isotonic score_mode, 1000-try seed
+search), evenly-spaced level grid (NOT random+mirrored -- see CLAUDE.md's
+"Sequence generation methods" for the full rationale): continuous true_mean
+levels exactly [10,26,42,58,74,90] (--mean_range=[10,90]); binary exact
+blue-ball counts [2,4,6,9,11,13] out of 15 (--blue_range=[2,13]), i.e. true_p
+= [0.133,0.267,0.4,0.6,0.733,0.867]; prefix_length=4, std_fixed=15,
+ITI_MS=1000ms. Promoted to task/sequences/{continuous,binary}_sequences.{pkl,json}
+as of the latest session, superseding the earlier seed=175/198 sequences
+(random+mirrored design) -- those remain fully recoverable via git history
+if ever needed. Verified directly against the saved files before promoting:
+exact repeat counts, exact levels, and for binary, every individual trial's
+full 15-observation sequence hitting its exact target blue-ball count with
+zero rounding slop (continuous still has the small boundary bias at its two
+extreme levels -- see the achieved-mean-vs-target table below; binary has no
+equivalent bias at any level).
 
 **10x4 full experiment**: NOT yet finalized. Best candidates found so far
 (moment-matched, isotonic score_mode, mean_range=[20,80], p_range=[0.2,0.8],
 std_fixed=15): continuous seed=245, binary seed=68 — saved under
 `{task}_momentmatch_sequences.*`, not yet promoted to the production
-filenames. Choice between the i.i.d. and moment-matched branches is pending
-PI consultation (moment-matching introduces a real, literature-documented
+filenames. These predate the evenly-spaced/no-mirroring redesign above, so
+they'd need regenerating under it too before being considered current --
+choice between the i.i.d. and moment-matched branches, AND what
+--n_levels/range to use at this larger scale, are both pending PI
+consultation (moment-matching introduces a real, literature-documented
 behavioral tradeoff — see CLAUDE.md — it is not a free smoothness win).
 
 ### Directory structure
@@ -294,10 +310,31 @@ task/
                               wiring needed). See "Exit/redirect and
                               data-saving architecture" in CLAUDE.md.
   sequences/
-    continuous_sequences.{pkl,json}   — current 6x4 pilot (moment-matched, seed=175, mean_range=[10,90], std=15)
-    binary_sequences.{pkl,json}       — current 6x4 pilot (moment-matched, seed=198, p_range=[0.1,0.9])
-    continuous_momentmatch_sequences.{pkl,json} — 10x4 candidate (seed=245, not yet production)
-    binary_momentmatch_sequences.{pkl,json}     — 10x4 candidate (seed=68, not yet production)
+    continuous_sequences.{pkl,json}   — PRODUCTION 6x4 pilot (moment-matched,
+                                        evenly-spaced levels [10,26,42,58,74,90],
+                                        std=15, promoted from
+                                        continuous_momentmatch_sequences.* below)
+    binary_sequences.{pkl,json}       — PRODUCTION 6x4 pilot (moment-matched,
+                                        exact blue-ball counts [2,4,6,9,11,13]
+                                        of 15, promoted from
+                                        binary_momentmatch_sequences.* below)
+    continuous_momentmatch_sequences.{pkl,json} — currently an IDENTICAL COPY of
+                                        the production file above (this is the
+                                        generation script's own output location,
+                                        always overwritten by whatever was most
+                                        recently searched here -- the OLD 10x4
+                                        candidate that used to live at this same
+                                        path (seed=245, mean_range=[20,80]) was
+                                        overwritten by the 6x4 pilot search and
+                                        is no longer in the working tree, but IS
+                                        still recoverable via git (commit 274b598
+                                        -- confirmed by directly checking out and
+                                        inspecting that version: 10 qids, 40
+                                        trials, means spanning ~22-78)
+    binary_momentmatch_sequences.{pkl,json}     — same situation, binary side
+                                        (old 10x4 candidate seed=68 likewise
+                                        overwritten in the working tree, same
+                                        git commit for recovery)
     continuous_iid_sequences.{pkl,json}         — 10x4 candidate (i.i.d. branch)
     binary_iid_sequences.{pkl,json}             — 10x4 candidate (i.i.d. branch)
   generate_sequences.py             — original: k-constrained rejection sampling

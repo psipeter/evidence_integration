@@ -25,7 +25,7 @@ target sample mean/std (continuous) or exact blue/red quota (binary)
 directly, then only randomizes order / residual shape. This sidesteps both
 problems: there is no joint multi-qid rejection loop, and the target
 statistics are hit by construction rather than by chance, so it scales to
-any n_unique_sequences for free.
+any number of parameter levels for free.
 
 Method
 ------
@@ -60,16 +60,56 @@ Prefix / suffix structure (preserved from generate_sequences.py)
     actual realized values, giving genuine within-qid variability rather
     than just reordering a fixed multiset.
 
+Parameter levels: evenly-spaced grid, NOT random, NOT mirrored
+-----------------------------------------------------------------
+  Earlier versions of this script (and generate_sequences.py /
+  generate_sequences_iid.py, which still use this approach) picked true_mean/
+  true_p by drawing randomly within stratified bins across the LOWER half of
+  a range, then mirrored each draw (mean -> 100-mean, p -> 1-p) to get the
+  upper half "for free" and guarantee a symmetric aggregate distribution.
+  That mirroring step doesn't carry its weight here for two independent
+  reasons: (1) its original point was compute-saving under
+  generate_sequences.py's rejection sampling, where extreme means are
+  expensive to draw -- moment-matching has no rejection loop at all, so
+  there's no cost to saving; (2) an EXPLICIT, evenly-spaced grid of levels is
+  already symmetric by construction (as long as the range and level count
+  are), so there's nothing left for a mirroring mechanism to add.
+
+  --n_levels (default 6) evenly-spaced levels are constructed via
+  np.linspace across an explicit range, one qid per level -- this
+  reproduces the ORIGINAL "6 unique sequences x n_repeats" structure
+  exactly, just with the 6 levels chosen deterministically (evenly spaced,
+  automatically split evenly between the lower and upper half of the range)
+  rather than randomly-drawn-then-mirrored:
+    Continuous: --mean_range (default [10,90], matching the pilot's adopted
+      boundary -- see generate_sequences.py's docstring for why [10,90]
+      rather than [0,100]). n_levels=6 over [10,90] gives [10,26,42,58,74,90].
+    Binary: --blue_range (default [2,13], i.e. blue-ball counts out of
+      --seq_length -- NOT a p fraction, since binary's moment-matching is
+      already exact for any integer quota, so there's no reason to go
+      through a p-value intermediate that then needs rounding back to the
+      nearest achievable 15th). n_levels=6 over [2,13] gives [2,4,6,9,11,13]
+      (rounds to a perfectly symmetric set: 2+13=4+11=6+9=15).
+  Both ranges/level counts are freely tunable via CLI -- there is nothing
+  6-specific hardcoded; a different n_levels/range combination (e.g. for a
+  larger full-experiment design) just needs different flag values.
+
+Continuous mean=10/90 note: the underlying moment-matching bias at extreme
+means is unchanged by any of this -- see generate_sequences.py's docstring /
+CLAUDE.md for the achieved-mean-vs-target bias table. Binary has no
+equivalent bias at any quota -- moment-matching is exact by construction for
+any integer blue-ball count.
+
 What this does NOT fix
 -----------------------
   Clipping after rescaling still truncates the distribution at extreme
   means, which still biases the achieved std down somewhat (just less
   severely than generate_sequences.py's rejection sampling, since we
-  actively correct for it via iterative rescale). If mean_range pushes
-  all the way to the [0,100] edges with a large std, the plausibility
-  check (report only, not gating -- see below) may still show a small
-  residual gap at the extremes. Use --report to check this directly
-  before trusting a given mean_range/std combination.
+  actively correct for it via iterative rescale). If mean_range pushes all
+  the way to the [0,100] edges with a large std, the plausibility check
+  (report only, not gating -- see below) may still show a small residual
+  gap at the extremes. Use --report to check this directly before trusting
+  a given mean_range/std combination.
 
 Plausibility checking here is DIAGNOSTIC ONLY (reported, not gating) --
 generation always succeeds by construction, so there is no rejection loop
@@ -77,12 +117,20 @@ and no seed can "fail" the way it could in generate_sequences.py.
 
 Usage
 -----
-  # Single generation (fast, no search)
+  # Single generation (fast, no search) -- default: 6 levels, continuous
+  # 10..90, binary blue-count 2..13 out of 15
   python task/generate_sequences_momentmatch.py --task continuous --seed 0
 
-  # Seed search over orderings/realizations for smoothness
-  python task/generate_sequences_momentmatch.py --task both --n_tries 200 \\
-      --rl_alpha_0 1.0 --rl_lambda 0.5 --score_mode isotonic
+  # Custom range / level count
+  python task/generate_sequences_momentmatch.py --task continuous --seed 0 \\
+      --n_levels 6 --mean_range 10 90 --n_repeats 4
+  python task/generate_sequences_momentmatch.py --task binary --seed 0 \\
+      --n_levels 6 --blue_range 2 13 --n_repeats 4
+
+  # Seed search over orderings/realizations for smoothness (this is the
+  # actual production 6x4 pilot search)
+  python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \\
+      --n_levels 6 --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
 
   # Diagnostic report of achieved vs target moments (no file written)
   python task/generate_sequences_momentmatch.py --task continuous --report
@@ -118,11 +166,12 @@ import numpy as np
 import pandas as pd
 
 # Reuse generic, method-agnostic utilities from generate_sequences.py rather
-# than duplicating them -- these are not tied to rejection sampling.
+# than duplicating them -- these are not tied to rejection sampling. Note:
+# mirror_sequence/mirror_params are deliberately NOT imported anymore -- see
+# "Parameter levels: evenly-spaced grid, NOT random, NOT mirrored" above.
 from generate_sequences import (
     VALUE_MIN, VALUE_MAX,
-    make_rng, mirror_sequence, mirror_params,
-    continuous_param_grid, binary_param_grid,
+    make_rng,
     check_sequence_plausibility,
     score_sequences,
     _save_sequences,
@@ -164,6 +213,38 @@ def moment_match_binary(rng, true_p, n):
     vals = [1] * n_blue + [-1] * (n - n_blue)
     perm = rng.permutation(n)
     return [vals[i] for i in perm]
+
+
+# ---------------------------------------------------------------------------
+# Evenly-spaced parameter-level grids (NOT random, NOT mirrored)
+# ---------------------------------------------------------------------------
+def continuous_mean_levels(n_levels, mean_range):
+    """n_levels evenly-spaced true_mean values across mean_range (inclusive
+    of both endpoints), via linspace -- automatically split evenly between
+    the lower and upper half of the range (symmetric around the midpoint
+    whenever n_levels is even), with no randomness."""
+    lo, hi = mean_range
+    return [round(float(v), 4) for v in np.linspace(lo, hi, n_levels)]
+
+
+def binary_blue_levels(n_levels, blue_range):
+    """n_levels evenly-spaced integer blue-ball counts across blue_range
+    (inclusive), via linspace + round -- e.g. n_levels=6, blue_range=[2,13]
+    gives [2,4,6,9,11,13] (symmetric: 2+13=4+11=6+9=15). Asserts the
+    rounded levels are still all distinct (can fail only for a very large
+    n_levels relative to a narrow blue_range)."""
+    lo, hi = blue_range
+    levels = sorted(set(int(round(v)) for v in np.linspace(lo, hi, n_levels)))
+    assert len(levels) == n_levels, (
+        f"blue_range={blue_range} with n_levels={n_levels} produced only "
+        f"{len(levels)} distinct integer levels after rounding ({levels}) -- "
+        f"widen blue_range or reduce n_levels.")
+    return levels
+
+
+def binary_p_levels(n_blue_levels, seq_length):
+    """true_p = n_blue / seq_length for each explicit blue-ball count."""
+    return [round(k / seq_length, 6) for k in n_blue_levels]
 
 
 # ---------------------------------------------------------------------------
@@ -293,44 +374,50 @@ def _shuffle_no_consecutive_qid(trials, rng, task):
 # ---------------------------------------------------------------------------
 # Core generation
 # ---------------------------------------------------------------------------
-def generate_task_sequences_momentmatch(task, args, rng):
+def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
     """Generate all trials for one task via moment matching.
 
     Mirrors generate_task_sequences()'s trial structure (prefix/suffix
-    split, mirrored qids, ITI scheduling, no-consecutive-qid shuffle) but
-    builds blocks via moment matching instead of rejection sampling.
-    Returns (DataFrame, json_trials), same schema as generate_sequences.py.
+    split, ITI scheduling, no-consecutive-qid shuffle) but builds blocks via
+    moment matching instead of rejection sampling, and picks true_mean/true_p
+    from an evenly-spaced level grid rather than randomly-drawn-then-mirrored
+    (see module docstring's "Parameter levels" section for why). Returns
+    (DataFrame, json_trials), same schema as generate_sequences.py.
+
+    verbose controls the per-call header/per-qid/summary prints -- this
+    function is called once per attempt during a seed search (potentially
+    thousands of times), so _seed_search_momentmatch passes verbose=False
+    to keep output to the periodic progress line only. --report and
+    single-generation mode want the full detail, so they leave it True.
     """
     seq_length    = args.seq_length
     prefix_length = args.prefix_length
     suffix_length = seq_length - prefix_length
     full_repeat   = (prefix_length >= seq_length)
 
-    n_unique  = args.n_unique_sequences
-    assert n_unique % 2 == 0, "n_unique_sequences must be even"
-    n_base    = n_unique // 2
+    # -- Evenly-spaced parameter levels (one qid per level) ------------------
+    if task == 'continuous':
+        mean_levels = continuous_mean_levels(args.n_levels, args.mean_range)
+        param_list  = [(mu, args.std_fixed, float('nan')) for mu in mean_levels]
+        levels_desc = f"mean_levels={mean_levels}  std_fixed={args.std_fixed}"
+    else:
+        blue_levels = binary_blue_levels(args.n_levels, args.blue_range)
+        p_levels    = binary_p_levels(blue_levels, seq_length)
+        param_list  = [(tp, float('nan'), tp) for tp in p_levels]
+        levels_desc = f"blue_levels={blue_levels} (of {seq_length})  ->  p_levels={p_levels}"
+
+    n_unique  = len(param_list)
     n_repeats = args.n_repeats
     n_total   = n_unique * n_repeats
 
-    print(f"\n{'='*60}")
-    print(f"Task: {task.upper()}  (moment-matched)")
-    print(f"  Total trials   : {n_total} ({n_unique} seqs x {n_repeats} reps)")
-    print(f"  Seq / prefix / suffix length: {seq_length} / {prefix_length} / {suffix_length}")
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Task: {task.upper()}  (moment-matched, evenly-spaced grid, no mirroring)")
+        print(f"  Total trials   : {n_total} ({n_unique} levels x {n_repeats} reps)")
+        print(f"  Seq / prefix / suffix length: {seq_length} / {prefix_length} / {suffix_length}")
+        print(f"  {levels_desc}")
 
-    # -- Base parameter sets (reused from generate_sequences.py) ------------
-    if task == 'continuous':
-        param_sets = continuous_param_grid(n_base, args.mean_range, args.std_fixed, rng)
-        print(f"  std_fixed={args.std_fixed}  mean_range={args.mean_range}")
-    else:
-        param_sets = binary_param_grid(n_base, args.p_range, rng)
-        print(f"  p_range={args.p_range}")
-
-    if task == 'continuous':
-        param_list = [(mu, sd, float('nan')) for mu, sd in param_sets]
-    else:
-        param_list = [(tp, float('nan'), tp) for tp in param_sets]
-
-    # -- Build prefix block (once per base qid, moment-matched) -------------
+    # -- Build prefix block (once per qid, moment-matched) -------------------
     templates = []
     for qid, (true_mean, true_std, true_p) in enumerate(param_list):
         if task == 'continuous':
@@ -342,22 +429,9 @@ def generate_task_sequences_momentmatch(task, args, rng):
             'qid': qid, 'true_mean': true_mean, 'true_std': true_std,
             'true_p': true_p, 'prefix': prefix,
         })
-        label = f'mean={true_mean:.1f}' if task == 'continuous' else f'p={true_p:.3f}'
-        print(f"  qid {qid:3d}: {label}  prefix=[{','.join(map(str, prefix))}]")
-
-    # -- Mirror templates -----------------------------------------------------
-    for base in templates[:n_base]:
-        m_mean, m_std, m_p = mirror_params(base['true_mean'], base['true_std'],
-                                           base['true_p'], task)
-        m_prefix = mirror_sequence(base['prefix'], task)
-        m_qid    = len(templates)
-        templates.append({
-            'qid': m_qid, 'true_mean': m_mean, 'true_std': m_std,
-            'true_p': m_p, 'prefix': m_prefix,
-        })
-        label = f'mean={m_mean:.1f}' if task == 'continuous' else f'p={m_p:.3f}'
-        print(f"  qid {m_qid:3d}: {label}  prefix=[{','.join(map(str, m_prefix))}]  "
-              f"[mirror of qid {base['qid']}]")
+        if verbose:
+            label = f'mean={true_mean:.1f}' if task == 'continuous' else f'p={true_p:.3f}'
+            print(f"  qid {qid:3d}: {label}  prefix=[{','.join(map(str, prefix))}]")
 
     # -- ITI schedule ---------------------------------------------------------
     ITI_MS   = 1000
@@ -427,12 +501,13 @@ def generate_task_sequences_momentmatch(task, args, rng):
     assert df['trial'].nunique() == n_total
     assert (df.groupby('qid')['trial'].nunique() == n_repeats).all()
 
-    print(f"\n  {len(df)} rows | {n_total} trials | {n_unique} seqs x {n_repeats} reps")
-    if task == 'continuous':
-        print(f"  Value range : {df['value'].min()} - {df['value'].max()}")
-        print(f"  true_mean   : {df['true_mean'].min():.1f} - {df['true_mean'].max():.1f}")
-    else:
-        print(f"  true_p range: {df['true_p'].min():.3f} - {df['true_p'].max():.3f}")
+    if verbose:
+        print(f"\n  {len(df)} rows | {n_total} trials | {n_unique} levels x {n_repeats} reps")
+        if task == 'continuous':
+            print(f"  Value range : {df['value'].min()} - {df['value'].max()}")
+            print(f"  true_mean   : {df['true_mean'].min():.1f} - {df['true_mean'].max():.1f}")
+        else:
+            print(f"  true_p range: {df['true_p'].min():.3f} - {df['true_p'].max():.3f}")
 
     return df, json_trials
 
@@ -486,7 +561,7 @@ def _seed_search_momentmatch(task, args, out_dir):
     for attempt in range(args.n_tries):
         task_seed = attempt if task == 'continuous' else attempt + 1000
         rng = make_rng(task_seed)
-        df, json_trials = generate_task_sequences_momentmatch(task, args, rng)
+        df, json_trials = generate_task_sequences_momentmatch(task, args, rng, verbose=False)
 
         if args.score_mode == 'bump':
             bay, rl, combined = score_sequences(
@@ -537,13 +612,22 @@ def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument('--task',               choices=['continuous', 'binary', 'both'], default='both')
     p.add_argument('--n_tries',            type=int,   default=1)
-    p.add_argument('--n_unique_sequences', type=int,   default=10)
     p.add_argument('--n_repeats',          type=int,   default=4)
     p.add_argument('--seq_length',         type=int,   default=15)
     p.add_argument('--prefix_length',      type=int,   default=4)
-    p.add_argument('--mean_range',         type=float, nargs=2, default=[20.0, 80.0])
+    p.add_argument('--n_levels',           type=int,   default=6,
+                   help='Number of evenly-spaced qid levels (one per level) -- '
+                        'the "6" in "6 unique sequences x n_repeats". Automatically '
+                        'split evenly between the lower/upper half of the range '
+                        'given by --mean_range/--blue_range (symmetric when even).')
+    p.add_argument('--mean_range',         type=float, nargs=2, default=[10.0, 90.0],
+                   help='Continuous: true_mean range to evenly space --n_levels across.')
     p.add_argument('--std_fixed',          type=float, default=15.0)
-    p.add_argument('--p_range',            type=float, nargs=2, default=[0.2, 0.8])
+    p.add_argument('--blue_range',         type=int,   nargs=2, default=[2, 13],
+                   help='Binary: blue-ball-count range (out of --seq_length) to evenly '
+                        'space --n_levels across -- NOT a p fraction (binary quota '
+                        'matching is already exact for any integer count, so there is '
+                        'no reason to route through a rounded p value).')
     p.add_argument('--max_rescale_iters',  type=int,   default=4,
                    help='Rescale+clip iterations to converge onto target moments')
     p.add_argument('--rl_alpha_0',         type=float, default=1.0)
@@ -571,13 +655,16 @@ def parse_args():
 
 def main():
     args = parse_args()
-    assert args.n_unique_sequences % 2 == 0, 'n_unique_sequences must be even'
     assert args.n_repeats > 0
     assert args.seq_length > 0
     assert 0 <= args.prefix_length <= args.seq_length
-    assert args.mean_range[0] < args.mean_range[1]
     assert args.std_fixed > 0
-    assert 0 < args.p_range[0] < args.p_range[1] < 1
+    assert args.n_levels >= 1
+    assert args.mean_range[0] < args.mean_range[1]
+    assert 0 <= args.mean_range[0] and args.mean_range[1] <= 100
+    assert args.blue_range[0] < args.blue_range[1]
+    assert 1 <= args.blue_range[0] and args.blue_range[1] <= args.seq_length - 1, \
+        'blue_range must fall within [1, seq_length-1] (exclude degenerate all-one-color quotas)'
 
     out_dir = pathlib.Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
