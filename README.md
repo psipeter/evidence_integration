@@ -152,19 +152,27 @@ Target: ~50–80 participants per task, within-subject.
 
 ### Design
 
-- **Sequences**: 10 unique sequences × 4 repeats = 40 trials; prefix_length=4; std_fixed=20
+- **Sequences**: 6 unique sequences × 4 repeats = 24 trials (current pilot);
+  prefix_length=4; std_fixed=15; moment-matched generation (see "Sequence
+  generation" below). Trial count is fully implicit from however many trials
+  task/sequences/{task}_sequences.json contains — no separate config switch
+  to keep in sync.
 - **ITI**: all trials use 1000ms (ITI manipulation removed — no effect observed in pilot)
-- **BTI**: 3s between-trial reset screen ("Trial X / 40 — generating new sequence…") —
+- **BTI**: 3s between-trial reset screen ("Trial X / N — generating new sequence…") —
   same wording for both tasks (continuous used to say "generating new distribution…";
   "sequence" is the more defensible word since the underlying hidden parameter can
-  repeat across trials — 6 unique parameter sets × 4 repeats — so "new distribution"
-  would sometimes overclaim novelty)
+  repeat across trials — 6 unique parameter sets × 4 repeats — so "new
+  distribution" would sometimes overclaim novelty)
 - **Distractor**: `iti_condition` per trial ('control'/'distract', 2-of-4 per qid);
   `DISTRACTOR_TYPE` in config: 'none' | 'iti_length' | 'popup' (default: 'none')
 - **Timeout**: 7s response deadline per observation
   - Per-trial timeout budget: 3 timeouts before session terminates
   - Timeout flow: "Too slow" screen (fade in/out/in, 3.2s) → replay ITI → same observation
   - On 3rd timeout: "Too slow / 0 timeouts remaining" → "Session terminated" screen with button
+- **Welcome screen**: title/branding page shown first, before consent — "Evidence
+  Integration", "Part A" (continuous) or "Part B" (binary), inside a bordered box;
+  "Proceed to tutorial" button leads to consent. Consent screen's own proceed
+  button (separate from the welcome screen's) reads "Begin tutorial".
 - **Tutorial**: box 1 (text) → image box (separate click-to-reveal step, showing a
   bubbling generative animation — binary: bubbles rise inside the blue/red bar;
   continuous: bubbles fall from under the Gaussian curve to the x-axis, weighted by
@@ -173,12 +181,15 @@ Target: ~50–80 participants per task, within-subject.
   tutorial summary → timeout demonstration (3 screens, same fade-in as real
   observations) → BTI → trial 1. The main obs circle/number, and the tutorial's own
   observation marker, fade in (1000ms) rather than appearing instantly, for a
-  consistent feel between tutorial and real trials.
+  consistent feel between tutorial and real trials. Tutorial's illustrative sequence
+  is derived from a real trial in the sequences data (config-base.js's
+  pickTutorialExample), not hand-picked, so it can't drift out of sync with the
+  actual generation parameters.
 - **Summary slides**: binary — per-obs bar chart (blue/red split at estimate, obs circle left);
   continuous — per-obs number line (red obs thumb, black circle at estimate)
 - **Consent form**: verbatim IRB-approved text from task/consent_form.txt, followed by
   2 warning boxes (data-loss / response-deadline, red background) with ordered
-  disclosure — box 2 stays locked until box 1 is revealed. "Begin experiment" doesn't
+  disclosure — box 2 stays locked until box 1 is revealed. The proceed button doesn't
   use the native `disabled` attribute (disabled buttons never dispatch `click`, so a
   premature click got silently swallowed with zero feedback) — a capturing-phase
   click listener gates it instead.
@@ -230,6 +241,7 @@ task/
       timeline-builder.js          — orchestrator: builds full timeline from config
       build-trial-timeline.js      — pure-JS trial loop (importable by test harness)
       build-tutorial-timeline.js   — tutorial sub-timeline (intro → obs → summary → timeout demo)
+      build-welcome-screen.js      — title/branding screen shown first, before consent
       build-consent-screen.js      — informed-consent screen
       build-end-screen.js          — final "Thank you" screen
       create-early-exit.js         — session-terminated flow (3-timeout exhaustion)
@@ -268,6 +280,8 @@ task/
       config.js
     experiment-continuous.js
     experiment-binary.js
+    test-harness.js         — test-ONLY entry (index-test.html); never bundled into
+                              any production build, never linked from production code
   sequences/
     continuous_sequences.{pkl,json}   — current 6x4 pilot (moment-matched, seed=175, mean_range=[10,90], std=15)
     binary_sequences.{pkl,json}       — current 6x4 pilot (moment-matched, seed=198, p_range=[0.1,0.9])
@@ -282,7 +296,8 @@ task/
   test_browser.mjs         — Playwright E2E tests (Chromium/Firefox/WebKit, both tasks)
   index-continuous.html
   index-binary.html
-  index-dev.html            — dev setup page; also accepts URL param overrides for tests
+  index-test.html           — test-ONLY entry point, drives test-harness.js; not
+                              a build input, real participants can't reach it
   package.json
   vite.config.js
 ```
@@ -294,25 +309,31 @@ as an implicit unsuffixed default. See CLAUDE.md for the fuller rationale.
 ### Key parameters
 
 ```js
-// src/{task}/config.js
-const N_TRIALS_TO_RUN        = 40;
+// src/shared/config-base.js DEFAULTS (shared by both task configs)
 const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;
 const SLIDER_DEFAULT         = 'none';
-const BTI_MS                 = 5000;
-const ITI_SHORT_MS           = 1000;
-const T_OBS_MS               = 7000;
+const DEFAULT_VALUE          = 50;
+const BTI_MS                 = 3000;
+const ITI_SHORT_MS           = 1000;   // tutorial between-observation ITI
+const T_OBS_MS                = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
+const DISTRACTOR_TYPE        = 'none';
 const MAX_TIMEOUTS_PER_TRIAL = 3;      // defined in timeline-builder.js
 const EARLY_EXIT_CODE        = 'EARLYEXIT'; // TODO: replace before publishing
 ```
+
+Trial count is NOT a config constant anymore — it's fully implicit from
+however many trials task/sequences/{task}_sequences.json contains.
 
 ### Commands
 
 ```bash
 cd task
 npm install                    # first time only
-npm run dev                    # local dev server; open index-dev.html for dev setup page
+npm run dev:continuous         # local dev server on :5173, opens index-continuous.html
+npm run dev:binary             # local dev server on :5174, opens index-binary.html
+                                # (both can run simultaneously, in two terminals)
 npm run build:continuous       # production build → dist-continuous/
 npm run build:binary           # production build → dist-binary/
 node test_browser.mjs          # Playwright E2E tests (~2-3 min); see Testing below
@@ -321,17 +342,23 @@ node test_browser.mjs          # Playwright E2E tests (~2-3 min); see Testing be
 ### Testing
 
 **`test_browser.mjs`** — spawns the real Vite dev server (not a patched build) and
-drives `index-dev.html` via Playwright across Chromium, Firefox, and WebKit, for
-both tasks (30 scenarios total: normal submit, timeout replay, "N timeouts
-remaining" text, 3-timeout termination screen, submit-then-continue). Fast
-timings and tutorial-skip are requested via URL params
-(`?tObsMs=&btiMs=&itiMs=&trials=&tutorial=false&autostart=1`) rather than by
-editing source files, so an interrupted run can't corrupt anything. Screen
-transitions are detected via `body[data-screen="..."]` rather than guessed
-sleep durations.
+drives a test-ONLY entry point (`index-test.html` / `src/test-harness.js`) via
+Playwright across Chromium, Firefox, and WebKit, for both tasks (30 scenarios
+total: normal submit, timeout replay, "N timeouts remaining", 3-timeout
+termination screen, submit-then-continue — tutorial included in full for every
+scenario). That harness is never linked from production code and never
+included in any build (vite.config.js's build inputs are only
+index-continuous.html/index-binary.html) — real participants can never reach
+it. It calls the exact same `buildAndRun()` production uses; it only adjusts
+plain config fields (trial count via array slicing, tObsMs/btiMs/itiMs via
+direct assignment) before handing the config to the same production code
+path — no override logic lives inside buildAndRun/timeline-builder.js itself.
+URL params: `?task=&trials=&tObsMs=&btiMs=&itiMs=`. Screen transitions are
+detected via `body[data-screen="..."]` rather than guessed sleep durations.
 
-Takes ~2–3 minutes for the full matrix — run it after big `task/` changes or
-when asked, not after every small edit.
+Takes ~2–3 minutes for the full matrix (longer than before the tutorial was
+included) — run it after big `task/` changes or when asked, not after every
+small edit.
 
 ```bash
 node test_browser.mjs                                   # full matrix
@@ -348,8 +375,8 @@ for system libraries if missing).
 # Terminal 1: local result server
 npm run dev:server
 
-# Terminal 2: task
-npm run dev
+# Terminal 2: task (either task works the same way)
+npm run dev:continuous
 # Complete a task in browser → data saved to task/dev-results/
 
 # Parse results
@@ -360,7 +387,7 @@ python task/parse_results.py --input_dir task/dev-results/ \
 ### Deploying to MindProbe
 
 **Pre-deployment checklist:**
-- Set `TEST_MODE = false` in both configs
+- Confirm task/sequences/{continuous,binary}_sequences.json holds the intended final trial count/parameters
 - Fill IRB Protocol Number in consent form (`[Protocol Number]` in `timeline-builder.js`)
 - Replace `EARLY_EXIT_CODE = 'EARLYEXIT'` with real Prolific partial-payment code
 - Obtain binary task completion code from Prolific (continuous: `C3W3TF1O`)

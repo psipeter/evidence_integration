@@ -160,7 +160,8 @@ Naming convention (IMPORTANT): every file/class that has a continuous/binary pai
   once (plugin-observation.js vs -binary.js, draw-performance.js vs bar-chart.js)
   and was cleaned up in a dedicated pass; don't reintroduce it.
 Key files: timeline-builder.js (orchestrator), build-trial-timeline.js (pure-JS
-  trial loop), build-tutorial-timeline.js, build-consent-screen.js, build-end-screen.js,
+  trial loop), build-tutorial-timeline.js, build-welcome-screen.js, build-consent-screen.js,
+  build-end-screen.js,
   create-early-exit.js, plugin-observation-continuous.js, plugin-observation-binary.js,
   observation-timeout-clock.js (shared countdown-clock renderer),
   slider-continuous.js, slider-binary.js, distribution-continuous.js (continuous
@@ -176,7 +177,13 @@ Target: ~50–80 participants per task, within-subject (both tasks per participa
 See task/ section in README.md for full details.
 
 Current task status (as of latest session):
-- TEST_MODE=false, N_TRIALS_TO_RUN=24, BTI_MS=3000ms, DISTRACTOR_TYPE='none'
+- No TEST_MODE/N_TRIALS_TO_RUN toggle anymore (removed along with index-dev.html
+  -- see "Task testing architecture" below). Trial count is fully implicit from
+  however many trials task/sequences/{task}_sequences.json contains (currently
+  24, the 6×4 pilot). BTI_MS=3000ms, DISTRACTOR_TYPE='none' (config-base.js
+  DEFAULTS).
+- Welcome/title screen (build-welcome-screen.js) is now the first screen shown,
+  before consent -- see "Task testing architecture" below.
 
 Stable architecture (established, do not regress):
 - jsPsych plugin conventions: see "jsPsych 8 plugin conventions" section below.
@@ -489,29 +496,108 @@ under moment-matching — this is now the adopted 6×4 pilot range (see
   running_mean) but explicitly deferred as a separate, bigger UI change —
   not started.
 
-Local dev: open http://localhost:5173/index-dev.html (TEST_MODE=true in configs).
-  Dev setup page: task/index-dev.html — select task, tutorial, nTrials, BTI, distractor.
-  All settings resolved before buildAndRun() — no jsPsych timing issues.
+Local dev: open http://localhost:5173/index-continuous.html or
+  http://localhost:5174/index-binary.html via `npm run dev:continuous` /
+  `npm run dev:binary` (each auto-opens its own task on its own fixed port,
+  set in vite.config.js -- both can run simultaneously in two terminals).
+  These call buildAndRun() with the real production config -- no dev-page,
+  no override mechanism, full sequences, real timing.
+
+### Task testing architecture (dev page removed)
+
+The old index-dev.html setup page (task/binary select buttons, tutorial
+skip toggle, trial-count/BTI/ITI presets, `?autostart=1`) is gone entirely --
+it's not used, and it complicated buildAndRun/config-base.js with dev-only
+knobs (`testMode`, `nTrialsDefault`, `trialItiMs`, `showTutorial`) that
+nothing else needed. Removing them also closed a real risk: config-base.js's
+old N_TRIALS_TO_RUN/TEST_MODE mechanism manually mirrored sequences.json's
+trial count rather than reading it, which could have silently truncated
+trials if the two ever drifted out of sync. Trial count is now fully
+implicit from sequences.json's actual length everywhere.
+
+**Production entry points are unchanged and were already correct**:
+index-continuous.html / index-binary.html -> experiment-continuous.js /
+experiment-binary.js -> `buildAndRun(config)` directly, full sequences, no
+overrides, tutorial always shown. Nothing about production behavior changed.
+
+**Test-only entry point** (index-test.html + src/test-harness.js) --
+NEVER linked from production code, NEVER included in any build
+(vite.config.js's rollupOptions.input only lists index-continuous.html /
+index-binary.html, so this is automatically excluded with no extra care
+needed; real participants can never reach or discover it). Calls the exact
+same buildAndRun() production uses -- test-harness.js only builds a
+slightly modified CONFIG OBJECT (fewer trials via array slicing, faster
+timing via direct field assignment) using fields that already exist on the
+config; no override logic lives inside buildAndRun/timeline-builder.js
+itself. URL params (all optional): `task`, `trials` (default 3), `tObsMs`,
+`btiMs`, `itiMs` (overrides both the main task's per-trial iti_ms AND the
+tutorial's itiShortMs). No tutorial-skip param exists -- the tutorial
+always runs in full, including in tests (see below for why).
+
+**test_browser.mjs** drives this via Playwright across Chromium/Firefox/
+WebKit, both tasks (30 scenarios). Since this still spawns the real Vite
+dev server and calls the real buildAndRun with real plugins/CSS/DOM, and
+Playwright still drives it with real clicks across real browser engines,
+this preserves the actual bug-catching value the old dev-page-driven suite
+had -- only the config VALUES differ from production, never the code path
+or the interaction method.
+
+The tutorial now runs in FULL during tests (previously skipped via
+`?tutorial=false`, meaning tutorial screens were NEVER exercised by
+automated tests at all). This was a deliberate choice, not just a side
+effect of removing the skip option: tutorial screens have no response
+deadline at all (see build-tutorial-timeline.js), so skipping was never
+about avoiding a timer, just a few extra clicks -- running it for real
+costs little and gains real cross-browser coverage of screens that were
+previously completely untested. doTutorial() in test_browser.mjs walks the
+full progressive-reveal intro -> remaining tutorial observations (each
+preceded by a fixed tutorial_iti, no click needed) -> tutorial summary ->
+3-screen timeout demo -> real trial 1. Same element ids across both tasks
+(tut-box-0/1/2, tut-image-placeholder, response-slider, submit-btn,
+proceed-btn) per the project's naming convention, so one implementation
+covers both tasks without branching. When waiting for the tutorial's
+repeated tutorial_iti <-> tutorial_observation cycle, always wait for the
+INTERMEDIATE tutorial_iti screen first, not directly for the next
+tutorial_observation -- the DOM can still show the just-submitted
+tutorial_observation's stale data-screen value for a few ms after
+submission, and tutorial_iti is a genuinely new state that can't be stale.
+
+**Slider interaction in tests** (moveSlider in test_browser.mjs) sets the
+slider's `.value` directly and dispatches a real `input` event, rather than
+computing a pixel position from the element's bounding box and simulating a
+mouse drag. This was a deliberate fix, not a stylistic preference: a
+pixel-based approach failed specifically for the binary tutorial slider
+under headless Chromium (computed height 16px instead of the CSS-specified
+96px, `elementFromPoint` missing the element entirely) while working fine
+for continuous in the exact same run -- but this could NOT be confirmed as a
+real app-facing bug, since there's no way to launch a headed browser in this
+sandbox to check against what a real user actually sees, and the person
+running this project manually did not observe any such issue. Treat any
+future headless-only slider anomaly the same way: fix the test's interaction
+robustness first (event dispatch, not geometry), and don't conclude it's an
+app bug without a way to visually verify against real usage.
+
+**itiShortMs bug found and fixed while building this**: the tutorial's
+between-observation ITI was hardcoded to `1000` in build-tutorial-timeline.js,
+completely ignoring the `itiShortMs` config field that was declared and
+threaded through config-base.js/timeline-builder.js the whole time --
+dead/disconnected plumbing that had never actually been wired to anything.
+Fixed: itiShortMs now flows through and is overridable via the test
+harness's `itiMs` param.
 
 Testing:
 - node test_consent_name.mjs — verifies pilot name saved to jsPsych data (fast, ~5s)
 - node test_browser.mjs      — Playwright E2E tests across Chromium, Firefox, and
-                               WebKit, both tasks (30 scenarios total). SLOW (~2-3 min) —
-                               only run after big task/ changes or when explicitly asked,
-                               not after every small edit. Runs fine via shell tool now
-                               (previous "hangs in shell" note was wrong — the real issue
-                               was a destructive config-patching harness that could leave
-                               source files corrupted and orphan the dev-server process on
-                               interrupt). Rewritten to:
-                                 - spawn the real `vite` dev server (not a patched build)
-                                 - drive it via URL params on index-dev.html (?task=,
-                                   ?tObsMs=, ?btiMs=, ?itiMs=, ?trials=, ?tutorial=,
-                                   ?autostart=1) — free-form overrides, not limited to
-                                   the dev-page's button presets — see index-dev.html
-                                 - detect screen transitions via body[data-screen="..."]
-                                   (set by on_trial_start in timeline-builder.js) instead
-                                   of guessing sleep durations
-                                 - kill the dev server by process group on exit
+                               WebKit, both tasks (30 scenarios total, full tutorial
+                               included). SLOW (~2-3 min, longer than before since
+                               the tutorial now runs in full) — only run after big
+                               task/ changes or when explicitly asked, not after every
+                               small edit. Runs fine via shell tool (spawns the real
+                               `vite` dev server against index-test.html, drives it via
+                               URL params -- see "Task testing architecture" above --
+                               detects screen transitions via body[data-screen="..."]
+                               set by on_trial_start in timeline-builder.js, kills the
+                               dev server by process group on exit).
                                Run a subset: node test_browser.mjs --task=binary --browser=chromium
                                Firefox/WebKit require: npx playwright install firefox webkit
                                (+ system deps via `sudo npx playwright install-deps` if missing —
@@ -591,7 +677,8 @@ JATOS/MindProbe deployment:
 - Abandoned runs stay as DATA_RETRIEVED in MindProbe — filter by FINISHED state
 
 Pre-deployment checklist (before Prolific production):
-  - Set TEST_MODE=false in both configs (already done for current jzips)
+  - Confirm task/sequences/{continuous,binary}_sequences.json holds the intended
+    final trial count/parameters (no more TEST_MODE/N_TRIALS_TO_RUN switch to check)
   - Remove PILOT ONLY name field (timeline-builder.js + parse_results.py)
   - Fill IRB Protocol Number ([Protocol Number] in timeline-builder.js)
   - Replace EARLY_EXIT_CODE='EARLYEXIT' with real Prolific partial-payment code
@@ -1088,3 +1175,8 @@ change (e.g. "change X to Y", "add Z", "remove W").
 - Do not add a seed search / best-of-N ranking to generate_sequences_iid.py —
   this was deliberately removed; any outcome-dependent seed selection
   reintroduces the conditioning this branch exists to avoid
+- Do not reintroduce dev-only override knobs (testMode, nTrialsDefault,
+  trialItiMs, showTutorial) into buildAndRun/timeline-builder.js/config-base.js
+  — these were deliberately removed along with index-dev.html; any test-only
+  need for different config values belongs in src/test-harness.js building a
+  modified config object, never inside the production code path itself

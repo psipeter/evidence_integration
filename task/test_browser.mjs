@@ -3,12 +3,22 @@
  * Playwright end-to-end tests for both tasks (continuous + binary) across
  * Chromium, Firefox, and WebKit.
  *
- * Non-destructive: no source files are patched. Fast timings/skip-tutorial
- * are requested via URL query params on index-dev.html (see the "URL param
- * overrides" block on that file), which the dev server reads at runtime.
- * This runs against the real Vite dev server serving the actual task code —
- * nothing is rebuilt or rewritten on disk, so a crash mid-run can't corrupt
- * source files.
+ * Non-destructive: no source files are patched. This runs against the real
+ * Vite dev server serving the actual task code, via a test-ONLY entry point
+ * (index-test.html / src/test-harness.js) that is never linked from
+ * production code and never included in any production build (vite.config.js
+ * only lists index-continuous.html/index-binary.html as build inputs) — real
+ * participants can never reach or discover it. That harness calls the exact
+ * same buildAndRun() production uses; it only adjusts plain config fields
+ * (trial count via array slicing, tObsMs/btiMs/itiMs via direct assignment)
+ * before handing the config to the same production code path — no override
+ * logic lives inside buildAndRun/timeline-builder.js itself. See
+ * src/test-harness.js's docstring for the full rationale.
+ *
+ * The tutorial runs in FULL here (no skip option exists anymore) — tutorial
+ * screens have no response deadline at all, so skipping was never about
+ * avoiding a timer, just extra clicks. Running it for real means these tests
+ * actually exercise the tutorial screens across browsers.
  *
  * Screen transitions are detected via `body[data-screen="..."]`, set by a
  * `on_trial_start` hook in timeline-builder.js (harmless in production —
@@ -17,7 +27,12 @@
  * a screen with no visible text (e.g. the ITI clock, which is canvas-only)
  * looks identical to "stuck" if you're only checking textContent, so tests
  * must wait for the actual screen to change, not for a fixed amount of time
- * to pass.
+ * to pass. This matters especially for the tutorial's repeated
+ * tutorial_iti <-> tutorial_observation cycle: always wait for the
+ * INTERMEDIATE tutorial_iti screen first, not directly for the next
+ * tutorial_observation, since the DOM can still show the just-submitted
+ * tutorial_observation's stale attribute value for a few ms after
+ * submission — tutorial_iti is a genuinely new state that can't be stale.
  *
  * The dev server is spawned in its own process group and killed by group
  * (not just by PID) on exit, so an interrupted run can't leave an orphaned
@@ -45,14 +60,11 @@ const argBrowser = process.argv.find(a => a.startsWith('--browser='))?.split('='
 const TASKS    = argTask    ? [argTask]    : ['binary', 'continuous'];
 const BROWSERS = argBrowser ? [argBrowser] : ['chromium', 'firefox', 'webkit'];
 
-// Fast-test overrides applied via URL params (see index-dev.html).
-// obs timeout 1500ms, BTI 400ms, ITI 400ms, no tutorial, 3 trials.
-// trials/btiMs/itiMs/tObsMs are free-form overrides (NOT limited to the
-// dev-page's button-group presets) — see index-dev.html for details.
+// Fast-test overrides applied via URL params on the test-only harness (see
+// src/test-harness.js): 1500ms observation deadline, 400ms BTI/ITI, 3 trials.
 const T_OBS_MS = 1500;
 const testUrl = (task) =>
-  `${BASE_URL}/index-dev.html?task=${task}&tObsMs=${T_OBS_MS}&btiMs=400&itiMs=400` +
-  `&tutorial=false&trials=3&autostart=1`;
+  `${BASE_URL}/index-test.html?task=${task}&tObsMs=${T_OBS_MS}&btiMs=400&itiMs=400&trials=3`;
 
 // ── Start / stop Vite dev server (own process group, killed by group) ──────
 function startDevServer() {
@@ -105,7 +117,33 @@ const waitForScreen = (p, screen, timeout = 10000) =>
 const waitForTimeoutsRemaining = (p, n, timeout = 10000) =>
   p.waitForSelector(`#too-slow-pulse[data-timeouts-remaining="${n}"]`, { timeout });
 
+// Sets the slider's value directly and dispatches a genuine 'input' event
+// (bubbling, so the app's own listener on #response-slider receives it
+// exactly as it would from a real interaction) -- deliberately NOT based on
+// computing a pixel position from the element's bounding box. The app's
+// slider listeners (slider-continuous.js / slider-binary.js) only need an
+// 'input' event to remove the unset/last styling and enable #submit-btn;
+// this triggers that same code path without depending on rendered geometry.
+const moveSlider = async (p, pct) => {
+  await p.evaluate((value) => {
+    const el = document.querySelector('#response-slider');
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, pct);
+};
+
+const submit = async (p) => {
+  await p.waitForSelector('#submit-btn:not([disabled])');
+  await p.click('#submit-btn');
+};
+
 const doConsent = async (p) => {
+  // Welcome/title screen is the very first thing shown — click through it
+  // before consent. Folded into doConsent (rather than a separate step at
+  // every call site) since every scenario needs both, in this order.
+  await waitForScreen(p, 'welcome');
+  await p.click('#welcome-begin-btn');
+
   await p.waitForSelector('#reveal-box-0');
   for (const id of ['reveal-box-0', 'reveal-box-1']) {
     await p.click(`#${id}`);
@@ -122,29 +160,63 @@ const doConsent = async (p) => {
   await p.click('#consent-btn');
 };
 
-// Tutorial is skipped via ?tutorial=false — next real screen is the first
-// observation ('observation' screen, set by build-trial-timeline.js).
+// Walks through the FULL tutorial (no skip option exists anymore): intro
+// (progressive box/image reveal, first response) -> remaining tutorial
+// observations (each preceded by a fixed 1s tutorial_iti, no click needed)
+// -> tutorial summary -> 3-screen timeout demo -> real trial 1.
+// Same IDs across both tasks (tut-box-0/1/2, tut-image-placeholder,
+// response-slider, submit-btn, proceed-btn) per the project's naming
+// convention, so this one implementation covers both without branching.
 const doTutorial = async (p) => {
+  await waitForScreen(p, 'tutorial_intro');
+  await p.click('#tut-box-0');
+  await wait(p, 80);
+  await p.click('#tut-image-placeholder');
+  await wait(p, 80);
+  await p.click('#tut-box-1');
+  await wait(p, 80);
+  await p.click('#tut-box-2');
+  await wait(p, 80);
+  await p.waitForSelector('#response-slider');
+  await moveSlider(p, 55);
+  await submit(p);
+
+  // Remaining tutorial observations, if any (n_obs varies but is always
+  // >=1 more after the intro). tutorial_iti always intervenes between them
+  // (fixed duration, no click) -- waiting for IT first, rather than
+  // directly for the next tutorial_observation, avoids a race where the
+  // DOM still shows the just-submitted screen's stale attribute value.
+  while (true) {
+    await p.waitForSelector(
+      'body[data-screen="tutorial_iti"], body[data-screen="tutorial_summary"]',
+      { timeout: 10000 }
+    );
+    const screen = await p.getAttribute('body', 'data-screen');
+    if (screen === 'tutorial_summary') break;
+    await waitForScreen(p, 'tutorial_observation', 5000);
+    await p.waitForSelector('#response-slider');
+    await moveSlider(p, 45);
+    await submit(p);
+  }
+
+  // Tutorial summary -> Next
+  await p.click('#proceed-btn');
+
+  // Timeout demo: 3 sub-screens inside a SINGLE jsPsych trial (data-screen
+  // stays 'timeout_demo' throughout -- these are plain DOM swaps, not new
+  // jsPsych trials -- so wait for specific elements, not attribute changes).
+  await waitForScreen(p, 'timeout_demo');
+  // Screen 1 has a real countdown clock (respects the tObsMs override, so
+  // this resolves quickly under test timing) that must run out on its own
+  // before screen 2's button exists.
+  await p.waitForSelector('#demo-next-btn', { timeout: T_OBS_MS + 8000 });
+  await p.click('#demo-next-btn');
+  await p.waitForSelector('#demo-proceed-btn', { timeout: 5000 });
+  await p.click('#demo-proceed-btn');
+
+  // Real trial 1
   await waitForScreen(p, 'observation', 10000);
   await p.waitForSelector('#response-slider');
-};
-
-const moveSlider = async (p, pct) => {
-  const box = await p.$eval('#response-slider', el => {
-    const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width };
-  });
-  const x = box.x + (pct / 100) * box.width;
-  await p.mouse.move(x, box.y + 10);
-  await p.mouse.down();
-  await wait(p, 50);
-  await p.mouse.up();
-  await wait(p, 100);
-};
-
-const submit = async (p) => {
-  await p.waitForSelector('#submit-btn:not([disabled])');
-  await p.click('#submit-btn');
 };
 
 // Let an observation time out without responding, then land on the

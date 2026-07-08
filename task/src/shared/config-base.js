@@ -8,15 +8,11 @@
 
 // ── Shared defaults (identical across tasks unless overridden) ─────────────
 export const DEFAULTS = {
-  TEST_MODE:              false,
-  N_TRIALS_TO_RUN:        24,      // 6 seqs × 4 reps
   N_OBS_TO_RUN:           15,
   SHOW_SLIDER_VALUE:      true,    // float label above thumb
   SLIDER_DEFAULT:         'none',  // 'none' | 'last'
   DEFAULT_VALUE:          50,      // midpoint of [0,100] slider
-  DEBUG_FAST:             false,   // set true for fast automated testing only
-  BTI_MS_TEST:            500,
-  BTI_MS_PROD:            3000,
+  BTI_MS:                 3000,
   ITI_SHORT_MS:           1000,
   T_OBS_MS:               7000,
   SHOW_TRIAL_PERFORMANCE: true,
@@ -104,26 +100,28 @@ export function buildConfig({
 }) {
   const P = { ...DEFAULTS, ...overrides };
 
-  const nTrialsDefault = P.TEST_MODE ? Math.min(20, P.N_TRIALS_TO_RUN) : P.N_TRIALS_TO_RUN;
-  const btiMs           = P.TEST_MODE ? P.BTI_MS_TEST : P.BTI_MS_PROD;
-
   return {
     taskType,
+    // Always the full set of trials in sequencesData -- no slicing. A
+    // separate N_TRIALS_TO_RUN/TEST_MODE mechanism used to slice this down
+    // (originally so a manually-maintained number stayed in sync with
+    // sequences.json's actual length, plus a dev-page override on top of
+    // that) -- removed entirely; trial count is now fully implicit from
+    // however many trials sequences.json actually contains, so it can never
+    // silently drift out of sync with the data again.
     sequences: sequencesData.map(
       s => ({ ...s, values: s.values.slice(0, P.N_OBS_TO_RUN) })
     ),
-    nTrialsDefault,
     tutorialValues,
     tutorialMean,
     tutorialStd,
     showSliderValue:      P.SHOW_SLIDER_VALUE,
     sliderDefault:        P.SLIDER_DEFAULT,
     defaultValue:         P.DEFAULT_VALUE,
-    btiMs,
+    btiMs:                P.BTI_MS,
     itiShortMs:           P.ITI_SHORT_MS,
     tObsMs:               P.T_OBS_MS,
     showTrialPerformance: P.SHOW_TRIAL_PERFORMANCE,
     distractorType:       P.DISTRACTOR_TYPE,
-    testMode:             P.TEST_MODE,
   };
 }

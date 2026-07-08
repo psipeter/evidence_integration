@@ -35,6 +35,45 @@ body {
   margin: auto;
   padding: 0 1rem;
 }
+
+/* ── Welcome / title screen ────────────────────────────────────────────── */
+.welcome-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  text-align: center;
+  padding: 0 1.5rem;
+}
+.welcome-box {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  padding: 3rem 4rem;
+}
+.welcome-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2.6rem, 6vw, 4.2rem);
+  font-weight: bold;
+  color: #1f2937;
+  letter-spacing: 0.01em;
+  margin-bottom: 1.75rem;
+}
+.welcome-subtitle {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  font-style: italic;
+  color: #4b5563;
+}
+.welcome-begin-btn {
+  font-size: 1.6rem;
+  padding: 1rem 3.5rem;
+  margin-top: 2.5rem;
+  position: relative;
+  z-index: 2;
+}
 .screen-wrap h2 {
   text-align: center;
   margin-bottom: 1.5rem;

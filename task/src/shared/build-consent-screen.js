@@ -144,7 +144,7 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
           </div>
         </div>
       </div>`,
-    choices: ['Begin experiment'],
+    choices: ['Begin tutorial'],
     button_html: (c) =>
       `<button id="consent-btn" class="jspsych-btn consent-btn-locked"
         style="font-size:1.6rem;padding:1rem 3.5rem;margin-top:1.5rem;">${c}</button>`,

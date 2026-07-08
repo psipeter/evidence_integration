@@ -18,7 +18,6 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
     sequences, sliderDefault, defaultValue, btiMs, tObsMs,
     showSliderValue, showTrialPerformance, MAX_TIMEOUTS_PER_TRIAL = 3,
     distractorType = 'iti_length',
-    trialItiMs     = null,  // null = use seq.iti_ms; number = override
   } = cfg;
 
   const { ItiClockPlugin, TrialObsPlugin, TrialSummaryPlugin,
@@ -45,7 +44,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
         trialTimeline.push({
           timeline: [{ type: ItiClockPlugin,
             duration_ms: (seq.iti_condition === 'distract' && ITI_DISTRACT_MS !== null)
-              ? ITI_DISTRACT_MS : (trialItiMs ?? seq.iti_ms ?? 1000),
+              ? ITI_DISTRACT_MS : (seq.iti_ms ?? 1000),
             iti_condition:   seq.iti_condition ?? 'control',
             distractor_type: distractorType,
             is_binary:       isBinary,
@@ -78,7 +77,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
             },
           },
           {
-            timeline: [{ type: ItiClockPlugin, duration_ms: trialItiMs ?? seq.iti_ms ?? 1000,
+            timeline: [{ type: ItiClockPlugin, duration_ms: seq.iti_ms ?? 1000,
               timed_out: true, timeouts_remaining: () => MAX_TIMEOUTS_PER_TRIAL - trialTimeouts,
               data: { screen: 'iti_replay', trial: t, observation: _o } }],
             conditional_function: () => timedOut && trialTimeouts < MAX_TIMEOUTS_PER_TRIAL,

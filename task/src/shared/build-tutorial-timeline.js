@@ -23,6 +23,7 @@ import TimeoutDemoPlugin   from './plugin-timeout-demo.js';
  * @param {boolean} cfg.showSliderValue
  * @param {number} cfg.tObsMs
  * @param {number} cfg.maxTimeoutsPerTrial
+ * @param {number} [cfg.itiShortMs]  tutorial between-observation ITI, ms (default 1000)
  * @param {object} plugins
  * @param {*} plugins.TutorialIntroPlugin   (task-specific intro plugin, obs 0)
  * @param {*} plugins.TutorialObsPlugin     (task-specific tutorial obs plugin, obs 1..n)
@@ -33,7 +34,7 @@ export function buildTutorialTimeline(cfg, plugins) {
   const {
     isBinary, tutorialValues, tutorialMean, tutorialStd,
     sliderDefault, defaultValue, showSliderValue,
-    tObsMs, maxTimeoutsPerTrial,
+    tObsMs, maxTimeoutsPerTrial, itiShortMs = 1000,
   } = cfg;
   const { TutorialIntroPlugin, TutorialObsPlugin, TutorialSummaryPlugin } = plugins;
 
@@ -77,7 +78,7 @@ export function buildTutorialTimeline(cfg, plugins) {
       timeline: [
         {
           type: ItiClockPlugin,
-          duration_ms: 1000,  // tutorial ITI always 1s
+          duration_ms: itiShortMs,
           data: { screen: 'tutorial_iti', observation: _o },
         },
         {

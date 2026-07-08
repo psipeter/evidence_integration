@@ -23,6 +23,11 @@
  *   tObsMs:               number  (observation display timeout, ms)
  *   showTrialPerformance: boolean
  * }
+ *
+ * Always runs the FULL sequences array (however many trials it contains),
+ * always shows the tutorial, and always uses each trial's own iti_ms —
+ * there is no dev-page/override mechanism anymore (removed along with
+ * index-dev.html; see CLAUDE.md).
  */
 
 import { initJsPsych } from 'jspsych';
@@ -42,6 +47,7 @@ import ObservationBinaryPlugin      from './plugin-observation-binary.js';
 import TrialSummaryBinaryPlugin     from './plugin-trial-summary-binary.js';
 import './style.css';
 import { buildTrialTimeline }      from './build-trial-timeline.js';
+import { buildWelcomeScreen }      from './build-welcome-screen.js';
 import { buildConsentScreen }      from './build-consent-screen.js';
 import { buildTutorialTimeline }   from './build-tutorial-timeline.js';
 import { createEarlyExit }         from './create-early-exit.js';
@@ -65,16 +71,7 @@ export function buildAndRun(cfg) {
     tObsMs,
     showTrialPerformance,
     distractorType = 'iti_length',
-    testMode       = false,
-    showTutorial   = true,
-    trialItiMs     = null,  // null = use seq.iti_ms; number = override all trial ITIs
-    nTrialsDefault = null,  // set in config; overridden by dev page
   } = cfg;
-
-  // Slice sequences to the correct number of trials
-  const activeSequences = nTrialsDefault != null
-    ? sequences.slice(0, nTrialsDefault)
-    : sequences;
 
   const isBinary = taskType === 'binary';
   // "Resolved" prefix distinguishes these task-specific selections from the
@@ -151,17 +148,21 @@ export function buildAndRun(cfg) {
 
   const timeline = [];
 
+  // ── Welcome / title screen ────────────────────────────────────────────────
+  // continuous <-> Part A, binary <-> Part B -- decided HERE (nowhere else)
+  // so the mapping is easy to find/change later if it should be the reverse
+  // or vary by participant instead of being fixed per task build.
+  timeline.push(buildWelcomeScreen(isBinary, isBinary ? 'Part B' : 'Part A'));
+
   // ── Consent ───────────────────────────────────────────────────────────────
   timeline.push(buildConsentScreen(tObsMs, MAX_TIMEOUTS_PER_TRIAL));
 
-  // ── Tutorial (conditionally skipped — controlled by showTutorial, set by
-  //    config or the dev setup page) ──────────────────────────────────────────
-  const skipTutorial = !showTutorial;
+  // ── Tutorial (always shown -- no skip mechanism anymore) ────────────────────
   const tutorialTimeline = buildTutorialTimeline(
     {
       isBinary, tutorialValues, tutorialMean, tutorialStd,
       sliderDefault, defaultValue, showSliderValue,
-      tObsMs, maxTimeoutsPerTrial: MAX_TIMEOUTS_PER_TRIAL,
+      tObsMs, maxTimeoutsPerTrial: MAX_TIMEOUTS_PER_TRIAL, itiShortMs,
     },
     {
       TutorialIntroPlugin,
@@ -169,16 +170,13 @@ export function buildAndRun(cfg) {
       TutorialSummaryPlugin: ResolvedTutorialSummaryPlugin,
     },
   );
-  timeline.push({
-    timeline:             tutorialTimeline,
-    conditional_function: () => !skipTutorial,
-  });
+  for (const node of tutorialTimeline) timeline.push(node);
 
   // Inter-trial reset before trial 1
   timeline.push({
     type:        InterTrialPlugin,
     trial_num:   1,
-    n_trials:    activeSequences.length,
+    n_trials:    sequences.length,
     duration_ms: btiMs,
     is_binary:   isBinary,
     data: { screen: 'inter_trial_reset', trial: -1 },
@@ -187,8 +185,8 @@ export function buildAndRun(cfg) {
   // ── Trial loop ────────────────────────────────────────────────────────────
   const { timeline: trialTimelineNodes, isExited } = buildTrialTimeline(
     {
-      sequences: activeSequences, sliderDefault, defaultValue,
-      btiMs, trialItiMs, tObsMs,
+      sequences, sliderDefault, defaultValue,
+      btiMs, tObsMs,
       showSliderValue, showTrialPerformance,
       MAX_TIMEOUTS_PER_TRIAL, distractorType,
     },
