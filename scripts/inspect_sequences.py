@@ -430,6 +430,145 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="t
     return results
 
 
+# ── Human-readable inspection CSV ──────────────────────────────────────────────
+def build_inspection_csv(seq_dir: Path, out_path: Path) -> pd.DataFrame:
+    """Observation-level, human-readable CSV of everything the sequence
+    generator is trying to guarantee -- prefix/suffix structure, achieved
+    vs target mean/std/p, prefix uniqueness across qids, binary exact-quota
+    correctness, and iti_condition balance. Reads directly from
+    {task}_sequences.json -- no model/NEF dependency at all, so this is
+    fast and always available regardless of --skip_nef.
+
+    One row per (task, trial, observation). Trial-level quantities (target,
+    final achieved value, this trial's prefix mean, the uniqueness/quota
+    verdicts) are repeated on every row of that trial -- deliberately
+    denormalized so opening this in a spreadsheet and scrolling one trial
+    at a time shows the per-observation trajectory AND the trial-level
+    summary side by side, without cross-referencing a second sheet.
+    is_prefix marks which rows belong to the shared prefix vs the
+    per-trial suffix (see generate_sequences_momentmatch.py's module
+    docstring for what that split means and why it exists).
+    """
+    rows = []
+    console_summary = []
+
+    for task in ("continuous", "binary"):
+        json_path = seq_dir / f"{task}_sequences.json"
+        if not json_path.exists():
+            continue
+        with open(json_path) as f:
+            trials = json.load(f)
+
+        # -- Global prefix-uniqueness check across all qids in this task --
+        # (the actual bug this whole redesign fixed: two different qids
+        # ending up with an identical realized prefix by chance -- see
+        # generate_sequences_momentmatch.py's module docstring)
+        prefix_by_qid: dict = {}
+        for t in trials:
+            pl = t["prefix_length"]
+            prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
+        all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
+        n_distinct = len(set(all_prefixes))
+        n_qids = len(prefix_by_qid)
+        one_prefix_per_qid = all(len(v) == 1 for v in prefix_by_qid.values())
+        prefix_ok = (n_distinct == n_qids) and one_prefix_per_qid
+        console_summary.append(
+            f"[{task}] prefix uniqueness: {n_distinct}/{n_qids} distinct "
+            f"({'OK' if prefix_ok else 'COLLISION DETECTED -- see rows below'})"
+        )
+
+        # -- iti_condition balance per qid (should be within 1 of even split) --
+        iti_by_qid: dict = {}
+        for t in trials:
+            iti_by_qid.setdefault(t["qid"], []).append(t.get("iti_condition"))
+        imbalanced = [q for q, conds in iti_by_qid.items()
+                      if abs(conds.count("control") - conds.count("distract")) > 1]
+        console_summary.append(
+            f"[{task}] iti_condition balance: "
+            + (f"{len(imbalanced)} qid(s) off by >1 ({imbalanced})"
+               if imbalanced else "OK (every qid within 1 of an even control/distract split)")
+        )
+
+        n_quota_bad = 0
+        for t in trials:
+            pl = t["prefix_length"]
+            vals = t["values"]
+            n = len(vals)
+            prefix_vals = vals[:pl]
+
+            target_mean = t.get("true_mean")
+            target_std  = t.get("true_std")
+            target_p    = t.get("true_p")
+
+            if task == "continuous":
+                prefix_mean  = float(np.mean(prefix_vals))
+                prefix_blue  = None
+                final_mean   = float(np.mean(vals))
+                final_std    = float(np.std(vals))
+                mean_error   = final_mean - target_mean if target_mean is not None else None
+                std_error    = final_std - target_std if target_std is not None else None
+                final_blue   = None
+                quota_ok     = None
+            else:
+                prefix_mean  = None
+                prefix_blue  = sum(1 for v in prefix_vals if v == 1)
+                final_mean   = final_std = mean_error = std_error = None
+                final_blue   = sum(1 for v in vals if v == 1)
+                target_blue  = round(target_p * n) if target_p is not None else None
+                quota_ok     = (final_blue == target_blue) if target_blue is not None else None
+                if quota_ok is False:
+                    n_quota_bad += 1
+
+            running_sum, running_blue = 0, 0
+            for o, v in enumerate(vals, start=1):
+                running_sum += v
+                running_blue += 1 if v == 1 else 0
+                rows.append({
+                    "task": task,
+                    "trial": t["trial"],
+                    "qid": t["qid"],
+                    "observation": o,
+                    "is_prefix": o <= pl,
+                    "value": v,
+                    "running_mean": (running_sum / o) if task == "continuous" else None,
+                    "running_p": (running_blue / o) if task == "binary" else None,
+                    "prefix_length": pl,
+                    "prefix_mean": prefix_mean,
+                    "prefix_blue_count": prefix_blue,
+                    "target_mean": target_mean,
+                    "target_std": target_std,
+                    "target_p": target_p,
+                    "final_achieved_mean": final_mean,
+                    "final_achieved_std": final_std,
+                    "final_achieved_blue": final_blue,
+                    "mean_error": mean_error,
+                    "std_error": std_error,
+                    "binary_quota_ok": quota_ok,
+                    "prefix_globally_unique_this_task": prefix_ok,
+                    "iti_ms": t.get("iti_ms"),
+                    "iti_condition": t.get("iti_condition"),
+                })
+
+        if task == "binary":
+            console_summary.append(
+                f"[{task}] exact-quota check: {n_quota_bad} trial(s) with "
+                f"achieved blue count != round(true_p * seq_length) "
+                f"({'OK' if n_quota_bad == 0 else 'MISMATCH -- see binary_quota_ok column'})"
+            )
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        print(f"[csv skip] no {{task}}_sequences.json files found in {seq_dir}")
+        return df
+    df = df.sort_values(["task", "trial", "observation"]).reset_index(drop=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
+    print(f"Saved: {out_path}  ({len(df)} rows)")
+    for line in console_summary:
+        print(" ", line)
+    return df
+
+
 # ── Plotting ──────────────────────────────────────────────────────────────────
 
 def _plot_panel(ax, agent_data, metric, title, ylabel, colors):
@@ -572,6 +711,15 @@ def parse_args():
         "--gt_mode", choices=list(GT_MODES), default="running_mean",
         help="Ground truth for RMSE panels: 'running_mean' (default) or 'true'",
     )
+    p.add_argument(
+        "--csv_out", default=None,
+        help="Path for the human-readable inspection CSV (default: "
+             "figures/inspect_sequences.csv)",
+    )
+    p.add_argument(
+        "--skip_csv", action="store_true",
+        help="Skip building the inspection CSV (built by default, alongside the figure)",
+    )
     return p.parse_args()
 
 
@@ -598,8 +746,13 @@ if __name__ == "__main__":
         print("JOB_COMPLETE")
         raise SystemExit(0)
 
-    out = Path(args.out) if args.out else FIGURES_DIR / "inspect_sequences.pdf"
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not args.skip_csv:
+        csv_out = Path(args.csv_out) if args.csv_out else FIGURES_DIR / "inspect_sequences.csv"
+        build_inspection_csv(Path(args.seq_dir), csv_out)
+
+    out = Path(args.out) if args.out else FIGURES_DIR / "inspect_sequences.pdf"
     make_figure(
         args.seq_dir,
         args.alpha_0,

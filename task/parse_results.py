@@ -40,6 +40,26 @@ Output columns (observation rows only)
     timed_out      : bool   True if response deadline elapsed
     rt             : float  Response time in ms (NaN if timed out)
     time_elapsed   : int    ms since experiment start
+
+Duplicate rows per (task, trial, observation) are INTENTIONAL, not a bug —
+read this before touching row-uniqueness assumptions anywhere downstream.
+When an observation times out, build-trial-timeline.js replays the SAME
+observation index (up to MAX_TIMEOUTS_PER_TRIAL times), and each attempt is
+its own jsPsych trial with its own row here — so a slot that timed out once
+or twice before eventually succeeding produces 1-2 extra timed_out=True rows
+under the same (task, trial, observation) key as the eventual real response
+(or, if the budget is exhausted, up to MAX_TIMEOUTS_PER_TRIAL timed_out=True
+rows and no successful one at all — see dev-results/pilot8fail.txt for a
+real example, confirmed via a real MindProbe run). This is deliberate: EVERY
+attempt is kept here for participant-level data-quality auditing (e.g. flagging
+someone who timed out repeatedly), not filtered at parse time. Any analysis
+treating (pid, task, trial, observation) as a unique key MUST filter first —
+typically to timed_out == False, or to the last attempt per slot if timeout
+counts themselves matter — before doing so; this script deliberately does not
+pick one, since which filtering is correct depends on the analysis. This also
+means the printed "Timed out" percentage below counts ATTEMPTS, not unique
+slots — a slot that timed out twice then succeeded contributes 2 to the
+timed_out count and 1 to the total denominator's success side, not 1-in-3.
 """
 
 import json

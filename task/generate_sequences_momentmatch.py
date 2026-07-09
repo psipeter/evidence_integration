@@ -27,78 +27,139 @@ problems: there is no joint multi-qid rejection loop, and the target
 statistics are hit by construction rather than by chance, so it scales to
 any number of parameter levels for free.
 
-Method
-------
-Continuous (per block, prefix or suffix, independently):
-  1. Draw n raw i.i.d. values from Normal(true_mean, true_std) (no rejection).
+Prefix generation (IMPORTANT -- read this before touching prefix logic)
+-------------------------------------------------------------------------
+As of the latest redesign, PREFIX IDENTITY and TARGET LEVEL are
+INDEPENDENT axes. This is a deliberate change from an earlier version of
+this script (and from generate_sequences.py) where each qid meant exactly
+one (prefix, target) pair, repeated n_repeats times -- which had a real,
+confirmed bug: two DIFFERENT qids could (and, in the production 6x4 pilot
+sequences, actually did) end up with an IDENTICAL realized prefix purely by
+chance, since binary's small combinatorial space at prefix_length=4 (only
+2**4=16 possible sequences total, and as few as 4 arrangements for a given
+exact quota) made collisions likely once enough qids shared a quota.
+
+The corrected design:
+  - `n_prefix` DISTINCT prefixes are generated first, independent of any
+    target. This is what "qid" and repeat structure now track: each of the
+    n_prefix prefixes is repeated `n_repeats` times, giving n_total =
+    n_prefix * n_repeats trials. See build_continuous_prefixes /
+    build_binary_prefixes.
+      - Continuous: real-valued draws essentially never coincide exactly,
+        so no active dedup is needed -- just a safety-net assertion.
+      - Binary: genuinely needs active dedup, since the combinatorial space
+        is small. Compositions (blue-ball counts out of prefix_length) are
+        spread across the FULL range from all-red to all-blue via an
+        evenly-spaced grid (same linspace pattern used elsewhere in this
+        script), and arrangements within a repeated composition are drawn
+        WITHOUT replacement. Fails loudly if n_prefix exceeds what's
+        structurally possible at a given prefix_length.
+  - `n_total` TARGET values (true_mean for continuous, true_p for binary)
+    are generated SEPARATELY, with NO forced repeat structure at all --
+    each trial gets its own target, decoupled from which prefix it uses.
+      - Continuous: n_total DISTINCT true_mean values, evenly spaced across
+        mean_range (nothing here needs to repeat -- see
+        continuous_target_means).
+      - Binary: the FULL native integer granularity of blue_range (every
+        integer level, not an evenly-spaced SUBSET the way the old
+        --n_levels design worked), distributed as evenly as possible across
+        n_total trials -- when n_total doesn't divide evenly by the number
+        of levels, the remainder goes to a RANDOM subset of levels (not
+        deterministically the first few), so there's no systematic bias
+        toward one end of the range. See binary_target_blue_counts.
+  - Prefix-slots and target-slots are then matched via a GLOBALLY OPTIMAL
+    assignment (optimal_matching, the Hungarian algorithm via
+    scipy.optimize.linear_sum_assignment) that minimizes total
+    |prefix_value - target_value| mismatch across all pairs jointly -- NOT
+    a greedy or randomized heuristic. A greedy "closest available" approach
+    was tried first and rejected after confirming empirically that it can
+    leave an arbitrarily bad single-pair mismatch (tested down to fully
+    greedy -- still left a >40-point mismatch on one pair) purely from
+    unlucky processing order once a popular region's limited supply runs
+    out; the Hungarian algorithm has no such failure mode since it
+    considers the whole assignment jointly.
+      - Continuous: no HARD feasibility constraint at all -- any prefix can
+        be rescaled toward any target via the residual suffix math below.
+      - Binary: a real hard feasibility constraint exists (see "Residual
+        math" below) -- an all-red prefix, for instance, cannot reach a
+        target near the top of blue_range no matter what the suffix
+        contains; infeasible pairs are given effectively-infinite cost, and
+        the function raises loudly if the optimal solution still has to use
+        one (meaning no feasible assignment exists at all).
+    No extra randomization is layered on top of the solver itself --
+    prefixes (and, for binary, targets) are already freshly drawn per
+    --seed, so different seeds already explore different assignments. Not
+    having an obvious, learnable prefix->target mapping (the "soft" pairing
+    goal from the design discussion) comes from the prefix's own sampling
+    noise -- SEM = std_fixed/sqrt(prefix_length), e.g. 7.5 at the
+    production defaults -- and from a prefix's n_repeats occurrences
+    generally landing on different targets, not from randomness inside the
+    matching step.
+  - Continuous prefixes are drawn with their CENTERS spread evenly across
+    mean_range (build_continuous_prefixes), not all centered on the range
+    midpoint -- an earlier version did the latter and, confirmed
+    empirically, left extreme targets with no genuinely close prefix
+    available no matter how the matching was tuned (a supply problem, not a
+    selection problem). Binary's compositions were already spread this way
+    from the start (see build_binary_prefixes), so it never had this issue.
+
+A consequence worth knowing about, not a bug: under this design, a given
+prefix's n_repeats occurrences will generally each pair with a DIFFERENT
+true_mean/true_p. "qid repeats" here means "same literal prefix shown
+multiple times", NOT "same hidden generative parameter shown multiple
+times" the way carrabin/yoo's qid works. If a downstream analysis or
+config-base.js's pickTutorialExample assumes a qid's repeats share a target
+(some do), that assumption no longer holds under this design and needs
+revisiting there, not here.
+
+Residual math (why this is needed at all)
+-------------------------------------------
+generate_sequences.py's prefix is drawn freely (not matched to anything),
+and its suffix is built via REJECTION SAMPLING on the FULL pooled sequence
+-- the rejection loop implicitly "corrects" for whatever the prefix already
+contributed. This script has no rejection loop at all (that is the entire
+point of moment-matching), so with a now-generic prefix, the suffix must
+explicitly target the RESIDUAL needed to bring the pooled sequence to the
+trial's actual target, not the target directly:
+
+  Continuous (suffix_for_continuous_target): exact algebra --
+    given prefix_sum = sum(prefix), and wanting the pooled sample mean over
+    all seq_length observations to equal target_mean:
+      residual_suffix_mean = (target_mean * seq_length - prefix_sum) / suffix_length
+    The suffix's OWN std target is left at std_fixed (not similarly
+    residual-adjusted -- doing that exactly would require accounting for
+    the between-block mean-shift term, i.e. Var(pooled) includes a
+    contribution from how far apart the two blocks' means are, which is
+    no longer ~0 now that the prefix's mean is unrelated to the target).
+    Expect pooled std to run slightly ABOVE std_fixed as a result, more so
+    for trials where the prefix's own realized mean happens to be far from
+    that trial's target -- check via --report if this matters for a given
+    mean_range/std_fixed combination.
+
+  Binary (suffix_for_binary_target): exact by construction, no
+    approximation needed -- total blue balls needed = round(true_p *
+    seq_length); suffix needs exactly (that minus however many blue balls
+    the prefix already has) blue balls among its suffix_length
+    observations. This is well-defined only when that residual falls in
+    [0, suffix_length], which is exactly what
+    match_prefixes_to_targets_binary's feasibility constraint guarantees
+    before this function is ever called.
+
+Method (per-block construction, unchanged from before)
+---------------------------------------------------------
+Continuous (per block):
+  1. Draw n raw i.i.d. values from Normal(target_mean, target_std) (no rejection).
   2. Affinely rescale so the block's OWN sample mean/std exactly match the
-     target: v' = true_mean + (v - mean(v)) * (true_std / std(v)).
+     target: v' = target_mean + (v - mean(v)) * (target_std / std(v)).
   3. Clip to [0,100], then repeat the rescale+clip step a few times
      (max_rescale_iters) to claw back most of the bias clipping introduces
-     at extreme means -- this does NOT fully solve the mean=10/90 + std=15
-     structural mismatch (clipping still truncates), but it converges much
-     closer than a single pass, and unlike generate_sequences.py it never
-     needs to reject and redraw.
+     at extreme means -- does NOT fully solve the mean=10/90 + std=15
+     structural mismatch (clipping still truncates), but converges much
+     closer than a single pass, and never needs to reject and redraw.
   4. Round to nearest int.
 
-  Because two blocks that each independently hit the same (mean, std) have
-  a pooled mean/std approximately equal to that same (mean, std) -- the
-  between-block variance term vanishes when both blocks share a mean --
-  the prefix and suffix can each target the SAME global (true_mean,
-  true_std) independently. No "residual target" bookkeeping is needed.
-
-Binary (per block, prefix or suffix, independently):
-  Exact quota: round(n * true_p) blue, the rest red, order shuffled.
-  This is exact by construction (up to rounding) -- no correction needed.
-
-Prefix / suffix structure (preserved from generate_sequences.py)
-------------------------------------------------------------------
-  Prefix: built once per qid (shared across all n_repeats repeats of that
-    qid), via moment_match_continuous/binary.
-  Suffix: built FRESH per repeat via a new raw draw + rescale (continuous)
-    or a fresh shuffle of the same quota (binary) -- so repeats differ in
-    actual realized values, giving genuine within-qid variability rather
-    than just reordering a fixed multiset.
-
-Parameter levels: evenly-spaced grid, NOT random, NOT mirrored
------------------------------------------------------------------
-  Earlier versions of this script (and generate_sequences.py /
-  generate_sequences_iid.py, which still use this approach) picked true_mean/
-  true_p by drawing randomly within stratified bins across the LOWER half of
-  a range, then mirrored each draw (mean -> 100-mean, p -> 1-p) to get the
-  upper half "for free" and guarantee a symmetric aggregate distribution.
-  That mirroring step doesn't carry its weight here for two independent
-  reasons: (1) its original point was compute-saving under
-  generate_sequences.py's rejection sampling, where extreme means are
-  expensive to draw -- moment-matching has no rejection loop at all, so
-  there's no cost to saving; (2) an EXPLICIT, evenly-spaced grid of levels is
-  already symmetric by construction (as long as the range and level count
-  are), so there's nothing left for a mirroring mechanism to add.
-
-  --n_levels (default 6) evenly-spaced levels are constructed via
-  np.linspace across an explicit range, one qid per level -- this
-  reproduces the ORIGINAL "6 unique sequences x n_repeats" structure
-  exactly, just with the 6 levels chosen deterministically (evenly spaced,
-  automatically split evenly between the lower and upper half of the range)
-  rather than randomly-drawn-then-mirrored:
-    Continuous: --mean_range (default [10,90], matching the pilot's adopted
-      boundary -- see generate_sequences.py's docstring for why [10,90]
-      rather than [0,100]). n_levels=6 over [10,90] gives [10,26,42,58,74,90].
-    Binary: --blue_range (default [2,13], i.e. blue-ball counts out of
-      --seq_length -- NOT a p fraction, since binary's moment-matching is
-      already exact for any integer quota, so there's no reason to go
-      through a p-value intermediate that then needs rounding back to the
-      nearest achievable 15th). n_levels=6 over [2,13] gives [2,4,6,9,11,13]
-      (rounds to a perfectly symmetric set: 2+13=4+11=6+9=15).
-  Both ranges/level counts are freely tunable via CLI -- there is nothing
-  6-specific hardcoded; a different n_levels/range combination (e.g. for a
-  larger full-experiment design) just needs different flag values.
-
-Continuous mean=10/90 note: the underlying moment-matching bias at extreme
-means is unchanged by any of this -- see generate_sequences.py's docstring /
-CLAUDE.md for the achieved-mean-vs-target bias table. Binary has no
-equivalent bias at any quota -- moment-matching is exact by construction for
-any integer blue-ball count.
+Binary (per block): exact quota: round(n * true_p) blue, the rest red,
+  order shuffled -- exact by construction, no correction needed.
 
 What this does NOT fix
 -----------------------
@@ -117,20 +178,20 @@ and no seed can "fail" the way it could in generate_sequences.py.
 
 Usage
 -----
-  # Single generation (fast, no search) -- default: 6 levels, continuous
-  # 10..90, binary blue-count 2..13 out of 15
+  # Single generation (fast, no search) -- default: 6 prefixes, continuous
+  # 15..85, binary blue-range 2..13 out of 15
   python task/generate_sequences_momentmatch.py --task continuous --seed 0
 
-  # Custom range / level count
+  # Custom range / prefix count
   python task/generate_sequences_momentmatch.py --task continuous --seed 0 \\
-      --n_levels 6 --mean_range 10 90 --n_repeats 4
+      --n_prefix 6 --mean_range 15 85 --n_repeats 4
   python task/generate_sequences_momentmatch.py --task binary --seed 0 \\
-      --n_levels 6 --blue_range 2 13 --n_repeats 4
+      --n_prefix 6 --blue_range 2 13 --n_repeats 4
 
   # Seed search over orderings/realizations for smoothness (this is the
   # actual production 6x4 pilot search)
   python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \\
-      --n_levels 6 --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+      --n_prefix 6 --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
 
   # Diagnostic report of achieved vs target moments (no file written)
   python task/generate_sequences_momentmatch.py --task continuous --report
@@ -161,14 +222,13 @@ from __future__ import annotations
 import argparse
 import math
 import pathlib
+from collections import Counter
 
 import numpy as np
 import pandas as pd
 
 # Reuse generic, method-agnostic utilities from generate_sequences.py rather
-# than duplicating them -- these are not tied to rejection sampling. Note:
-# mirror_sequence/mirror_params are deliberately NOT imported anymore -- see
-# "Parameter levels: evenly-spaced grid, NOT random, NOT mirrored" above.
+# than duplicating them -- these are not tied to rejection sampling.
 from generate_sequences import (
     VALUE_MIN, VALUE_MAX,
     make_rng,
@@ -216,35 +276,277 @@ def moment_match_binary(rng, true_p, n):
 
 
 # ---------------------------------------------------------------------------
-# Evenly-spaced parameter-level grids (NOT random, NOT mirrored)
+# Prefix generation: n_prefix DISTINCT prefixes, independent of any target
+# (see module docstring's "Prefix generation" section for full rationale)
 # ---------------------------------------------------------------------------
-def continuous_mean_levels(n_levels, mean_range):
-    """n_levels evenly-spaced true_mean values across mean_range (inclusive
-    of both endpoints), via linspace -- automatically split evenly between
-    the lower and upper half of the range (symmetric around the midpoint
-    whenever n_levels is even), with no randomness."""
-    lo, hi = mean_range
-    return [round(float(v), 4) for v in np.linspace(lo, hi, n_levels)]
+def build_continuous_prefixes(rng, n_prefix, prefix_length, mean_range, std_fixed,
+                              value_min=VALUE_MIN, value_max=VALUE_MAX):
+    """n_prefix distinct length-prefix_length integer sequences, one drawn
+    per evenly-spaced CENTER across mean_range (via linspace, the same
+    pattern used for binary's composition grid and continuous's own
+    target-level grid) -- NOT all drawn from a single central distribution.
+
+    Why this matters: prefix identity and target level are independent
+    axes (see module docstring), and top_k_random_matching can only PREFER
+    a good pairing among whatever prefixes actually exist -- if all
+    n_prefix prefixes were centered on the range midpoint (an earlier
+    version of this function did exactly that), there would reliably be
+    nothing close to extreme targets no matter how the matching is
+    written. Confirmed empirically: with all 6 prefixes centered at 50,
+    max achieved-mean error was ~4.7 and max achieved std ~28.5 against a
+    target of 15, even with the closeness preference in place -- a supply
+    problem, not a selection problem. Spreading the prefixes' own centers
+    across the same range as the targets ensures there's always something
+    reasonably close available.
+
+    This does NOT make true_mean obvious from the prefix alone: each
+    prefix is only prefix_length=4 observations, so its OWN sample mean's
+    standard error is std_fixed/sqrt(prefix_length) = 15/2 = 7.5 for the
+    production defaults -- a prefix centered near 85 can still look like an
+    fairly ordinary 4-observation run by chance, and the ACTUAL paired
+    target (chosen by the soft top-k preference, not a forced 1:1 tie) will
+    often differ from any given prefix's own center anyway. The randomness
+    inherent in drawing only 4 observations is doing real work here, not
+    just decoration.
+    """
+    centers = np.linspace(mean_range[0], mean_range[1], n_prefix)
+    prefixes = []
+    for center in centers:
+        vals = rng.normal(center, std_fixed, size=prefix_length)
+        vals = np.clip(np.round(vals), value_min, value_max).astype(int).tolist()
+        prefixes.append(vals)
+    seen = set(tuple(p) for p in prefixes)
+    assert len(seen) == n_prefix, (
+        f"Two continuous prefixes came out identical by chance (n_prefix={n_prefix}, "
+        f"prefix_length={prefix_length}) -- astronomically unlikely; if this ever "
+        f"fires for real, just re-run with a different --seed.")
+    return prefixes
 
 
-def binary_blue_levels(n_levels, blue_range):
-    """n_levels evenly-spaced integer blue-ball counts across blue_range
-    (inclusive), via linspace + round -- e.g. n_levels=6, blue_range=[2,13]
-    gives [2,4,6,9,11,13] (symmetric: 2+13=4+11=6+9=15). Asserts the
-    rounded levels are still all distinct (can fail only for a very large
-    n_levels relative to a narrow blue_range)."""
-    lo, hi = blue_range
-    levels = sorted(set(int(round(v)) for v in np.linspace(lo, hi, n_levels)))
-    assert len(levels) == n_levels, (
-        f"blue_range={blue_range} with n_levels={n_levels} produced only "
-        f"{len(levels)} distinct integer levels after rounding ({levels}) -- "
-        f"widen blue_range or reduce n_levels.")
-    return levels
+def build_binary_prefixes(rng, n_prefix, prefix_length):
+    """n_prefix distinct length-prefix_length binary ({-1,+1}) prefixes,
+    spanning diverse compositions from all-red to all-blue -- NOT all
+    forced to the maximally-flexible 50/50 composition, per the "method 2"
+    design decision (diverse compositions + constrained random matching to
+    targets, rather than trivial-but-uninteresting uniform composition).
+
+    Compositions (blue-ball counts out of prefix_length) are spread via
+    linspace(0, prefix_length, n_prefix), same pattern as this script's
+    other level-grids elsewhere. Arrangements within a repeated composition
+    (linspace can round to the same integer more than once) are drawn
+    WITHOUT replacement so no two prefixes are literally identical --
+    THIS is the actual fix for the collision bug that motivated this
+    whole redesign (two different qids in the production 6x4 pilot ended
+    up with an identical realized prefix by chance).
+
+    Fails loudly (not a plausible-looking silent fallback) if n_prefix
+    exceeds the number of distinct length-prefix_length binary sequences
+    that exist at all (2**prefix_length), or if a specific composition's
+    own arrangement pool (C(prefix_length, k)) is exhausted.
+    """
+    max_possible = 2 ** prefix_length
+    assert n_prefix <= max_possible, (
+        f"n_prefix={n_prefix} exceeds the {max_possible} distinct binary sequences "
+        f"that exist at prefix_length={prefix_length} -- reduce n_prefix or "
+        f"increase prefix_length.")
+
+    compositions = [int(round(v)) for v in np.linspace(0, prefix_length, n_prefix)]
+
+    prefixes = []
+    used_per_composition: dict[int, set] = {}
+    for k in compositions:
+        pool_size = math.comb(prefix_length, k)
+        already_used = used_per_composition.setdefault(k, set())
+        assert len(already_used) < pool_size, (
+            f"composition k={k} blue out of prefix_length={prefix_length} only has "
+            f"{pool_size} distinct arrangements, and n_prefix={n_prefix}'s evenly-"
+            f"spaced composition grid ({compositions}) asks for more of them than "
+            f"exist -- reduce n_prefix or widen prefix_length.")
+        for _attempt in range(10_000):
+            positions = rng.choice(prefix_length, size=k, replace=False)
+            arrangement = [-1] * prefix_length
+            for pos in positions:
+                arrangement[pos] = 1
+            key = tuple(arrangement)
+            if key not in already_used:
+                already_used.add(key)
+                prefixes.append(arrangement)
+                break
+        else:
+            raise RuntimeError(
+                f"Could not find a fresh arrangement for composition k={k} after "
+                f"10000 attempts -- should be unreachable given the pool_size "
+                f"assertion above; something is wrong if this actually fires.")
+    return prefixes
 
 
-def binary_p_levels(n_blue_levels, seq_length):
-    """true_p = n_blue / seq_length for each explicit blue-ball count."""
-    return [round(k / seq_length, 6) for k in n_blue_levels]
+# ---------------------------------------------------------------------------
+# Target-level generation: independent of prefix identity, no forced repeats
+# (see module docstring's "Prefix generation" section)
+# ---------------------------------------------------------------------------
+def continuous_target_means(n_trials, mean_range):
+    """n_trials DISTINCT true_mean values, evenly spaced across mean_range --
+    one per trial. No repeat structure here at all (unlike prefix identity,
+    which is what carries repeats now) -- these are independent axes."""
+    return [round(float(v), 4) for v in np.linspace(mean_range[0], mean_range[1], n_trials)]
+
+
+def binary_target_blue_counts(rng, n_trials, blue_range):
+    """Full native integer granularity across blue_range (EVERY integer
+    blue count, not an evenly-spaced SUBSET the way the old --n_levels
+    design worked), distributed as evenly as possible across n_trials
+    trials. When n_trials doesn't divide evenly by the number of levels,
+    the remainder goes to a RANDOM subset of levels (not deterministically
+    the first few), so there is no systematic bias toward one end of the
+    range. Returns a shuffled list of length n_trials (blue counts, with
+    multiplicity)."""
+    levels = list(range(blue_range[0], blue_range[1] + 1))
+    n_levels = len(levels)
+    base, remainder = divmod(n_trials, n_levels)
+    counts = {lvl: base for lvl in levels}
+    if remainder:
+        bonus_levels = rng.choice(levels, size=remainder, replace=False)
+        for lvl in bonus_levels:
+            counts[lvl] += 1
+    out = []
+    for lvl in levels:
+        out.extend([lvl] * counts[lvl])
+    rng.shuffle(out)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Preference-weighted random matching: prefix-slots <-> target-slots.
+# Prefers CLOSER pairs (|prefix's own mean/p - target|) without collapsing
+# to a fully deterministic nearest-neighbor assignment -- see
+# top_k_random_matching's docstring for why.
+# ---------------------------------------------------------------------------
+def binary_feasible_target_range(prefix_blue, suffix_length, blue_range):
+    """A prefix with `prefix_blue` blue balls (out of prefix_length) can
+    only reach total-sequence blue counts in [prefix_blue, prefix_blue +
+    suffix_length] -- the suffix alone can add between 0 and suffix_length
+    more blue balls, nothing else is possible. Intersected with blue_range
+    since targets outside it are never generated anyway."""
+    lo = max(blue_range[0], prefix_blue)
+    hi = min(blue_range[1], prefix_blue + suffix_length)
+    return lo, hi
+
+
+def optimal_matching(prefix_slot_values, target_slot_values, feasible_fn=None):
+    """Finds the GLOBALLY minimum-total-mismatch one-to-one assignment
+    between prefix-slots and target-slots (sum of |prefix_value -
+    target_value| over all pairs), via the Hungarian algorithm
+    (scipy.optimize.linear_sum_assignment) -- NOT a greedy/random-order
+    heuristic.
+
+    This replaced an earlier greedy "random among the top_k closest
+    available" approach after confirming empirically that greedy selection
+    can leave an arbitrarily bad single-pair mismatch even when every step
+    picks the closest currently-available option (tested down to top_k=1,
+    i.e. fully greedy -- still left a >40-point mismatch on one pair,
+    because "closest available right now" can get forced into a bad corner
+    by unlucky processing order once a popular region's supply runs out).
+    The Hungarian algorithm has no such failure mode: it considers the full
+    assignment jointly, so no single pair can be arbitrarily bad while a
+    better OVERALL assignment existed.
+
+    No extra randomization layer is added here on top of scipy's solver:
+    prefixes (and, for binary, targets) are already freshly drawn per
+    --seed, so different seeds already explore genuinely different
+    assignments -- see build_continuous_prefixes / build_binary_prefixes.
+    This keeps prefix identity and target level on independent axes (a
+    prefix's n_repeats occurrences generally still land on different
+    targets) without needing the assignment step itself to inject
+    additional noise. "Soft" in the sense the design discussion wanted --
+    not an obvious, rigid prefix->target mapping a participant could
+    learn -- comes from the prefix's own sampling noise (SEM =
+    std_fixed/sqrt(prefix_length), e.g. 7.5 at the production defaults)
+    and from repeats of the same prefix generally pairing with different
+    targets, not from randomness inside this function.
+
+    feasible_fn(prefix_value, target_value) -> bool marks infeasible pairs
+    with a very large cost rather than filtering them out structurally (the
+    solver needs a square cost matrix) -- used for binary's exact quota-
+    reachability constraint; None for continuous, which has no such hard
+    constraint. Raises loudly if the optimal solution still has to use an
+    infeasible pair, meaning no feasible assignment exists at all (the
+    chosen prefix compositions cannot structurally supply the requested
+    target distribution) -- never silently returns a broken pairing.
+
+    Returns a list of target_slot_values reordered to align 1:1 with
+    prefix_slot_values (result[i] is the target paired with
+    prefix_slot_values[i]).
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    n = len(prefix_slot_values)
+    assert len(target_slot_values) == n
+    pv = np.asarray(prefix_slot_values, dtype=float)
+    tv = np.asarray(target_slot_values, dtype=float)
+    cost = np.abs(pv[:, None] - tv[None, :])
+
+    BIG = 1e6
+    if feasible_fn is not None:
+        infeasible = np.array([[not feasible_fn(p, t) for t in tv] for p in pv])
+        cost = np.where(infeasible, BIG, cost)
+
+    row_idx, col_idx = linear_sum_assignment(cost)
+    if feasible_fn is not None and (cost[row_idx, col_idx] >= BIG).any():
+        raise RuntimeError(
+            "No feasible prefix<->target assignment exists even at the OPTIMAL "
+            "solution -- the chosen prefix compositions cannot structurally supply "
+            "the requested target distribution (e.g. too many extreme-composition "
+            "all-red/all-blue prefixes competing for the same scarce end of the "
+            "range). Adjust n_prefix or the composition grid (see "
+            "build_binary_prefixes).")
+
+    result = [None] * n
+    for r, c in zip(row_idx, col_idx):
+        result[r] = target_slot_values[c]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Residual-suffix builders (see module docstring's "Residual math" section)
+# ---------------------------------------------------------------------------
+def suffix_for_continuous_target(rng, prefix_values, target_mean, std_fixed,
+                                 suffix_length, max_rescale_iters,
+                                 value_min=VALUE_MIN, value_max=VALUE_MAX):
+    """Suffix's OWN target mean = the algebraic residual needed so the FULL
+    (prefix+suffix) pooled sequence's sample mean hits target_mean exactly
+    (by construction, via the same rescale mechanism as
+    moment_match_continuous) -- necessary now that the prefix is generic
+    and not already near the target. See module docstring for why the
+    suffix's std target is left at std_fixed rather than similarly
+    residual-adjusted (expect pooled std to run slightly above std_fixed
+    as a result)."""
+    prefix_sum = sum(prefix_values)
+    seq_length = len(prefix_values) + suffix_length
+    residual_mean = (target_mean * seq_length - prefix_sum) / suffix_length
+    return moment_match_continuous(rng, residual_mean, std_fixed, suffix_length,
+                                   value_min=value_min, value_max=value_max,
+                                   max_rescale_iters=max_rescale_iters)
+
+
+def suffix_for_binary_target(rng, prefix_values, target_blue, suffix_length):
+    """Exact residual quota: the suffix needs exactly (target_blue minus
+    however many blue balls the prefix already has) blue balls among its
+    suffix_length observations. Guaranteed to land in [0, suffix_length] by
+    construction AS LONG AS the prefix<->target pairing came from
+    match_prefixes_to_targets_binary (which only ever proposes feasible
+    pairings) -- this function trusts that contract rather than re-deriving
+    it, so the assertion below is a bug detector, not a user-facing error
+    path."""
+    prefix_blue = sum(1 for v in prefix_values if v == 1)
+    suffix_blue = target_blue - prefix_blue
+    assert 0 <= suffix_blue <= suffix_length, (
+        f"suffix_blue={suffix_blue} out of range [0,{suffix_length}] -- an "
+        f"infeasible (prefix,target) pair reached suffix construction, which "
+        f"should be impossible if match_prefixes_to_targets_binary was used "
+        f"upstream. This indicates a real bug, not a data issue.")
+    vals = [1] * suffix_blue + [-1] * (suffix_length - suffix_blue)
+    perm = rng.permutation(suffix_length)
+    return [vals[i] for i in perm]
 
 
 # ---------------------------------------------------------------------------
@@ -377,14 +679,14 @@ def _shuffle_no_consecutive_qid(trials, rng, task):
 def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
     """Generate all trials for one task via moment matching.
 
-    Mirrors generate_task_sequences()'s trial structure (prefix/suffix
-    split, ITI scheduling, no-consecutive-qid shuffle) but builds blocks via
-    moment matching instead of rejection sampling, and picks true_mean/true_p
-    from an evenly-spaced level grid rather than randomly-drawn-then-mirrored
-    (see module docstring's "Parameter levels" section for why). Returns
-    (DataFrame, json_trials), same schema as generate_sequences.py.
+    Prefix identity (n_prefix distinct prefixes, each repeated n_repeats
+    times) and target level (n_total independently-generated true_mean/
+    true_p values, no forced repeats) are INDEPENDENT axes -- see module
+    docstring's "Prefix generation" section for the full rationale and the
+    bug this fixes. Returns (DataFrame, json_trials), same schema as
+    generate_sequences.py.
 
-    verbose controls the per-call header/per-qid/summary prints -- this
+    verbose controls the per-call header/per-prefix/summary prints -- this
     function is called once per attempt during a seed search (potentially
     thousands of times), so _seed_search_momentmatch passes verbose=False
     to keep output to the periodic progress line only. --report and
@@ -393,77 +695,98 @@ def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
     seq_length    = args.seq_length
     prefix_length = args.prefix_length
     suffix_length = seq_length - prefix_length
-    full_repeat   = (prefix_length >= seq_length)
+    if prefix_length >= seq_length:
+        raise NotImplementedError(
+            "prefix_length >= seq_length (no suffix at all) is not supported under "
+            "the independent-prefix/target design -- there would be nothing left "
+            "for the residual-suffix math to adjust, so a trial's realized value "
+            "couldn't be steered toward its assigned target at all. If this is ever "
+            "genuinely needed, it needs its own dedicated code path, not a silent "
+            "fallback here.")
 
-    # -- Evenly-spaced parameter levels (one qid per level) ------------------
-    if task == 'continuous':
-        mean_levels = continuous_mean_levels(args.n_levels, args.mean_range)
-        param_list  = [(mu, args.std_fixed, float('nan')) for mu in mean_levels]
-        levels_desc = f"mean_levels={mean_levels}  std_fixed={args.std_fixed}"
-    else:
-        blue_levels = binary_blue_levels(args.n_levels, args.blue_range)
-        p_levels    = binary_p_levels(blue_levels, seq_length)
-        param_list  = [(tp, float('nan'), tp) for tp in p_levels]
-        levels_desc = f"blue_levels={blue_levels} (of {seq_length})  ->  p_levels={p_levels}"
-
-    n_unique  = len(param_list)
+    n_prefix  = args.n_prefix
     n_repeats = args.n_repeats
-    n_total   = n_unique * n_repeats
+    n_total   = n_prefix * n_repeats
 
     if verbose:
         print(f"\n{'='*60}")
-        print(f"Task: {task.upper()}  (moment-matched, evenly-spaced grid, no mirroring)")
-        print(f"  Total trials   : {n_total} ({n_unique} levels x {n_repeats} reps)")
+        print(f"Task: {task.upper()}  (moment-matched; prefix identity and target level are independent axes)")
+        print(f"  Total trials   : {n_total} ({n_prefix} prefixes x {n_repeats} reps)")
         print(f"  Seq / prefix / suffix length: {seq_length} / {prefix_length} / {suffix_length}")
-        print(f"  {levels_desc}")
 
-    # -- Build prefix block (once per qid, moment-matched) -------------------
-    templates = []
-    for qid, (true_mean, true_std, true_p) in enumerate(param_list):
-        if task == 'continuous':
-            prefix = moment_match_continuous(rng, true_mean, true_std, prefix_length,
-                                              max_rescale_iters=args.max_rescale_iters)
-        else:
-            prefix = moment_match_binary(rng, true_p, prefix_length)
-        templates.append({
-            'qid': qid, 'true_mean': true_mean, 'true_std': true_std,
-            'true_p': true_p, 'prefix': prefix,
-        })
-        if verbose:
-            label = f'mean={true_mean:.1f}' if task == 'continuous' else f'p={true_p:.3f}'
-            print(f"  qid {qid:3d}: {label}  prefix=[{','.join(map(str, prefix))}]")
-
-    # -- ITI schedule ---------------------------------------------------------
-    ITI_MS   = 1000
-    iti_sched = _build_iti_schedule(rng, templates, n_repeats)
-
-    # -- Build trials: shared prefix + fresh moment-matched suffix per repeat -
-    rep_count = {}
-    trials = []
-    if full_repeat:
-        for tmpl in templates:
-            qid = tmpl['qid']
-            for _ in range(n_repeats):
-                rep_idx = rep_count.get(qid, 0)
-                iti_condition = iti_sched[qid][rep_idx]
-                rep_count[qid] = rep_idx + 1
-                trials.append({**tmpl, 'values': tmpl['prefix'],
-                               'iti_ms': ITI_MS, 'iti_condition': iti_condition})
+    # -- Build n_prefix DISTINCT prefixes, independent of any target --------
+    if task == 'continuous':
+        prefixes = build_continuous_prefixes(rng, n_prefix, prefix_length,
+                                             args.mean_range, args.std_fixed)
     else:
-        for _rep in range(n_repeats):
-            for tmpl in templates:
-                qid = tmpl['qid']
-                if task == 'continuous':
-                    suffix = moment_match_continuous(
-                        rng, tmpl['true_mean'], tmpl['true_std'], suffix_length,
-                        max_rescale_iters=args.max_rescale_iters)
-                else:
-                    suffix = moment_match_binary(rng, tmpl['true_p'], suffix_length)
-                rep_idx = rep_count.get(qid, 0)
-                iti_condition = iti_sched[qid][rep_idx]
-                rep_count[qid] = rep_idx + 1
-                trials.append({**tmpl, 'values': tmpl['prefix'] + suffix,
-                               'iti_ms': ITI_MS, 'iti_condition': iti_condition})
+        prefixes = build_binary_prefixes(rng, n_prefix, prefix_length)
+
+    if verbose:
+        for i, pfx in enumerate(prefixes):
+            print(f"  prefix {i}: [{','.join(map(str, pfx))}]")
+
+    # -- Build n_total target values, independent of prefix, no forced repeats
+    if task == 'continuous':
+        target_means = continuous_target_means(n_total, args.mean_range)
+        if verbose:
+            print(f"  target means ({n_total}): {target_means}")
+    else:
+        target_blue = binary_target_blue_counts(rng, n_total, args.blue_range)
+        if verbose:
+            print(f"  target blue-count distribution: {dict(sorted(Counter(target_blue).items()))}")
+
+    # -- Prefix-slots: each of the n_prefix prefixes repeated n_repeats times,
+    #    shuffled -- this is what carries "qid" identity/repeats now.
+    prefix_slot_idx = [i for i in range(n_prefix) for _ in range(n_repeats)]
+    rng.shuffle(prefix_slot_idx)
+
+    # -- Match prefix-slots to target-slots via globally optimal assignment
+    #    (see optimal_matching's docstring for why greedy selection was
+    #    tried first and rejected)
+    if task == 'continuous':
+        prefix_means = [float(np.mean(pfx)) for pfx in prefixes]
+        prefix_slot_values = [prefix_means[i] for i in prefix_slot_idx]
+        # No hard feasibility constraint for continuous -- any prefix can be
+        # rescaled toward any target via the residual suffix.
+        matched_targets = optimal_matching(prefix_slot_values, target_means)
+    else:
+        prefix_slot_blue = [sum(1 for v in prefixes[i] if v == 1) for i in prefix_slot_idx]
+        matched_targets = optimal_matching(
+            prefix_slot_blue, target_blue,
+            feasible_fn=lambda pv, tv: (
+                binary_feasible_target_range(pv, suffix_length, args.blue_range)[0]
+                <= tv <=
+                binary_feasible_target_range(pv, suffix_length, args.blue_range)[1]))
+
+    # -- ITI schedule (per prefix identity, same mechanism as before) --------
+    ITI_MS = 1000
+    prefix_templates = [{'qid': i} for i in range(n_prefix)]
+    iti_sched = _build_iti_schedule(rng, prefix_templates, n_repeats)
+    rep_count = {}
+
+    # -- Build each trial: prefix + residual-matched suffix ------------------
+    trials = []
+    for pfx_idx, target in zip(prefix_slot_idx, matched_targets):
+        prefix_vals = prefixes[pfx_idx]
+        rep_idx = rep_count.get(pfx_idx, 0)
+        iti_condition = iti_sched[pfx_idx][rep_idx]
+        rep_count[pfx_idx] = rep_idx + 1
+
+        if task == 'continuous':
+            true_mean, true_std, true_p = target, args.std_fixed, float('nan')
+            suffix = suffix_for_continuous_target(
+                rng, prefix_vals, true_mean, true_std, suffix_length,
+                args.max_rescale_iters)
+        else:
+            true_p = round(target / seq_length, 6)
+            true_mean, true_std = float('nan'), float('nan')
+            suffix = suffix_for_binary_target(rng, prefix_vals, target, suffix_length)
+
+        trials.append({
+            'qid': pfx_idx, 'true_mean': true_mean, 'true_std': true_std,
+            'true_p': true_p, 'values': prefix_vals + suffix,
+            'iti_ms': ITI_MS, 'iti_condition': iti_condition,
+        })
 
     trials = _shuffle_no_consecutive_qid(trials, rng, task)
 
@@ -492,7 +815,7 @@ def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
 
     df = pd.DataFrame(records)
 
-    # -- Sanity checks (same as generate_sequences.py) ------------------------
+    # -- Sanity checks (same spirit as generate_sequences.py) ----------------
     assert len(df) == n_total * seq_length
     if task == 'continuous':
         assert df['value'].between(VALUE_MIN, VALUE_MAX).all()
@@ -500,9 +823,17 @@ def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
         assert df['value'].isin([-1, 1]).all()
     assert df['trial'].nunique() == n_total
     assert (df.groupby('qid')['trial'].nunique() == n_repeats).all()
+    if task == 'binary':
+        # Exact quota by construction -- verify no rounding slop crept in.
+        achieved_blue = df.groupby('trial')['value'].apply(lambda s: (s == 1).sum())
+        expected_blue = (df.groupby('trial')['true_p'].first() * seq_length).round()
+        assert np.array_equal(achieved_blue.reindex(expected_blue.index).values,
+                              expected_blue.values), (
+            "binary quota mismatch -- suffix residual math has a bug, this should "
+            "be impossible given exact-quota construction.")
 
     if verbose:
-        print(f"\n  {len(df)} rows | {n_total} trials | {n_unique} levels x {n_repeats} reps")
+        print(f"\n  {len(df)} rows | {n_total} trials | {n_prefix} prefixes x {n_repeats} reps")
         if task == 'continuous':
             print(f"  Value range : {df['value'].min()} - {df['value'].max()}")
             print(f"  true_mean   : {df['true_mean'].min():.1f} - {df['true_mean'].max():.1f}")
@@ -612,22 +943,24 @@ def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument('--task',               choices=['continuous', 'binary', 'both'], default='both')
     p.add_argument('--n_tries',            type=int,   default=1)
-    p.add_argument('--n_repeats',          type=int,   default=4)
+    p.add_argument('--n_repeats',          type=int,   default=4,
+                   help='How many times each of the n_prefix distinct prefixes is used. '
+                        'n_trials = n_prefix * n_repeats.')
     p.add_argument('--seq_length',         type=int,   default=15)
     p.add_argument('--prefix_length',      type=int,   default=4)
-    p.add_argument('--n_levels',           type=int,   default=6,
-                   help='Number of evenly-spaced qid levels (one per level) -- '
-                        'the "6" in "6 unique sequences x n_repeats". Automatically '
-                        'split evenly between the lower/upper half of the range '
-                        'given by --mean_range/--blue_range (symmetric when even).')
-    p.add_argument('--mean_range',         type=float, nargs=2, default=[10.0, 90.0],
-                   help='Continuous: true_mean range to evenly space --n_levels across.')
+    p.add_argument('--n_prefix',           type=int,   default=6,
+                   help='Number of DISTINCT prefixes -- this is what "qid" and repeat '
+                        'structure track now (see module docstring\'s "Prefix generation" '
+                        'section). Independent of the target-level distribution below.')
+    p.add_argument('--mean_range',         type=float, nargs=2, default=[15.0, 85.0],
+                   help='Continuous: true_mean range. n_trials DISTINCT values are spread '
+                        'evenly across this range, one per trial -- not tied to n_prefix.')
     p.add_argument('--std_fixed',          type=float, default=15.0)
     p.add_argument('--blue_range',         type=int,   nargs=2, default=[2, 13],
-                   help='Binary: blue-ball-count range (out of --seq_length) to evenly '
-                        'space --n_levels across -- NOT a p fraction (binary quota '
-                        'matching is already exact for any integer count, so there is '
-                        'no reason to route through a rounded p value).')
+                   help='Binary: blue-ball-count range (out of --seq_length). EVERY integer '
+                        'level in this range is used (not an evenly-spaced subset), '
+                        'distributed as evenly as possible across n_trials trials -- not '
+                        'tied to n_prefix.')
     p.add_argument('--max_rescale_iters',  type=int,   default=4,
                    help='Rescale+clip iterations to converge onto target moments')
     p.add_argument('--rl_alpha_0',         type=float, default=1.0)
@@ -659,7 +992,7 @@ def main():
     assert args.seq_length > 0
     assert 0 <= args.prefix_length <= args.seq_length
     assert args.std_fixed > 0
-    assert args.n_levels >= 1
+    assert args.n_prefix >= 1
     assert args.mean_range[0] < args.mean_range[1]
     assert 0 <= args.mean_range[0] and args.mean_range[1] <= 100
     assert args.blue_range[0] < args.blue_range[1]
