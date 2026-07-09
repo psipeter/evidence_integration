@@ -46,6 +46,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import { spawn }         from 'child_process';
 import path              from 'path';
 import { fileURLToPath } from 'url';
+import fs                from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT      = 7655;
@@ -65,6 +66,29 @@ const BROWSERS = argBrowser ? [argBrowser] : ['chromium', 'firefox', 'webkit'];
 const T_OBS_MS = 1500;
 const testUrl = (task) =>
   `${BASE_URL}/index-test.html?task=${task}&tObsMs=${T_OBS_MS}&btiMs=400&itiMs=400&trials=3`;
+
+// Same URL, but with a PROLIFIC_PID present -- flips isProlific=true in
+// timeline-builder.js, which changes which finishSession() branch runs
+// (real Prolific redirect vs local DOM-update-in-place -- see
+// finish-session.js). No prior scenario in this suite ever set this param,
+// so the Prolific branch had zero automated coverage before.
+const testUrlProlific = (task) => `${testUrl(task)}&PROLIFIC_PID=e2e_test_pid`;
+
+// Parsed directly out of timeline-builder.js's PROLIFIC_CODES rather than
+// hardcoded here -- avoids this test silently going stale if those
+// placeholder codes are ever filled in for real Prolific deployment.
+// Fails loudly (rather than falling back to a guessed value) if the source
+// ever changes shape enough that this regex stops matching, per the
+// project's "prefer no default" convention for anything that must always
+// be present (see CLAUDE.md's jsPsych plugin conventions section).
+const timelineBuilderSrc = fs.readFileSync(
+  path.join(__dirname, 'src/shared/timeline-builder.js'), 'utf8');
+function expectedProlificCode(task, kind) {
+  const re = new RegExp(`${task}:\\s*\\{\\s*completion:\\s*'([^']+)',\\s*earlyExit:\\s*'([^']+)'`);
+  const m = timelineBuilderSrc.match(re);
+  if (!m) throw new Error(`Could not parse PROLIFIC_CODES for task=${task} from timeline-builder.js`);
+  return kind === 'completion' ? m[1] : m[2];
+}
 
 // ── Start / stop Vite dev server (own process group, killed by group) ──────
 function startDevServer() {
@@ -98,6 +122,75 @@ function stopDevServer(proc) {
   } catch {
     try { proc.kill('SIGKILL'); } catch {}
   }
+}
+
+// ── Start / stop the result server (mimics jatos.submitResultData) ─────────
+// jatos-shim.js -- used by index-test.html exactly as it is by real local
+// dev, since index-test.html never loads a real jatos.js (see
+// test-harness.js) -- POSTs every endStudy/endStudyAndRedirect call to
+// dev-server.js, which writes a result_<timestamp>.json file into
+// dev-results/. Spinning this up lets the end-screen/early-exit scenarios
+// below assert that a save ACTUALLY happened, not just that the right
+// screen rendered. This closes the exact coverage gap behind every real
+// save/redirect bug in this project's history (see CLAUDE.md's "Exit/
+// redirect and data-saving architecture") -- each one was found only by a
+// live MindProbe pilot run, because nothing automated used to reach this
+// far into the flow.
+const RESULT_PORT = 3099;
+const RESULTS_DIR = path.join(__dirname, 'dev-results');
+
+function startResultServer() {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      'node', ['dev-server.js'],
+      { cwd: __dirname, stdio: ['ignore', 'pipe', 'pipe'], detached: true }
+    );
+    let resolved = false;
+    const onData = (buf) => {
+      if (!resolved && /running at/i.test(buf.toString())) {
+        resolved = true;
+        resolve(proc);
+      }
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.on('error', reject);
+    proc.on('exit', (code) => {
+      if (!resolved) reject(new Error(`Result server exited early (code ${code})`));
+    });
+    setTimeout(() => { if (!resolved) reject(new Error('Result server did not start in time')); }, 8000);
+  });
+}
+
+function stopResultServer(proc) {
+  if (!proc || proc.killed) return;
+  try {
+    process.kill(-proc.pid, 'SIGKILL');
+  } catch {
+    try { proc.kill('SIGKILL'); } catch {}
+  }
+}
+
+// Test-created save files use dev-server.js's own `result_<timestamp>.json`
+// naming -- distinct from every real pilot/dev filename already sitting in
+// dev-results/ (see CLAUDE.md's "Pilot data files"), so snapshotting and
+// cleaning up only this pattern can never touch real data.
+const isTestResultFile = (name) => /^result_.*\.json$/.test(name);
+const snapshotResultFiles = () =>
+  new Set(fs.readdirSync(RESULTS_DIR).filter(isTestResultFile));
+
+// Polls for a NEW result_*.json file not present in `before` -- the save
+// POST completes asynchronously relative to the button click that triggers
+// it, so this can't just check once. Returns the new filename.
+async function waitForNewResultFile(before, timeout = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const now = fs.readdirSync(RESULTS_DIR).filter(isTestResultFile);
+    const fresh = now.find((f) => !before.has(f));
+    if (fresh) return fresh;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('No new result file appeared in dev-results/ within timeout');
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +316,14 @@ const doTutorial = async (p) => {
 // "too slow" replay screen (data-screen="iti_replay").
 const letObsTimeOut = (p) => waitForScreen(p, 'iti_replay', T_OBS_MS + 5000);
 
+// finishSession's non-Prolific branch (finish-session.js) replaces
+// #jspsych-content in place with this exact confirmation copy -- no screen
+// change, no navigation. Waiting for it confirms the participant-visible
+// half of the save flow didn't silently fail, alongside the result-file
+// check that confirms the data-visible half.
+const waitForSaveConfirmation = (p, timeout = 5000) =>
+  p.waitForSelector('text=Session complete', { timeout });
+
 // ── Test scenarios (task-agnostic — same jsPsych plugin IDs for both tasks) ──
 // MAX_TIMEOUTS_PER_TRIAL is 3 (see timeline-builder.js) — these scenarios
 // deliberately stay under/at that budget; going one timeout further always
@@ -272,6 +373,25 @@ const SCENARIOS = [
       await waitForScreen(p, 'terminated', T_OBS_MS + 8000);
       if (!await hasEl(p, '#early-exit-btn')) throw new Error('No early-exit button');
       if (await hasEl(p, '#summary-svg'))     throw new Error('Summary shown after termination');
+
+      // Same coverage gap as the "Completes all trials" scenario below, but
+      // for the early-exit path: create-early-exit.js wires its button via
+      // a raw pointerdown listener straight to finishSession() -- a
+      // separate code path from the normal end screen's jsPsych
+      // button-response plugin. Reaching 'terminated' only proved the
+      // screen renders; it never proved clicking the button actually saves
+      // anything, which is the exact class of bug this project has hit
+      // before (see CLAUDE.md's "Exit/redirect and data-saving
+      // architecture").
+      const beforeExit = snapshotResultFiles();
+      await p.click('#early-exit-btn');
+      await waitForSaveConfirmation(p);
+      const savedExitFile = await waitForNewResultFile(beforeExit);
+      const savedExit = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, savedExitFile), 'utf8'));
+      if (!Array.isArray(savedExit) || savedExit.length === 0) {
+        throw new Error(`Saved result file ${savedExitFile} was empty or not an array`);
+      }
+      fs.unlinkSync(path.join(RESULTS_DIR, savedExitFile));  // keep dev-results/ clean
     },
   },
   {
@@ -284,6 +404,131 @@ const SCENARIOS = [
       if (await hasEl(p, '#too-slow-pulse')) throw new Error('Unexpected too-slow pulse after submit');
     },
   },
+  {
+    // Closes a real coverage gap: every other scenario only exercises
+    // individual-observation interactions (submit, timeout, etc.) within
+    // the first trial or two. None of them ever complete every trial and
+    // reach the LAST trial's own summary screen -- which is built by a
+    // separate, duplicated code path in build-trial-timeline.js (the
+    // "Final summary" block, distinct from the main per-trial loop's own
+    // summary block) and DID drift out of sync with it once already (a
+    // missing true_p field there crashed the binary task on the very last
+    // trial in a real pilot run -- see CLAUDE.md). Completing all
+    // `trials` (3, per testUrl's override) x 15 observations is slower
+    // than the other scenarios, but it's the only way to actually visit
+    // that final-trial-specific code path at all.
+    name: 'Completes all trials, reaches final summary without crashing',
+    fn: async (p) => {
+      await doConsent(p); await doTutorial(p);
+      for (let t = 0; t < 3; t++) {
+        for (let o = 0; o < 15; o++) {
+          await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+          await moveSlider(p, 40 + o);
+          await submit(p);
+          if (o < 14) await waitForScreen(p, 'iti', 5000);
+        }
+        if (t < 2) {
+          await waitForScreen(p, 'inter_trial', 5000);
+          await p.click('#next-btn');
+          await waitForScreen(p, 'inter_trial_reset', 5000);
+        }
+      }
+      // This is the exact screen that previously threw an uncaught error
+      // ("You must specify a value for the 'true_p' parameter...") and left
+      // a blank page for binary -- reaching it with real rendered content
+      // and no page error (checked below, after fn returns) is the actual
+      // regression test.
+      await waitForScreen(p, 'inter_trial', 5000);
+      const contentLength = await p.evaluate(
+        () => document.querySelector('#jspsych-content')?.innerHTML?.length ?? 0);
+      if (contentLength === 0) throw new Error('Final summary screen rendered no content (blank page)');
+
+      // Closes a SECOND coverage gap this scenario used to stop short of:
+      // reaching the final summary only proved the screen renders, not that
+      // a session actually finishes. Clicking through to the "Thank you!"
+      // end screen and its button is what triggers finishSession()
+      // (finish-session.js) -- the single place that calls
+      // jatos.endStudy/endStudyAndRedirect. Every real save/redirect bug in
+      // this project's history (the submitResultData/endStudy signature
+      // bug, the double-save bug, the same-origin-redirect-after-
+      // session-close bug) was found only by a live MindProbe pilot run,
+      // never by this suite, precisely because nothing automated ever
+      // reached this far -- see CLAUDE.md's "Exit/redirect and
+      // data-saving architecture".
+      const before = snapshotResultFiles();
+      await p.click('#next-btn');
+      await waitForScreen(p, 'end', 5000);
+      await p.click('body[data-screen="end"] button');
+      await waitForSaveConfirmation(p);
+      const savedFile = await waitForNewResultFile(before);
+      const saved = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, savedFile), 'utf8'));
+      if (!Array.isArray(saved) || saved.length === 0) {
+        throw new Error(`Saved result file ${savedFile} was empty or not an array`);
+      }
+      const hasObservationRows = saved.some((row) => row.screen === 'observation');
+      if (!hasObservationRows) {
+        throw new Error(`Saved result file ${savedFile} had no observation rows`);
+      }
+      fs.unlinkSync(path.join(RESULTS_DIR, savedFile));  // keep dev-results/ clean
+    },
+  },
+  {
+    // Prolific-branch coverage: finishSession()'s isProlific branch (real
+    // redirect to app.prolific.com, see finish-session.js) had ZERO
+    // automated coverage before this -- every other scenario runs without
+    // ?PROLIFIC_PID, so only the non-Prolific "no redirect, DOM update in
+    // place" branch was ever exercised. Reuses the early-exit/terminated
+    // path (cheap: 3 timeouts) rather than "Completes all trials" (45
+    // interactions) -- both exit paths call the exact same finishSession(),
+    // differing only in WHICH prolificCode argument gets passed
+    // (completion vs earlyExit), so this cheaper path exercises the same
+    // isProlific branch. app.prolific.com is intercepted via page.route so
+    // no real external network request is ever made; the intercepted
+    // request URL is checked against the expected per-task earlyExit code
+    // parsed straight out of timeline-builder.js's PROLIFIC_CODES.
+    name: 'Prolific participant: early-exit redirects to app.prolific.com with correct code',
+    url: testUrlProlific,
+    fn: async (p, task) => {
+      let capturedUrl = null;
+      await p.route('https://app.prolific.com/**', (route) => {
+        capturedUrl = route.request().url();
+        route.fulfill({ status: 200, contentType: 'text/plain', body: 'OK' });
+      });
+
+      await doConsent(p); await doTutorial(p);
+      await letObsTimeOut(p);                              // 1st timeout
+      await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+      await letObsTimeOut(p);                              // 2nd timeout
+      await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+      await waitForScreen(p, 'terminated', T_OBS_MS + 8000);
+
+      const before = snapshotResultFiles();
+      await p.click('#early-exit-btn');
+
+      // jatos-shim.js's endStudyAndRedirect saves BEFORE navigating (await
+      // saveData(data) precedes window.location.href = url), so a result
+      // file should still land here even though this branch never shows
+      // finishSession's "Session complete" DOM confirmation (that message
+      // is non-Prolific only -- see finish-session.js).
+      const savedFile = await waitForNewResultFile(before);
+      fs.unlinkSync(path.join(RESULTS_DIR, savedFile));  // keep dev-results/ clean
+
+      // Poll rather than page.waitForURL(): the navigation is a plain
+      // window.location.href assignment fulfilled by the route above, and
+      // capturedUrl (set synchronously inside the route handler) is the
+      // more direct signal that the redirect was actually attempted at all.
+      const start = Date.now();
+      while (!capturedUrl && Date.now() - start < 5000) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (!capturedUrl) throw new Error('No redirect to app.prolific.com was ever made');
+
+      const expectedCode = expectedProlificCode(task, 'earlyExit');
+      if (!capturedUrl.includes(`cc=${expectedCode}`)) {
+        throw new Error(`Redirect URL had wrong code: ${capturedUrl} (expected cc=${expectedCode})`);
+      }
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
@@ -291,18 +536,38 @@ let passed = 0, failed = 0;
 const failures = [];
 
 async function runSuite(browserName, task) {
-  const engine  = ENGINES[browserName];
-  const browser = await engine.launch();
+  const engine = ENGINES[browserName];
   console.log(`\n### ${browserName} / ${task} ###`);
-  for (const { name, fn } of SCENARIOS) {
+  for (const { name, fn, url = testUrl } of SCENARIOS) {
+    // Fresh browser PER SCENARIO, not just a fresh page within one shared
+    // browser for the whole task -- found via a real flake while adding the
+    // "completes all trials" scenario below: that scenario (45 real
+    // interactions, far heavier than the others) would intermittently hit
+    // "Target page, context or browser has been closed" specifically when
+    // run as the LAST of several scenarios sharing one browser instance,
+    // but never failed running alone in a fresh browser with identical
+    // timing/logic -- pointing at accumulated browser-process instability
+    // across sequential scenarios, not an app bug (confirmed separately:
+    // the same flow via a standalone script completed cleanly with zero
+    // errors). Costs a bit more time (one extra browser launch per
+    // scenario) for meaningfully better isolation.
+    const browser = await engine.launch();
     const page = await browser.newPage();
     page.setDefaultTimeout(15000);
     const errs = [];
     page.on('pageerror', e => errs.push(e.message));
     console.log('--- ' + name + ' ---');
     try {
-      await page.goto(testUrl(task));
-      await fn(page);
+      await page.goto(url(task));
+      await fn(page, task);
+      // Any uncaught page error (e.g. a plugin throwing on a missing
+      // required parameter) previously only got logged, never actually
+      // failed the test -- a scenario whose fn() doesn't happen to wait on
+      // anything past the crash point could report PASS regardless. This
+      // was a real gap: it's what let the final-trial true_p bug (see the
+      // dedicated scenario above) go undetected even when this suite was
+      // passing 30/30. Treat any page error as a failure unconditionally.
+      if (errs.length) throw new Error('Uncaught page error(s): ' + errs.join('; '));
       console.log('  PASS');
       passed++;
     } catch (e) {
@@ -312,14 +577,18 @@ async function runSuite(browserName, task) {
       failures.push(`${browserName} / ${task} / ${name}: ${e.message}`);
     } finally {
       await page.close();
+      await browser.close();
     }
   }
-  await browser.close();
 }
 
 console.log('Starting Vite dev server...');
 const devServer = await startDevServer();
-console.log(`Dev server ready on :${PORT}\n`);
+console.log(`Dev server ready on :${PORT}`);
+
+console.log('Starting result server (mimics jatos.submitResultData)...');
+const resultServer = await startResultServer();
+console.log(`Result server ready on :${RESULT_PORT}\n`);
 
 try {
   for (const browserName of BROWSERS) {
@@ -329,6 +598,7 @@ try {
   }
 } finally {
   stopDevServer(devServer);
+  stopResultServer(resultServer);
 }
 
 console.log('\n' + '='.repeat(40));

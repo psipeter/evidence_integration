@@ -121,7 +121,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   const _seq = sequences[sequences.length - 1], _resp = lastTrialResponses;
   timeline.push({
     timeline: [{ type: TrialSummaryPlugin, true_mean: _seq.true_mean, true_std: _seq.true_std,
-      values: [..._seq.values], responses: () => _resp.map(r => r.response),
+      true_p: _seq.true_p ?? null, values: [..._seq.values], responses: () => _resp.map(r => r.response),
       show_performance: showTrialPerformance, is_last: true,
       data: { screen: 'inter_trial', trial: sequences.length - 1 } }],
     conditional_function: () => !exitFlag,

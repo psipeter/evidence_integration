@@ -51,14 +51,23 @@ export function createEarlyExit({ beforeUnloadHandler, isProlific, jsPsych, earl
         </div>`;
       const btn = document.getElementById('early-exit-btn');
       if (btn) btn.addEventListener('pointerdown', () => {
-        // finishSession (shared with timeline-builder.js's on_finish) is the
-        // single place that knows how a session actually ends -- see its
-        // own docstring for why non-Prolific participants get a DOM update
-        // + no redirect, not a redirect to a same-origin confirmation page
-        // (confirmed broken on real JATOS: an access-rights error trying to
-        // serve that file after the session had already ended).
+        // One-shot, matching how jsPsych's own button-response plugin
+        // behaves everywhere else in this app (it disables its buttons on
+        // click, so a second click can't re-fire the handler). This screen
+        // is hand-rolled DOM rather than a real jsPsych trial -- jsPsych's
+        // own timeline has already reached its natural end by the time a
+        // participant sees it (see module docstring) -- so it doesn't get
+        // that protection for free; { once: true } below plus disabling the
+        // button here closes that gap explicitly. This matters more than a
+        // generic double-click guard would elsewhere: calling
+        // finishSession() (and therefore jatos.endStudy/endStudyAndRedirect)
+        // twice is the exact bug class already documented in CLAUDE.md's
+        // "Exit/redirect and data-saving architecture" -- a second call can
+        // hit a DIFFERENT failure on real JATOS (session already closed),
+        // not a harmless no-op.
+        btn.disabled = true;
         finishSession({ isProlific, prolificCode: earlyExitCode, jsPsych, contentEl: el });
-      });
+      }, { once: true });
     };
 
     // Show "Too slow — all timeouts used" with fade-in/out/in, then terminated screen

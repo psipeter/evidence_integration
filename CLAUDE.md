@@ -24,6 +24,23 @@ anything else. Compaction summaries omit conventions. Key ones to remember:
   image when a genuine visual judgment call is needed.
 - Run node test_browser.mjs only after big task/ changes or when explicitly asked —
   it's slow (3 browsers × 2 tasks); don't run it reflexively after every small edit
+- **Before running test_browser.mjs (or any other slow E2E verification), ask
+  Peter first** — don't run it automatically just because a task/ change was
+  made. Small/localized changes often don't warrant the full 6-call E2E pass;
+  let him decide whether verification is warranted and at what scope (e.g. a
+  single browser/task combo vs. the full matrix) before spending that time.
+- **When Claude runs test_browser.mjs via shell:run_command**: run it as 6 SEPARATE
+  calls, one per browser/task combination (--browser=X --task=Y), never as one
+  call for the full matrix. A single full-matrix call (node test_browser.mjs with
+  no filters) exceeded the shell tool's own response window and returned a
+  timeout error to Claude with no result, even though the test process itself
+  was still running fine on the remote host — the tool times out well before
+  the full ~2-3+ min suite finishes. Report each of the 6 results (browser,
+  task, pass/fail counts) separately as they complete, so the person can track
+  how long the run is taking. If two calls are issued back-to-back, a brief
+  port-release race on 7655/3099 between them can cause a spurious
+  connection-refused failure — check `lsof -ti:7655` / `lsof -ti:3099` are both
+  empty and simply retry that one combination rather than assuming an app bug.
 - All NEF simulation data → data/runs/; figures → figures/
 
 ---
@@ -669,9 +686,10 @@ harness's `itiMs` param.
 Testing:
 - node test_consent_name.mjs — verifies pilot name saved to jsPsych data (fast, ~5s)
 - node test_browser.mjs      — Playwright E2E tests across Chromium, Firefox, and
-                               WebKit, both tasks (30 scenarios total, full tutorial
-                               included). SLOW (~2-3 min, longer than before since
-                               the tutorial now runs in full) — only run after big
+                               WebKit, both tasks (30+ scenarios total, full tutorial
+                               included, plus end-screen/early-exit save verification
+                               — see "Exit/redirect and data-saving architecture" below).
+                               SLOW (~2-3+ min for the full matrix) — only run after big
                                task/ changes or when explicitly asked, not after every
                                small edit. Runs fine via shell tool (spawns the real
                                `vite` dev server against index-test.html, drives it via
@@ -679,7 +697,19 @@ Testing:
                                detects screen transitions via body[data-screen="..."]
                                set by on_trial_start in timeline-builder.js, kills the
                                dev server by process group on exit).
-                               Run a subset: node test_browser.mjs --task=binary --browser=chromium
+                               **Claude must always run this as 6 separate shell:run_command
+                               calls** (one per browser × task combination, e.g.
+                               `node test_browser.mjs --browser=chromium --task=continuous`),
+                               never as a single full-matrix call -- the shell tool's own
+                               response window is shorter than the full suite takes, so a
+                               single unfiltered call returns a tool-level timeout with no
+                               result even though the suite is running fine remotely. Report
+                               each of the 6 results as they land so the person can track
+                               progress/timing. A spurious connection-refused failure right
+                               after a prior call can mean a port-release race on 7655/3099
+                               between back-to-back calls, not an app bug -- check
+                               `lsof -ti:7655` / `lsof -ti:3099` are empty, then retry just
+                               that combination.
                                Firefox/WebKit require: npx playwright install firefox webkit
                                (+ system deps via `sudo npx playwright install-deps` if missing —
                                watch for unrelated broken third-party apt repos blocking this)
@@ -824,6 +854,21 @@ screen is where the confirmation message appears, updated in place:
     participant ever sees this screen or clicks anything, which would
     otherwise double-call the exit.
 
+**Early-exit button is one-shot** (`create-early-exit.js`): this screen is
+hand-rolled DOM, not a real jsPsych trial (jsPsych's timeline has already
+reached its natural end by the time a participant sees it -- see the
+module's own docstring), so it never got the double-click protection
+jsPsych's own button-response plugin gives every other button in this app
+for free (it disables its buttons on click). Fixed to match: the button's
+pointerdown listener is registered with `{ once: true }` and sets
+`btn.disabled = true` as its first action, reusing the existing
+`.jspsych-btn:disabled` CSS (style.css) for identical visual feedback to
+every other button. This isn't cosmetic -- calling `finishSession()` (and
+therefore `jatos.endStudy`/`endStudyAndRedirect`) twice is the exact bug
+class already hit twice in this file's own history: a second call can hit
+a DIFFERENT failure on real JATOS (session already closed), not a
+harmless no-op.
+
 **PROLIFIC_CODES** (timeline-builder.js): one object grouped by task, each
 with a `completion` and `earlyExit` code -- 4 values total, ALL still
 placeholders (`TODO_..._CODE`). A previously-real continuous completion
@@ -831,6 +876,104 @@ code (`C3W3TF1O`, from an earlier study configuration) was deliberately
 discarded rather than kept around unverified -- don't reintroduce it
 without first re-confirming it's still valid for the upcoming Prolific
 study. Must be filled in before real Prolific deployment (see checklist).
+
+**Two independent completion mechanisms exist, and only one was ever
+addressed**: app-level JS (`finish-session.js`'s calls to
+`jatos.endStudy`/`endStudyAndRedirect`, which is everything documented
+above) and a SEPARATE platform-level mechanism -- JATOS's own
+`showEndPage` behavior plus the study's "End Redirect URL" property (set
+in `generate_jzip.py`'s `.jas` spec). Per JATOS's own jatos.js reference,
+`showEndPage` DEFAULTS TO TRUE, meaning `jatos.endStudy(data)` with no
+other arguments -- what this file called until a recent review -- tells
+JATOS to redirect to an end page (its own default one, or whatever's in
+the study's End Redirect URL) AFTER the study finishes, regardless of
+what the app's own JS thinks it's doing. `generate_jzip.py` had real-
+looking Prolific completion URLs sitting in that property (one of them
+the specific `C3W3TF1O` code discarded above), so this could have silently
+redirected a non-Prolific pilot participant to a dead Prolific completion
+page right after the "Session complete" screen, with no visible error.
+`pilot7cont.txt` never ruled this out -- it only proves data saved
+correctly, not that no redirect happened afterward; those are independent
+facts that got conflated. This is exactly the same class of blind spot as
+the redirect-after-session-close bug described above ("Where participants
+land..."): a JATOS study/component PROPERTY (evaluated server-side) that
+the local dev shim (jatos-shim.js) has zero representation of, since the
+shim only mocks jatos.js's client-side API, not server-side property
+enforcement -- no amount of local/E2E testing against the shim could ever
+have caught this. Fixed:
+`finish-session.js` now explicitly passes `showEndPage=false`, and
+`generate_jzip.py`'s `endRedirectUrl` is now an empty string (matching
+that spec's own convention for other unset string fields) rather than any
+plausible-looking URL -- so the JS remains the single source of truth for
+redirect behavior in both local dev and real JATOS, and if this field's
+inert status is ever accidentally bypassed by a future change, it fails
+obviously rather than silently sending someone to a stale code. Other
+`.jas` properties (`linearStudy`, each component's `reloadable`) are the
+same category of risk -- platform-enforced, invisible to local testing --
+though none are currently known to conflict with anything.
+
+**How finish-session.js and generate_jzip.py must stay in sync** (read
+this before touching either file): `generate_jzip.py`'s `UNUSED_END_REDIRECT_URL
+= ""` is a fixed, hardcoded value -- it is NOT derived from
+`finish-session.js` in any general sense, and there is nothing that keeps
+these two files in sync automatically beyond one narrow, explicit check.
+That check (`assert_show_end_page_disabled()` in `generate_jzip.py`, run
+as the very first thing `main()` does, before any build or packaging)
+spawns a throwaway `node --input-type=module` process that IMPORTS THE
+REAL `finish-session.js` module and reads its exported `SHOW_END_PAGE`
+constant -- not a regex/text match against the source, and not a second
+hardcoded copy of the assumption, both of which could silently drift.
+Safe to import standalone: `finish-session.js` only references
+`jatos`/`document` inside `finishSession()`'s function body, never at
+module top level, so importing it alone never executes that code. If the
+import fails for any reason, or `SHOW_END_PAGE` isn't exactly `false`, the
+script refuses to build (`sys.exit`, not a warning) with a specific error
+message naming both files.
+  - **What this check does NOT do**: it does not make `endRedirectUrl`
+    track `finish-session.js`'s behavior automatically, and it would NOT
+    catch every possible future divergence between the two files -- only
+    this one specific, narrow precondition. There is no general
+    auto-derivation here because there is no automatically-correct
+    `endRedirectUrl` to compute from the JS; the design intent is simply
+    "the platform-level redirect must never fire, ever" (a fixed
+    invariant), not "mirror whatever URL the JS happens to use" (there
+    isn't one on the non-Prolific path, and the Prolific path's URL is
+    dynamic and per-task/per-exit-reason anyway).
+  - **If `SHOW_END_PAGE` ever needs to become `true`**: that is a
+    deliberate design change, not a one-line toggle. It requires deciding
+    what `endRedirectUrl` should be at that point (there's no automatic
+    right answer), updating `assert_show_end_page_disabled()`'s expected
+    value to match, and re-confirming the whole thing against a real
+    MindProbe pilot run before trusting it -- the same standard this
+    project already holds every other claim about JATOS's actual runtime
+    behavior to (see "The save mechanism" above).
+  - **Before Prolific production**: re-run `python task/generate_jzip.py`
+    (which re-runs this check) after ANY change to `finish-session.js`,
+    not just ones that look redirect-related -- the check is cheap and
+    unconditional, so there's no reason to skip it, and no other part of
+    the pipeline will catch a regression here (see the "local dev shim has
+    zero representation of this" point above).
+
+**End-screen/early-exit save verification (test_browser.mjs)**: until a
+recent session, the E2E suite never actually exercised this whole section --
+every scenario stopped short of the "Thank you!" end screen and the
+'terminated' screen's own button, so `finishSession()` (and therefore
+`jatos.endStudy`/`endStudyAndRedirect`) was never once called by the
+automated suite. This is exactly why every real bug described above (the
+submitResultData/endStudy signature bug, the double-save bug, the
+same-origin-redirect-after-session-close bug) was found only by a live
+MindProbe pilot run, never by this suite. Fixed: test_browser.mjs now also
+spins up dev-server.js (the same local shim endpoint jatos-shim.js posts to)
+alongside the Vite dev server, and both the "Completes all trials" and "3
+timeouts" scenarios click all the way through to their respective buttons,
+wait for finishSession's "Session complete" confirmation, and assert a new
+`result_<timestamp>.json` file actually appeared in dev-results/ with real
+content -- then delete that test-created file afterward (matched by
+dev-server.js's own naming, so real pilot/dev files already in that folder
+can never be touched). This closes the coverage gap for the LOCAL-SHIM half
+of the save flow; it still can't catch a real-JATOS-only failure mode (see
+the redirect bug above) -- that class of bug still needs a live MindProbe
+dry-run.
 
 Pre-deployment checklist (before Prolific production):
   - Confirm task/sequences/{continuous,binary}_sequences.json holds the intended
@@ -845,6 +988,12 @@ Pre-deployment checklist (before Prolific production):
     Prolific first)
   - Fund Prolific wallet; confirm payment rate with PI
   - Run: node test_browser.mjs (in terminal)
+  - (No manual step needed for the showEndPage/endRedirectUrl invariant --
+    generate_jzip.py's assert_show_end_page_disabled() enforces it
+    automatically on every run and refuses to build if it's ever violated;
+    see "How finish-session.js and generate_jzip.py must stay in sync"
+    above. Still worth a live MindProbe dry-run before wide rollout, since
+    that check only confirms the JS-side intent, not real JATOS behavior.)
 
 Pilot data files:
   data/task_results.pkl          — pilot 3 (40 trials, pilot_undefined)
