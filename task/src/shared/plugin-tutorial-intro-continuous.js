@@ -1,6 +1,7 @@
 import { buildDistributionSVG } from './distribution-continuous.js';
 import { buildSliderHTML, initSlider } from './slider-continuous.js';
 import { startContinuousDrawAnimation } from './continuous-draw-animation.js';
+import { BOX0, BOX1, BOX2, DIST_CAPTION, SAMPLE_COLOR } from './tutorial-text-continuous.js';
 /**
  * plugin-tutorial-intro-continuous.js
  * Obs 1 of the continuous tutorial — progressive reveal via click.
@@ -9,11 +10,10 @@ import { startContinuousDrawAnimation } from './continuous-draw-animation.js';
  * The image reveal is its own step, separate from box 0's text, so
  * participants aren't reading and watching the animation at the same time —
  * mirrors plugin-tutorial-intro-binary.js's structure exactly.
+ * Box text is imported from tutorial-text-continuous.js, shared with
+ * plugin-tutorial-observation-continuous.js -- never hardcode it here again
+ * (see that module's own docstring for why).
  */
-
-const GOAL_COLOR   = '#2563eb';
-const SAMPLE_COLOR = '#ef4444';
-const DIST_COLOR   = '#16a34a';
 
 const info = {
   name: 'tutorial-intro-continuous',
@@ -41,20 +41,6 @@ class TutorialIntroContinuousPlugin {
     const self = this;
     document.body.style.backgroundColor = '#f5f5f5';
     const { example_value, true_mean, true_std } = trial;
-
-    const BOX0 = `In this task, you'll see a sequence of
-      <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>. Each number is
-      randomly drawn from a hidden
-      <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>.`;
-    const BOX1 = `Your <strong>goal</strong> is to estimate that distribution's
-      <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>, based on
-      all the numbers you've seen in this sequence.`;
-    const BOX2 = `<strong>Move</strong> the slider to show your estimate of the
-      <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>.`;
-    const DIST_CAPTION = `This curve shows the true
-      <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>. In the
-      experiment, you will only see the individual
-      <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>.`;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>

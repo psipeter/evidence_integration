@@ -4,7 +4,22 @@
  * Entirely self-contained — no side effects on the main timeline.
  *
  * Screen 1: observation layout, slider disabled, clock runs to zero.
- *           Fixed callout near the clock: "You must respond before the clock runs out"
+ *           Intro banner states the real per-trial deadline (seconds
+ *           derived from t_obs_ms, not hardcoded) and that this is a
+ *           passive demo. A yellow highlight bar sits directly under the
+ *           clock (visual emphasis, no text -- the banner already explains
+ *           it), and the disabled Submit button itself reads "Disabled for
+ *           this demo" instead of "Submit", since the button is exactly
+ *           where a confused participant's attention (and cursor) already
+ *           is. An earlier version used two separate text callouts (one
+ *           near the clock, one near the controls) with wording that read
+ *           as an instruction to act ("you must respond") next to visibly
+ *           inert controls -- real participants tried to respond and, with
+ *           nothing explaining why nothing happened, were confused about
+ *           what they could/couldn't do on this screen. Simplified down to
+ *           one banner + the button's own label carrying the "can't act
+ *           here" message, rather than stacking multiple redundant call-
+ *           outs around the screen.
  * Screen 2: "Too slow" screen with info boxes.
  * Screen 3: "Tutorial complete" + "Proceed to experiment" button.
  */
@@ -42,6 +57,11 @@ class TimeoutDemoPlugin {
     const showScreen1 = () => {
       document.body.style.backgroundColor = '#f5f5f5';
 
+      // Derived from the real t_obs_ms parameter, not hardcoded -- this is
+      // exactly the kind of literal that silently drifted stale before (see
+      // CLAUDE.md's tutorial-literal note) if t_obs_ms is ever tuned later.
+      const seconds = Math.round(_tObs / 1000);
+
       const sliderHTML = is_binary
         ? buildBinarySliderHTML({ unset: true, initPos: 50, showValue: true })
         : buildSliderHTML({ unset: true, initPos: 50, showValue: true });
@@ -50,29 +70,16 @@ class TimeoutDemoPlugin {
         ? `<div id="demo-stimulus" class="binary-circle" style="background:#fff;"></div>`
         : `<div id="demo-stimulus" class="stimulus-number" style="color:#ef4444;opacity:0;">${demo_value}</div>`;
 
-      // Callout injected into body so it renders near the fixed clock
-      const note = document.createElement('div');
-      note.id = 'timeout-demo-note';
-      Object.assign(note.style, {
-        position:   'fixed',
-        top:        'calc(1.2rem + 88px + 0.75rem)',
-        right:      'calc(1rem + 88px + 0.75rem)',
-        background: '#fffbeb',
-        border:     '1px solid #fbbf24',
-        borderRadius: '8px',
-        padding:    '0.5rem 0.9rem',
-        fontSize:   '1.1rem',
-        color:      '#92400e',
-        lineHeight: '1.4',
-        zIndex:     '200',
-        whiteSpace: 'nowrap',
-        boxShadow:  '0 2px 6px rgba(0,0,0,0.1)',
-      });
-      note.textContent = 'You must respond before the clock runs out ↗';
-      document.body.appendChild(note);
-
       display_el.innerHTML = `
+        <div id="timeout-demo-intro" style="text-align:center;max-width:640px;
+             margin:0 auto 1.5rem;background:#eff6ff;border:1px solid #93c5fd;
+             border-radius:8px;padding:0.9rem 1.3rem;font-size:1.3rem;color:#1e3a8a;">
+          On each trial, you'll have <strong>${seconds} seconds</strong> to submit
+          your response. This demo shows what happens if you run out of time.
+        </div>
         <canvas id="demo-clock" class="timeout-clock" width="88" height="88"></canvas>
+        <div style="position:fixed;top:calc(1.2rem + 88px + 0.4rem);right:1.5rem;
+             width:88px;height:10px;background:#fbbf24;border-radius:4px;z-index:99;"></div>
         <div class="obs-wrap">
           ${stimulus}
           <div style="opacity:0.4;pointer-events:none;width:100%;">${sliderHTML}</div>
@@ -80,7 +87,7 @@ class TimeoutDemoPlugin {
         <div style="text-align:center;">
           <button class="jspsych-btn" disabled
             style="font-size:1.6rem;padding:1rem 3.5rem;min-width:200px;opacity:0.4;">
-            Submit
+            &#128274; Disabled for this demo
           </button>
         </div>`;
 
@@ -103,8 +110,6 @@ class TimeoutDemoPlugin {
 
       startTimeoutClock(canvas, _tObs, () => {
         document.body.style.backgroundColor = '#f5f5f5';
-        const n = document.getElementById('timeout-demo-note');
-        if (n) n.parentNode.removeChild(n);
         showScreen2();
       });
     };
@@ -118,11 +123,11 @@ class TimeoutDemoPlugin {
           <div style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;margin-top:0.5rem;">
             <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;
                         padding:0.9rem 1.2rem;font-size:1.3rem;color:#333;text-align:center;">
-              ↩ The observation will <strong>automatically repeat</strong>
+              ↩ The previous ${is_binary ? 'ball' : 'number'} will be <strong>shown again</strong>
             </div>
-            <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;
-                        padding:0.9rem 1.2rem;font-size:1.3rem;color:#b91c1c;text-align:center;">
-              &#9888; If you reach 0 timeouts in a trial, the experiment will end
+            <div style="background:#fef2f2;border:1.5px solid #ef4444;border-radius:6px;
+                        padding:0.9rem 1.2rem;font-size:1.3rem;color:#7f1d1d;text-align:center;">
+              <strong>Warning:</strong> If you reach 0 timeouts in a trial, the experiment will end
               and you will receive partial compensation
             </div>
           </div>

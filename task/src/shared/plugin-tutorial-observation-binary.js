@@ -5,15 +5,16 @@
  * No timeout clock, deliberately — participants need unhurried time to read
  * and think during the tutorial. Draw animation runs on load; submit stays
  * disabled until the animation completes.
+ *
+ * Box text is imported from tutorial-text-binary.js, shared with
+ * plugin-tutorial-intro-binary.js -- never hardcode it here again (see that
+ * module's own docstring for why).
  */
 
 import { buildBinarySliderHTMLv2 as buildBinarySliderHTML, initBinarySliderV2 as initBinarySlider } from './slider-binary.js';
 import { buildUrnSVG } from './urn-binary.js';
 import { startBinaryDrawAnimation } from './binary-draw-animation.js';
-
-const SAMPLE_BLUE = '#2563eb';
-const SAMPLE_RED  = '#ef4444';
-const DIST_COLOR  = '#16a34a';
+import { BOX0, BOX1, BOX2, URN_CAPTION } from './tutorial-text-binary.js';
 
 const info = {
   name: 'tutorial-observation-binary',
@@ -40,24 +41,6 @@ class TutorialObservationBinaryPlugin {
             slider_default, init_pos, show_value } = trial;
     const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 50);
     const unset = slider_default === 'none';
-
-    const BOX0 = `In this task, you'll see a sequence of balls. Each ball is
-      randomly colored
-      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> or
-      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> according to a
-      hidden <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>.`;
-    const BOX1 = `Your <strong>goal</strong> is to estimate that
-      <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>, based on
-      all the balls you've seen in this sequence.`;
-    const BOX2 = `<strong>Move</strong> the slider toward
-      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> or
-      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> to show
-      which you think is more likely, and by how much.`;
-    const URN_CAPTION = `This bar shows the true
-      <span style="color:${DIST_COLOR};font-weight:bold;">probability</span> of
-      <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> vs
-      <span style="color:${SAMPLE_RED};font-weight:bold;">red</span>. In the
-      experiment, you will only see the colored balls.`;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>

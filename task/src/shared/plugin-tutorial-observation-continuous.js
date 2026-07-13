@@ -16,15 +16,16 @@
  * (continuous-draw-animation.js) reveals it — same auto-running pattern as
  * plugin-tutorial-observation-binary.js's startBinaryDrawAnimation; submit
  * stays disabled until it completes.
+ *
+ * Box text is imported from tutorial-text-continuous.js, shared with
+ * plugin-tutorial-intro-continuous.js -- never hardcode it here again (see
+ * that module's own docstring for why).
  */
 
 import { buildDistributionSVG } from './distribution-continuous.js';
 import { buildSliderHTML, initSlider } from './slider-continuous.js';
 import { startContinuousDrawAnimation } from './continuous-draw-animation.js';
-
-const GOAL_COLOR   = '#2563eb';   // blue  — true mean / ???
-const SAMPLE_COLOR = '#ef4444';   // red   — current observation
-const DIST_COLOR   = '#16a34a';   // green — distribution curve
+import { BOX0, BOX1, BOX2, DIST_CAPTION, SAMPLE_COLOR } from './tutorial-text-continuous.js';
 
 const info = {
   name: 'tutorial-observation-continuous',
@@ -55,20 +56,6 @@ class TutorialObservationContinuousPlugin {
             slider_default, init_pos, show_value } = trial;
     const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 0);
     const unset = slider_default === 'none';
-
-    const DIST_CAPTION = `This curve shows the true
-      <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>. In the
-      experiment, you will only see the individual
-      <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>.`;
-    const BOX0 = `In this task, you'll see a sequence of
-      <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>. Each number is
-      randomly drawn from a hidden
-      <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>.`;
-    const BOX1 = `Your <strong>goal</strong> is to estimate that distribution's
-      <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>, based on
-      all the numbers you've seen in this sequence.`;
-    const BOX2 = `<strong>Move</strong> the slider to show your estimate of the
-      <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>.`;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
