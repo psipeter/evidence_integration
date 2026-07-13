@@ -1,6 +1,13 @@
 """
 generate_sequences_iid.py
 ==========================
+ROLE: one of two generation methods under active consideration for the
+full 10x4 experiment (see CLAUDE.md's "PI decision pending" note) -- NOT
+currently promoted to production. The current 6x4 pilot uses
+generate_sequences_momentmatch.py instead. Do not delete this file or its
+output ({task}_iid_sequences.*) -- the i.i.d.-vs-moment-matched choice is
+still open and this is one of the two live candidates being compared.
+
 The "pure i.i.d." branch: genuinely unconstrained sampling. No k-based
 plausibility check, no rejection loop, no smoothing/gating, and -- per
 explicit decision -- NO seed search or best-of-N ranking either. Any

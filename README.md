@@ -196,57 +196,62 @@ Target: ~50–80 participants per task, within-subject.
 
 ### Sequence generation
 
-Three generation methods now exist (see CLAUDE.md's "Sequence generation
-methods" section for the full rationale and tradeoffs):
+Three scripts, each with a ROLE note at the top of its own module docstring
+(see CLAUDE.md's "Sequence generation methods" section for the full
+rationale and tradeoffs):
 
 ```bash
-# Original (k-constrained rejection sampling, std=20) -- not used for the
-# pilot since it switched to moment-matching; kept for comparison
-python task/generate_sequences.py --task continuous --seed <N>
-python task/generate_sequences.py --task binary --seed <N>
-
-# Pure i.i.d. (no smoothing, no seed search — single draw)
+# Pure i.i.d. (no smoothing, no seed search — single draw) -- one of two
+# candidates still under PI consideration for the 10x4 design, not current
+# production:
 python task/generate_sequences_iid.py --task both --seed 0 \
     --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
 
 # Moment-matched / quota (isotonic-residual seed search, default score_mode) --
-# this is what generated the CURRENT PRODUCTION 6x4 pilot. Evenly-spaced
-# level grid, NOT random+mirrored (see CLAUDE.md for why mirroring was
-# removed):
+# this is what generated the CURRENT PRODUCTION 6x4 pilot. Prefix identity
+# and target level are independent axes (see CLAUDE.md for the full
+# mechanism and the collision bug this fixes):
 python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \
-    --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
-# Defaults used above (all overridable): --n_levels 6, --mean_range 10 90
+    --n_prefix 6 --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+# Defaults used above (all overridable): --n_prefix 6, --mean_range 15 85
 # (continuous), --blue_range 2 13 (binary, blue-ball count out of
 # --seq_length -- NOT a p fraction).
+
+# generate_sequences.py has no CLI of its own anymore -- shared-utilities
+# module only, imported by both scripts above, not run directly.
 ```
 
 **Current 6x4 pilot** (in production): moment-matched/quota generation
 (generate_sequences_momentmatch.py, isotonic score_mode, 1000-try seed
-search), evenly-spaced level grid (NOT random+mirrored -- see CLAUDE.md's
-"Sequence generation methods" for the full rationale): continuous true_mean
-levels exactly [10,26,42,58,74,90] (--mean_range=[10,90]); binary exact
-blue-ball counts [2,4,6,9,11,13] out of 15 (--blue_range=[2,13]), i.e. true_p
-= [0.133,0.267,0.4,0.6,0.733,0.867]; prefix_length=4, std_fixed=15,
-ITI_MS=1000ms. Promoted to task/sequences/{continuous,binary}_sequences.{pkl,json}
-as of the latest session, superseding the earlier seed=175/198 sequences
-(random+mirrored design) -- those remain fully recoverable via git history
-if ever needed. Verified directly against the saved files before promoting:
-exact repeat counts, exact levels, and for binary, every individual trial's
-full 15-observation sequence hitting its exact target blue-ball count with
-zero rounding slop (continuous still has the small boundary bias at its two
-extreme levels -- see the achieved-mean-vs-target table below; binary has no
-equivalent bias at any level).
+search). Prefix identity (6 distinct prefixes, --n_prefix) and target level
+(true_mean/true_p) are independent axes, matched via a globally optimal
+(Hungarian algorithm) assignment rather than tied 1:1 -- see CLAUDE.md's
+"Sequence design" section for the full mechanism and the real prefix-
+collision bug this redesign fixes. Continuous true_mean spans exactly
+[15,85] (--mean_range=[15,85], 24 distinct evenly-spaced values, one per
+trial); binary spans exactly [2,13] blue-ball count out of 15
+(--blue_range=[2,13], all 12 integer levels used, 2 repeats each), i.e.
+true_p = [0.1333, ..., 0.8667]; prefix_length=4, std_fixed=15,
+ITI_MS=1000ms. Promoted to task/sequences/{continuous,binary}_sequences.{pkl,json},
+superseding the earlier evenly-spaced/no-mirroring sequences (which had the
+prefix-collision bug) -- those remain fully recoverable via git history.
+Verified directly against the saved files before promoting: 6 distinct
+prefixes per task with zero collisions, exactly 4 repeats each, zero binary
+quota mismatches, full target-range coverage. scripts/inspect_sequences.py
+now also writes a human-readable, observation-level CSV
+(figures/inspect_sequences.csv) covering all of this alongside the existing
+diagnostic figure -- see that script's own docstring.
 
-**10x4 full experiment**: NOT yet finalized. Best candidates found so far
-(moment-matched, isotonic score_mode, mean_range=[20,80], p_range=[0.2,0.8],
-std_fixed=15): continuous seed=245, binary seed=68 — saved under
-`{task}_momentmatch_sequences.*`, not yet promoted to the production
-filenames. These predate the evenly-spaced/no-mirroring redesign above, so
-they'd need regenerating under it too before being considered current --
-choice between the i.i.d. and moment-matched branches, AND what
---n_levels/range to use at this larger scale, are both pending PI
-consultation (moment-matching introduces a real, literature-documented
-behavioral tradeoff — see CLAUDE.md — it is not a free smoothness win).
+**10x4 full experiment**: NOT yet finalized. The previously-found candidate
+seeds (moment-matched, isotonic score_mode, mean_range=[20,80],
+p_range=[0.2,0.8], std_fixed=15: continuous seed=245, binary seed=68) now
+predate BOTH the evenly-spaced/no-mirroring redesign AND the prefix/target-
+independence redesign above -- they'd need regenerating from scratch under
+the current script to be current, not just re-checked. Choice between the
+i.i.d. and moment-matched branches, AND what --n_prefix/range to use at
+this larger scale, are both pending PI consultation (moment-matching
+introduces a real, literature-documented behavioral tradeoff — see
+CLAUDE.md — it is not a free smoothness win).
 
 ### Directory structure
 

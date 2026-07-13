@@ -329,39 +329,88 @@ distribution" would overclaim novelty it can't always guarantee.
 - Distractor system exists (iti_condition per trial, popup/iti_length/none) but
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
 
-Sequence design: 6×4 (24 trials) is the CURRENT PILOT production design, generated
-  via task/generate_sequences_momentmatch.py (quota/moment-matching, isotonic
-  score_mode, 1000-try seed search), std_fixed=15. Promoted to production
-  (task/sequences/{continuous,binary}_sequences.{pkl,json}) as of the latest
-  session, superseding the earlier seed=175/198 sequences (still fully
-  recoverable via git history if ever needed -- nothing was deleted, only
-  overwritten in the working tree, and task/sequences/ is git-tracked).
+Sequence design: 6x4 (24 trials) is the CURRENT PILOT production design,
+  generated via task/generate_sequences_momentmatch.py (1000-try isotonic
+  seed search), std_fixed=15. Promoted to production
+  (task/sequences/{continuous,binary}_sequences.{pkl,json}); superseded
+  the older seed=175/198 sequences (fully recoverable via git history).
 
-  **Design**: --n_levels=6 evenly-spaced qid levels (NOT random-then-mirrored
-  -- see "Sequence generation methods" below for why mirroring was removed),
-  automatically split 3-lower/3-upper around each range's midpoint:
-    Continuous: --mean_range=[10,90] -> true_mean levels exactly
-      [10, 26, 42, 58, 74, 90].
-    Binary: --blue_range=[2,13] (blue-ball count out of 15, not a p fraction)
-      -> exactly [2, 4, 6, 9, 11, 13] blue balls, i.e. true_p =
-      [0.133, 0.267, 0.4, 0.6, 0.733, 0.867].
-  Verified directly against the saved files (not just the generation script's
-  own assertions) before promoting: exactly 4 repeats per qid for both tasks;
-  continuous true_mean/true_std levels exactly as above; binary true_p levels
-  exactly as above AND every individual 15-observation trial hits its exact
-  target blue-ball count with zero deviation (binary quota-matching has no
-  rounding slop at all, unlike continuous's boundary bias -- see below).
-  Check figure: copy the four {task}_sequences.{pkl,json} files to a temp dir
-  and run scripts/inspect_sequences.py --seq_dir <temp dir> --skip_nef (the
-  script hardcodes the plain {task}_sequences.* filenames, so it can't be
-  pointed at a differently-named file directly).
+  **Design (redesigned -- prefix identity and target level are now
+  INDEPENDENT axes, not one qid = one fixed (prefix, target) pair)**:
+  A real collision bug motivated this -- two DIFFERENT qids in an earlier
+  version of the promoted sequences ended up with an IDENTICAL realized
+  4-observation prefix purely by chance (binary's prefix_length=4 only
+  allows 2**4=16 distinct sequences total, as few as 4 arrangements for a
+  given exact quota, so collisions were structurally likely once enough
+  qids shared a quota). See generate_sequences_momentmatch.py's module
+  docstring ("Prefix generation" section) for the full mechanism; summary:
+    - `--n_prefix=6` DISTINCT prefixes are generated first, independent of
+      any target -- this is what "qid" and repeat structure track now
+      (each repeated `--n_repeats=4` times -> 24 trials). Continuous:
+      prefix centers spread evenly across --mean_range (NOT all centered on
+      the range midpoint -- an earlier version did that and left extreme
+      targets with no genuinely close prefix available, a supply problem
+      no amount of matching cleverness could fix). Binary: compositions
+      (blue-ball count out of 4) spread across the full range via the same
+      linspace pattern, arrangements drawn WITHOUT replacement -- this is
+      the actual fix for the collision bug above.
+    - 24 TARGET values (true_mean for continuous, true_p for binary) are
+      generated SEPARATELY, with NO forced repeat structure -- continuous
+      gets 24 DISTINCT evenly-spaced means across --mean_range=[15,85]
+      (changed from the old [10,90]); binary gets the FULL native integer
+      blue-count granularity across --blue_range=[2,13] (every integer
+      level 2..13, not an evenly-spaced subset the old --n_levels design
+      used), distributed as evenly as possible (2 repeats each at n=24,
+      12 levels -- divides evenly here, but the remainder-handling is
+      general for cases where it doesn't).
+    - Prefix-slots and target-slots are matched via a GLOBALLY OPTIMAL
+      assignment (Hungarian algorithm, scipy.optimize.linear_sum_assignment,
+      minimizing total mismatch) -- NOT a greedy heuristic, which was tried
+      first and rejected after confirming empirically it can leave an
+      arbitrarily bad single-pair mismatch (>40 points) from unlucky
+      processing order, even fully greedy. Binary's exact quota-
+      reachability constraint (an all-red prefix cannot reach a target near
+      the top of blue_range) is enforced as effectively-infinite cost on
+      infeasible pairs.
+    - Suffix construction targets the algebraic RESIDUAL needed to bring
+      the pooled (prefix+suffix) sequence to the trial's actual target, not
+      the target directly -- necessary now that the prefix is generic and
+      not already near the target. Exact for binary; continuous's pooled
+      std runs slightly above std_fixed on average as a result (measured on
+      the promoted pilot: mean achieved std ~14.6, max ~20.6 against a
+      target of 15 -- see the boundary-bias table below for the separate,
+      pre-existing extreme-mean bias this compounds with).
 
-  For the full 10×4 (40 trials) experiment, three generation methods now exist
-  and are under active evaluation — see "Sequence generation methods" below.
-  The full-experiment design is NOT yet finalized: pending PI consultation on
-  which method (i.i.d. vs moment-matched) to promote to production, AND on
-  what --n_levels/range to use (the 6×4 pilot's choices above are not
-  automatically the right ones at a larger scale).
+  **Consequence to know about, not a bug**: a given prefix's 4 repeats
+  generally pair with DIFFERENT true_mean/true_p each time now. "qid
+  repeats" means "same literal prefix shown multiple times", NOT "same
+  hidden parameter shown multiple times" the way carrabin/yoo's qid works.
+  config-base.js's `pickTutorialExample` may still assume the latter for
+  some of its fallback logic -- flagged in "Sequences.json schema" below,
+  not yet verified/fixed.
+
+  Verified directly against the saved files before promoting (not just the
+  generation script's own internal assertions): 6 distinct prefixes per
+  task (zero collisions), exactly 4 repeats each, zero binary quota
+  mismatches, true_mean spans exactly [15,85], true_p spans exactly
+  [0.1333, 0.8667] using all 12 integer blue-count levels. Check via
+  scripts/inspect_sequences.py, which now ALSO writes a human-readable,
+  observation-level CSV (figures/inspect_sequences.csv by default,
+  alongside the existing PDF) covering prefix/suffix structure, running
+  trajectory, achieved-vs-target mean/std/p, and these same constraint
+  checks -- see that script's own module docstring. It reads the literal
+  {task}_sequences.* filenames from --seq_dir, so pointing it at a
+  differently-named file (e.g. the *_momentmatch_sequences.* search output,
+  before promoting) still needs the temp-dir copy trick described in
+  "Inspect sequences" further below.
+
+  For the full 10x4 (40 trials) experiment: NOT yet finalized, and the
+  previously-found 10x4 candidate seeds (continuous seed=245, binary
+  seed=68 -- see "Sequence generation methods" below) now predate BOTH the
+  evenly-spaced/no-mirroring redesign AND this prefix/target-independence
+  redesign -- they would need regenerating from scratch under the current
+  script to be current, not just re-checked. PI decision on i.i.d. vs
+  moment-matched is also still open -- see "Open items" below.
 
 Single master copy in task/sequences/{task}_sequences.{pkl,json}.
 task/src/{task}/config.js imports directly from task/sequences/ — no copy step needed.
@@ -411,6 +460,18 @@ hand-pick a new tutorial example again — if the pedagogical example ever
 needs different qualities, change pickTutorialExample's selection logic,
 not the values.
 
+**NOT YET VERIFIED against the prefix/target-independence redesign**: the
+"falls through past all of the closest qid's repeats" fallback behavior
+described above was verified back when a qid's repeats all shared the same
+true_mean/true_p (the pre-redesign design). Under the current design a
+qid's repeats generally have DIFFERENT targets (see "Sequence design"
+above), so falling through a qid's "repeats" as a fallback candidate group
+may no longer mean what it used to. This function operates on individual
+TRIALS (not qids) for its primary closest-to-midpoint selection, so the
+core logic is likely still fine -- but the fallback path hasn't been
+re-checked against real production data since the redesign. Verify before
+relying on it, don't assume it still holds.
+
 **Participant-data columns** (parse_results.py, build-trial-timeline.js):
 only genuinely participant-generated fields are recorded/saved —
 prolific_pid, task, trial, observation, value, response, timed_out, rt,
@@ -428,82 +489,86 @@ before assuming it's fine.
 ### Sequence generation methods (task/)
 
 Three separate scripts, kept deliberately distinct rather than one script with
-a tunable knob — see rationale below.
+a tunable knob. Each now carries a ROLE note at the top of its own module
+docstring stating its current status -- check there first, this section
+summarizes but the scripts themselves are the source of truth.
 
-**task/generate_sequences.py** (original; being phased out for new work):
-  Draws i.i.d. observations, then rejects and redraws whole blocks until the
-  realized sample statistics fall within k × SE of the true parameter
-  (rejection sampling). Two problems discovered during the 10×4 push:
-  1. The joint constraint (ALL qids must pass simultaneously in one draw)
-     scales very badly with n_unique_sequences — going from 6 to 10 qids
-     collapsed the binary structural pass rate from ~12% to ~0% at k=0.5,
-     and to only ~6% even at the old k=0.7.
-  2. At extreme means (e.g. mean=10 or 90 with std=15), the [0,100] bound
-     truncates the achievable std so far below the nominal value that NO
-     amount of resampling can pass a tight k — a structural mismatch between
-     target and bound, not a sampling problem.
-  **Key finding**: k-constrained rejection sampling and exact quota sampling
-  turned out to be the SAME underlying object at different points on one
-  continuum — i.i.d. sampling conditioned on the final composition falling
-  within k × SE of the target. Exact enumeration (n=11, p=0.5) showed the
-  variance of the LAST observation's predictability at the production k=0.7
-  is already ~10x smaller than true i.i.d., ~90% of the way to quota's hard
-  zero. There is no way to tighten k for smoothness without buying into
-  finite-population predictability — they are the same lever.
-  Still used only by whichever pilot/production sequences were last generated
-  with it -- currently NOT the active pilot method (the 6×4 pilot switched to
-  moment-matching, see "Sequence design" above). Not recommended for new work.
+**task/generate_sequences.py** -- SHARED UTILITIES ONLY, not independently
+  runnable. Its own generation method (rejection sampling: draw prefix/
+  suffix freely, redraw whole blocks until the realized sequence passes a
+  plausibility check) was REMOVED in a cleanup pass -- no CLI, no main(),
+  nothing calls it directly anymore. It exists purely as an import target:
+  generate_sequences_iid.py and generate_sequences_momentmatch.py both pull
+  RNG/param-grid/observation-drawing/plausibility-checking/scoring helpers
+  from here rather than duplicating them (make_rng, continuous_param_grid,
+  binary_param_grid, mirror_sequence, mirror_params, draw_continuous_obs,
+  draw_binary_obs, check_sequence_plausibility, _weighted_delta_score,
+  _weighted_rmse_score, score_sequences, _bayesian_responses, _rl_responses,
+  _save_sequences -- check both other scripts' imports before removing or
+  renaming anything in this file). Do not reintroduce the rejection-sampling
+  generation logic here; if it's ever needed again it's recoverable from git
+  history. The rejection-sampling METHOD's own known problems (for context,
+  since the method itself is still referenced in prose elsewhere): the joint
+  multi-qid constraint (ALL qids must pass simultaneously in one draw) scaled
+  very badly with qid count -- going from 6 to 10 qids collapsed the binary
+  structural pass rate from ~12% to ~0% at k=0.5, ~6% at k=0.7 -- and at
+  extreme means (e.g. mean=10/90 with std=15) the [0,100] bound truncates the
+  achievable std so far below nominal that no amount of resampling passes a
+  tight k (a structural mismatch between target and bound, not a sampling
+  problem). **Key finding**: k-constrained rejection sampling and exact quota
+  sampling are the SAME underlying object at different points on one
+  continuum -- i.i.d. sampling conditioned on the final composition falling
+  within k x SE of the target. There is no way to tighten k for smoothness
+  without buying into finite-population predictability; they are the same
+  lever.
 
-**task/generate_sequences_iid.py** (pure i.i.d. branch):
-  Genuinely unconstrained sampling — no k, no plausibility gate, no rejection
-  loop, and deliberately NO seed search or best-of-N ranking either (any
-  outcome-dependent seed selection is itself a form of conditioning, which
-  would pull back toward the same finite-population structure this branch
-  exists to avoid). Single draw, save, done. Matches the closest published
-  precedent (Nassar/Behrens/Glaze-style predictive-inference tasks draw
-  outcomes directly from the generative distribution with no correction).
-  `--report` gives a diagnostic (achieved vs target moments) that never
-  feeds back into generation.
+**task/generate_sequences_iid.py** -- pure i.i.d. branch, one of two
+  candidates still under consideration for the pending 10x4 full-experiment
+  design (see "Open items" below) -- NOT current production, NOT dead code.
+  Genuinely unconstrained sampling -- no k, no plausibility gate, no
+  rejection loop, and deliberately NO seed search or best-of-N ranking
+  either (any outcome-dependent seed selection is itself a form of
+  conditioning, which would pull back toward the same finite-population
+  structure this branch exists to avoid). Single draw, save, done. Matches
+  the closest published precedent (Nassar/Behrens/Glaze-style predictive-
+  inference tasks draw outcomes directly from the generative distribution
+  with no correction). `--report` gives a diagnostic (realized vs target
+  moments) that never feeds back into generation.
 
-**task/generate_sequences_momentmatch.py** (quota / moment-matching branch):
-  Constructs each block (prefix/suffix) to hit the target sample mean/std
-  (continuous, via iterative rescale+clip) or exact blue/red quota (binary),
-  then randomizes order/realization. No rejection loop — resolves the
-  mean=10/90+std=15 truncation problem directly (verified: achieved std
-  within ~0.5 of nominal even at the range edges, vs ~4.5 off under
-  rejection sampling).
+**task/generate_sequences_momentmatch.py** -- CURRENTLY ACTIVE / PRODUCTION
+  method. The promoted 6x4 pilot was generated by this script. Constructs
+  each block (prefix or suffix) to hit a target sample mean/std (continuous,
+  via iterative rescale+clip) or exact blue/red quota (binary), then
+  randomizes order/realization. No rejection loop -- resolves the
+  mean=10/90+std=15 truncation problem directly (achieved std within ~0.5 of
+  nominal even at the range edges, vs ~4.5 off under rejection sampling).
   Literature check: no support found for exact quota matching as a
-  behaviorally-neutral stimulus-generation choice in the probability-learning/
-  evidence-integration literature — every precedent found (gambler's-fallacy,
-  probability-matching studies) uses this kind of composition constraint as
-  a deliberate, studied manipulation, not a neutral background choice. Real
-  methodological tradeoff, not free.
-  **Parameter levels are an evenly-spaced grid, not random+mirrored** (as of
-  the latest session): earlier versions (and generate_sequences.py /
-  generate_sequences_iid.py, which still work this way) drew true_mean/
-  true_p randomly within stratified bins across the LOWER half of
-  mean_range/p_range, then mirrored each draw (mean -> 100-mean, p -> 1-p)
-  to get the upper half "for free" and guarantee symmetry. Removed from
-  this script specifically: mirroring's point was compute-saving under
-  rejection sampling (no rejection loop here to save on) and guaranteeing
-  symmetry (redundant once you specify an already-symmetric explicit grid
-  directly). `--n_levels` (default 6 -- this reproduces the original "6
-  unique sequences x n_repeats" structure exactly, just deterministic
-  instead of random+mirrored) evenly-spaced levels are built via
-  np.linspace across `--mean_range` (continuous, default [10,90]) or
-  `--blue_range` (binary, default [2,13] -- an exact blue-ball COUNT out of
-  --seq_length, not a p fraction, since binary's moment-matching already has
-  no boundary-bias tradeoff at all to route around -- see the achieved-p
-  exactness note above). Both are automatically split evenly between the
-  lower/upper half of the range whenever --n_levels is even (e.g. n_levels=6
-  over mean_range=[10,90] gives exactly [10,26,42,58,74,90]; n_levels=6 over
-  blue_range=[2,13] gives exactly [2,4,6,9,11,13]). Number of qids is
-  DERIVED from --n_levels, not a separate --n_unique_sequences. Continuous's
-  boundary bias (achieved-mean-vs-target table below) is unchanged by any of
-  this -- the difference under an explicit grid is that EVERY trial at
-  whichever level sits nearest the range edge shows it consistently, where
-  previously only whichever single random stratified draw happened to land
-  near an edge did.
+  behaviorally-neutral stimulus-generation choice in the probability-
+  learning/evidence-integration literature -- every precedent found
+  (gambler's-fallacy, probability-matching studies) uses this kind of
+  composition constraint as a deliberate, studied manipulation, not a
+  neutral background choice. Real methodological tradeoff, not free.
+
+  **Prefix identity and target level are independent axes** (the current
+  design, redesigned from an earlier version where each qid meant one fixed
+  (prefix, target) pair) -- see "Sequence design" above for the full
+  mechanism and the collision bug this fixes, and the script's own module
+  docstring ("Prefix generation" section) for the complete rationale. In
+  brief: `--n_prefix` (default 6) distinct prefixes, independent of any
+  target, each repeated `--n_repeats` (default 4) times; target values
+  generated separately with no forced repeats (continuous: N distinct
+  evenly-spaced means; binary: full native blue-count granularity,
+  distributed as evenly as possible); matched via the Hungarian algorithm
+  (scipy.optimize.linear_sum_assignment), not a greedy heuristic (greedy was
+  tried and rejected -- see the script's docstring for why). Parameter
+  levels/targets are an evenly-spaced grid or full native range, NOT
+  random+mirrored -- mirroring's point was compute-saving under rejection
+  sampling (no rejection loop here to save on) and guaranteeing symmetry
+  (redundant once you specify an already-symmetric grid directly), so it was
+  removed entirely; `mirror_sequence`/`mirror_params` still exist in
+  generate_sequences.py purely because generate_sequences_iid.py still uses
+  them.
+
   Seed search via `--score_mode {bump, isotonic}` (default: isotonic):
     - 'bump': original approach, penalizes only upward steps in the aggregate
       |Δresponse| curve; includes an RMSE-vs-ground-truth component and a
@@ -516,32 +581,32 @@ a tunable knob — see rationale below.
       No RMSE component (curve shape is independent of which ground truth
       downstream analyses use — see gt_mode below), no gate (every seed
       ranked by bay_resid + rl_resid, lowest wins). This is the currently
-      preferred method: at 10×4 (mean_range=[20,80], std_fixed=15,
-      p_range=[0.2,0.8], n_tries=300) found residuals ~3.1e-7 (binary, seed=68)
-      and ~2.0e-7 (continuous, seed=245) — curves visually indistinguishable
-      from perfectly smooth decay.
+      preferred method.
+    Note: neither score_mode penalizes achieved-vs-target mismatch (mean/
+    std/p accuracy) at all -- only curve smoothness. Deliberately left this
+    way after discussion: folding in a mismatch term is a genuine dual-
+    objective tradeoff (could trade smoothness for accuracy or vice versa)
+    with modest expected marginal benefit given the structural fix already
+    in place, so it wasn't added. If accuracy ever looks insufficient for a
+    winning seed, check via --report / the inspect_sequences.py CSV first;
+    revisit adding a score term only if that's not enough.
 
-Current best candidates for the 10×4 full experiment (found under the OLD
-random+mirrored design, since removed -- see "Parameter levels" note in
-generate_sequences_momentmatch.py's own section above; these predate the
-evenly-spaced/no-mirroring redesign and would need regenerating under it to
-be current). NOT promoted to production filenames, and no longer present at
-task/sequences/{task}_momentmatch_sequences.* either (that path now holds a
-copy of the 6x4 PILOT data instead, overwritten by the more recent 6x4
-search -- see "Sequence design" above) -- still fully recoverable via git
-(commit 274b598, confirmed by directly checking out and inspecting that
-version: 10 qids, 40 trials each):
+Current best candidates for the 10x4 full experiment -- STALE, predate BOTH
+the evenly-spaced/no-mirroring redesign AND the prefix/target-independence
+redesign, would need regenerating from scratch under the current script to
+be current (not just re-checked). Recoverable via git (commit 274b598) for
+reference only:
   continuous: seed=245 (momentmatch, isotonic, mean_range=[20,80], std_fixed=15)
   binary:     seed=68  (momentmatch, isotonic, p_range=[0.2,0.8])
-std_fixed=15 is the new default for continuous going forward (down from 20
-in the original rejection-sampling design) — confirmed to resolve within the
-achievable range via moment-matching; NOT confirmed compatible with the
-original rejection-sampling script at k<0.7 (truncation issues near
-mean_range edges, see above).
+std_fixed=15 is the default for continuous (down from 20 in the original
+rejection-sampling design) -- confirmed to resolve within the achievable
+range via moment-matching.
 
 How far can moment-matching push mean_range/p_range toward [0,100]/[0,1]?
 Tested empirically (moment_match_continuous/binary directly, 300 draws per
-target, std_fixed=15, n=15 obs):
+target, std_fixed=15, n=15 obs) -- this table predates the prefix/target-
+independence redesign but the underlying per-BLOCK boundary-clipping bias it
+measures is a property of moment_match_continuous itself, still accurate:
 
   target mean | achieved mean (bias)  | achieved std (target 15)
   ----------- | --------------------- | -------------------------
@@ -558,41 +623,53 @@ target, std_fixed=15, n=15 obs):
 Bias grows smoothly (not a hard cutoff) as the target approaches the [0,100]
 bound -- moment-matching pushes the usable range much further than rejection
 sampling did, but does NOT eliminate the boundary-clipping problem, just
-shrinks it. [10,90] (bias +0.95, std 14.23) was judged an acceptable tradeoff
-and adopted for the 6×4 pilot; below ~mean=10 the bias becomes large enough
-to matter. Binary has NO equivalent problem -- quota is exact for any p in
-(0,1), the only limitation is 1/n rounding granularity (e.g. p=0.02 at n=15
-rounds to an exact 0, same as p=0.00 -- not a degradation, just coarseness),
-so p_range can go far more extreme than mean_range if ever needed.
-
-Wider ranges (mean_range=[10,90], p_range=[0.1,0.9]) were tested and found
-to fail structurally under rejection sampling (truncation) but work fine
-under moment-matching — this is now the adopted 6×4 pilot range (see
-"Sequence design" above).
+shrinks it. This is a PER-BLOCK bias (affects a single prefix or suffix
+block built via moment_match_continuous); the CURRENT design's pooled-
+sequence std inflation (prefix generic/unrelated to target -- see "Sequence
+design" above) is a SEPARATE, additional effect layered on top of this one,
+not a replacement for it. [15,85] (current production range) sits inside the
+region where this per-block bias is small; below ~mean=10 it becomes large
+enough to matter on its own. Binary has NO equivalent problem -- quota is
+exact for any p in (0,1), the only limitation is 1/n rounding granularity.
 
 ### Open items (as of latest session)
 
-- **6×4 pilot regenerated and promoted**: new sequences generated under
-  generate_sequences_momentmatch.py's evenly-spaced/no-mirroring design
-  (--n_levels=6, continuous --mean_range=[10,90], binary --blue_range=[2,13],
-  1000-try seed search) and promoted to task/sequences/{continuous,binary}_
-  sequences.{pkl,json}, superseding the old seed=175/198 sequences. Verified
-  directly against the saved files before promoting (repeat counts, exact
-  levels, exact per-trial blue-ball counts for binary) -- see "Sequence
-  design" above for the full verification. NOTE: a real pilot already
-  collected some participant data under the OLD sequences (see "Pilot data
-  files" below) -- going forward, new participants run on a DIFFERENT
-  stimulus set than those earlier ones; keep this in mind for any analysis
-  that pools across them.
-- **PI decision pending**: i.i.d. vs moment-matched for the 10×4 production
+- **6x4 pilot regenerated and promoted (prefix/target-independence redesign)**:
+  new sequences generated under generate_sequences_momentmatch.py's
+  redesigned prefix/target-independent-axes architecture (--n_prefix=6,
+  continuous --mean_range=[15,85] (changed from [10,90]), binary
+  --blue_range=[2,13] (unchanged), 1000-try isotonic seed search) and
+  promoted to task/sequences/{continuous,binary}_sequences.{pkl,json},
+  superseding the earlier evenly-spaced/no-mirroring sequences (which had
+  the qid-prefix-collision bug -- see "Sequence design" above). Verified
+  directly against the saved files before promoting: 6 distinct prefixes
+  per task (zero collisions), exactly 4 repeats each, zero binary quota
+  mismatches, full target-range coverage -- see "Sequence design" above
+  for the exact numbers. NOTE: real pilots already collected participant
+  data under BOTH earlier sequence sets (see "Pilot data files" below) --
+  going forward, new participants run on yet another different stimulus
+  set than those; keep this in mind for any analysis that pools across
+  pilot generations.
+- **PI decision pending**: i.i.d. (generate_sequences_iid.py) vs moment-
+  matched (generate_sequences_momentmatch.py) for the 10x4 production
   sequences (see literature-precedent tradeoff above) is still open, as is
-  what --n_levels/range the 10×4 scale should use (not automatically the
-  same as the 6×4 pilot's choices above) -- both need resolving before
-  10×4 is finalized.
+  what --n_prefix/range the 10x4 scale should use (not automatically the
+  same as the 6x4 pilot's choices above) -- both need resolving before
+  10x4 is finalized. Whichever method wins, it will need the
+  prefix/target-independence treatment applied at that scale too if it's
+  generate_sequences_momentmatch.py (generate_sequences_iid.py has no
+  analogous prefix-collision risk in the same way, since it never shares a
+  prefix across repeats via exact quota construction the way the
+  moment-match branch's OLD design did -- verify this reasoning holds
+  before assuming it, don't take it as already-confirmed).
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
   running-mean overlay requested (matching inspect_sequences.py's --gt_mode
   running_mean) but explicitly deferred as a separate, bigger UI change —
   not started.
+- **config-base.js's pickTutorialExample** may still assume a qid's repeats
+  share a target (see "Sequences.json schema" above) -- not yet verified
+  against the prefix/target-independence redesign. Check before relying on
+  its fallback path.
 
 Local dev: open http://localhost:5173/index-continuous.html or
   http://localhost:5174/index-binary.html via `npm run dev:continuous` /
@@ -1170,22 +1247,21 @@ Simulates RL_lambda and NEF models on the task sequences for validation figures.
 
 ### Generate sequences
 
-See "Sequence generation methods" above for the three scripts. Quick reference:
+See "Sequence generation methods" above for the three scripts (and each
+script's own module docstring for its current ROLE). Quick reference:
 
-    # Original rejection sampling (currently unused for the pilot; kept for comparison)
-    venv/bin/python task/generate_sequences.py --task continuous --n_unique_sequences 6 --n_repeats 4 --n_tries 500
-    venv/bin/python task/generate_sequences.py --task binary    --n_unique_sequences 6 --n_repeats 4 --n_tries 500
-
-    # Pure i.i.d. (single draw, no search)
+    # Pure i.i.d. (single draw, no search) -- one of two candidates still
+    # under PI consideration for the 10x4 design, not current production:
     venv/bin/python task/generate_sequences_iid.py --task both --seed 0 \
         --n_unique_sequences 10 --n_repeats 4 --mean_range 20 80 --std_fixed 15 --p_range 0.2 0.8
 
     # Moment-matched / quota (isotonic seed search, default score_mode) --
-    # this is what generated the CURRENT PRODUCTION 6x4 pilot (evenly-spaced
-    # levels, NOT random+mirrored -- see "Sequence generation methods" above):
+    # this is what generated the CURRENT PRODUCTION 6x4 pilot (prefix
+    # identity and target level are independent axes -- see "Sequence
+    # generation methods" above):
     venv/bin/python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \
-        --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
-    # Defaults used above (all overridable): --n_levels 6, --mean_range 10 90
+        --n_prefix 6 --n_repeats 4 --rl_alpha_0 1.0 --rl_lambda 0.5
+    # Defaults used above (all overridable): --n_prefix 6, --mean_range 15 85
     # (continuous), --blue_range 2 13 (binary, blue-ball count out of
     # --seq_length -- NOT a p fraction). Output goes to
     # task/sequences/{task}_momentmatch_sequences.{pkl,json} by default (NOT
@@ -1193,12 +1269,26 @@ See "Sequence generation methods" above for the three scripts. Quick reference:
     # {task}_sequences.{pkl,json} once verified (see "Sequence design" above
     # for the verification steps actually used for the current pilot).
 
-    # WARNING (all three scripts): --task both overwrites BOTH sequence files.
+    # WARNING (both scripts): --task both overwrites BOTH sequence files.
     # After a search, regenerate whichever task you want to keep with --seed N.
+
+    # generate_sequences.py has no CLI of its own anymore -- it's a shared-
+    # utilities module only (imported by both scripts above), not something
+    # you run directly. See its module docstring / "Sequence generation
+    # methods" above.
 
 ### Inspect sequences (scripts/inspect_sequences.py)
 
     venv/bin/python scripts/inspect_sequences.py --alpha_0 1.0 --rl_lambda 0.5 --skip_nef
+
+Builds BOTH a diagnostic figure (figures/inspect_sequences.pdf) AND a
+human-readable, observation-level CSV (figures/inspect_sequences.csv by
+default, built unless --skip_csv) covering prefix/suffix structure, running
+trajectory, achieved-vs-target mean/std/p, and constraint checks (prefix
+uniqueness across qids, binary exact-quota correctness, ITI
+control/distract balance) -- no NEF/model dependency at all, so the CSV
+builds fast regardless of --skip_nef. See build_inspection_csv's own
+docstring for the full column list.
 
 Reads exact filenames {task}_sequences.pkl/json from --seq_dir (default
 task/sequences/) — NOT the _iid/_momentmatch suffixed branch outputs. To
@@ -1508,3 +1598,16 @@ change (e.g. "change X to Y", "add Z", "remove W").
   and data-saving architecture"). Only redirect to an EXTERNAL domain
   (Prolific); for everyone else, use finish-session.js's DOM-update-in-place
   approach instead
+- Do not delete generate_sequences.py or remove any of the specific
+  functions it exports — it has no CLI/generation logic of its own anymore,
+  but it is a genuine, live shared-utilities dependency of BOTH
+  generate_sequences_iid.py and generate_sequences_momentmatch.py (check
+  both scripts' imports before touching anything in this file)
+- Do not reintroduce a design where one qid means one fixed (prefix, target)
+  pair in generate_sequences_momentmatch.py — this was the actual mechanism
+  behind a real, confirmed bug (two different qids ending up with an
+  identical realized prefix by chance; see "Sequence design"). Prefix
+  identity and target level must stay independent axes, matched via
+  optimal_matching, not tied 1:1 or paired via a greedy heuristic (greedy
+  was tried and rejected — see that function's docstring for the measured
+  failure mode)
