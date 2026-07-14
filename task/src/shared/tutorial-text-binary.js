@@ -31,7 +31,7 @@ export const BOX1 = `Your <strong>goal</strong> is to estimate that
   <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>, based on
   all the balls you've seen in this sequence.`;
 
-export const BOX2 = `<strong>Move</strong> the slider to show your estimate of the
+export const BOX2 = `<strong>Move</strong> the slider to show your evolving estimate of the
   overall <span style="color:${DIST_COLOR};font-weight:bold;">probability</span> for
   this sequence.`;
 

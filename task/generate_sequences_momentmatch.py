@@ -331,6 +331,54 @@ def build_continuous_prefixes(rng, n_prefix, prefix_length, mean_range, std_fixe
     return prefixes
 
 
+def _allocate_binary_composition_counts(n_prefix, prefix_length):
+    """Distribute n_prefix arrangement-requests as evenly as possible across
+    the prefix_length+1 possible compositions (blue-ball counts 0..
+    prefix_length), respecting each composition's own arrangement-pool
+    capacity C(prefix_length, k) -- composition 0 (all-red) and composition
+    prefix_length (all-blue) each have exactly ONE possible arrangement, so
+    can never receive more than 1 no matter how large n_prefix is.
+
+    Replaces an earlier version that just rounded np.linspace(0,
+    prefix_length, n_prefix) directly, which worked by luck at n_prefix=6
+    (only ever double-booked composition 2, which has plenty of room) but
+    broke at n_prefix=10 (linspace(0,4,10) asks for composition 0 AND
+    composition 4 twice each -- structurally impossible, caught by the
+    caller's own assertion rather than silently reusing a prefix, which
+    would have reintroduced the exact collision bug this whole design
+    exists to prevent).
+
+    Simple one-at-a-time round-robin across compositions, skipping any
+    that are already at capacity: gives a naturally even spread (each
+    composition gets floor(n_prefix / n_compositions) or one more) while
+    guaranteeing no composition is ever over-allocated. Terminates within
+    n_prefix passes given the caller's own n_prefix <= 2**prefix_length
+    check (total capacity across all compositions is always exactly
+    2**prefix_length), so running out of room here would indicate a bug
+    upstream, not a normal outcome.
+
+    Returns {composition_k: count} for k in 0..prefix_length.
+    """
+    levels = list(range(prefix_length + 1))
+    capacity = {k: math.comb(prefix_length, k) for k in levels}
+    alloc = dict.fromkeys(levels, 0)
+    remaining = n_prefix
+    idx = 0
+    guard = 0
+    while remaining > 0:
+        guard += 1
+        assert guard <= n_prefix * len(levels) + 10, (
+            "Ran out of allocation passes before placing all n_prefix requests -- "
+            "should be unreachable given the caller's n_prefix <= 2**prefix_length "
+            "check; this indicates a real bug, not a normal input.")
+        k = levels[idx % len(levels)]
+        if alloc[k] < capacity[k]:
+            alloc[k] += 1
+            remaining -= 1
+        idx += 1
+    return alloc
+
+
 def build_binary_prefixes(rng, n_prefix, prefix_length):
     """n_prefix distinct length-prefix_length binary ({-1,+1}) prefixes,
     spanning diverse compositions from all-red to all-blue -- NOT all
@@ -338,19 +386,22 @@ def build_binary_prefixes(rng, n_prefix, prefix_length):
     design decision (diverse compositions + constrained random matching to
     targets, rather than trivial-but-uninteresting uniform composition).
 
-    Compositions (blue-ball counts out of prefix_length) are spread via
-    linspace(0, prefix_length, n_prefix), same pattern as this script's
-    other level-grids elsewhere. Arrangements within a repeated composition
-    (linspace can round to the same integer more than once) are drawn
-    WITHOUT replacement so no two prefixes are literally identical --
-    THIS is the actual fix for the collision bug that motivated this
-    whole redesign (two different qids in the production 6x4 pilot ended
-    up with an identical realized prefix by chance).
+    Compositions (blue-ball counts out of prefix_length) are spread across
+    the full range via _allocate_binary_composition_counts, which respects
+    each composition's own arrangement-pool capacity C(prefix_length, k) --
+    composition 0 (all-red) and composition prefix_length (all-blue) each
+    have only ONE possible arrangement, so can never absorb more than one
+    request no matter how large n_prefix is (see that function's docstring
+    for the n_prefix=10 case that first exposed this). Arrangements within
+    a composition that gets more than one request are drawn WITHOUT
+    replacement so no two prefixes are literally identical -- THIS is the
+    actual fix for the collision bug that motivated this whole redesign
+    (two different qids in the production 6x4 pilot ended up with an
+    identical realized prefix by chance).
 
     Fails loudly (not a plausible-looking silent fallback) if n_prefix
     exceeds the number of distinct length-prefix_length binary sequences
-    that exist at all (2**prefix_length), or if a specific composition's
-    own arrangement pool (C(prefix_length, k)) is exhausted.
+    that exist at all (2**prefix_length).
     """
     max_possible = 2 ** prefix_length
     assert n_prefix <= max_possible, (
@@ -358,7 +409,11 @@ def build_binary_prefixes(rng, n_prefix, prefix_length):
         f"that exist at prefix_length={prefix_length} -- reduce n_prefix or "
         f"increase prefix_length.")
 
-    compositions = [int(round(v)) for v in np.linspace(0, prefix_length, n_prefix)]
+    composition_counts = _allocate_binary_composition_counts(n_prefix, prefix_length)
+    compositions = []
+    for k in sorted(composition_counts):
+        compositions.extend([k] * composition_counts[k])
+    rng.shuffle(compositions)
 
     prefixes = []
     used_per_composition: dict[int, set] = {}
@@ -367,9 +422,10 @@ def build_binary_prefixes(rng, n_prefix, prefix_length):
         already_used = used_per_composition.setdefault(k, set())
         assert len(already_used) < pool_size, (
             f"composition k={k} blue out of prefix_length={prefix_length} only has "
-            f"{pool_size} distinct arrangements, and n_prefix={n_prefix}'s evenly-"
-            f"spaced composition grid ({compositions}) asks for more of them than "
-            f"exist -- reduce n_prefix or widen prefix_length.")
+            f"{pool_size} distinct arrangements, and the allocator asked for more of "
+            f"them than exist ({composition_counts}) -- this should be unreachable "
+            f"given _allocate_binary_composition_counts's own capacity check; "
+            f"indicates a real bug, not a normal input.")
         for _attempt in range(10_000):
             positions = rng.choice(prefix_length, size=k, replace=False)
             arrangement = [-1] * prefix_length
@@ -724,8 +780,11 @@ def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
 
     # -- Build n_prefix DISTINCT prefixes, independent of any target --------
     if task == 'continuous':
+        cont_value_min = VALUE_MIN + args.boundary_margin
+        cont_value_max = VALUE_MAX - args.boundary_margin
         prefixes = build_continuous_prefixes(rng, n_prefix, prefix_length,
-                                             args.mean_range, args.std_fixed)
+                                             args.mean_range, args.std_fixed,
+                                             value_min=cont_value_min, value_max=cont_value_max)
     else:
         prefixes = build_binary_prefixes(rng, n_prefix, prefix_length)
 
@@ -784,7 +843,9 @@ def generate_task_sequences_momentmatch(task, args, rng, verbose=True):
             true_mean, true_std, true_p = target, args.std_fixed, float('nan')
             suffix = suffix_for_continuous_target(
                 rng, prefix_vals, true_mean, true_std, suffix_length,
-                args.max_rescale_iters)
+                args.max_rescale_iters,
+                value_min=VALUE_MIN + args.boundary_margin,
+                value_max=VALUE_MAX - args.boundary_margin)
         else:
             true_p = round(target / seq_length, 6)
             true_mean, true_std = float('nan'), float('nan')
@@ -971,6 +1032,14 @@ def parse_args():
                         'tied to n_prefix.')
     p.add_argument('--max_rescale_iters',  type=int,   default=4,
                    help='Rescale+clip iterations to converge onto target moments')
+    p.add_argument('--boundary_margin',    type=float, default=0.0,
+                   help='Continuous only: insets the [0,100] clip range used for both '
+                        'prefixes and suffixes to [0+margin, 100-margin], guaranteeing '
+                        '(not just reducing the chance of) no observation ever lands '
+                        'exactly at 0 or 100. 0 (default) preserves prior behavior. '
+                        'A bigger margin further shrinks the usable range, compounding '
+                        'with (not replacing) the existing extreme-mean boundary bias -- '
+                        'see module docstring\'s boundary-bias table.')
     p.add_argument('--rl_alpha_0',         type=float, default=1.0)
     p.add_argument('--rl_lambda',          type=float, default=0.5)
     p.add_argument('--k_std_cont',         type=float, default=0.7,
@@ -1006,6 +1075,8 @@ def main():
     assert args.blue_range[0] < args.blue_range[1]
     assert 1 <= args.blue_range[0] and args.blue_range[1] <= args.seq_length - 1, \
         'blue_range must fall within [1, seq_length-1] (exclude degenerate all-one-color quotas)'
+    assert 0 <= args.boundary_margin < (VALUE_MAX - VALUE_MIN) / 2, \
+        'boundary_margin must leave a non-empty usable range'
 
     out_dir = pathlib.Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

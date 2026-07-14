@@ -655,13 +655,25 @@ exact for any p in (0,1), the only limitation is 1/n rounding granularity.
   sequences (see literature-precedent tradeoff above) is still open, as is
   what --n_prefix/range the 10x4 scale should use (not automatically the
   same as the 6x4 pilot's choices above) -- both need resolving before
-  10x4 is finalized. Whichever method wins, it will need the
+  10x4 is finalized. **See docs/sequence_design_open_questions.md for the
+  full investigation**: a real, quantified behavioral confound from quota
+  construction (not the gambler's-fallacy framing originally suspected --
+  the actual mechanism is a near-deterministic "back-half corrects the
+  front-half" property, confirmed with real numbers), a three-way
+  prefix-design trilemma with no fully clean resolution, a rejected
+  model-recovery-based alternative (same underlying issue as quota, plus a
+  circularity risk), a separate and orthogonal Laplace-transform bias
+  affecting binary lambda-recovery project-wide, and a full breakdown of
+  what serving unique per-participant i.i.d. sequences would actually
+  require if that path is chosen. Whichever method wins, it will need the
   prefix/target-independence treatment applied at that scale too if it's
   generate_sequences_momentmatch.py (generate_sequences_iid.py has no
   analogous prefix-collision risk in the same way, since it never shares a
   prefix across repeats via exact quota construction the way the
   moment-match branch's OLD design did -- verify this reasoning holds
-  before assuming it, don't take it as already-confirmed).
+  before assuming it, don't take it as already-confirmed; the memo above
+  also documents a real, separate prefix-collision bug already found in
+  generate_sequences_iid.py itself, unrelated to this specific claim).
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
   running-mean overlay requested (matching inspect_sequences.py's --gt_mode
   running_mean) but explicitly deferred as a separate, bigger UI change —
@@ -947,12 +959,27 @@ a DIFFERENT failure on real JATOS (session already closed), not a
 harmless no-op.
 
 **PROLIFIC_CODES** (timeline-builder.js): one object grouped by task, each
-with a `completion` and `earlyExit` code -- 4 values total, ALL still
-placeholders (`TODO_..._CODE`). A previously-real continuous completion
-code (`C3W3TF1O`, from an earlier study configuration) was deliberately
-discarded rather than kept around unverified -- don't reintroduce it
-without first re-confirming it's still valid for the upcoming Prolific
-study. Must be filled in before real Prolific deployment (see checklist).
+with a `completion` and `earlyExit` code -- filled in with real codes as of
+the latest session: continuous {completion: C1CNSEMJ, earlyExit: C1ARJ6LO},
+binary {completion: C12FEFJU, earlyExit: C1L1GGHT}. These belong to fresh
+studies created inside a Project in the shared "Human Mixed Task" Prolific
+workspace (the PI's workspace) -- NOT the earlier draft studies in the
+original personal workspace, which are being abandoned in favor of this
+project-based setup. An EARLIER set of codes (`C3W3TF1O` for the shared
+normal-completion code, `CHXZJB62`/`C1QXJUFU` for continuous/binary
+early-exit) belonged to those now-abandoned drafts -- fully superseded, do
+not reuse or confuse with the current set above. (`C3W3TF1O` itself has a
+longer history worth knowing if it resurfaces anywhere: it's also the
+specific code an earlier session found hardcoded and discarded from
+generate_jzip.py's endRedirectUrl field, unrelated to its later brief
+reuse as an actual real Prolific code for the old drafts -- see the
+"Two independent completion mechanisms" note below for that separate
+story. Neither history makes it valid for anything current.) Screen-out
+(early-exit) reward is set to a flat $3, decided as a deliberate
+simplification over exact time-proportional pay -- see chat history for
+the reasoning (informed-consent warnings already cover the risk, and a
+meaningfully-smaller flat amount preserves the incentive to stay engaged
+rather than diluting it).
 
 **Two independent completion mechanisms exist, and only one was ever
 addressed**: app-level JS (`finish-session.js`'s calls to
@@ -1031,6 +1058,33 @@ message naming both files.
     the pipeline will catch a regression here (see the "local dev shim has
     zero representation of this" point above).
 
+**generate_jzip.py generates a FRESH study/component/batch UUID on every
+run** (not a fixed literal, as it was before a real near-miss surfaced
+this): JATOS matches studies by UUID, not filename or content, so
+importing a jzip whose UUID matches an already-imported study triggers an
+"overwrite this study?" prompt -- which replaces that study's served
+assets in place while leaving already-collected result data untouched.
+That's fine for a genuine in-place fix, but wrong when promoting a real
+new version (e.g. the 6x4 -> 10x4 transition) while an OLDER pilot's
+already-distributed links are still meant to be collecting responses on
+the OLD content -- overwriting would silently swap what those old links
+serve, with no visible sign anything changed, potentially mixing two
+different task versions under one nominal "pilot" label. Confirmed via
+JATOS's own docs/forum: giving the new build a different UUID is what
+makes JATOS import it as a genuinely separate study with its own new
+distribution links, never touching the old one. This is now automatic --
+every `python task/generate_jzip.py` run prints the UUID it generated, and
+importing that jzip will always create a NEW MindProbe study, never
+overwrite an existing one. If an in-place overwrite is ever genuinely
+wanted (e.g. fixing a typo on a study that hasn't collected any real data
+yet), that requires manually reusing the specific UUID JATOS shows for
+that study's properties -- there's deliberately no flag for this in the
+script, since silently defaulting to "never overwrite" is correct in the
+overwhelming majority of cases and the failure mode of getting it wrong
+(silently corrupting an in-progress pilot's data) is worse than the
+inconvenience of doing a real overwrite manually on the rare occasion it's
+actually wanted.
+
 **End-screen/early-exit save verification (test_browser.mjs)**: until a
 recent session, the E2E suite never actually exercised this whole section --
 every scenario stopped short of the "Thank you!" end screen and the
@@ -1057,12 +1111,14 @@ Pre-deployment checklist (before Prolific production):
     final trial count/parameters (no more TEST_MODE/N_TRIALS_TO_RUN switch to check)
   - Remove PILOT ONLY name field (timeline-builder.js + parse_results.py)
   - Fill IRB Protocol Number ([Protocol Number] in timeline-builder.js)
-  - Fill all 4 Prolific code placeholders in timeline-builder.js's
-    PROLIFIC_CODES (completion + early-exit codes, for both continuous and
-    binary -- none are real yet; a previously-real continuous completion
-    code was deliberately discarded since it belonged to an old study
-    configuration and shouldn't be assumed valid without re-confirming with
-    Prolific first)
+  - [DONE] All 4 Prolific code placeholders in timeline-builder.js's
+    PROLIFIC_CODES are filled with real codes from the "Human Mixed Task"
+    workspace project (see "PROLIFIC_CODES" note above for the exact
+    values and which earlier code set they superseded) -- jzips rebuilt
+    to match. Still outstanding: the actual Study URL field on each
+    Prolific study can't be set until the production build is confirmed
+    live on MindProbe and a JATOS link is generated -- deliberately last,
+    per explicit decision, not an oversight.
   - Fund Prolific wallet; confirm payment rate with PI
   - Run: node test_browser.mjs (in terminal)
   - (No manual step needed for the showEndPage/endRedirectUrl invariant --

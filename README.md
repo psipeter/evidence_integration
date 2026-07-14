@@ -253,6 +253,18 @@ this larger scale, are both pending PI consultation (moment-matching
 introduces a real, literature-documented behavioral tradeoff — see
 CLAUDE.md — it is not a free smoothness win).
 
+**See `docs/sequence_design_open_questions.md`** for the full write-up of
+this tradeoff: a real, quantified behavioral confound from quota
+construction (not simple gambler's-fallacy reasoning — the actual
+mechanism is subtler and confirmed with real simulation numbers), a
+three-way design trilemma between statistical cleanliness, target
+diversity, and the repeat-based reliability metrics (T5/T6/V-group) this
+project's scientific goals depend on, and what it would actually take to
+serve genuinely unique sequences to every participant if that path is
+ever chosen. Nothing there blocks the current 6x4 pilot or the promoted
+10x4 production sequences from shipping — it's there so the trade-off is
+fully informed rather than re-discovered from scratch later.
+
 ### Directory structure
 
 ```

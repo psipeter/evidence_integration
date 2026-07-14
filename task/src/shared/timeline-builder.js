@@ -64,8 +64,8 @@ const MAX_TIMEOUTS_PER_TRIAL = 3;
 // own pair of codes) rather than as two same-shaped completion/early-exit
 // objects side by side.
 const PROLIFIC_CODES = {
-  continuous: { completion: 'TODO_CONTINUOUS_COMPLETION_CODE', earlyExit: 'TODO_CONTINUOUS_EARLY_EXIT_CODE' },
-  binary:     { completion: 'TODO_BINARY_COMPLETION_CODE',     earlyExit: 'TODO_BINARY_EARLY_EXIT_CODE' },
+  continuous: { completion: 'C1CNSEMJ', earlyExit: 'C1ARJ6LO' },
+  binary:     { completion: 'C12FEFJU', earlyExit: 'C1L1GGHT' },
 };
 
 export function buildAndRun(cfg) {

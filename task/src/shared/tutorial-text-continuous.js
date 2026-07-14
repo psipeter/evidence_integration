@@ -35,7 +35,7 @@ export const BOX1 = `Your <strong>goal</strong> is to estimate that distribution
   <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>, based on
   all the numbers you've seen in this sequence.`;
 
-export const BOX2 = `<strong>Move</strong> the slider to show your estimate of the
+export const BOX2 = `<strong>Move</strong> the slider to show your evolving estimate of the
   overall <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span> for
   this sequence.`;
 

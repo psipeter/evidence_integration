@@ -5,6 +5,29 @@ Build production assets and package JATOS study archives (.jzip) for MindProbe.
 Usage (from repo root or task/):
     python task/generate_jzip.py
     python task/generate_jzip.py --skip-build   # package existing dist-* only
+
+UUIDs are freshly generated EVERY run (see STUDIES below) -- deliberately,
+not an oversight. JATOS matches studies by UUID, not filename or content: importing
+a jzip whose UUID matches an already-imported study triggers an "overwrite
+this study?" prompt, which replaces that study's served assets in place
+while leaving already-collected result data untouched. That's fine for
+fixing a typo mid-pilot, but it's the wrong behavior when promoting a
+genuinely new version (e.g. 6x4 -> 10x4) while an OLDER pilot's distributed
+links are still supposed to be collecting responses on the OLD content --
+overwriting would silently swap what those old links serve, with no
+visible sign anything changed, potentially mixing two different task
+versions under one nominal "pilot" label. Confirmed via JATOS's own docs/
+forum: the correct way to keep two versions coexisting side by side is to
+give the new one a different UUID, so JATOS imports it as a genuinely
+separate study with its own new distribution links, never touching the old
+one. Every run of this script now does that automatically -- each jzip you
+build is its own new MindProbe study on import, never an overwrite of
+whatever's already there. If you ever DO want an in-place overwrite (e.g.
+genuinely just fixing a typo on a study that hasn't collected any real data
+yet), you'd need to reuse the specific UUID JATOS shows you for that
+study's properties -- there's no flag for that here on purpose, since the
+safe default (never silently overwrite) is what you want in the overwhelming
+majority of cases.
 """
 
 from __future__ import annotations
@@ -14,6 +37,7 @@ import json
 import shutil
 import subprocess
 import sys
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -107,7 +131,10 @@ STUDIES = {
         "jas": {
             "version": "3",
             "data": {
-                "uuid": "6c48d3e3-3b34-4cb8-a840-b7922ec6ff57",
+                # Fresh UUID every run, on purpose -- see this file's own
+                # top-of-module docstring for why. Never hardcode this back
+                # to a fixed literal.
+                "uuid": str(uuid.uuid4()),
                 "title": "Evidence Integration — Continuous",
                 "description": "Sequential evidence integration task (continuous).",
                 "groupStudy": False,
@@ -120,7 +147,7 @@ STUDIES = {
                 "studyEntryMsg": None,
                 "componentList": [
                     {
-                        "uuid": "df03e4d5-d810-447f-bbb1-1442b5e0260f",
+                        "uuid": str(uuid.uuid4()),
                         "title": "Task",
                         "htmlFilePath": "index-continuous.html",
                         "reloadable": False,
@@ -131,7 +158,7 @@ STUDIES = {
                 ],
                 "batchList": [
                     {
-                        "uuid": "b6c21ad2-f1fb-42a3-9c53-3dc3d702a191",
+                        "uuid": str(uuid.uuid4()),
                         "title": "Default",
                         "active": True,
                         "maxActiveMembers": None,
@@ -157,7 +184,7 @@ STUDIES = {
         "jas": {
             "version": "3",
             "data": {
-                "uuid": "5327124f-2370-49a8-a3bc-2c0534c1fcf2",
+                "uuid": str(uuid.uuid4()),
                 "title": "Evidence Integration — Binary",
                 "description": "Sequential evidence integration task (binary).",
                 "groupStudy": False,
@@ -170,7 +197,7 @@ STUDIES = {
                 "studyEntryMsg": None,
                 "componentList": [
                     {
-                        "uuid": "3a183108-0807-4921-9c3b-2df801a3a607",
+                        "uuid": str(uuid.uuid4()),
                         "title": "Task",
                         "htmlFilePath": "index-binary.html",
                         "reloadable": False,
@@ -181,7 +208,7 @@ STUDIES = {
                 ],
                 "batchList": [
                     {
-                        "uuid": "cdb5f9a9-55cb-4d00-8b05-ccc48daf4db5",
+                        "uuid": str(uuid.uuid4()),
                         "title": "Default",
                         "active": True,
                         "maxActiveMembers": None,
@@ -242,7 +269,9 @@ def package_study(name: str, spec: dict) -> Path:
 
     size_kb = out_path.stat().st_size / 1024
     n_files = sum(1 for _ in dist_dir.rglob("*") if _.is_file())
+    study_uuid = spec["jas"]["data"]["uuid"]
     print(f"  {name}: {out_path.name} ({size_kb:.0f} KiB, {n_files} assets)")
+    print(f"    uuid: {study_uuid}  (fresh this run -- will import as a NEW MindProbe study, not overwrite an existing one)")
     return out_path
 
 
