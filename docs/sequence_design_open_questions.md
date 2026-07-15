@@ -100,15 +100,19 @@ reverted: it reintroduces (2)'s diversity cap and creates a much sharper,
 more literal (3) memorization risk (identical 4-observation openings,
 repeated verbatim across a participant's own session).
 
-**A real, previously-undetected bug found along the way**: this same
-literal-repetition mechanism also affects `generate_sequences_iid.py`'s own
-prefix generation (drawn from the matched target distribution, no
-uniqueness check) -- empirically, **9 of 10 random seeds produced real
-prefix collisions across different qids** (only 6-8 distinct prefixes out
-of 10 expected). This was never checked before this investigation, since
-all prior collision-bug fixing this project did was specific to
-`generate_sequences_momentmatch.py`. Not yet fixed in `generate_sequences_iid.py`
--- flagged here so it's not forgotten if that branch is ever revisited.
+**A real, previously-undetected bug found along the way, since fixed**:
+this same literal-repetition mechanism also affected
+`generate_sequences_iid.py`'s own prefix generation (drawn from the
+matched target distribution, no uniqueness check) -- empirically, **9 of 10
+random seeds produced real prefix collisions across different qids** (only
+6-8 distinct prefixes out of 10 expected). This was never checked before
+this investigation, since all prior collision-bug fixing this project did
+was specific to `generate_sequences_momentmatch.py`. **Fixed** via
+`_draw_unique_binary_prefix` (active dedup on the base draw, with a
+fresh-redraw fallback for the rare case a deterministic mirror collides --
+confirmed to actually fire in testing, not just theoretical) plus a
+safety-net uniqueness assertion; verified 10/10 seeds now produce the
+expected number of distinct prefixes, previously 9/10 failed.
 
 **No design was found that fully satisfies all three goals simultaneously.**
 This is presented as a real, acknowledged trade-off for the PI to weigh, not
@@ -175,38 +179,62 @@ split-half reliability across the simulated population.
 
 **Headline results, n=50 simulated participants, Mean agent** (true
 lambda=1 by construction -- Mean is RL_lambda's own special case
-alpha_0=1, lambda=1):
+alpha_0=1, lambda=1). **Updated** after fixing the prefix-collision bug
+documented in Section 3 (continuous was never affected by that bug and is
+unchanged; binary moved both closer to the true value and substantially
+tighter once the spurious collision-driven noise was removed):
 
 ```
                 fitted lambda (mean+/-std)   range          split-half reliability
 continuous      1.13 +/- 0.29                [0.60, 1.85]    r=0.82, p<0.0001
-binary          0.77 +/- 0.17                [0.38, 1.28]    r=0.76, p<0.0001
+binary          0.84 +/- 0.10                [0.60, 1.00]    r=0.41, p=0.003
 ```
 
-Split-half reliability is strong for both tasks despite every participant
-seeing completely independently-randomized sequences -- i.i.d. sampling
-noise alone does *not* wash out the ability to detect a consistent decay
-signature. But **the population mean itself sits meaningfully off the true
-value of 1** (especially for binary), and the spread across participants is
-substantial -- a real cost of not smoothing/selecting sequences at all.
+(Binary, pre-fix, for reference on how much the bug mattered: 0.77 +/-
+0.17, range [0.38, 1.28], split-half r=0.76 -- std dropped ~40% and the
+mean moved closer to the true value of 1 purely from removing the
+collision noise. **But reliability dropped**, from r=0.76 to r=0.41 --
+the opposite direction from the mean/std improvement, and worth taking
+seriously rather than glossing over: this suggests the pre-fix "good"
+reliability was likely partly artifactual -- a participant whose random
+seed happened to produce many prefix collisions would show a similarly
+biased pattern across their WHOLE session (both halves), creating spurious
+agreement between first-half and second-half fits that isn't genuine
+signal. Once that shared distortion is removed, the true underlying
+split-half reliability for binary is real but much more modest than it
+first looked.)
+
+Split-half reliability is strong for continuous (r=0.82) despite every
+participant seeing completely independently-randomized sequences --
+i.i.d. sampling noise alone does *not* wash out the ability to detect a
+consistent decay signature there. Binary's reliability is real but far
+more modest (r=0.41) once the collision-driven artifact is removed -- see
+above. In both cases, **the population mean itself sits meaningfully off
+the true value of 1** (especially binary, even post-fix), and the spread
+across participants is substantial -- a real cost of not smoothing/
+selecting sequences at all.
 
 **Comparison against the real (quota, seed-searched) production
 sequences**, same Mean agent, single dataset (not averaged over many
-draws):
+draws). **Updated** with the post-fix i.i.d. mean:
 
 ```
-                i.i.d. mean (n=50)    production (quota, n=1)
-continuous      1.133                 1.044   (much closer to true=1)
-binary          0.765                 0.758   (essentially unchanged)
+                i.i.d. mean (n=50, post-fix)    production (quota, n=1)
+continuous      1.133                            1.044   (quota much closer to true=1)
+binary          0.842                            0.758   (quota now further from true=1)
 ```
 
-Quota substantially helps continuous lambda-recovery, but **does nothing
-measurable for binary**. Important caveat this comparison surfaced: this
-conflates quota construction itself with the 1000-try seed search that
-selected this specific sequence set for smoothness -- an *unselected*
-single quota draw might look much more like the i.i.d. distribution. Not
-yet checked; flagged as a natural follow-up if this matters for a real
-decision.
+This flips part of the original conclusion. Pre-fix, binary looked like
+"quota does nothing measurable" (0.765 i.i.d. vs 0.758 quota -- essentially
+identical). Post-fix, the i.i.d. average (0.842) is actually *closer* to
+the true value than this specific quota draw (0.758) -- quota no longer
+looks neutral-to-slightly-better for binary, it looks slightly *worse*
+than the average i.i.d. participant would do. Continuous still clearly
+favors quota. Important caveat unchanged from before: this conflates quota
+construction itself with the 1000-try seed search that selected this
+specific sequence set for smoothness -- an *unselected* single quota draw
+might look different again. Not yet checked; flagged as a natural
+follow-up if this matters for a real decision.
 
 **A second, independent bias was found and isolated**: binary's poor
 lambda recovery (both i.i.d. and quota alike) is substantially explained by
@@ -235,12 +263,51 @@ just this investigation (it's already used project-wide).
 **RL_lambda noise sensitivity** (as predicted going in -- smaller lambda
 means alpha decays slower, so individual noisy observations keep mattering
 later into a trial): confirmed clearly noisier than the Mean agent,
-especially for binary (coefficient of variation roughly doubles), and the
-specific bias/noise trade-off shifts in a non-obvious way with alpha_0
-(one config showed large systematic bias with *low* variance; another
-showed smaller bias with *higher* variance) -- this isn't simply "smaller
-lambda -> uniformly more noise," alpha_0 is doing real, not-yet-fully-
-characterized work too.
+especially for binary, and the specific bias/noise trade-off shifts in a
+non-obvious way with alpha_0 (one config showed large systematic bias with
+*low* variance; another showed smaller bias with *higher* variance) --
+this isn't simply "smaller lambda -> uniformly more noise," alpha_0 is
+doing real, not-yet-fully-characterized work too. **Updated after the
+prefix-collision fix** -- same qualitative pattern holds, numbers moved in
+the same direction as the Mean agent above (closer to true, tighter std):
+
+```
+                        WITH transform          WITHOUT transform
+                     (pre-fix -> post-fix)    (pre-fix -> post-fix)      true lambda
+RL(1.0, 0.5) binary  0.284+/-.164 -> 0.367+/-.088   0.430+/-.235 -> 0.561+/-.134   0.5
+RL(0.5, 0.3) binary  0.158+/-.073 -> 0.189+/-.042   0.323+/-.117 -> 0.381+/-.064   0.3
+```
+
+continuous unchanged in both configs (0.574+/-.175 and 0.753+/-.048
+respectively) -- confirms, again, that continuous was never touched by
+this bug at all; only binary's fits moved.
+
+**Direct quota-vs-i.i.d. split-half reliability comparison, same
+methodology on both sides**: `scripts/inspect_sequences.py` now has a 3rd
+panel column (`compute_split_half_reliability`) that sweeps 50 different
+RL_lambda ground-truth values across the production quota sequences and
+fits/correlates split-half lambda exactly the way `inspect_iid_sequences.py`
+does for i.i.d. -- same `fit_lambda_mid`/`split_half_lambda` calls, not a
+reimplementation, so the numbers are genuinely comparable, not just
+visually similar:
+
+```
+                    quota (production, seed-searched)     i.i.d. (50 sims, post-fix)
+binary   split-half   r=0.998, p=8e-59                    r=0.41,  p=0.003
+continuous split-half r=1.000, p=7e-75                    r=0.82,  p<0.0001
+```
+
+Quota's reliability is essentially perfect, not just better. This is the
+sharpest, most concrete evidence in this whole memo for the trade-off at
+its center: near-perfect reliability isn't a separate nice property of
+quota, it's the direct, mechanical consequence of the same seed search
+that explicitly optimizes every trial's `|Δresponse|` curve for smoothness
+(Section 2) -- if every individual trial is already engineered to be
+well-behaved and track its target with minimal noise, splitting trials
+into any two halves gives nearly identical aggregate curves almost
+regardless of which specific trials land in which half. High reliability
+and behavioral realism are pulling in opposite directions here, not
+independent properties you get to have both of.
 
 ## 7. What it would take to actually serve unique i.i.d. sequences per
    participant, if that path is ever chosen
@@ -256,9 +323,15 @@ Full breakdown was worked through in chat; summary:
   serves additional static files from a study's asset directory via
   relative-path `fetch()` the way this assumes -- not yet verified against
   real JATOS.
-- **Pool generation**: mostly already built -- `simulate_participants` in
-  `inspect_iid_sequences.py` already generates N independent sets; turning
-  that into a real pool-writer is a small wrapper, not new work.
+- **Pool generation**: **done** -- `task/generate_sequences_pool.py`
+  generates N independent sequence sets per task and writes each to its
+  own `{task}_{NNNN}_sequences.{pkl,json}`, with a built-in verification
+  pass (member count, per-member prefix uniqueness). Thin wrapper around
+  `generate_task_sequences_iid`, same as `inspect_iid_sequences.py`'s own
+  `simulate_participants` -- no new generation logic. Not yet wired into
+  anything downstream (asset bundling, runtime fetch, assignment,
+  provenance recording, `parse_results.py` are all still separate,
+  not-yet-started steps).
 - **Assignment**: recommend a stateless hash of participant ID mod pool
   size (e.g. Prolific PID) -- avoids needing any server-side coordination or
   counter, which would carry real concurrency risk (two participants
@@ -302,15 +375,21 @@ reverse. Every path has real, now-quantified costs:
 
 - **Quota (current production)**: real behavioral confound established with
   numbers, not hand-waving (Section 2), plus a fundamental prefix-design
-  trilemma with no fully clean resolution (Section 3).
+  trilemma with no fully clean resolution (Section 3), plus near-perfect
+  split-half reliability (r=0.998-1.000) that is now confirmed to be the
+  direct, mechanical byproduct of the same seed-search smoothing that
+  drives the confound in Section 2 -- not a separate advantage (Section 6).
 - **Pure i.i.d.**: no behavioral confound from construction, but
   substantially noisier lambda-recovery even averaged over many
-  independent draws (Section 6), a real (if fixable) collision bug in its
-  own prefix generation (Section 3), and would require substantial new
+  independent draws (Section 6), and would require substantial new
   infrastructure to actually deploy with per-participant uniqueness
   (Section 7) -- or, if deployed with one shared i.i.d. draw (the simpler
   option), inherits the "got lucky/unlucky with the one seed" risk that
-  per-participant randomization was meant to avoid.
+  per-participant randomization was meant to avoid. The prefix-collision
+  bug (Section 3) is fixed; a pool-generation tool
+  (`task/generate_sequences_pool.py`) exists and is verified, though
+  nothing downstream (asset bundling, runtime fetch, assignment,
+  provenance recording, parse_results.py) has been built yet.
 - **Model-recovery-based selection**: rejected (Section 4) as likely just
   quota again, with an added circularity risk.
 

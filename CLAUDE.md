@@ -665,15 +665,20 @@ exact for any p in (0,1), the only limitation is 1/n rounding granularity.
   circularity risk), a separate and orthogonal Laplace-transform bias
   affecting binary lambda-recovery project-wide, and a full breakdown of
   what serving unique per-participant i.i.d. sequences would actually
-  require if that path is chosen. Whichever method wins, it will need the
-  prefix/target-independence treatment applied at that scale too if it's
-  generate_sequences_momentmatch.py (generate_sequences_iid.py has no
-  analogous prefix-collision risk in the same way, since it never shares a
-  prefix across repeats via exact quota construction the way the
-  moment-match branch's OLD design did -- verify this reasoning holds
-  before assuming it, don't take it as already-confirmed; the memo above
-  also documents a real, separate prefix-collision bug already found in
-  generate_sequences_iid.py itself, unrelated to this specific claim).
+  require if that path is chosen. **`generate_sequences_iid.py` DID have
+  its own prefix-collision bug** (independently-drawn per-qid prefixes,
+  no uniqueness check -- confirmed empirically, 9/10 seeds collided at
+  n_unique_sequences=10) -- this is now FIXED (`_draw_unique_binary_prefix`,
+  active dedup with a fresh-redraw fallback for mirror collisions,
+  verified 10/10 seeds now correct) -- see the memo for the full before/
+  after numbers, including a striking case where fixing it *lowered*
+  apparent split-half reliability (the old "good" reliability was partly
+  an artifact of the collision bug, not genuine signal). A pool-generation
+  tool (`task/generate_sequences_pool.py`) now exists on top of the fixed
+  function, for the "serve a unique sequence set per participant"
+  architecture described in the memo's Section 7 -- nothing downstream of
+  it (asset bundling, runtime fetch, assignment, provenance recording,
+  parse_results.py) has been built yet.
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
   running-mean overlay requested (matching inspect_sequences.py's --gt_mode
   running_mean) but explicitly deferred as a separate, bigger UI change —

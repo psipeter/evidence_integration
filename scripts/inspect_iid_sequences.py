@@ -48,11 +48,20 @@ Usage:
     python scripts/inspect_iid_sequences.py --n_participants 50
     python scripts/inspect_iid_sequences.py --n_participants 100 --n_prefix 10 --n_repeats 4
     python scripts/inspect_iid_sequences.py --n_participants 50 --task continuous
+    python scripts/inspect_iid_sequences.py --sequence_type quota
+        # loads task/sequences/{task}_sequences.pkl (the real, shared
+        # production quota sequences) instead of generating i.i.d. draws --
+        # --n_participants is ignored/forced to 1 (quota sequences are
+        # identical for every real participant, so there's nothing to
+        # vary across a simulated population). Output figure/pkl names
+        # switch to inspect_quota_sequences* automatically.
 
 Output:
-    data/runs/inspect_iid_sequences/raw_{n}p.pkl   -- long-format observations+responses
-    data/runs/inspect_iid_sequences/fits_{n}p.pkl  -- per-participant fitted lambda (full + split-half)
-    figures/inspect_iid_sequences.pdf
+    data/runs/inspect_iid_sequences/{stem}_raw_{n}p.pkl   -- long-format observations+responses
+    data/runs/inspect_iid_sequences/{stem}_fits_{n}p.pkl  -- per-participant fitted lambda (full + split-half)
+    figures/{stem}.pdf
+    where {stem} is inspect_iid_sequences* or inspect_quota_sequences*
+    depending on --sequence_type (plus agent/transform suffixes -- see main()).
 """
 from __future__ import annotations
 
@@ -137,7 +146,81 @@ def _rl_lambda_responses(values, task, alpha_0, lambda_):
 
 
 # ---------------------------------------------------------------------------
-# Simulation: one fresh, independent sequence set per participant
+# Shared row-builder: given ONE participant's/pool-member's raw sequence
+# dataframe, compute agent responses and return long-format rows. Used by
+# BOTH the i.i.d. per-participant path (simulate_participants, many calls)
+# and the quota path (load_quota_sequences, exactly one call) so the two
+# sequence_types build directly comparable data through identical logic.
+# ---------------------------------------------------------------------------
+def _rows_for_sequences(df, task, model_id, agent_name, agent_fn, skip_binary_transform):
+    rows = []
+    for trial_id, g in df.groupby("trial"):
+        g = g.sort_values("observation")
+        vals = g["value"].tolist()
+        resp = agent_fn(vals, task)
+        # Feed the REAL (1-indexed) observation values into
+        # apply_binary_transform, matching exactly what test_sequences.py's
+        # own pipeline does -- see simulate_participants' original note
+        # (kept here since this is now the single shared row-builder).
+        resp_df = pd.DataFrame({
+            "observation": g["observation"].tolist(),
+            "response": resp,
+        })
+        if task == "binary" and not skip_binary_transform:
+            resp_df = apply_binary_transform(resp_df, f"task_{task}")
+        tm  = g["true_mean"].iloc[0]
+        ts  = g["true_std"].iloc[0]
+        tp  = g["true_p"].iloc[0]
+        qid = g["qid"].iloc[0]
+        for obs, r in zip(g["observation"].tolist(), resp_df["response"].tolist()):
+            rows.append({
+                "model_id": model_id, "model_type": agent_name,
+                "task": task, "trial": int(trial_id), "qid": int(qid),
+                "observation": int(obs), "response": float(r),
+                "true_mean": tm, "true_std": ts, "true_p": tp,
+            })
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Quota path: the real, shared production sequences -- every real
+# participant under the current momentmatch deployment sees the IDENTICAL
+# sequences, so there is no per-participant variation to simulate here.
+# n_participants is meaningless for this sequence_type; always exactly one
+# 'participant' (model_id='p0000'), regardless of what --n_participants
+# was set to on the CLI (main() overrides it with a printed note).
+# ---------------------------------------------------------------------------
+def load_quota_sequences(tasks, seq_dir, agent_name, agent_fn, skip_binary_transform=False):
+    """Load task/sequences/{task}_sequences.pkl (the real, promoted, shared
+    quota/momentmatch production sequences -- NOT regenerated, NOT
+    randomized) and build the same long-format rows simulate_participants
+    builds for i.i.d., so the two sequence_types are directly comparable
+    through scripts/inspect_sequences.py's SAME downstream fitting/plotting
+    code. Since quota sequences are identical for every real participant,
+    this is inherently a single 'participant' -- the RMSE/delta panels will
+    show one line, not a spread, and the split-half reliability panel will
+    correctly report 'insufficient data' (n=1 can't be correlated across a
+    population) rather than a meaningless number. See
+    docs/sequence_design_open_questions.md Section 6 for the ACTUAL
+    quota-vs-i.i.d. split-half reliability comparison (computed differently,
+    via a lambda sweep on the shared file, in scripts/inspect_sequences.py) --
+    this script's own reliability panel is not the right tool for that
+    comparison at n_participants=1, only the per-participant-spread panels
+    (columns 1-2) are.
+    """
+    seq_dir = Path(seq_dir)
+    all_rows = []
+    for task in tasks:
+        pkl = seq_dir / f"{task}_sequences.pkl"
+        assert pkl.exists(), f"quota sequence file not found: {pkl}"
+        df = pd.read_pickle(pkl)
+        all_rows.extend(_rows_for_sequences(df, task, "p0000", agent_name, agent_fn,
+                                            skip_binary_transform))
+    return pd.DataFrame(all_rows)
+
+
+# ---------------------------------------------------------------------------
+# i.i.d. path: one fresh, independent sequence set per participant
 # ---------------------------------------------------------------------------
 def simulate_participants(n_participants, tasks, n_prefix, n_repeats,
                           seq_length, prefix_length, mean_range, std_fixed,
@@ -195,37 +278,8 @@ def simulate_participants(n_participants, tasks, n_prefix, n_repeats,
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 df, _ = generate_task_sequences_iid(task, args_ns, rng)
-
-            for trial_id, g in df.groupby("trial"):
-                g = g.sort_values("observation")
-                vals = g["value"].tolist()
-                resp = agent_fn(vals, task)
-                # Feed the REAL (1-indexed) observation values into
-                # apply_binary_transform, matching exactly what
-                # test_sequences.py's own pipeline does -- not the
-                # 0-indexed convention that module's own docstring
-                # describes (a pre-existing discrepancy elsewhere in this
-                # project, not something to silently "fix" here; matching
-                # the ACTUAL existing pipeline behavior matters more for
-                # this investigation than the documented-but-unused intent).
-                resp_df = pd.DataFrame({
-                    "observation": g["observation"].tolist(),
-                    "response": resp,
-                })
-                if task == "binary" and not skip_binary_transform:
-                    resp_df = apply_binary_transform(resp_df, f"task_{task}")
-                tm  = g["true_mean"].iloc[0]
-                ts  = g["true_std"].iloc[0]
-                tp  = g["true_p"].iloc[0]
-                qid = g["qid"].iloc[0]
-                for obs, r in zip(g["observation"].tolist(),
-                                 resp_df["response"].tolist()):
-                    all_rows.append({
-                        "model_id": model_id, "model_type": agent_name,
-                        "task": task, "trial": int(trial_id), "qid": int(qid),
-                        "observation": int(obs), "response": float(r),
-                        "true_mean": tm, "true_std": ts, "true_p": tp,
-                    })
+            all_rows.extend(_rows_for_sequences(df, task, model_id, agent_name, agent_fn,
+                                                skip_binary_transform))
         if (pid + 1) % progress_every == 0 or pid == n_participants - 1:
             print(f"  simulated {pid + 1}/{n_participants} participants")
     return pd.DataFrame(all_rows)
@@ -318,7 +372,8 @@ def _delta_curve(g):
 # ---------------------------------------------------------------------------
 # Figure: 3 columns x len(tasks) rows
 # ---------------------------------------------------------------------------
-def make_figure(raw_df, fits_df, tasks, out_path, n_participants, agent_label="Mean"):
+def make_figure(raw_df, fits_df, tasks, out_path, n_participants, agent_label="Mean",
+                sequence_type="iid"):
     apply_style()
     n_rows = len(tasks)
     fig, axes = plt.subplots(n_rows, 3, figsize=(13, 4.2 * n_rows), squeeze=False)
@@ -405,10 +460,16 @@ def make_figure(raw_df, fits_df, tasks, out_path, n_participants, agent_label="M
         ax_fit.legend(fontsize=7, frameon=False)
         ax_fit.spines[["top", "right"]].set_visible(False)
 
-    fig.suptitle(
-        f"i.i.d. sequence-generation variance across {n_participants} "
-        f"simulated participants (each with independently randomized "
-        f"sequences)  |  agent: {agent_label}", fontsize=11, fontweight="bold")
+    if sequence_type == "quota":
+        fig.suptitle(
+            f"quota/momentmatch production sequences (identical for every real "
+            f"participant, n_participants=1)  |  agent: {agent_label}",
+            fontsize=11, fontweight="bold")
+    else:
+        fig.suptitle(
+            f"i.i.d. sequence-generation variance across {n_participants} "
+            f"simulated participants (each with independently randomized "
+            f"sequences)  |  agent: {agent_label}", fontsize=11, fontweight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -434,6 +495,15 @@ def parse_args():
                   help="Default matches production blue_range=[2,13] out of 15, "
                        "converted to a p fraction")
     p.add_argument("--task", choices=["continuous", "binary", "both"], default="both")
+    p.add_argument("--sequence_type", choices=["iid", "quota"], default="iid",
+                  help="'iid' (default): --n_participants independent i.i.d. draws, "
+                       "via generate_sequences_iid.py -- see module docstring. "
+                       "'quota': the real, shared task/sequences/{task}_sequences.pkl "
+                       "production files (momentmatch) -- identical for every real "
+                       "participant, so --n_participants is forced to 1 regardless "
+                       "of what's passed (a printed note explains if overridden).")
+    p.add_argument("--seq_dir", default="task/sequences",
+                  help="Only used when --sequence_type quota")
     p.add_argument("--agent", choices=["Mean", "RL_lambda"], default="Mean",
                   help="Mean = running average (the 'optimal' agent used by default). "
                        "RL_lambda = alpha(n)=alpha_0/n**lambda_ delta-rule agent "
@@ -455,26 +525,39 @@ def main():
     assert args.n_prefix % 2 == 0, "n_prefix must be even (generate_sequences_iid.py requirement)"
     tasks = ["continuous", "binary"] if args.task == "both" else [args.task]
 
+    if args.sequence_type == "quota" and args.n_participants != 1:
+        print(f"[note] --sequence_type quota ignores --n_participants "
+              f"({args.n_participants} requested) -- quota sequences are identical "
+              f"for every real participant, so this is always exactly 1.")
+        args.n_participants = 1
+
     if args.agent == "RL_lambda":
         agent_name = f"RL_lambda(\u03b1={args.alpha_0},\u03bb={args.rl_lambda})"
         agent_fn = lambda vals, task: _rl_lambda_responses(vals, task, args.alpha_0, args.rl_lambda)
-        default_stem = f"inspect_iid_sequences_rl_a{args.alpha_0:.2f}_l{args.rl_lambda:.2f}"
+        default_stem = f"inspect_{args.sequence_type}_sequences_rl_a{args.alpha_0:.2f}_l{args.rl_lambda:.2f}"
     else:
         agent_name = "Mean"
         agent_fn = _running_mean_responses
-        default_stem = "inspect_iid_sequences"
+        default_stem = f"inspect_{args.sequence_type}_sequences"
     if args.skip_binary_transform:
         agent_name += " [no Laplace transform]"
         default_stem += "_notransform"
 
-    print(f"Simulating {args.n_participants} participant(s) x {len(tasks)} task(s) "
-          f"({args.n_prefix} prefixes x {args.n_repeats} repeats each = "
-          f"{args.n_prefix * args.n_repeats} trials/participant/task) | agent={agent_name}...")
-    raw_df = simulate_participants(
-        args.n_participants, tasks, args.n_prefix, args.n_repeats,
-        args.seq_length, args.prefix_length, args.mean_range, args.std_fixed,
-        args.p_range, args.base_seed, agent_name=agent_name, agent_fn=agent_fn,
-        skip_binary_transform=args.skip_binary_transform)
+    if args.sequence_type == "quota":
+        print(f"Loading quota production sequences from {args.seq_dir} "
+              f"x {len(tasks)} task(s) | agent={agent_name}...")
+        raw_df = load_quota_sequences(
+            tasks, args.seq_dir, agent_name, agent_fn,
+            skip_binary_transform=args.skip_binary_transform)
+    else:
+        print(f"Simulating {args.n_participants} participant(s) x {len(tasks)} task(s) "
+              f"({args.n_prefix} prefixes x {args.n_repeats} repeats each = "
+              f"{args.n_prefix * args.n_repeats} trials/participant/task) | agent={agent_name}...")
+        raw_df = simulate_participants(
+            args.n_participants, tasks, args.n_prefix, args.n_repeats,
+            args.seq_length, args.prefix_length, args.mean_range, args.std_fixed,
+            args.p_range, args.base_seed, agent_name=agent_name, agent_fn=agent_fn,
+            skip_binary_transform=args.skip_binary_transform)
 
     print("Fitting power laws (full + split-half) per participant...")
     fits_df = compute_fits(raw_df, tasks)
@@ -497,7 +580,8 @@ def main():
     print()
 
     out_pdf = Path(args.out_pdf) if args.out_pdf else FIGURES_DIR / f"{default_stem}.pdf"
-    make_figure(raw_df, fits_df, tasks, out_pdf, args.n_participants, agent_label=agent_name)
+    make_figure(raw_df, fits_df, tasks, out_pdf, args.n_participants, agent_label=agent_name,
+               sequence_type=args.sequence_type)
     print("JOB_COMPLETE")
 
 

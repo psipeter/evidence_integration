@@ -432,22 +432,23 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="t
 
 # ── Human-readable inspection CSV ──────────────────────────────────────────────
 def build_inspection_csv(seq_dir: Path, out_path: Path) -> pd.DataFrame:
-    """Observation-level, human-readable CSV of everything the sequence
-    generator is trying to guarantee -- prefix/suffix structure, achieved
-    vs target mean/std/p, prefix uniqueness across qids, binary exact-quota
-    correctness, and iti_condition balance. Reads directly from
-    {task}_sequences.json -- no model/NEF dependency at all, so this is
-    fast and always available regardless of --skip_nef.
+    """Human-readable, ONE-ROW-PER-TRIAL CSV. Each column obs_1..obs_N is one
+    observation's raw value (so a whole trial's stimulus sequence reads left
+    to right on a single line), followed by true_mean/true_p/true_std and
+    their achieved (obs_mean/obs_p/obs_std) counterparts. A blank '|'
+    column sits right after the prefix (obs_1..obs_prefix_length) to make
+    the prefix/suffix boundary visually obvious in a spreadsheet -- see
+    generate_sequences_momentmatch.py's module docstring for what that
+    split means and why it exists.
 
-    One row per (task, trial, observation). Trial-level quantities (target,
-    final achieved value, this trial's prefix mean, the uniqueness/quota
-    verdicts) are repeated on every row of that trial -- deliberately
-    denormalized so opening this in a spreadsheet and scrolling one trial
-    at a time shows the per-observation trajectory AND the trial-level
-    summary side by side, without cross-referencing a second sheet.
-    is_prefix marks which rows belong to the shared prefix vs the
-    per-trial suffix (see generate_sequences_momentmatch.py's module
-    docstring for what that split means and why it exists).
+    Simpler, wide-format replacement for an earlier long-format (one row
+    per observation, trial-level fields repeated on every row) version --
+    moved to one row per TRIAL instead, since that's the natural unit for a
+    human scanning by eye: an entire trial's sequence and its
+    target-vs-achieved summary now sit on one line, not spread across 15.
+
+    Reads directly from {task}_sequences.json -- no model/NEF dependency at
+    all, so this is fast and always available regardless of --skip_nef.
     """
     rows = []
     console_summary = []
@@ -474,7 +475,7 @@ def build_inspection_csv(seq_dir: Path, out_path: Path) -> pd.DataFrame:
         prefix_ok = (n_distinct == n_qids) and one_prefix_per_qid
         console_summary.append(
             f"[{task}] prefix uniqueness: {n_distinct}/{n_qids} distinct "
-            f"({'OK' if prefix_ok else 'COLLISION DETECTED -- see rows below'})"
+            f"({'OK' if prefix_ok else 'COLLISION DETECTED'})"
         )
 
         # -- iti_condition balance per qid (should be within 1 of even split) --
@@ -494,79 +495,124 @@ def build_inspection_csv(seq_dir: Path, out_path: Path) -> pd.DataFrame:
             pl = t["prefix_length"]
             vals = t["values"]
             n = len(vals)
-            prefix_vals = vals[:pl]
+
+            row = {"task": task, "trial": t["trial"], "qid": t["qid"]}
+            for i, v in enumerate(vals, start=1):
+                row[f"obs_{i}"] = v
+                if i == pl:
+                    row["|"] = ""  # separator column, right after the prefix
 
             target_mean = t.get("true_mean")
             target_std  = t.get("true_std")
             target_p    = t.get("true_p")
 
             if task == "continuous":
-                prefix_mean  = float(np.mean(prefix_vals))
-                prefix_blue  = None
-                final_mean   = float(np.mean(vals))
-                final_std    = float(np.std(vals))
-                mean_error   = final_mean - target_mean if target_mean is not None else None
-                std_error    = final_std - target_std if target_std is not None else None
-                final_blue   = None
-                quota_ok     = None
+                obs_mean, obs_std, obs_p = float(np.mean(vals)), float(np.std(vals)), None
             else:
-                prefix_mean  = None
-                prefix_blue  = sum(1 for v in prefix_vals if v == 1)
-                final_mean   = final_std = mean_error = std_error = None
-                final_blue   = sum(1 for v in vals if v == 1)
-                target_blue  = round(target_p * n) if target_p is not None else None
-                quota_ok     = (final_blue == target_blue) if target_blue is not None else None
-                if quota_ok is False:
+                obs_p, obs_mean, obs_std = float(np.mean([v == 1 for v in vals])), None, None
+                achieved_blue = sum(1 for v in vals if v == 1)
+                target_blue = round(target_p * n) if target_p is not None else None
+                if target_blue is not None and achieved_blue != target_blue:
                     n_quota_bad += 1
 
-            running_sum, running_blue = 0, 0
-            for o, v in enumerate(vals, start=1):
-                running_sum += v
-                running_blue += 1 if v == 1 else 0
-                rows.append({
-                    "task": task,
-                    "trial": t["trial"],
-                    "qid": t["qid"],
-                    "observation": o,
-                    "is_prefix": o <= pl,
-                    "value": v,
-                    "running_mean": (running_sum / o) if task == "continuous" else None,
-                    "running_p": (running_blue / o) if task == "binary" else None,
-                    "prefix_length": pl,
-                    "prefix_mean": prefix_mean,
-                    "prefix_blue_count": prefix_blue,
-                    "target_mean": target_mean,
-                    "target_std": target_std,
-                    "target_p": target_p,
-                    "final_achieved_mean": final_mean,
-                    "final_achieved_std": final_std,
-                    "final_achieved_blue": final_blue,
-                    "mean_error": mean_error,
-                    "std_error": std_error,
-                    "binary_quota_ok": quota_ok,
-                    "prefix_globally_unique_this_task": prefix_ok,
-                    "iti_ms": t.get("iti_ms"),
-                    "iti_condition": t.get("iti_condition"),
-                })
+            row.update({
+                "true_mean": target_mean, "true_p": target_p, "true_std": target_std,
+                "obs_mean": obs_mean, "obs_p": obs_p, "obs_std": obs_std,
+            })
+            rows.append(row)
 
         if task == "binary":
             console_summary.append(
                 f"[{task}] exact-quota check: {n_quota_bad} trial(s) with "
                 f"achieved blue count != round(true_p * seq_length) "
-                f"({'OK' if n_quota_bad == 0 else 'MISMATCH -- see binary_quota_ok column'})"
+                f"({'OK' if n_quota_bad == 0 else 'MISMATCH'})"
             )
 
     df = pd.DataFrame(rows)
     if df.empty:
         print(f"[csv skip] no {{task}}_sequences.json files found in {seq_dir}")
         return df
-    df = df.sort_values(["task", "trial", "observation"]).reset_index(drop=True)
+    df = df.sort_values(["task", "trial"]).reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
     print(f"Saved: {out_path}  ({len(df)} rows)")
     for line in console_summary:
         print(" ", line)
     return df
+
+
+# ── Split-half λ-recovery reliability (comparable to test_sequences.pdf's
+# panels E/L, computed on THIS figure's own --seq_dir sequences) ────────
+def compute_split_half_reliability(seq_df, task, alpha_0=1.0, n_lambdas=50):
+    """Split-half λ-recovery reliability: sweep n_lambdas different RL_lambda
+    ground-truth parameterizations (lambda_ in [0.01, 0.99], alpha_0 fixed)
+    across the SAME sequence set -- standing in for "many different
+    participants, each with their own true decay rate", the same role
+    test_sequences.py's own lambda sweep plays in its panels E/L (which
+    already default to these exact production sequences via
+    --seq_dir task/sequences, alpha_0=1.0 by CLI default -- matched here).
+    Fits lambda separately on the first half vs second half of trials for
+    each swept value and correlates the two halves across the swept
+    population.
+
+    Reuses fit_lambda_mid/split_half_lambda directly from test_sequences.py
+    (not reimplemented) so this number means exactly the same thing as it
+    does there -- packaged into THIS figure specifically so quota's
+    reliability sits side by side with scripts/inspect_iid_sequences.py's
+    i.i.d. reliability panel for direct comparison (see chat history for
+    why that comparison matters -- it's what motivated adding this panel
+    at all, after fixing a real prefix-collision bug in
+    generate_sequences_iid.py revealed that i.i.d.'s split-half reliability
+    had been artificially inflated by that bug).
+
+    Returns (rel_df, r, p) where rel_df has one row per swept lambda value
+    with columns [model_id, first, second] (dropna'd), r/p from pearsonr
+    (nan if too few finite points or zero variance to correlate).
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_sequences import fit_lambda_mid, split_half_lambda  # noqa: F401 (fit_lambda_mid re-exported for callers)
+
+    dataset = f"task_{task}"
+    rows = []
+    for i, lam in enumerate(np.linspace(0.01, 0.99, n_lambdas)):
+        model_id = f"RL_lambda[{i}]"
+        for tid in seq_df["trial"].unique():
+            g = seq_df[seq_df["trial"] == tid].sort_values("observation")
+            vals = g["value"].tolist()
+            resp = _rl_responses(vals, task, alpha_0, float(lam))
+            resp_df = pd.DataFrame({"observation": list(range(len(resp))), "response": resp})
+            resp_df = apply_binary_transform(resp_df, dataset)
+            for obs_i, r in enumerate(resp_df["response"].tolist()):
+                rows.append({
+                    "model_id": model_id, "model_type": "RL_lambda",
+                    "trial": int(tid), "observation": obs_i + 1, "response": float(r),
+                })
+    sweep_df = pd.DataFrame(rows)
+    half_wide = split_half_lambda(sweep_df)
+    rel = half_wide.dropna(subset=["first", "second"])
+    if len(rel) >= 3 and rel["first"].std() > 1e-9:
+        from scipy.stats import pearsonr
+        r_val, p_val = pearsonr(rel["first"], rel["second"])
+    else:
+        r_val, p_val = float("nan"), float("nan")
+    return rel, r_val, p_val
+
+
+def _plot_reliability_panel(ax, rel, r, p, title, color):
+    from utils.plot_style import pvalue_to_stars
+    if not rel.empty:
+        ax.scatter(rel["first"], rel["second"], s=14, alpha=0.6, color=color, zorder=3)
+    ax.plot([0, 1], [0, 1], color="0.6", lw=0.8, ls="--", zorder=1)
+    note = f"r={r:.2f}{pvalue_to_stars(p)}  (n={len(rel)})" if np.isfinite(r) else "insufficient data"
+    ax.text(0.05, 0.95, note, transform=ax.transAxes, ha="left", va="top", fontsize=7,
+           bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.85))
+    ax.set_title(title, fontsize=9, fontweight="bold")
+    ax.set_xlabel("First-half fitted \u03bb", fontsize=8)
+    ax.set_ylabel("Second-half fitted \u03bb", fontsize=8)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.tick_params(labelsize=7)
+    ax.spines[["top", "right"]].set_visible(False)
 
 
 # ── Plotting ──────────────────────────────────────────────────────────────────
@@ -619,9 +665,10 @@ def make_figure(
 
     n_models = 5 if nef_metrics else 4
     colors = get_palette(n_models)
-    fig, axes = plt.subplots(2, 2, figsize=(9, 6), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(13, 6), constrained_layout=True)
 
     gt_label = "RMSE vs running mean" if gt_mode == "running_mean" else "RMSE vs true param"
+    reliability_color = get_palette(3)[2]
 
     for row, task in enumerate(["binary", "continuous"]):
         pkl = seq_dir / f"{task}_sequences.pkl"
@@ -655,8 +702,23 @@ def make_figure(
             colors,
         )
 
-        for ax in axes[row]:
+        for ax in axes[row, :2]:
             ax.axvline(prefix + 0.5, color="#999", lw=0.8, ls="--", alpha=0.6)
+
+        # -- Column 2: split-half λ-recovery reliability, comparable to
+        # test_sequences.pdf's panels E/L, computed on THESE sequences --
+        # see compute_split_half_reliability's docstring for why this was
+        # added (comparing quota vs i.i.d. split-half reliability directly)
+        rel, r_val, p_val = compute_split_half_reliability(seq_df, task)
+        if np.isfinite(r_val):
+            print(f"[reliability] {task}: split-half λ r={r_val:.3f} p={p_val:.4g} (n={len(rel)})")
+        else:
+            print(f"[reliability] {task}: insufficient data")
+        _plot_reliability_panel(
+            axes[row, 2], rel, r_val, p_val,
+            f"{label} — split-half λ reliability (quota)",
+            reliability_color,
+        )
 
     fig.suptitle(
         f"Sequence diagnostics ({gt_mode})  |  RL/NEF α={alpha_0} λ={rl_lambda}  "

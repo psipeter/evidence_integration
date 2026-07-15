@@ -8,6 +8,19 @@ generate_sequences_momentmatch.py instead. Do not delete this file or its
 output ({task}_iid_sequences.*) -- the i.i.d.-vs-moment-matched choice is
 still open and this is one of the two live candidates being compared.
 
+Known bug, fixed: binary prefixes were originally drawn independently per
+qid with no uniqueness check -- confirmed empirically that 9 of 10 random
+seeds produced a real prefix collision at n_unique_sequences=10 (only
+6-8 distinct prefixes out of 10 expected; only 2**prefix_length=16 possible
+binary sequences exist at prefix_length=4, so this was likely, not a fluke).
+This silently affected every binary result computed via
+scripts/inspect_iid_sequences.py before the fix -- see
+docs/sequence_design_open_questions.md for the full investigation this was
+found during. Fixed via _draw_unique_binary_prefix (active dedup, matching
+in spirit -- though not code, since the generation path differs -- the fix
+already applied to generate_sequences_momentmatch.py's build_binary_prefixes
+for the same underlying reason).
+
 The "pure i.i.d." branch: genuinely unconstrained sampling. No k-based
 plausibility check, no rejection loop, no smoothing/gating, and -- per
 explicit decision -- NO seed search or best-of-N ranking either. Any
@@ -90,6 +103,43 @@ from generate_sequences import (
     check_sequence_plausibility,
     _save_sequences,
 )
+
+
+# ---------------------------------------------------------------------------
+# Prefix uniqueness fix (real bug, confirmed empirically -- see module
+# docstring's "Known bug, fixed" note below)
+# ---------------------------------------------------------------------------
+def _draw_unique_binary_prefix(rng, true_p, prefix_length, used_prefixes, max_attempts=10_000):
+    """draw_binary_obs, retried until the result hasn't already been used by
+    an earlier qid in THIS generation call. Fixes a real, confirmed bug:
+    with prefix_length=4 there are only 2**4=16 possible binary sequences
+    total, so independently drawing one per qid with no uniqueness check
+    collides often -- confirmed empirically, 9 of 10 random seeds produced a
+    real collision at n_unique_sequences=10 (only 6-8 distinct prefixes out
+    of 10 expected). Exactly the same class of bug
+    generate_sequences_momentmatch.py's build_binary_prefixes was redesigned
+    to fix earlier this project, just reached via a different generation
+    path here (that fix doesn't apply directly since this script's prefixes
+    aren't drawn from a shared composition grid -- each qid has its own
+    true_p).
+
+    Fails loudly rather than silently returning a duplicate -- if
+    n_unique_sequences approaches or exceeds 2**prefix_length this is
+    structurally impossible, not just unlucky, and retrying forever
+    wouldn't help.
+    """
+    for _ in range(max_attempts):
+        candidate = tuple(draw_binary_obs(rng, true_p, prefix_length))
+        if candidate not in used_prefixes:
+            used_prefixes.add(candidate)
+            return list(candidate)
+    raise RuntimeError(
+        f"Could not draw a unique {prefix_length}-length binary prefix after "
+        f"{max_attempts} attempts (true_p={true_p}). {len(used_prefixes)} prefixes "
+        f"already used out of {2**prefix_length} possible at this prefix_length -- "
+        f"if n_unique_sequences approaches or exceeds 2**prefix_length, this is "
+        f"structurally impossible, not just unlucky; reduce n_unique_sequences or "
+        f"increase prefix_length.")
 
 
 # ---------------------------------------------------------------------------
@@ -179,12 +229,19 @@ def generate_task_sequences_iid(task, args, rng):
         param_list = [(tp, float('nan'), tp) for tp in param_sets]
 
     # -- Build prefix block (once per base qid, plain i.i.d.) ----------------
+    # used_prefixes tracks every prefix assigned so far in THIS call (base
+    # AND mirrored) -- binary needs active dedup (see
+    # _draw_unique_binary_prefix's docstring for why); continuous gets only
+    # a safety-net assertion since real-valued draws essentially never
+    # collide exactly.
+    used_prefixes = set()
     templates = []
     for qid, (true_mean, true_std, true_p) in enumerate(param_list):
         if task == 'continuous':
             prefix = draw_continuous_obs(rng, true_mean, true_std, prefix_length)
+            used_prefixes.add(tuple(prefix))
         else:
-            prefix = draw_binary_obs(rng, true_p, prefix_length)
+            prefix = _draw_unique_binary_prefix(rng, true_p, prefix_length, used_prefixes)
         templates.append({
             'qid': qid, 'true_mean': true_mean, 'true_std': true_std,
             'true_p': true_p, 'prefix': prefix,
@@ -193,10 +250,27 @@ def generate_task_sequences_iid(task, args, rng):
         print(f"  qid {qid:3d}: {label}  prefix=[{','.join(map(str, prefix))}]")
 
     # -- Mirror templates -----------------------------------------------------
+    # Mirroring is deterministic (not a fresh draw), so on the rare chance a
+    # mirrored prefix collides with something already used, there's nothing
+    # to "retry" -- fall back to a fresh unique draw from the MIRRORED
+    # target's own true_p instead of the mirror transform, for that one qid
+    # only. Expected to essentially never trigger in practice (mirroring a
+    # specific base prefix landing exactly on an already-used one is a rare
+    # coincidence on top of an already-rare event), but silently allowing a
+    # duplicate here would undo the whole point of the fix above.
     for base in templates[:n_base]:
         m_mean, m_std, m_p = mirror_params(base['true_mean'], base['true_std'],
                                            base['true_p'], task)
         m_prefix = mirror_sequence(base['prefix'], task)
+        mirror_note = ''
+        if task == 'continuous':
+            used_prefixes.add(tuple(m_prefix))
+        else:
+            if tuple(m_prefix) in used_prefixes:
+                m_prefix = _draw_unique_binary_prefix(rng, m_p, prefix_length, used_prefixes)
+                mirror_note = ' [mirror collided -- redrawn fresh instead]'
+            else:
+                used_prefixes.add(tuple(m_prefix))
         m_qid    = len(templates)
         templates.append({
             'qid': m_qid, 'true_mean': m_mean, 'true_std': m_std,
@@ -204,7 +278,7 @@ def generate_task_sequences_iid(task, args, rng):
         })
         label = f'mean={m_mean:.1f}' if task == 'continuous' else f'p={m_p:.3f}'
         print(f"  qid {m_qid:3d}: {label}  prefix=[{','.join(map(str, m_prefix))}]  "
-              f"[mirror of qid {base['qid']}]")
+              f"[mirror of qid {base['qid']}]{mirror_note}")
 
     # -- ITI schedule ---------------------------------------------------------
     ITI_MS   = 1000
@@ -272,6 +346,11 @@ def generate_task_sequences_iid(task, args, rng):
         assert df['value'].isin([-1, 1]).all()
     assert df['trial'].nunique() == n_total
     assert (df.groupby('qid')['trial'].nunique() == n_repeats).all()
+    n_distinct_prefixes = len(set(tuple(t['prefix']) for t in templates))
+    assert n_distinct_prefixes == n_unique, (
+        f"prefix collision: {n_distinct_prefixes}/{n_unique} distinct prefixes -- "
+        f"should be unreachable given _draw_unique_binary_prefix's own dedup; "
+        f"indicates a real bug if this ever fires.")
 
     print(f"\n  {len(df)} rows | {n_total} trials | {n_unique} seqs x {n_repeats} reps")
     if task == 'continuous':
