@@ -16,8 +16,28 @@
  * reached. Driven by requestAnimationFrame — NOT jsPsych.pluginAPI.setTimeout,
  * since it needs to redraw every frame, not just fire once.
  *
+ * Also calls onTimeout() IMMEDIATELY if the tab becomes hidden
+ * (document.visibilitychange), rather than leaving the countdown to sit
+ * frozen until the tab regains focus. This isn't a cosmetic nicety —
+ * requestAnimationFrame callbacks are fully SUSPENDED (not just throttled)
+ * in a hidden tab, since rAF is tied to the paint cycle and there's nothing
+ * to paint when hidden. Without this, switching tabs mid-observation acted
+ * as an unintended, unbounded pause: the clock simply stopped advancing
+ * until the tab became visible again, and any response given immediately
+ * after would carry a badly inflated rt (performance.now() - trialStart
+ * naively includes the away-time). Treating hidden-while-active as an
+ * immediate timeout closes both the pause exploit and the rt-contamination
+ * risk in one place — see plugin-iti-clock.js's timed_out branch for the
+ * other half of this fix (requiring a manual click to proceed afterward,
+ * so a single stray visibility change can cost at most one timeout, not an
+ * unbounded cascade while the tab stays hidden).
+ *
  * Returns a `stop()` function; callers must call it when the trial finishes
- * for any other reason (e.g. a real response), to cancel the pending rAF.
+ * for any other reason (e.g. a real response), to cancel the pending rAF
+ * AND remove the visibility listener — otherwise a later, unrelated tab
+ * switch during a subsequent trial would have nothing left listening (the
+ * listener is removed here), but leaving it un-removed would be a real
+ * leak across many trials in a long session regardless.
  */
 export function startTimeoutClock(canvas, tObsMs, onTimeout) {
   const ctx  = canvas.getContext('2d');
@@ -27,8 +47,23 @@ export function startTimeoutClock(canvas, tObsMs, onTimeout) {
   const start = performance.now();
 
   let rafId = null;
+  let done  = false;
+
+  const finish = () => {
+    if (done) return;
+    done = true;
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    onTimeout();
+  };
+
+  const onVisibilityChange = () => {
+    if (document.hidden) finish();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
 
   const draw = (now) => {
+    if (done) return;
     const fraction = Math.min((now - start) / tObsMs, 1);
 
     if (fraction < 0.6) {
@@ -59,13 +94,15 @@ export function startTimeoutClock(canvas, tObsMs, onTimeout) {
     if (fraction < 1) {
       rafId = requestAnimationFrame(draw);
     } else {
-      onTimeout();
+      finish();
     }
   };
 
   rafId = requestAnimationFrame(draw);
 
   return function stop() {
+    done = true;
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    document.removeEventListener('visibilitychange', onVisibilityChange);
   };
 }

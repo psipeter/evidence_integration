@@ -1,7 +1,11 @@
 /**
  * plugin-iti-clock.js
- * jsPsych 8 plugin — circular countdown clock that auto-advances.
- * If timed_out=true, briefly shows "too slow" before the clock starts.
+ * jsPsych 8 plugin — circular countdown clock between trials.
+ * If timed_out=false: auto-advances once duration_ms elapses (normal ITI).
+ * If timed_out=true: shows a "Too slow / X remaining" message, THEN a
+ * manual "Repeat" button — deliberately does NOT auto-advance. See the
+ * timed_out branch below for why (closes a tab-visibility exploit/failure
+ * mode together with observation-timeout-clock.js).
  */
 
 const info = {
@@ -184,10 +188,17 @@ class ItiClockPlugin {
     };
 
     if (timed_out) {
-      // Fade in(100ms) → out(1000ms) → in(2000ms) → hold → clock(3200ms)
-      // Each transition: 0.8s. Total: 100+800+200+800+200+800+400 = 3300ms
+      // Fade in(100ms) → out(1000ms) → in(2000ms) → hold, THEN a manual "Repeat"
+      // button — deliberately NOT an auto-advancing clock like the normal ITI
+      // below. If this screen auto-advanced, a stray tab-switch (which now
+      // immediately consumes one timeout via observation-timeout-clock.js's
+      // visibilitychange handling) could cascade into a second, third
+      // automatic timeout while nobody's looking, forcing early-exit before
+      // the participant even regains control. Requiring a click means the
+      // WORST case from any single stray focus loss is exactly one consumed
+      // timeout, then an indefinite, fully inert wait for the participant to
+      // return and press Repeat — never more than that automatically.
       const FADE = 800;   // matches transition duration
-      const displayMs = 3200;
       display_el.innerHTML = `
         <div class="iti-wrap" style="flex-direction:column;gap:1.2rem;">
           <span style="font-size:3rem;font-weight:bold;color:#ef4444;">
@@ -198,12 +209,22 @@ class ItiClockPlugin {
             opacity:0;transition:opacity ${FADE}ms ease;">
             ${timeouts_remaining} timeout${timeouts_remaining === 1 ? '' : 's'} remaining
           </span>
+          <button id="repeat-btn" class="jspsych-btn" disabled style="
+            font-size:1.4rem;padding:0.8rem 3rem;min-width:180px;
+            opacity:0;transition:opacity ${FADE}ms ease;">
+            Repeat
+          </button>
         </div>`;
-      const el = display_el.querySelector('#too-slow-pulse');
-      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 100);        // fade in
-      setTimeout(() => { if (el && active) el.style.opacity = '0'; }, 100+FADE+200); // fade out
-      setTimeout(() => { if (el && active) el.style.opacity = '1'; }, 100+FADE*2+400); // fade in
-      setTimeout(() => { if (active) showClock(); }, displayMs);
+      const msgEl = display_el.querySelector('#too-slow-pulse');
+      const btnEl = display_el.querySelector('#repeat-btn');
+      if (btnEl) btnEl.addEventListener('click', finish);
+      setTimeout(() => { if (msgEl && active) msgEl.style.opacity = '1'; }, 100);        // fade in
+      setTimeout(() => { if (msgEl && active) msgEl.style.opacity = '0'; }, 100+FADE+200); // fade out
+      setTimeout(() => {
+        if (!active) return;
+        if (msgEl) msgEl.style.opacity = '1';                 // fade in
+        if (btnEl) { btnEl.style.opacity = '1'; btnEl.disabled = false; }
+      }, 100+FADE*2+400);
     } else {
       showClock();
     }

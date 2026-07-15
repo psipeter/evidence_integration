@@ -166,8 +166,8 @@ Required columns: pid, trial, observation, value, response.
 Carrabin adds: qid, true_p (from carrabin_original.csv).
 
 New task (task/): Two online experiments deployed on Prolific via MindProbe/JATOS.
-- Continuous task: Normal(mean, std) stimulus; slider response [0–100]; 24 trials × 15 obs
-- Binary task: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 24 trials × 15 obs
+- Continuous task: Normal(mean, std) stimulus; slider response [0–100]; 8x4=32 trials × 15 obs
+- Binary task: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 8x4=32 trials × 15 obs
 Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
 Timeout system: 3 timeouts per trial; timeout → too-slow screen → replay; exhausted → terminated screen.
 Naming convention (IMPORTANT): every file/class that has a continuous/binary pair
@@ -199,8 +199,8 @@ Current task status (as of latest session):
 - No TEST_MODE/N_TRIALS_TO_RUN toggle anymore (removed along with index-dev.html
   -- see "Task testing architecture" below). Trial count is fully implicit from
   however many trials task/sequences/{task}_sequences.json contains (currently
-  24, the 6×4 pilot). BTI_MS=3000ms, DISTRACTOR_TYPE='none' (config-base.js
-  DEFAULTS).
+  32, the 8x4 hybrid production set -- see "Sequence design" below). BTI_MS=3000ms,
+  DISTRACTOR_TYPE='none' (config-base.js DEFAULTS).
 - Welcome/title screen (build-welcome-screen.js) is now the first screen shown,
   before consent -- see "Task testing architecture" below.
 
@@ -329,11 +329,27 @@ distribution" would overclaim novelty it can't always guarantee.
 - Distractor system exists (iti_condition per trial, popup/iti_length/none) but
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
 
-Sequence design: 6x4 (24 trials) is the CURRENT PILOT production design,
-  generated via task/generate_sequences_momentmatch.py (1000-try isotonic
-  seed search), std_fixed=15. Promoted to production
-  (task/sequences/{continuous,binary}_sequences.{pkl,json}); superseded
-  the older seed=175/198 sequences (fully recoverable via git history).
+Sequence design: **8x4 (32 trials) hybrid production design is CURRENT**,
+  superseding the earlier 6x4 pure-momentmatch pilot described below.
+  Generated via task/generate_sequences_hybrid.py (see "Sequence generation
+  methods" below) -- binary keeps quota/momentmatch construction unchanged
+  (no seed search); continuous uses a genuinely i.i.d., unrescaled suffix
+  instead. Chosen at 8x4 rather than 10x4 specifically to reduce
+  participant time. Promoted to task/sequences/{continuous,binary}_sequences.
+  {pkl,json}; the older 6x4 sequences (and the pure _iid_/_momentmatch_
+  branch outputs) remain recoverable via git history / their own
+  differently-named files, not deleted. **See docs/sequence_design_open_
+  questions.md for the full investigation and decision rationale** -- the
+  quota-vs-i.i.d. confound this decision was based on, the hybrid design's
+  own std-guard tuning, and everything checked before promoting.
+
+  Historical context (6x4, momentmatch-only) -- kept for the mechanism
+  detail, since the hybrid design reuses this construction UNCHANGED for
+  binary and PARTIALLY for continuous (prefix/target generation + optimal
+  matching, just not the suffix rescale):
+  6x4 (24 trials) was generated via task/generate_sequences_momentmatch.py
+  (1000-try isotonic seed search), std_fixed=15. Superseded the older
+  seed=175/198 sequences (fully recoverable via git history).
 
   **Design (redesigned -- prefix identity and target level are now
   INDEPENDENT axes, not one qid = one fixed (prefix, target) pair)**:
@@ -379,7 +395,13 @@ Sequence design: 6x4 (24 trials) is the CURRENT PILOT production design,
       std runs slightly above std_fixed on average as a result (measured on
       the promoted pilot: mean achieved std ~14.6, max ~20.6 against a
       target of 15 -- see the boundary-bias table below for the separate,
-      pre-existing extreme-mean bias this compounds with).
+      pre-existing extreme-mean bias this compounds with). **The hybrid
+      design (current production) uses this same residual-mean centering
+      for continuous but skips the rescale step entirely** -- see
+      generate_sequences_hybrid.py's own module docstring for why (dropping
+      the rescale, not the seed search, is what actually restores genuine
+      trial-ending uncertainty) and its two variance guards (analytical
+      bias correction + a loose +/-25% std safety-net rejection).
 
   **Consequence to know about, not a bug**: a given prefix's 4 repeats
   generally pair with DIFFERENT true_mean/true_p each time now. "qid
@@ -602,6 +624,42 @@ std_fixed=15 is the default for continuous (down from 20 in the original
 rejection-sampling design) -- confirmed to resolve within the achievable
 range via moment-matching.
 
+**task/generate_sequences_hybrid.py** -- the CURRENT PRODUCTION method
+  (chosen after PI discussion, resolving the i.i.d.-vs-momentmatch decision
+  below into a per-task split rather than a single uniform answer). Binary:
+  calls the exact same construction as generate_sequences_momentmatch.py
+  (prefix/target independence, optimal matching, exact-quota suffix), but
+  with NO seed search -- single draw. Continuous: same prefix/target
+  construction and optimal matching, but the suffix
+  (suffix_for_continuous_target_iid) is a genuinely UNRESCALED i.i.d. draw
+  centered on the algebraic residual mean, not forced to hit it via
+  momentmatch's iterative rescale -- also no seed search. Confirmed
+  empirically (see docs/sequence_design_open_questions.md and this file's
+  own module docstring) that dropping ONLY the seed search barely moves
+  either the split-half reliability or the "back-half corrects front-half"
+  correlation that make quota's terminal accuracy nearly guaranteed
+  regardless of genuine evidence integration -- the iterative RESCALE step
+  itself, not the search, is the actual source of both effects. Removing
+  the rescale (keeping only residual-mean centering) is what actually
+  restores genuine trial-ending uncertainty for continuous.
+  Two variance guards on the continuous suffix, confirmed not to
+  reintroduce the mean-related confound (checked directly, see the
+  docstring for the numbers): (1) an analytical bias correction solving for
+  the suffix's own variance parameter so E[pooled_std] ~= std_fixed,
+  accounting for the prefix's fixed contribution; (2) a loose safety-net
+  rejection (`--std_tolerance_frac`, default 0.25 = +/-25%, chosen as a
+  cost/benefit bend point after directly comparing +/-33.3%/25%/15% across
+  5 seeds) that redraws the whole suffix (fresh i.i.d., never a rescale) if
+  the achieved std falls outside tolerance. No seed search anywhere in this
+  file, for either task, by design.
+  Currently promoted at 8x4 (32 trials, chosen over 10x4 specifically to
+  reduce participant time) -- see "Sequence design" above for the exact
+  parameters and verification. `task/generate_sequences_pool.py` also
+  exists (thin wrapper writing N independent i.i.d. sequence sets to disk,
+  for the "unique sequence per participant" architecture in docs/
+  sequence_design_open_questions.md Section 7) -- not wired into anything
+  downstream yet.
+
 How far can moment-matching push mean_range/p_range toward [0,100]/[0,1]?
 Tested empirically (moment_match_continuous/binary directly, 300 draws per
 target, std_fixed=15, n=15 obs) -- this table predates the prefix/target-
@@ -650,35 +708,23 @@ exact for any p in (0,1), the only limitation is 1/n rounding granularity.
   going forward, new participants run on yet another different stimulus
   set than those; keep this in mind for any analysis that pools across
   pilot generations.
-- **PI decision pending**: i.i.d. (generate_sequences_iid.py) vs moment-
-  matched (generate_sequences_momentmatch.py) for the 10x4 production
-  sequences (see literature-precedent tradeoff above) is still open, as is
-  what --n_prefix/range the 10x4 scale should use (not automatically the
-  same as the 6x4 pilot's choices above) -- both need resolving before
-  10x4 is finalized. **See docs/sequence_design_open_questions.md for the
-  full investigation**: a real, quantified behavioral confound from quota
-  construction (not the gambler's-fallacy framing originally suspected --
-  the actual mechanism is a near-deterministic "back-half corrects the
-  front-half" property, confirmed with real numbers), a three-way
-  prefix-design trilemma with no fully clean resolution, a rejected
-  model-recovery-based alternative (same underlying issue as quota, plus a
-  circularity risk), a separate and orthogonal Laplace-transform bias
-  affecting binary lambda-recovery project-wide, and a full breakdown of
-  what serving unique per-participant i.i.d. sequences would actually
-  require if that path is chosen. **`generate_sequences_iid.py` DID have
-  its own prefix-collision bug** (independently-drawn per-qid prefixes,
-  no uniqueness check -- confirmed empirically, 9/10 seeds collided at
+- **RESOLVED -- hybrid method chosen** (see "Sequence generation methods"
+  above for the mechanism, "Sequence design" above for the 8x4 promotion,
+  and docs/sequence_design_open_questions.md for the full investigation
+  this decision is based on): binary keeps quota/momentmatch construction
+  unchanged (no seed search); continuous uses an unrescaled i.i.d. suffix
+  with two variance guards. `generate_sequences_iid.py` DID have its own
+  prefix-collision bug (independently-drawn per-qid prefixes, no
+  uniqueness check -- confirmed empirically, 9/10 seeds collided at
   n_unique_sequences=10) -- this is now FIXED (`_draw_unique_binary_prefix`,
-  active dedup with a fresh-redraw fallback for mirror collisions,
-  verified 10/10 seeds now correct) -- see the memo for the full before/
-  after numbers, including a striking case where fixing it *lowered*
-  apparent split-half reliability (the old "good" reliability was partly
-  an artifact of the collision bug, not genuine signal). A pool-generation
-  tool (`task/generate_sequences_pool.py`) now exists on top of the fixed
-  function, for the "serve a unique sequence set per participant"
-  architecture described in the memo's Section 7 -- nothing downstream of
-  it (asset bundling, runtime fetch, assignment, provenance recording,
-  parse_results.py) has been built yet.
+  active dedup with a fresh-redraw fallback for mirror collisions, verified
+  10/10 seeds now correct), including a striking case where fixing it
+  *lowered* apparent split-half reliability (the old "good" reliability was
+  partly an artifact of the collision bug, not genuine signal). Both pure
+  branches (generate_sequences_iid.py, generate_sequences_momentmatch.py)
+  remain fully intact and re-runnable if either pure method needs
+  revisiting later -- the hybrid script is a third, separate option, not a
+  replacement for either.
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
   running-mean overlay requested (matching inspect_sequences.py's --gt_mode
   running_mean) but explicitly deferred as a separate, bigger UI change —
@@ -881,6 +927,68 @@ JATOS/MindProbe deployment:
 - Abandoned runs stay as DATA_RETRIEVED in MindProbe — filter by FINISHED state
 - See "Exit/redirect and data-saving architecture" below for how/where data
   actually gets saved and where participants land afterward.
+
+### Tab-visibility handling for observation timeouts (found and fixed)
+
+**The bug**: `observation-timeout-clock.js`'s countdown (used by both
+observation plugins AND `plugin-timeout-demo.js`) and `plugin-iti-clock.js`'s
+circular ITI clock are both driven by `requestAnimationFrame` — correct for
+smooth per-frame redraw, but rAF callbacks are fully SUSPENDED (not just
+throttled) in a hidden/background tab, since rAF is tied to the paint cycle
+and there's nothing to paint when hidden. Reported symptom: switching tabs
+mid-observation let the clock reach the "X timeouts remaining" screen (that
+message is `setTimeout`-driven, which still mostly fires in the background)
+but then froze indefinitely on the NEXT observation's fresh rAF-driven
+clock, never advancing until the tab regained focus — an unintended,
+unbounded pause. This also meant a real response given upon return would
+carry a badly inflated `rt` (`performance.now() - trialStart` naively
+includes the away-time) — though a genuine timeout itself already records
+`rt: null`, so that specific field wasn't corrupted, only a completed
+response following a stray tab-switch would have been.
+
+**The fix, two coordinated pieces**:
+1. `observation-timeout-clock.js`'s `startTimeoutClock` now also listens for
+   `document.visibilitychange` and calls `onTimeout()` IMMEDIATELY if the tab
+   becomes hidden while active — treating hidden-while-active as an
+   immediate deadline-reached event, same code path as the natural rAF
+   completion (guarded by a `done` flag so the two paths can't double-fire).
+   Listener is removed in the returned `stop()` too, so a later, unrelated
+   tab switch during a subsequent trial has nothing stale left listening.
+   Automatically covers both observation plugins AND the tutorial's timeout
+   demo, since all three call this same shared function — exactly the kind
+   of shared-module payoff this file was extracted for in the first place.
+2. `plugin-iti-clock.js`'s `timed_out=true` branch (the "Too slow / X
+   remaining" screen) no longer auto-advances via its own rAF-driven clock
+   after the fade-message sequence — it now shows a manual "Repeat" button
+   (disabled until its own fade-in completes, to prevent an accidental early
+   click) that the participant must press to proceed. The normal
+   (non-timeout) ITI between trials is untouched, still auto-advances as
+   before.
+
+**Why both pieces together, not just #1**: without #2, a stray focus loss
+would immediately consume one timeout (#1) and then land on a screen that
+still auto-advances on its own timer — which, if the tab is STILL hidden
+when that timer would fire, would consume ANOTHER timeout immediately
+afterward, and so on, potentially exhausting all `MAX_TIMEOUTS_PER_TRIAL`
+and forcing early-exit before the participant ever regains control. With #2,
+progression after any timeout (visibility-triggered or a genuine slow
+response) requires an explicit click — which cannot happen while the tab is
+hidden, since nobody is there to click it — so the WORST case from any
+single stray tab-switch is exactly one consumed timeout, followed by an
+indefinite, fully inert wait, never an automatic cascade. Confirmed via code
+reading that `plugin-timeout-demo.js`'s own "too slow" screen already worked
+this way (always required a "Next" click, never auto-advanced) — the real
+task's ITI flow is now brought in line with a pattern the tutorial demo
+already used, not something novel.
+
+**Not addressed, deliberately out of scope for this fix**: the NORMAL
+(non-timeout) ITI clock between trials still auto-advances via rAF and would
+still freeze the same way if the tab is hidden during a genuine (not
+timeout-triggered) waiting period — lower-stakes than the timeout case
+since it can't cascade toward early-exit, but the same underlying rAF-
+suspension mechanism applies there too if it's ever worth revisiting.
+Browser/tab CLOSURE (as opposed to backgrounding) remains unrecoverable, as
+already disclosed in the informed-consent text.
 
 ### Exit/redirect and data-saving architecture
 
@@ -1642,11 +1750,16 @@ change (e.g. "change X to Y", "add Z", "remove W").
 - Do not save figures as PNG or SVG — PDF only
 - Do not upload figure images unnecessarily — use numerical checks first
 - Do not promote generate_sequences_iid.py or generate_sequences_momentmatch.py
-  output to the production {task}_sequences.{pkl,json} filenames without
-  explicit go-ahead — PI consultation on i.i.d. vs moment-matched is pending
-- Do not add a seed search / best-of-N ranking to generate_sequences_iid.py —
-  this was deliberately removed; any outcome-dependent seed selection
-  reintroduces the conditioning this branch exists to avoid
+  output directly to the production {task}_sequences.{pkl,json} filenames
+  without explicit go-ahead -- production is generate_sequences_hybrid.py's
+  output (a deliberate per-task combination of both, chosen after PI
+  discussion; see "Sequence generation methods"), not either pure method
+  on its own
+- Do not add a seed search / best-of-N ranking to generate_sequences_iid.py
+  or generate_sequences_hybrid.py -- deliberately absent from both; any
+  outcome-dependent seed selection reintroduces the conditioning/confound
+  this project spent real effort establishing and then avoiding (see
+  docs/sequence_design_open_questions.md)
 - Do not reintroduce dev-only override knobs (testMode, nTrialsDefault,
   trialItiMs, showTutorial) into buildAndRun/timeline-builder.js/config-base.js
   — these were deliberately removed along with index-dev.html; any test-only
