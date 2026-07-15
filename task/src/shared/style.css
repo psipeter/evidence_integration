@@ -295,6 +295,37 @@ input[type="range"].slider-last::-moz-range-thumb {
   color: #7f1d1d;
 }
 
+/* Blue variant -- informational/motivational, not a warning. Same blue as
+   plugin-timeout-demo.js's intro banner, reused here for consistency across
+   the app's "blue = informational" visual language rather than inventing a
+   new one. Used for the consent screen's payment-motivation box (as a
+   click-to-reveal box, same markup shape as .consent-info-box above). NOT
+   used for the tutorial-summary reminder boxes -- see .info-banner-blue
+   below, which matches plugin-timeout-demo.js's banner sizing instead
+   (larger font/padding than this click-to-reveal-oriented variant). */
+.consent-info-box-blue {
+  background: #eff6ff;
+  border: 1.5px solid #93c5fd;
+  color: #1e3a8a;
+}
+
+/* Standalone blue info banner -- NOT the click-to-reveal box shape above.
+   Extracted from plugin-timeout-demo.js's intro banner (that file's own
+   markup now uses this class instead of duplicating the inline style) so
+   both it and the tutorial-summary reminder boxes stay visually identical
+   without copy-pasted styling drifting apart. */
+.info-banner-blue {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto 1.5rem;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  padding: 0.9rem 1.3rem;
+  font-size: 1.3rem;
+  color: #1e3a8a;
+}
+
 .consent-footer {
   flex-shrink: 0;
   padding-top: 1rem;

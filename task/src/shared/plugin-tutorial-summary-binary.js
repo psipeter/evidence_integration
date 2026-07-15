@@ -25,6 +25,9 @@ class TutorialSummaryBinaryPlugin {
 
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;width:70vw;">
+        <div class="info-banner-blue">
+          You will be paid based on your performance.
+        </div>
         <div id="summary-svg"
           style="display:block;margin:0 auto 0.75rem;
                  width:100%;border:1px solid #e5e7eb;

@@ -6,12 +6,16 @@
 import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
 
 /**
- * @param {boolean} isBinary       determines the subtitle's color -- Part A
- *                                  (continuous) is blue, Part B (binary) is red.
- * @param {string}  partLabel      e.g. 'Part A' / 'Part B' -- decided by the
+ * @param {boolean} isBinary       determines the subtitle's color -- 'Numbers'
+ *                                  (continuous) is blue, 'Colors' (binary) is
+ *                                  red.
+ * @param {string}  partLabel      e.g. 'Numbers' / 'Colors' -- decided by the
  *                                  caller (timeline-builder.js), not
  *                                  hardcoded here, so the continuous/binary
- *                                  <-> A/B mapping lives in one obvious place.
+ *                                  <-> label mapping lives in one obvious
+ *                                  place. Matches the study names given on
+ *                                  Prolific (not the earlier internal
+ *                                  'Part A'/'Part B' labels).
  * @returns {object} jsPsych timeline node
  */
 export function buildWelcomeScreen(isBinary, partLabel) {
@@ -25,7 +29,7 @@ export function buildWelcomeScreen(isBinary, partLabel) {
           <div class="welcome-subtitle ${subtitleClass}">${partLabel}</div>
         </div>
       </div>`,
-    choices: ['Proceed to tutorial'],
+    choices: ['Begin'],
     button_html: (c) =>
       `<button id="welcome-begin-btn" class="jspsych-btn welcome-begin-btn">${c}</button>`,
     data: { screen: 'welcome' },

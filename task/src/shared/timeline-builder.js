@@ -55,11 +55,9 @@ import { buildEndScreen }          from './build-end-screen.js';
 import { finishSession }          from './finish-session.js';
 
 const MAX_TIMEOUTS_PER_TRIAL = 3;
-// TODO: all 4 of these are still placeholders -- none obtained from
-// Prolific yet, including continuous's completion code (the previously-real
-// 'C3W3TF1O' was discarded: it belonged to an old study configuration and
-// shouldn't be assumed valid for the upcoming one without re-confirming it
-// with Prolific first). Fill all 4 in before real Prolific deployment.
+// Real codes, filled in from the "Human Mixed Task" Prolific workspace
+// project (see CLAUDE.md's "PROLIFIC_CODES" note for the full history,
+// including an earlier now-superseded set tied to abandoned drafts).
 // Grouped by task first (each task is a separate Prolific study with its
 // own pair of codes) rather than as two same-shaped completion/early-exit
 // objects side by side.
@@ -165,10 +163,12 @@ export function buildAndRun(cfg) {
   const timeline = [];
 
   // ── Welcome / title screen ────────────────────────────────────────────────
-  // continuous <-> Part A, binary <-> Part B -- decided HERE (nowhere else)
-  // so the mapping is easy to find/change later if it should be the reverse
-  // or vary by participant instead of being fixed per task build.
-  timeline.push(buildWelcomeScreen(isBinary, isBinary ? 'Part B' : 'Part A'));
+  // continuous <-> 'Numbers', binary <-> 'Colors' -- decided HERE (nowhere
+  // else), matching the study names given on Prolific (previously the
+  // internal-only labels 'Part A'/'Part B'). Easy to find/change later if
+  // the mapping should be the reverse or vary by participant instead of
+  // being fixed per task build.
+  timeline.push(buildWelcomeScreen(isBinary, isBinary ? 'Colors' : 'Numbers'));
 
   // ── Consent ───────────────────────────────────────────────────────────────
   timeline.push(buildConsentScreen(tObsMs, MAX_TIMEOUTS_PER_TRIAL));

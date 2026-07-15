@@ -3,16 +3,21 @@
  * Builds the informed-consent jsPsych timeline node.
  *
  * Ordered disclosure (mirrors plugin-tutorial-intro-*.js's progressive-reveal
- * pattern): box 0 is active immediately; box 1 stays locked (showing a
- * "· · ·" placeholder, not clickable) until box 0 is revealed. The
- * name/checkbox section stays behind its own "· · ·" locked placeholder until
- * both boxes are revealed. Boxes are stacked vertically (not side by side)
- * to make the top-to-bottom reading/reveal order visually obvious.
+ * pattern): box 0 is active immediately; each subsequent box stays locked
+ * (showing a "· · ·" placeholder, not clickable) until the one before it is
+ * revealed. The name/checkbox section stays behind its own "· · ·" locked
+ * placeholder until all boxes are revealed. Boxes are stacked vertically
+ * (not side by side) to make the top-to-bottom reading/reveal order visually
+ * obvious.
  *
- * Two boxes (not three) — a third box repeating Prolific's own
- * timing/compensation listing was removed as redundant. Both remaining boxes
- * are warnings (data loss, session termination), so both carry a plain-text
- * "Warning:" label plus a red background/border to make that unmistakable.
+ * Three boxes: a blue payment-motivation box first (NOT a warning --
+ * distinguished with its own blue background/border, see
+ * .consent-info-box-blue in style.css), followed by the two original red
+ * warning boxes (data loss, session termination), both still carrying a
+ * plain-text "Warning:" label. An earlier third box repeating Prolific's
+ * own timing/compensation listing was removed as redundant -- this NEW
+ * third box is a different, deliberate addition (motivational framing, not
+ * a redundant repeat of the Prolific listing).
  *
  * "Begin experiment" is NOT given a native `disabled` attribute. Disabled
  * buttons never dispatch a `click` event at all in any browser, which meant
@@ -35,14 +40,16 @@
  */
 import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
 
-const N_BOXES = 2;
+const N_BOXES = 3;
 
 // Note: jsPsych wraps all trial content in `.jspsych-content { text-align:
 // center; }`, so these boxes are center-aligned by inheritance even without
 // an explicit override — it's made explicit below for clarity, not because
 // leaving it off would produce left-aligned text.
-const makeBox = (id, realHTML, textAlign) => `
-  <div id="${id}" class="consent-info-box" style="position:relative;">
+// variant: 'red' (default, warning) or 'blue' (informational/motivational,
+// not a warning) -- see .consent-info-box-blue in style.css.
+const makeBox = (id, realHTML, textAlign, variant = 'red') => `
+  <div id="${id}" class="consent-info-box${variant === 'blue' ? ' consent-info-box-blue' : ''}" style="position:relative;">
     <span id="${id}-placeholder"
           style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
                  font-size:1.3rem;font-weight:bold;color:#ccc;white-space:nowrap;">
@@ -57,6 +64,7 @@ const makeBox = (id, realHTML, textAlign) => `
  * @returns {object} jsPsych timeline node
  */
 export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
+  const BOX_PAY_REAL = `You will be paid <strong>$8.00 - 12.00</strong> based on your performance.`;
   const BOX0_REAL = `<strong>Warning:</strong> Do not close, refresh, or navigate away during
             the task — your data will be lost and you will not be paid.`;
   const BOX1_REAL = `<strong>Warning:</strong> You must respond within the ${tObsMs / 1000}-second
@@ -115,8 +123,9 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
           </div>
         </div>
         <div class="consent-info-boxes">
-          ${makeBox('reveal-box-0', BOX0_REAL, 'center')}
-          ${makeBox('reveal-box-1', BOX1_REAL, 'center')}
+          ${makeBox('reveal-box-0', BOX_PAY_REAL, 'center', 'blue')}
+          ${makeBox('reveal-box-1', BOX0_REAL, 'center')}
+          ${makeBox('reveal-box-2', BOX1_REAL, 'center')}
         </div>
         <div class="consent-footer" style="margin-top:0.75rem;position:relative;">
           <!-- consent-fields-real is ALWAYS in flow (so this block's height is

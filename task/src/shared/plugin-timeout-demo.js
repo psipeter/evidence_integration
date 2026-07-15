@@ -71,9 +71,7 @@ class TimeoutDemoPlugin {
         : `<div id="demo-stimulus" class="stimulus-number" style="color:#ef4444;opacity:0;">${demo_value}</div>`;
 
       display_el.innerHTML = `
-        <div id="timeout-demo-intro" style="text-align:center;max-width:640px;
-             margin:0 auto 1.5rem;background:#eff6ff;border:1px solid #93c5fd;
-             border-radius:8px;padding:0.9rem 1.3rem;font-size:1.3rem;color:#1e3a8a;">
+        <div id="timeout-demo-intro" class="info-banner-blue">
           On each trial, you'll have <strong>${seconds} seconds</strong> to submit
           your response. This demo shows what happens if you run out of time.
         </div>
