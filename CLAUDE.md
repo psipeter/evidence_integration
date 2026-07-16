@@ -450,8 +450,108 @@ Sequence design: **8x4 (32 trials) hybrid production design is CURRENT**,
   script to be current, not just re-checked. PI decision on i.i.d. vs
   moment-matched is also still open -- see "Open items" below.
 
-Single master copy in task/sequences/{task}_sequences.{pkl,json}.
-task/src/{task}/config.js imports directly from task/sequences/ — no copy step needed.
+Single master copy in task/sequences/{task}_sequences.{pkl,json} --
+  **this is the CANONICAL REFERENCE/promotion target, not what's actually
+  served to real participants** -- see "Per-participant sequence pool"
+  immediately below for what real participants get (one of 200 independent
+  pool members, not this single file). This file remains the thing you
+  regenerate/verify/promote when changing generation parameters; the pool
+  is built FROM the same generator (generate_sequences_hybrid.py) with the
+  same promoted parameters, just called 200 times instead of once.
+task/src/{task}/config.js imports the POOL (task/sequences_pool/, via
+  import.meta.glob) -- NOT task/sequences/{task}_sequences.json directly
+  anymore. See "Per-participant sequence pool" below.
+
+### Per-participant sequence pool (unique sequence per participant)
+
+**Decided and built** (see chat history for the full design discussion):
+each real participant gets ONE of 200 independently-generated hybrid
+sequence sets (not the single shared file above), assigned via a
+deterministic hash of their own participant ID -- no server-side
+counter/database needed, and the same participant gets the same pool
+index in BOTH tasks (same hash formula, not seeded by task name, given
+equal pool sizes).
+
+**Generation**: `task/generate_sequences_pool.py` wraps
+`generate_task_sequences_hybrid` (generate_sequences_hybrid.py) -- 200
+independent calls per task, same promoted parameters as the single
+reference file (8 prefixes x 4 repeats, mean_range=[15,85]/blue_range=
+[2,13], boundary_margin=1, std_tolerance_frac=0.25). Output:
+`task/sequences_pool/{task}_{0000..0199}_sequences.{pkl,json}`. Verified:
+200/200 members pass prefix uniqueness both tasks, 0 binary quota
+mismatches across the whole pool. NOT committed to git (see .gitignore --
+800 files is too much churn to track usefully; fully reproducible via
+`python task/generate_sequences_pool.py --n_pool 200 --task both --seed 0`,
+those being the script's own CLI defaults).
+
+**Bundling**: `task/src/{continuous,binary}/config.js` uses
+`import.meta.glob('../../sequences_pool/{task}_*_sequences.json', {eager:
+true})` to statically bundle all 200 members into the build at compile
+time -- chosen over a runtime `fetch()` of a pool directory after directly
+measuring the cost (~150KB gzip for 200 members, smaller than this app's
+own CSS) and weighing it against fetch's unverified reliance on JATOS
+serving extra static assets correctly, a risk category this project has
+hit real, costly surprises in before (see "Tab-visibility handling" and
+"The save mechanism" sections). The tutorial's illustrative example
+(`pickTutorialExample`) is derived from a fixed, arbitrary pool member
+(index 0) -- the tutorial only needs ONE representative example, not
+something tied to any participant's actual assignment.
+
+**Assignment**: `timeline-builder.js`'s `poolIndexForParticipant` -- a
+deterministic DJB2-style string hash of the participant's ID (real
+PROLIFIC_PID, or the `pilot_${jatos.workerId}` fallback) into [0,
+poolSize). `sequences = sequencesPool[poolIndex]`; `pool_index` recorded
+via `jsPsych.data.addProperties` alongside the existing `prolific_pid`/
+`task`, so it lands on every row. Pilots/local testing draw from the pool
+too (decided explicitly), not a special-cased fixed file -- test-harness.js
+slices every pool member down to the fast-test trial count and passes the
+full pool through, so local/E2E tests exercise the real assignment path.
+
+**Verified working end-to-end, not just locally**: confirmed via real
+Prolific "preview as participant" across two different browsers (Chrome,
+Firefox incognito) that the SAME underlying preview identity produces the
+SAME pool assignment both times; confirmed via local dev with a
+manually-supplied `?PROLIFIC_PID=` that DIFFERENT fixed IDs give
+DIFFERENT, reload-stable pool assignments. (`npm run dev:continuous`
+WITHOUT an explicit `?PROLIFIC_PID=` will look different on every reload --
+this is expected, not a bug: with no ID in the URL, the local jatos-shim
+falls back to `workerId: 'dev_' + Date.now()`, a fresh timestamp every
+page load, which is a genuinely different identity each time -- not
+comparable to a real, stable participant ID. Append a fixed
+`?PROLIFIC_PID=your_test_id` to get reproducible local pool assignment.)
+
+**Data schema impact**: value/true_mean/true_std/true_p/qid/pool_index are
+now embedded DIRECTLY in every observation row (build-trial-timeline.js),
+replacing a design that reconstructed them via a (task, trial) join
+against the single shared file -- that join assumed every participant saw
+identical content at a given trial index, which stopped being true once
+pool assignment varies who sees what. See "Participant-data columns"
+below (rewritten to match) and parse_results.py's own module docstring.
+
+**Diagnostic tooling, pool-aware**:
+  - `scripts/inspect_iid_sequences.py --sequence_type pool` loads every
+    real `{task}_{NNNN}_sequences.pkl` under `--pool_dir` (default
+    task/sequences_pool) and reuses the SAME multi-participant plotting/
+    fitting pipeline the iid path uses -- reads the actual files real
+    participants get assigned, not a fresh simulation. Verified: 192,000
+    rows (200 members x 2 tasks x 32 trials x 15 obs), fitted lambda
+    consistent with earlier single-file/simulated findings.
+  - `scripts/inspect_sequences.py`'s `build_inspection_csv` gained an
+    optional `pool_dir` param -- reads every pool member instead of the
+    single file, adds a `pool_index` column, aggregates the prefix-
+    uniqueness/quota checks per member into one summary line per task
+    (since 200 separate OK lines wouldn't be readable). Verified: 12,800
+    rows, 200/200 members passing all checks both tasks.
+
+**What's NOT yet been directly observed** (an inference, not a gap in the
+built mechanism): two genuinely different real Prolific participants (via
+real recruitment, not preview) actually receiving different PROLIFIC_PID
+values that both correctly flow through to different pool members. Every
+check so far exercised either one real ID (preview) or manually-supplied
+local IDs -- the remaining link is Prolific's own bedrock guarantee that
+real participants get distinct IDs, not anything this app's code could
+plausibly interfere with. Closeable only by an actual small pilot with 2+
+real participants, comparing pool_index in their exported data afterward.
 
 ### Sequences.json schema, tutorial derivation, and participant-data columns
 
@@ -511,18 +611,28 @@ re-checked against real production data since the redesign. Verify before
 relying on it, don't assume it still holds.
 
 **Participant-data columns** (parse_results.py, build-trial-timeline.js):
-only genuinely participant-generated fields are recorded/saved —
-prolific_pid, task, trial, observation, value, response, timed_out, rt,
-time_elapsed. true_mean, true_std, true_p, qid, prefix_length, iti_ms,
-iti_condition are intentionally NOT duplicated into the raw export or the
-final pickle — all are fully determined by (task, trial) alone (trial order
-is identical for every participant), so they're recovered via a join
-against sequences.json when analysis needs them. This was found VIOLATED
-once already (build-trial-timeline.js's 'iti' screen was duplicating
-iti_ms/iti_condition/distractor_type into every recorded ITI row, despite
-the file's own docstring saying otherwise) and fixed — if a new screen/
-plugin's `data:{...}` block is ever added, check it against this principle
-before assuming it's fine.
+**REVISED** -- value/true_mean/true_std/true_p/qid/pool_index are now
+recorded DIRECTLY on every observation row (alongside the genuinely
+participant-generated fields: prolific_pid, task, trial, observation,
+response, timed_out, rt, time_elapsed). This replaced an earlier design
+where only the participant-generated fields were saved and everything
+else was reconstructed via a join against sequences.json on (task, trial)
+alone -- that join relied on every participant sharing exactly one file,
+so (task, trial) alone determined `value`. That stopped being true once
+per-participant pool assignment was introduced (see "Per-participant
+sequence pool" above) -- (task, trial) is no longer enough; you'd also
+need to know which of the 200 pool members that participant got. Rather
+than doing a three-key join against the right pool member's file,
+build-trial-timeline.js now records these fields directly, so every
+participant's raw export is fully self-contained: no lookup, no join, no
+dependency on the pool files still existing/matching later. `pool_index`
+is kept specifically so which pool member a given participant saw is
+always traceable even without the pool files on disk.
+parse_results.py's `load_values_lookup` and the per-task merge/row-wise
+value lookup were removed entirely (not just patched) -- net effect is a
+simplification, not just a fix. Old (pre-pool) export files remain
+parseable: pool_index comes back missing/NaN with a printed WARNING
+rather than crashing.
 
 ### Sequence generation methods (task/)
 
@@ -670,11 +780,11 @@ range via moment-matching.
   file, for either task, by design.
   Currently promoted at 8x4 (32 trials, chosen over 10x4 specifically to
   reduce participant time) -- see "Sequence design" above for the exact
-  parameters and verification. `task/generate_sequences_pool.py` also
-  exists (thin wrapper writing N independent i.i.d. sequence sets to disk,
-  for the "unique sequence per participant" architecture in docs/
-  sequence_design_open_questions.md Section 7) -- not wired into anything
-  downstream yet.
+  parameters and verification. **`task/generate_sequences_pool.py` is now
+  the actual production mechanism for the per-participant pool** -- see the
+  new "Per-participant sequence pool" section right after this one for the
+  full architecture (not "not wired into anything downstream" anymore --
+  that was true when this note was first written, resolved since).
 
 How far can moment-matching push mean_range/p_range toward [0,100]/[0,1]?
 Tested empirically (moment_match_continuous/binary directly, 300 draws per
@@ -1260,18 +1370,31 @@ Pre-deployment checklist (before Prolific production):
   - [DONE] Prolific wallet funded; payment rate confirmed: $10 for normal
     completion, $3 for the screen-out/early-exit path (see "PROLIFIC_CODES"
     note above for the reasoning behind the $3 figure specifically).
-  - Run: node test_browser.mjs (in terminal) -- NOT yet re-run since this
-    session's tab-visibility timeout fix or the welcome/consent/tutorial-
-    summary text changes; needed before the next real deployment given the
-    timeout fix is a real behavioral change, not just copy.
-  - Rebuild jzips (python task/generate_jzip.py) after the above -- the
-    jzips currently on disk predate all of this session's task/src changes.
+  - [DONE] node test_browser.mjs: all 6 browser x task combinations confirmed
+    48/48 passing (8/8 each) against the final per-participant-pool state,
+    including the new pool-assignment scenario.
+  - [DONE] Rebuild jzips (python task/generate_jzip.py) -- rebuilt after
+    the per-participant pool work landed; confirmed no source/pool files
+    postdate the current jzips, and confirmed directly in the built
+    bundles (not just source) that pool_index and urlQueryParameters both
+    landed correctly.
   - (No manual step needed for the showEndPage/endRedirectUrl invariant --
     generate_jzip.py's assert_show_end_page_disabled() enforces it
     automatically on every run and refuses to build if it's ever violated;
     see "How finish-session.js and generate_jzip.py must stay in sync"
     above. Still worth a live MindProbe dry-run before wide rollout, since
     that check only confirms the JS-side intent, not real JATOS behavior.)
+  - Verified via real Prolific "preview as participant" (Chrome + Firefox
+    incognito): the tab-visibility redirect fix and the per-participant
+    pool assignment both work correctly against the real platform, not
+    just the local shim -- see "Per-participant sequence pool" above.
+    NOT yet verified against real preview: a genuinely FULL completion run
+    (all trials through to the real "Thank you!" end screen and redirect)
+    -- every real-platform check so far went through the cheaper early-exit
+    path (3 timeouts), which structurally can't exercise the last-trial
+    code path this project has had a real crash on before (the missing
+    true_p bug). A full preview run is planned next specifically to close
+    this.
 
 Pilot data files:
   data/task_results.pkl          — pilot 3 (40 trials, pilot_undefined)

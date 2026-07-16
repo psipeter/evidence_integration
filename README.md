@@ -45,8 +45,8 @@ theory that the NEF realises biophysically, not a point of direct comparison.
 |------|---|-------------|--------|
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
-| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 24 trials (pilot, std=15, moment-matched) / 40 trials (full, TBD); prefix_length=4 | **Under development** |
-| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 24 trials (pilot, moment-matched) / 40 trials (full, TBD); prefix_length=4 | **Under development** |
+| task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 8x4=32 trials (hybrid method, per-participant pool of 200) | **Piloting** |
+| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 8x4=32 trials (hybrid method, per-participant pool of 200) | **Piloting** |
 
 task-continuous and task-binary are designed to be completed within-subject
 (same participants recruited via Prolific allowlist). Together they unlock all
@@ -143,8 +143,13 @@ evidence_integration/
 ## task/ — Online Experiment
 
 Two online experiments deployed on Prolific via MindProbe/JATOS:
-- **Continuous task**: Normal(mean, std) stimulus; slider response [0–100]; 24 trials (pilot) or 40 trials (full, TBD) × 15 obs
-- **Binary task**: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 24 trials (pilot) or 40 trials (full, TBD) × 15 obs
+- **Continuous task**: Normal(mean, std) stimulus; slider response [0–100]; 8x4=32 trials × 15 obs
+- **Binary task**: Bernoulli(p) stimulus (blue/red circle); slider response [0–100%]; 8x4=32 trials × 15 obs
+
+Each participant is assigned ONE of 200 independently-generated sequence sets
+per task (a per-participant pool, not one shared file) -- see "Design" below
+and CLAUDE.md's "Per-participant sequence pool" section for the full
+mechanism.
 
 Both tasks share all infrastructure (jsPsych 8, Vite 6, shared plugins/CSS).
 Data pipeline: JATOS JSON → `task/parse_results.py` → `data/task_results.pkl`.
@@ -152,11 +157,14 @@ Target: ~50–80 participants per task, within-subject.
 
 ### Design
 
-- **Sequences**: 6 unique sequences × 4 repeats = 24 trials (current pilot);
-  prefix_length=4; std_fixed=15; moment-matched generation (see "Sequence
-  generation" below). Trial count is fully implicit from however many trials
-  task/sequences/{task}_sequences.json contains — no separate config switch
-  to keep in sync.
+- **Sequences**: hybrid method -- binary via quota/momentmatch construction
+  (no seed search), continuous via an unrescaled i.i.d.-suffix construction
+  (no seed search either); 8 distinct prefixes × 4 repeats = 32 trials;
+  prefix_length=4; std_fixed=15 (continuous). Each participant gets ONE of
+  200 independently-generated sequence sets per task, assigned via a
+  deterministic hash of their participant ID (same index for both tasks) --
+  not one shared file. See CLAUDE.md's "Per-participant sequence pool" and
+  "Sequence design" sections for the full mechanism and rationale.
 - **ITI**: all trials use 1000ms (ITI manipulation removed — no effect observed in pilot)
 - **BTI**: 3s between-trial reset screen ("Trial X / N — generating new sequence…") —
   same wording for both tasks (continuous used to say "generating new distribution…";
@@ -170,9 +178,8 @@ Target: ~50–80 participants per task, within-subject.
   - Timeout flow: "Too slow" screen (fade in/out/in, 3.2s) → replay ITI → same observation
   - On 3rd timeout: "Too slow / 0 timeouts remaining" → "Session terminated" screen with button
 - **Welcome screen**: title/branding page shown first, before consent — "Evidence
-  Integration", "Part A" (continuous) or "Part B" (binary), inside a bordered box;
-  "Proceed to tutorial" button leads to consent. Consent screen's own proceed
-  button (separate from the welcome screen's) reads "Begin tutorial".
+  Integration", "Numbers" (continuous) or "Colors" (binary), inside a bordered box,
+  matching the study names given on Prolific; "Begin" button leads to consent.
 - **Tutorial**: box 1 (text) → image box (separate click-to-reveal step, showing a
   bubbling generative animation — binary: bubbles rise inside the blue/red bar;
   continuous: bubbles fall from under the Gaussian curve to the x-axis, weighted by
@@ -188,11 +195,13 @@ Target: ~50–80 participants per task, within-subject.
 - **Summary slides**: binary — per-obs bar chart (blue/red split at estimate, obs circle left);
   continuous — per-obs number line (red obs thumb, black circle at estimate)
 - **Consent form**: verbatim IRB-approved text from task/consent_form.txt, followed by
-  2 warning boxes (data-loss / response-deadline, red background) with ordered
-  disclosure — box 2 stays locked until box 1 is revealed. The proceed button doesn't
-  use the native `disabled` attribute (disabled buttons never dispatch `click`, so a
-  premature click got silently swallowed with zero feedback) — a capturing-phase
-  click listener gates it instead.
+  3 boxes with ordered disclosure (each stays locked until the one before it is
+  revealed): a blue payment-motivation box first ("You will be paid $8.00 -
+  10.00 based on your performance"), then 2 red warning boxes (data-loss /
+  response-deadline). The proceed button doesn't use the native `disabled`
+  attribute (disabled buttons never dispatch `click`, so a premature click got
+  silently swallowed with zero feedback) — a capturing-phase click listener
+  gates it instead.
 
 ### Sequence generation
 
@@ -221,26 +230,26 @@ python task/generate_sequences_momentmatch.py --task both --n_tries 1000 \
 # module only, imported by both scripts above, not run directly.
 ```
 
-**Current 6x4 pilot** (in production): moment-matched/quota generation
-(generate_sequences_momentmatch.py, isotonic score_mode, 1000-try seed
-search). Prefix identity (6 distinct prefixes, --n_prefix) and target level
-(true_mean/true_p) are independent axes, matched via a globally optimal
-(Hungarian algorithm) assignment rather than tied 1:1 -- see CLAUDE.md's
-"Sequence design" section for the full mechanism and the real prefix-
-collision bug this redesign fixes. Continuous true_mean spans exactly
-[15,85] (--mean_range=[15,85], 24 distinct evenly-spaced values, one per
-trial); binary spans exactly [2,13] blue-ball count out of 15
-(--blue_range=[2,13], all 12 integer levels used, 2 repeats each), i.e.
-true_p = [0.1333, ..., 0.8667]; prefix_length=4, std_fixed=15,
-ITI_MS=1000ms. Promoted to task/sequences/{continuous,binary}_sequences.{pkl,json},
-superseding the earlier evenly-spaced/no-mirroring sequences (which had the
-prefix-collision bug) -- those remain fully recoverable via git history.
-Verified directly against the saved files before promoting: 6 distinct
-prefixes per task with zero collisions, exactly 4 repeats each, zero binary
-quota mismatches, full target-range coverage. scripts/inspect_sequences.py
-now also writes a human-readable, observation-level CSV
-(figures/inspect_sequences.csv) covering all of this alongside the existing
-diagnostic figure -- see that script's own docstring.
+**Current production** (8x4 hybrid, per-participant pool): binary uses
+unchanged quota/momentmatch construction (prefix/target independence,
+optimal matching, exact-quota suffix) but with NO seed search; continuous
+uses the same prefix/target construction but a genuinely unrescaled
+i.i.d.-suffix (also no seed search) -- see CLAUDE.md's "Sequence generation
+methods" and "Per-participant sequence pool" sections for the full
+rationale and the empirical findings behind this per-task split. 8 distinct
+prefixes, 4 repeats each = 32 trials PER POOL MEMBER; 200 independent pool
+members per task (task/generate_sequences_pool.py), each participant
+assigned one via a deterministic hash of their ID. Continuous mean_range=
+[15,85]; binary blue_range=[2,13] out of 15. Verified across the whole
+pool (not just one member): 200/200 members pass prefix uniqueness both
+tasks, zero binary quota mismatches. scripts/inspect_iid_sequences.py
+--sequence_type pool and scripts/inspect_sequences.py --pool_dir both
+support inspecting the real pool directly -- see CLAUDE.md for usage.
+
+The single reference file (task/sequences/{continuous,binary}_sequences.
+{pkl,json}) remains the promotion/verification target when changing
+generation parameters, but is NOT what real participants are served --
+see "Per-participant sequence pool" in CLAUDE.md.
 
 **10x4 full experiment**: NOT yet finalized. The previously-found candidate
 seeds (moment-matched, isotonic score_mode, mean_range=[20,80],
@@ -325,14 +334,10 @@ task/
     test-harness.js         — test-ONLY entry (index-test.html); never bundled into
                               any production build, never linked from production code
   sequences/
-    continuous_sequences.{pkl,json}   — PRODUCTION 6x4 pilot (moment-matched,
-                                        evenly-spaced levels [10,26,42,58,74,90],
-                                        std=15, promoted from
-                                        continuous_momentmatch_sequences.* below)
-    binary_sequences.{pkl,json}       — PRODUCTION 6x4 pilot (moment-matched,
-                                        exact blue-ball counts [2,4,6,9,11,13]
-                                        of 15, promoted from
-                                        binary_momentmatch_sequences.* below)
+    continuous_sequences.{pkl,json}   — single reference/promotion-target copy
+                                        (NOT what real participants are served
+                                        -- see sequences_pool/ below)
+    binary_sequences.{pkl,json}       — same, binary side
     continuous_momentmatch_sequences.{pkl,json} — currently an IDENTICAL COPY of
                                         the production file above (this is the
                                         generation script's own output location,
@@ -352,9 +357,20 @@ task/
                                         git commit for recovery)
     continuous_iid_sequences.{pkl,json}         — 10x4 candidate (i.i.d. branch)
     binary_iid_sequences.{pkl,json}             — 10x4 candidate (i.i.d. branch)
+  sequences_pool/                     — the REAL per-participant pool served to
+                                        real participants -- 200 members/task,
+                                        {task}_{0000..0199}_sequences.{pkl,json},
+                                        generated by generate_sequences_pool.py.
+                                        Gitignored (800 small files, fully
+                                        reproducible via that script's own CLI
+                                        defaults) -- see CLAUDE.md's
+                                        "Per-participant sequence pool" section.
   generate_sequences.py             — original: k-constrained rejection sampling
   generate_sequences_iid.py         — pure i.i.d., no smoothing, no seed search
   generate_sequences_momentmatch.py — quota/moment-matching, isotonic seed search
+  generate_sequences_hybrid.py      — CURRENT PRODUCTION method (per-task split)
+  generate_sequences_pool.py        — wraps generate_sequences_hybrid.py, writes
+                                        the 200-member pool above
   parse_results.py
   test_browser.mjs         — Playwright E2E tests (Chromium/Firefox/WebKit, both tasks)
   index-continuous.html
@@ -452,16 +468,16 @@ python task/parse_results.py --input_dir task/dev-results/ \
 
 ### Deploying to MindProbe
 
-**Pre-deployment checklist:**
-- Confirm task/sequences/{continuous,binary}_sequences.json holds the intended final trial count/parameters
-- Fill IRB Protocol Number in consent form (`[Protocol Number]` in `timeline-builder.js`)
-- Fill all 4 Prolific code placeholders in timeline-builder.js's `PROLIFIC_CODES`
-  (completion + early-exit codes, for both continuous and binary — none are
-  real yet; a previously-real continuous completion code was deliberately
-  discarded since it belonged to an old study configuration and shouldn't be
-  assumed valid without re-confirming with Prolific first — see CLAUDE.md's
-  "Exit/redirect and data-saving architecture" for the full rationale)
-- Fund Prolific wallet; confirm payment rate with PI
+**Pre-deployment checklist:** (see CLAUDE.md's own checklist for full detail
+and current per-item status)
+- [DONE] Sequence pool generated and verified (200/task, hybrid method)
+- [DONE] PILOT ONLY name field removed
+- [DONE] All 4 Prolific code placeholders filled in timeline-builder.js's `PROLIFIC_CODES`
+- [DONE] Prolific wallet funded; payment rate confirmed ($10 completion, $3 early-exit)
+- [DONE] Jzips rebuilt against the final per-participant-pool state
+- [DONE] Full 6-way browser/task E2E matrix -- 48/48 passing (8/8 each)
+- [PENDING] A genuinely full completion run via real Prolific preview (not
+  just early-exit) -- the one real-platform path not yet exercised
 
 ```bash
 npm run build:continuous && npm run build:binary
@@ -476,7 +492,7 @@ Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
 - **Free task ordering** — natural counterbalancing via Prolific dashboard
 - Set both to **auto-approve** so second task appears immediately after first
 - End screen: *"one half of a two-part study — look for the other on your dashboard"*
-- **Payment:** ≥$12/hr; set estimated time conservatively
+- **Payment:** $10 for normal completion, $3 for the screen-out/early-exit path
 - **Non-completions:** request return (not rejection) — slot reopens
 - **Partial compensation:** participants who reach 3 timeouts in one trial receive
   partial payment via the per-task `earlyExit` code in `PROLIFIC_CODES`
@@ -486,27 +502,30 @@ Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
 
 ### Data format
 
-`parse_results.py` filters to `screen='observation'` rows and outputs only
-genuinely participant-generated fields (plus `value`, looked up from the
-sequence file since it's simple and avoids a second join downstream):
+`parse_results.py` filters to `screen='observation'` rows and extracts every
+column DIRECTLY from the raw export -- no lookup/join against a sequence
+file (see CLAUDE.md's "Participant-data columns" section for why this
+changed: a join against a single shared file stopped being valid once
+different participants can be assigned different pool members):
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `prolific_pid` | str | Prolific participant ID |
 | `task` | str | `'continuous'` or `'binary'` |
+| `pool_index` | int | Which of the 200 pool members this participant was assigned |
 | `trial` | int | 0-indexed trial number |
 | `observation` | int | 0-indexed observation within trial |
-| `value` | int | Stimulus value — looked up from task/sequences/{task}_sequences.json, not the raw export |
+| `qid` | int | Which of that pool member's distinct prefixes this trial used |
+| `value` | int | Stimulus value |
+| `true_mean` | float | Continuous only; NaN for binary rows |
+| `true_std` | float | Continuous only; NaN for binary rows |
+| `true_p` | float | Binary only; NaN for continuous rows |
 | `response` | float | Participant estimate (NaN if timed out) |
 | `timed_out` | bool | True if response deadline elapsed |
 | `rt` | float | Response time in ms (NaN if timed out) |
 | `time_elapsed` | int | ms since experiment start |
 
-`true_mean`, `true_std`, `true_p`, `qid`, `prefix_length`, `iti_ms`,
-`iti_condition` are intentionally NOT included — all are fully determined by
-(task, trial) alone (trial order is identical for every participant), so
-they're recovered via a join against task/sequences/{task}_sequences.json
-when a given analysis needs them, rather than duplicated into every raw
-export. See parse_results.py's module docstring for the same note.
+Older (pre-pool) export files remain parseable -- `pool_index` comes back
+missing/NaN with a printed warning rather than crashing.
 
 Both tasks share the same output file — use `df[df.task == 'continuous']` to split.
