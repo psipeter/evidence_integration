@@ -29,6 +29,29 @@ if (typeof jatos === 'undefined') {
 
   window.jatos = {
     studySessionData: {},
+    // Real jatos.js only reliably populates workerId/urlQueryParameters
+    // etc. AFTER onLoad()'s callback fires -- calling back immediately here
+    // (nothing async to actually wait for locally) keeps the local/test
+    // code path exercising the exact same jatos.onLoad(...) wrapper
+    // timeline-builder.js now uses for real JATOS, rather than a parallel
+    // mechanism that could silently drift from it.
+    onLoad: (callback) => { callback(); },
+    // Mirrors real JATOS's own contract for jatos.urlQueryParameters:
+    // "Original query string parameters of the URL that starts the study"
+    // -- captured server-side before any internal redirect, so it survives
+    // even once window.location.search itself no longer contains them (see
+    // timeline-builder.js's own comment on this for the real-JATOS
+    // mechanics). Locally there's no such redirect, so window.location.search
+    // is still accurate at read time -- this just exposes the same values
+    // under the property name the real app code actually reads.
+    urlQueryParameters: Object.fromEntries(new URLSearchParams(window.location.search)),
+    // Never set at all before this fix -- meant every local/dev run without
+    // a PROLIFIC_PID fell through to `pilot_${jatos.workerId}` with
+    // workerId literally undefined, producing exactly the "pilot_undefined"
+    // participant IDs seen in several real historical pilot files (see
+    // CLAUDE.md's "Pilot data files" note) -- a synthetic but non-undefined
+    // value here closes that gap for any future local/dev run.
+    workerId: 'dev_' + Date.now(),
     submitResultData: async (data, onSuccess) => {
       await saveData(data);
       if (onSuccess) onSuccess();

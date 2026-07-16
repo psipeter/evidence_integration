@@ -238,15 +238,10 @@ const doConsent = async (p) => {
   await p.click('#welcome-begin-btn');
 
   await p.waitForSelector('#reveal-box-0');
-  for (const id of ['reveal-box-0', 'reveal-box-1']) {
+  for (const id of ['reveal-box-0', 'reveal-box-1', 'reveal-box-2']) {
     await p.click(`#${id}`);
     await wait(p, 80);
   }
-  await p.fill('#pilot-name', 'TestUser');
-  await p.evaluate(() =>
-    document.getElementById('pilot-name')
-      .dispatchEvent(new Event('input', { bubbles: true })));
-  await wait(p, 80);
   await p.click('#consent-checkbox');
   await wait(p, 80);
   await p.waitForSelector('#consent-btn:not(.consent-btn-locked)');
@@ -316,6 +311,21 @@ const doTutorial = async (p) => {
 // "too slow" replay screen (data-screen="iti_replay").
 const letObsTimeOut = (p) => waitForScreen(p, 'iti_replay', T_OBS_MS + 5000);
 
+// Same, but ALSO clicks through the "too slow" screen's Repeat button --
+// use this for any timeout that's NOT the final, budget-exhausting one.
+// That screen deliberately no longer auto-advances (see CLAUDE.md's
+// "Tab-visibility handling for observation timeouts") -- a real behavioral
+// change this suite needs to account for, not a bug. Only the genuinely
+// FINAL timeout (which exhausts MAX_TIMEOUTS_PER_TRIAL) skips this screen
+// entirely and falls straight through to 'terminated' -- see
+// build-trial-timeline.js's conditional_function -- so scenarios calling
+// this for every timeout except the last one.
+const letObsTimeOutAndRepeat = async (p) => {
+  await letObsTimeOut(p);
+  await p.waitForSelector('#repeat-btn:not([disabled])');
+  await p.click('#repeat-btn');
+};
+
 // finishSession's non-Prolific branch (finish-session.js) replaces
 // #jspsych-content in place with this exact confirmation copy -- no screen
 // change, no navigation. Waiting for it confirms the participant-visible
@@ -353,7 +363,7 @@ const SCENARIOS = [
     name: '1 timeout remaining text correct',
     fn: async (p) => {
       await doConsent(p); await doTutorial(p);
-      await letObsTimeOut(p);                              // 1st timeout
+      await letObsTimeOutAndRepeat(p);                     // 1st timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);  // loop_function replays same obs
       await letObsTimeOut(p);                              // 2nd timeout — 1 of 3 remaining
       await waitForTimeoutsRemaining(p, 1);
@@ -363,9 +373,9 @@ const SCENARIOS = [
     name: '3 timeouts: session terminated, no summary',
     fn: async (p) => {
       await doConsent(p); await doTutorial(p);
-      await letObsTimeOut(p);                              // 1st timeout
+      await letObsTimeOutAndRepeat(p);                     // 1st timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);
-      await letObsTimeOut(p);                              // 2nd timeout
+      await letObsTimeOutAndRepeat(p);                     // 2nd timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);
       // 3rd timeout exhausts the budget and triggers earlyExit(), a manual
       // DOM injection (not a jsPsych trial) that sets data-screen='terminated'
@@ -496,9 +506,9 @@ const SCENARIOS = [
       });
 
       await doConsent(p); await doTutorial(p);
-      await letObsTimeOut(p);                              // 1st timeout
+      await letObsTimeOutAndRepeat(p);                     // 1st timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);
-      await letObsTimeOut(p);                              // 2nd timeout
+      await letObsTimeOutAndRepeat(p);                     // 2nd timeout
       await waitForScreen(p, 'observation', T_OBS_MS + 5000);
       await waitForScreen(p, 'terminated', T_OBS_MS + 8000);
 

@@ -83,6 +83,17 @@ export function buildAndRun(cfg) {
     distractorType = 'iti_length',
   } = cfg;
 
+  // Everything below reads jatos.* variables (workerId, urlQueryParameters),
+  // which jatos.js's own reference docs say are only reliably populated
+  // AFTER jatos.onLoad()'s callback fires -- reading them synchronously,
+  // with no onLoad wrapper (as this function did before), is very likely
+  // why several early real pilots recorded prolific_pid as literally
+  // "pilot_undefined" (jatos.workerId read before it was ready) -- see
+  // CLAUDE.md's "Pilot data files" note. jatos-shim.js's local dev/test
+  // onLoad calls back immediately (nothing async to wait for locally), so
+  // this wrapper is a no-op timing-wise outside real JATOS.
+  jatos.onLoad(() => {
+
   const isBinary = taskType === 'binary';
   // "Resolved" prefix distinguishes these task-specific selections from the
   // plain imported class names above (e.g. TutorialSummaryContinuousPlugin
@@ -93,9 +104,22 @@ export function buildAndRun(cfg) {
   const TrialObsPlugin                = isBinary ? ObservationBinaryPlugin         : ObservationContinuousPlugin;
   const ResolvedTrialSummaryPlugin    = isBinary ? TrialSummaryBinaryPlugin        : TrialSummaryContinuousPlugin;
 
-  // Prolific PID — absent for pilot participants
-  const urlParams   = new URLSearchParams(window.location.search);
-  const prolificPID = urlParams.get('PROLIFIC_PID') || null;
+  // Prolific PID -- absent for pilot participants. Read from
+  // jatos.urlQueryParameters, NOT window.location.search: JATOS's own
+  // internal redirect (/publix/{studyCode} -> /publix/{workerId}/
+  // {studyUuid}/start, confirmed directly against this project's real
+  // MindProbe deployment) strips the ORIGINAL query string from the
+  // visible URL before this script ever runs, but jatos.js itself
+  // captures those original parameters server-side and exposes them via
+  // jatos.urlQueryParameters -- confirmed against JATOS's own "Use
+  // Prolific" documentation and jatos.js reference, not assumed. Falling
+  // back to window.location.search as a second check costs nothing and
+  // covers any case where urlQueryParameters is empty for a reason not
+  // yet seen (e.g. a future direct-link workflow that bypasses the
+  // publix redirect entirely).
+  const prolificPID = jatos.urlQueryParameters?.PROLIFIC_PID
+    || new URLSearchParams(window.location.search).get('PROLIFIC_PID')
+    || null;
   const isProlific  = prolificPID !== null;
 
   // ── beforeunload guard — warns participant before navigating away ──────────
@@ -221,4 +245,6 @@ export function buildAndRun(cfg) {
   timeline.push(buildEndScreen(isExited, jsPsychHtmlButtonResponse, isProlific));
 
   jsPsych.run(timeline);
+
+  });
 }

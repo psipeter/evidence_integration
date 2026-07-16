@@ -188,10 +188,21 @@ Key files: timeline-builder.js (orchestrator), build-trial-timeline.js (pure-JS
   continuous-draw-animation.js / binary-draw-animation.js (tutorial bubbling
   animations, see below).
 Data pipeline: JATOS JSON → task/parse_results.py → data/task_results.pkl
-Consent form: verbatim IRB text from task/consent_form.txt — do not paraphrase or edit.
-Pilot name field: PILOT ONLY — saves name as prolific_pid substitute.
-  Remove before Prolific production (marked // PILOT ONLY in timeline-builder.js and
-  # PILOT ONLY in parse_results.py).
+Consent form: verbatim IRB text from task/consent_form.txt — do not paraphrase or edit
+  (note: not literally read from that file at build time -- build-consent-screen.js
+  hand-transcribes the same text inline, confirmed matching; consent_form.txt is a
+  reference copy, not an active import).
+Pilot name field: REMOVED (was PILOT ONLY -- saved a manually-typed name as a
+  prolific_pid substitute for distinguishing pilot participants by eye). Removed
+  from build-consent-screen.js (HTML + all JS wiring: isReady()'s name check,
+  the name-capture listener, on_finish's pilot_name assignment) and
+  parse_results.py (the pilot_name capture/fallback in prolific_pid). Safe to
+  remove because prolific_pid was already independently set via
+  jsPsych.data.addProperties in timeline-builder.js (participantId = prolificPID
+  ?? pilot_${jatos.workerId}), applied retroactively to every row including
+  observation rows -- the name field was never the actual source of prolific_pid,
+  just a manual convenience for a human skimming pilot data. test_consent_name.mjs
+  (which exclusively tested this now-removed feature) moved to _trash/.
 Target: ~50–80 participants per task, within-subject (both tasks per participant).
 See task/ section in README.md for full details.
 
@@ -226,12 +237,17 @@ Stable architecture (established, do not regress):
   accumulates across sessions and is never committed; clear it out periodically.
 
 Consent screen (build-consent-screen.js):
-- 2 boxes (a redundant 3rd repeating Prolific's own timing/pay listing was
-  removed), both styled as warnings (red background/border, bold "Warning:"
-  label) — stacked vertically, ordered disclosure (box 2 locked with a "· · ·"
-  placeholder until box 1 is revealed, mirroring the tutorial-intro pattern).
-  Name/checkbox section stays behind its own "· · ·" placeholder until both
-  boxes are done.
+- 3 boxes: a blue payment-motivation box first ("You will be paid $8.00 - 10.00
+  based on your performance" -- NOT a warning, distinguished via
+  .consent-info-box-blue), followed by the two original red warning boxes
+  (data loss, session termination) with their plain-text "Warning:" label. An
+  earlier redundant 3rd box repeating Prolific's own timing/pay listing was
+  removed at one point; this NEW 3rd box is a different, deliberate addition
+  (motivational framing), not a reintroduction of that one. Stacked vertically,
+  ordered disclosure (each box locked with a "· · ·" placeholder until the one
+  before it is revealed, mirroring the tutorial-intro pattern). The checkbox
+  section (no longer a name+checkbox section -- see "Pilot name field" above)
+  stays behind its own "· · ·" placeholder until all three boxes are done.
 - "Begin experiment" does NOT use the native `disabled` attribute — disabled
   buttons never dispatch `click` at all, which silently ate premature clicks
   with zero feedback (a real pilot complaint) and in one case the disabled
@@ -243,7 +259,7 @@ Consent screen (build-consent-screen.js):
   (attached directly to the button during trial() setup) ever fires — if
   requirements aren't met it's stopped silently (no popup message; an earlier
   version had one but it shifted the layout when shown).
-- Layout-shift note: reveal boxes and the name/checkbox section reserve their
+- Layout-shift note: reveal boxes and the checkbox section reserve their
   final height from the start via `visibility:hidden` (not `display:none`) on
   the real content, with the placeholder absolutely-positioned on top — the
   same pattern used in the tutorial-intro plugins. `display:none` removes an
@@ -824,7 +840,6 @@ Fixed: itiShortMs now flows through and is overridable via the test
 harness's `itiMs` param.
 
 Testing:
-- node test_consent_name.mjs — verifies pilot name saved to jsPsych data (fast, ~5s)
 - node test_browser.mjs      — Playwright E2E tests across Chromium, Firefox, and
                                WebKit, both tasks (30+ scenarios total, full tutorial
                                included, plus end-screen/early-exit save verification
@@ -1220,20 +1235,37 @@ the redirect bug above) -- that class of bug still needs a live MindProbe
 dry-run.
 
 Pre-deployment checklist (before Prolific production):
-  - Confirm task/sequences/{continuous,binary}_sequences.json holds the intended
-    final trial count/parameters (no more TEST_MODE/N_TRIALS_TO_RUN switch to check)
-  - Remove PILOT ONLY name field (timeline-builder.js + parse_results.py)
-  - Fill IRB Protocol Number ([Protocol Number] in timeline-builder.js)
+  - [DONE] Confirm task/sequences/{continuous,binary}_sequences.json holds the
+    intended final trial count/parameters -- 8x4 hybrid (32 trials), see
+    "Sequence design" above.
+  - [DONE] Removed PILOT ONLY name field (build-consent-screen.js +
+    parse_results.py -- NOT timeline-builder.js, correcting this checklist's
+    earlier file reference). test_consent_name.mjs (tested only this feature)
+    moved to _trash/.
+  - [REMOVED FROM CHECKLIST] "Fill IRB Protocol Number" -- no such placeholder
+    exists anywhere in the current codebase (checked timeline-builder.js,
+    build-consent-screen.js, consent_form.txt directly -- zero hits for
+    "protocol" in any of them). Either resolved outside the on-screen text
+    (e.g. communicated to Prolific/IRB directly) or never actually applicable
+    to begin with; removed as a checklist item per explicit instruction
+    rather than left as a permanently-stale blocker.
   - [DONE] All 4 Prolific code placeholders in timeline-builder.js's
     PROLIFIC_CODES are filled with real codes from the "Human Mixed Task"
     workspace project (see "PROLIFIC_CODES" note above for the exact
-    values and which earlier code set they superseded) -- jzips rebuilt
-    to match. Still outstanding: the actual Study URL field on each
-    Prolific study can't be set until the production build is confirmed
-    live on MindProbe and a JATOS link is generated -- deliberately last,
-    per explicit decision, not an oversight.
-  - Fund Prolific wallet; confirm payment rate with PI
-  - Run: node test_browser.mjs (in terminal)
+    values and which earlier code set they superseded). Still outstanding:
+    the actual Study URL field on each Prolific study can't be set until
+    the production build is confirmed live on MindProbe and a JATOS link
+    is generated -- deliberately last, per explicit decision, not an
+    oversight.
+  - [DONE] Prolific wallet funded; payment rate confirmed: $10 for normal
+    completion, $3 for the screen-out/early-exit path (see "PROLIFIC_CODES"
+    note above for the reasoning behind the $3 figure specifically).
+  - Run: node test_browser.mjs (in terminal) -- NOT yet re-run since this
+    session's tab-visibility timeout fix or the welcome/consent/tutorial-
+    summary text changes; needed before the next real deployment given the
+    timeout fix is a real behavioral change, not just copy.
+  - Rebuild jzips (python task/generate_jzip.py) after the above -- the
+    jzips currently on disk predate all of this session's task/src changes.
   - (No manual step needed for the showEndPage/endRedirectUrl invariant --
     generate_jzip.py's assert_show_end_page_disabled() enforces it
     automatically on every run and refuses to build if it's ever violated;

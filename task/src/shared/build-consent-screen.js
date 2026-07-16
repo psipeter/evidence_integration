@@ -64,7 +64,7 @@ const makeBox = (id, realHTML, textAlign, variant = 'red') => `
  * @returns {object} jsPsych timeline node
  */
 export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
-  const BOX_PAY_REAL = `You will be paid <strong>$8.00 - 12.00</strong> based on your performance.`;
+  const BOX_PAY_REAL = `You will be paid <strong>$8.00 - 10.00</strong> based on your performance.`;
   const BOX0_REAL = `<strong>Warning:</strong> Do not close, refresh, or navigate away during
             the task — your data will be lost and you will not be paid.`;
   const BOX1_REAL = `<strong>Warning:</strong> You must respond within the ${tObsMs / 1000}-second
@@ -133,13 +133,6 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
                positioned overlay on top of it. Hiding the overlay reveals what
                was already there underneath, so nothing below it reflows. -->
           <div id="consent-fields-real">
-            <!-- PILOT ONLY: name field for within-participant ID (remove for Prolific production) -->
-            <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;justify-content:center;">
-              <label for="pilot-name" style="font-size:1.4rem;flex-shrink:0;">Name:</label>
-              <input type="text" id="pilot-name" placeholder="Enter your name"
-                style="font-size:1.4rem;padding:0.4rem 0.75rem;border:1.5px solid #d1d5db;
-                       border-radius:6px;width:220px;">
-            </div>
             <label style="display:flex;align-items:center;justify-content:center;gap:0.75rem;cursor:pointer;">
               <input type="checkbox" id="consent-checkbox"
                 style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
@@ -161,7 +154,6 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
     on_load: () => {
       let revealedCount = 0;
       let fieldsUnlocked = false;
-      let _pilotName = '';
 
       const btn = document.getElementById('consent-btn');
 
@@ -172,8 +164,7 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
 
       const isReady = () => {
         const checked = document.getElementById('consent-checkbox')?.checked;
-        const name    = document.getElementById('pilot-name')?.value.trim() || '';
-        return fieldsUnlocked && checked && !!name;
+        return fieldsUnlocked && checked;
       };
 
       const refreshBtnLook = () => setBtnLookReady(isReady());
@@ -201,13 +192,11 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
         if (revealedCount < N_BOXES) {
           activateBox(revealedCount);
         } else {
-          // All boxes done — unlock the name/checkbox section (already in
+          // All boxes done — unlock the checkbox section (already in
           // flow; just hide the overlay, no layout shift).
           fieldsUnlocked = true;
           document.getElementById('consent-fields-locked').style.display = 'none';
-          const nameInput = document.getElementById('pilot-name');
-          const checkbox  = document.getElementById('consent-checkbox');
-          nameInput.addEventListener('input', refreshBtnLook);
+          const checkbox = document.getElementById('consent-checkbox');
           checkbox.addEventListener('change', refreshBtnLook);
         }
         refreshBtnLook();
@@ -226,26 +215,12 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
       activateBox(0);
       refreshBtnLook();
 
-      // Exposed for on_finish to read the captured name and for cleanup.
-      window._pilotNameCapture = null;
-      const nameCaptureUpdater = () => {
-        _pilotName = document.getElementById('pilot-name')?.value.trim() || '';
-        window._pilotNameCapture = _pilotName;
-      };
-      document.addEventListener('input', nameCaptureUpdater);
-
       window._consentCleanup = () => {
         document.removeEventListener('click', interceptor, { capture: true });
-        document.removeEventListener('input', nameCaptureUpdater);
       };
     },
     on_finish: (data) => {
       data.consent_given = true;
-      // PILOT ONLY: save name as prolific_pid substitute (remove for Prolific production)
-      if (window._pilotNameCapture) {
-        data.pilot_name = window._pilotNameCapture;
-        window._pilotNameCapture = null;
-      }
       if (window._consentCleanup) {
         window._consentCleanup();
         window._consentCleanup = null;
