@@ -44,7 +44,13 @@ const task       = qp.get('task') === 'binary' ? 'binary' : 'continuous';
 const baseConfig = task === 'binary' ? configBinary : configContinuous;
 
 const nTrials  = qp.has('trials') ? parseInt(qp.get('trials'), 10) : 3;
-const sequences = baseConfig.sequences.slice(0, nTrials);
+// Slice EVERY pool member down to nTrials (not just one) and pass the
+// full pool through -- lets buildAndRun's real poolIndexForParticipant
+// hash pick a member, same as production, per an explicit decision that
+// testing should exercise the actual pool-assignment path rather than
+// hardcoding a single member. test_browser.mjs's fixed fake PROLIFIC_PID
+// (e2e_test_pid) means this always resolves to the same member across runs.
+const sequencesPool = baseConfig.sequencesPool.map(pool => pool.slice(0, nTrials));
 
 const itiMsOverride = qp.has('itiMs') ? parseInt(qp.get('itiMs'), 10) : null;
 if (itiMsOverride != null) {
@@ -52,12 +58,14 @@ if (itiMsOverride != null) {
   // per-trial objects via {...s} for every page load, not references into
   // the raw imported JSON -- this can't leak between test runs or corrupt
   // the module-level config.
-  for (const seq of sequences) seq.iti_ms = itiMsOverride;
+  for (const pool of sequencesPool) {
+    for (const seq of pool) seq.iti_ms = itiMsOverride;
+  }
 }
 
 buildAndRun({
   ...baseConfig,
-  sequences,
+  sequencesPool,
   tObsMs:     qp.has('tObsMs') ? parseInt(qp.get('tObsMs'), 10) : baseConfig.tObsMs,
   btiMs:      qp.has('btiMs')  ? parseInt(qp.get('btiMs'), 10)  : baseConfig.btiMs,
   itiShortMs: itiMsOverride != null ? itiMsOverride : baseConfig.itiShortMs,

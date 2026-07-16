@@ -1,34 +1,40 @@
 """
 generate_sequences_pool.py
 ============================
-Builds a POOL of N independent i.i.d. sequence sets, each saved as its own
+Builds a POOL of N independent HYBRID sequence sets, each saved as its own
 numbered file, for the "serve a unique sequence set to every participant"
-architecture described in docs/sequence_design_open_questions.md (Section 7).
+architecture (docs/sequence_design_open_questions.md Section 7, extended
+for the hybrid method after PI discussion -- see chat history).
 
-This is a thin wrapper around generate_sequences_iid.py's own
-generate_task_sequences_iid -- no new generation logic lives here. Each
-pool member is a completely independent call (fresh RNG seed, task's own
-offset), matching exactly what scripts/inspect_iid_sequences.py already
-does for its analysis-only simulations; this script just writes each one
-out as a real file instead of only holding it in memory.
+This is a thin wrapper around generate_sequences_hybrid.py's own
+generate_task_sequences_hybrid -- no new generation logic lives here.
+Each pool member is a completely independent call (fresh RNG seed, task's
+own offset) of the SAME per-task hybrid method already promoted to
+production: binary via unchanged quota/momentmatch construction (no seed
+search), continuous via the unrescaled i.i.d.-suffix construction (no
+seed search either) -- see generate_sequences_hybrid.py's own module
+docstring for the full rationale. This file previously wrapped
+generate_sequences_iid.py's pure i.i.d. generator; switched to the hybrid
+method once that was chosen as production. generate_sequences_iid.py
+itself is untouched and still usable directly if a pure-i.i.d. pool is
+ever wanted for comparison.
 
 Deliberately NOT wired into anything yet (no config.js changes, no build
-changes, no assignment mechanism) -- this is step 2 of the ordered
-refactor plan in docs/sequence_design_open_questions.md; the pieces after
-this (asset bundling, runtime fetch + async bootstrap, assignment,
-provenance recording, parse_results.py) are separate, not-yet-started
-steps. Building this in isolation lets it be tested/verified on its own
-before anything downstream depends on it.
+changes, no assignment mechanism, no parse_results.py changes) -- this is
+one piece of an ordered plan; see chat history for the rest (asset
+bundling, runtime assignment, provenance recording, diagnostic tooling,
+testing). Building this in isolation lets it be tested/verified on its
+own before anything downstream depends on it.
 
 Usage
 -----
-    python task/generate_sequences_pool.py --n_pool 100 --task both
+    python task/generate_sequences_pool.py --n_pool 200 --task both
     python task/generate_sequences_pool.py --n_pool 20 --task continuous --pool_dir task/sequences_pool
 
 Output
 ------
     {pool_dir}/{task}_{0000..N-1}_sequences.{pkl,json}
-    one independent generate_task_sequences_iid call per member -- same
+    one independent generate_task_sequences_hybrid call per member -- same
     schema as every other sequence file in this project. (Filename order is
     {task}_{index}_sequences.{ext} rather than {task}_sequences_{index}.ext
     -- this matches _save_sequences' own fixed "{name}_sequences.{ext}"
@@ -44,22 +50,23 @@ import io
 import pathlib
 
 from generate_sequences import make_rng, _save_sequences
-from generate_sequences_iid import generate_task_sequences_iid
+from generate_sequences_hybrid import generate_task_sequences_hybrid
 
 
-def build_pool(n_pool, tasks, n_unique_sequences, n_repeats, seq_length,
-              prefix_length, mean_range, std_fixed, p_range, base_seed,
-              pool_dir, progress_every=10):
-    """Generate n_pool independent sequence sets per task, each saved as its
-    own {task}_{NNNN}_sequences.{pkl,json} under pool_dir. Returns a dict
-    {task: [pkl_path, ...]} of everything written, for the caller to log or
-    verify.
+def build_pool(n_pool, tasks, n_prefix, n_repeats, seq_length,
+              prefix_length, mean_range, std_fixed, blue_range,
+              boundary_margin, std_tolerance_frac, base_seed,
+              pool_dir, progress_every=20):
+    """Generate n_pool independent HYBRID sequence sets per task, each saved
+    as its own {task}_{NNNN}_sequences.{pkl,json} under pool_dir. Returns a
+    dict {task: [pkl_path, ...]} of everything written, for the caller to
+    log or verify.
 
     Seed scheme mirrors scripts/inspect_iid_sequences.py's
-    simulate_participants exactly (same offset formula), so a pool member's
-    index N reproduces the identical sequences a simulated "participant N"
-    would have gotten in that analysis tool -- useful for cross-checking
-    the two against each other if that's ever needed.
+    simulate_participants exactly (same offset formula) -- kept even though
+    this now wraps the hybrid generator instead of the pure-i.i.d. one, so
+    a pool member's index N still lines up with whatever a same-index
+    comparison run in that tool would use, if that's ever useful.
     """
     from types import SimpleNamespace
     written = {task: [] for task in tasks}
@@ -70,17 +77,18 @@ def build_pool(n_pool, tasks, n_unique_sequences, n_repeats, seq_length,
             seed = base_seed + i * 100_000 + (0 if task == "continuous" else 50_000)
             rng = make_rng(seed)
             args_ns = SimpleNamespace(
-                task=task, n_unique_sequences=n_unique_sequences, n_repeats=n_repeats,
+                task=task, n_prefix=n_prefix, n_repeats=n_repeats,
                 seq_length=seq_length, prefix_length=prefix_length,
-                mean_range=mean_range, std_fixed=std_fixed, p_range=p_range,
-                k_std_cont=0.7, output_dir=str(pool_task_dir), seed=seed, report=False,
+                mean_range=mean_range, std_fixed=std_fixed, blue_range=blue_range,
+                boundary_margin=boundary_margin, std_tolerance_frac=std_tolerance_frac,
+                output_dir=str(pool_task_dir), seed=seed, report=False,
             )
-            # generate_task_sequences_iid prints a lot per call (~20 lines,
-            # by design for its normal single-generation use) -- redirected
+            # generate_task_sequences_hybrid prints a fair amount per call
+            # (by design for its normal single-generation use) -- redirected
             # to keep n_pool calls from flooding the console; a concise
             # progress line is printed here instead.
             with contextlib.redirect_stdout(io.StringIO()):
-                df, json_trials = generate_task_sequences_iid(task, args_ns, rng)
+                df, json_trials = generate_task_sequences_hybrid(task, args_ns, rng, verbose=True)
             pkl_path, json_path = _save_sequences(
                 df, json_trials, f"{task}_{i:04d}", pool_task_dir)
             written[task].append(pkl_path)
@@ -91,14 +99,17 @@ def build_pool(n_pool, tasks, n_unique_sequences, n_repeats, seq_length,
 
 def verify_pool(written, tasks, n_pool):
     """Sanity check the whole pool after writing: every member exists, has
-    the expected trial count, and (binary only) zero prefix collisions --
-    the exact thing this refactor pass was meant to fix. Prints a summary;
-    raises if anything is wrong, matching this project's fail-loud
-    convention rather than silently shipping a bad pool."""
+    the expected trial count, zero prefix collisions, and (binary only)
+    exact quota -- matching generate_task_sequences_hybrid's own per-call
+    assertions, re-checked here across the WHOLE pool as an extra guard.
+    Prints a summary; raises if anything is wrong, matching this project's
+    fail-loud convention rather than silently shipping a bad pool."""
     import json as _json
+    import numpy as _np
     for task in tasks:
         assert len(written[task]) == n_pool, f"{task}: expected {n_pool} pool members, wrote {len(written[task])}"
-        n_collisions = 0
+        n_prefix_collisions = 0
+        n_quota_mismatches = 0
         for pkl_path in written[task]:
             json_path = pkl_path.with_suffix(".json")
             with open(json_path) as f:
@@ -109,30 +120,44 @@ def verify_pool(written, tasks, n_pool):
                 prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
             all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
             if len(set(all_prefixes)) != len(prefix_by_qid):
-                n_collisions += 1
-        status = "OK" if n_collisions == 0 else f"{n_collisions} member(s) with a collision"
+                n_prefix_collisions += 1
+            if task == "binary":
+                for t in trials:
+                    achieved_blue = sum(1 for v in t["values"] if v == 1)
+                    target_blue = round(t["true_p"] * len(t["values"]))
+                    if achieved_blue != target_blue:
+                        n_quota_mismatches += 1
+        status = "OK" if n_prefix_collisions == 0 else f"{n_prefix_collisions} member(s) with a prefix collision"
         print(f"[verify] {task}: {n_pool} members, prefix uniqueness {status}")
-        assert n_collisions == 0, (
-            f"{task}: {n_collisions} pool member(s) have a prefix collision -- "
-            f"should be unreachable given generate_sequences_iid.py's own fix; "
+        assert n_prefix_collisions == 0, (
+            f"{task}: {n_prefix_collisions} pool member(s) have a prefix collision -- "
+            f"should be unreachable given build_{task}_prefixes' own dedup; "
             f"indicates a real regression if this ever fires.")
+        if task == "binary":
+            print(f"[verify] {task}: exact-quota check across pool: "
+                  f"{n_quota_mismatches} mismatch(es) ({'OK' if n_quota_mismatches == 0 else 'FAIL'})")
+            assert n_quota_mismatches == 0, (
+                f"{task}: {n_quota_mismatches} trial(s) across the pool failed the exact-quota "
+                f"check -- should be impossible given suffix_for_binary_target's construction.")
 
 
 def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--n_pool", type=int, default=50, help="Number of independent pool members to generate")
+    p.add_argument("--n_pool", type=int, default=200, help="Number of independent pool members to generate")
     p.add_argument("--task", choices=["continuous", "binary", "both"], default="both")
-    p.add_argument("--n_unique_sequences", type=int, default=10,
-                  help="n_unique_sequences per pool member (must be even)")
+    p.add_argument("--n_prefix", type=int, default=8,
+                  help="Number of DISTINCT prefixes per pool member -- matches current "
+                       "production's 8x4 default")
     p.add_argument("--n_repeats", type=int, default=4)
     p.add_argument("--seq_length", type=int, default=15)
     p.add_argument("--prefix_length", type=int, default=4)
     p.add_argument("--mean_range", type=float, nargs=2, default=[15.0, 85.0],
                   help="Default matches current production continuous range")
     p.add_argument("--std_fixed", type=float, default=15.0)
-    p.add_argument("--p_range", type=float, nargs=2, default=[2 / 15, 13 / 15],
-                  help="Default matches production blue_range=[2,13] out of 15, "
-                       "converted to a p fraction")
+    p.add_argument("--blue_range", type=int, nargs=2, default=[2, 13],
+                  help="Default matches current production binary range")
+    p.add_argument("--boundary_margin", type=float, default=1.0)
+    p.add_argument("--std_tolerance_frac", type=float, default=0.25)
     p.add_argument("--base_seed", type=int, default=0)
     p.add_argument("--pool_dir", default="task/sequences_pool")
     return p.parse_args()
@@ -140,17 +165,16 @@ def parse_args():
 
 def main():
     args = parse_args()
-    assert args.n_unique_sequences % 2 == 0, "n_unique_sequences must be even"
     assert args.n_pool > 0
     tasks = ["continuous", "binary"] if args.task == "both" else [args.task]
 
-    print(f"Building a pool of {args.n_pool} independent sequence set(s) per task "
-          f"({args.n_unique_sequences} seqs x {args.n_repeats} repeats each) "
-          f"-> {args.pool_dir}")
+    print(f"Building a pool of {args.n_pool} independent HYBRID sequence set(s) per task "
+          f"({args.n_prefix} prefixes x {args.n_repeats} repeats each = "
+          f"{args.n_prefix * args.n_repeats} trials/member) -> {args.pool_dir}")
     written = build_pool(
-        args.n_pool, tasks, args.n_unique_sequences, args.n_repeats,
-        args.seq_length, args.prefix_length, args.mean_range, args.std_fixed,
-        args.p_range, args.base_seed, args.pool_dir)
+        args.n_pool, tasks, args.n_prefix, args.n_repeats, args.seq_length,
+        args.prefix_length, args.mean_range, args.std_fixed, args.blue_range,
+        args.boundary_margin, args.std_tolerance_frac, args.base_seed, args.pool_dir)
 
     print()
     verify_pool(written, tasks, args.n_pool)

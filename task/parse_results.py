@@ -14,28 +14,37 @@ This produces a directory (or zip) where each file is one participant's JSON arr
 of jsPsych trial objects. Both continuous and binary exports can be pointed at the
 same --input_dir, or separate dirs can be merged by running twice and concatenating.
 
-Design note: only genuinely participant-generated fields are kept here
-(prolific_pid, task, trial, observation, value, response, timed_out, rt,
-time_elapsed). `value` isn't in the raw export either (build-trial-timeline.js
-only exports trial/observation for observation rows), but it's simple enough
-to look up from task/sequences/{task}_sequences.json (trial order is identical
-for every participant, nothing is shuffled) that it's worth including directly
-rather than requiring a second join step downstream.
-
-Everything else about a given (task, trial) — true_mean, true_p, true_std,
-qid, prefix_length, iti_ms, iti_condition — is intentionally left out of this
-pickle. All of it is still fully recoverable later the same way (a join
-against the sequence files on (task, trial)) if a given analysis needs it;
-it just doesn't need to live in every copy of this file.
+Design note: value/true_mean/true_std/true_p/qid/pool_index are extracted
+DIRECTLY from each row here -- no lookup/join against a saved sequence file.
+This is a deliberate change (see chat history) from an earlier design that
+looked `value` up from task/sequences/{task}_sequences.json via a (task,
+trial) join, which relied on every participant sharing exactly one file (so
+(task, trial) alone determined `value`). That stopped being true once
+per-participant pool assignment was introduced -- (task, trial) is no
+longer enough; you'd also need to know which pool member that participant
+got. Rather than doing a THREE-key join against the right pool member's
+file, build-trial-timeline.js now records these fields directly on every
+observation row, so every participant's raw export is fully self-contained:
+no lookup, no join, no dependency on the pool files still existing/matching
+later. `pool_index` is kept in the output specifically so which pool member
+a given participant saw is always traceable, even without the pool files.
 
 Output columns (observation rows only)
 ---------------------------------------
     prolific_pid   : str    Prolific participant ID
     task           : str    'continuous' or 'binary'
-    trial          : int    0-indexed trial number
+    pool_index     : int    Which of the 200 pool members this participant
+                            was assigned (see timeline-builder.js's
+                            poolIndexForParticipant) -- same index for both
+                            tasks for a given participant, by design
+    trial          : int    0-indexed trial number (within that pool member)
     observation    : int    0-indexed observation within trial
-    value          : int    Stimulus value (0..100 continuous; -1/1 binary) —
-                            looked up from the sequence file, not the raw export
+    qid            : int    Which of that pool member's distinct prefixes
+                            this trial used
+    value          : int    Stimulus value (0..100 continuous; -1/1 binary)
+    true_mean      : float  Continuous only; NaN for binary rows
+    true_std       : float  Continuous only; NaN for binary rows
+    true_p         : float  Binary only; NaN for continuous rows
     response       : float  Participant estimate (NaN if timed out or no response)
     timed_out      : bool   True if response deadline elapsed
     rt             : float  Response time in ms (NaN if timed out)
@@ -68,25 +77,11 @@ import pathlib
 import pandas as pd
 import numpy as np
 
-TASK_DIR      = pathlib.Path(__file__).resolve().parent
-SEQUENCES_DIR = TASK_DIR / 'sequences'
-
-
-def load_values_lookup(task: str) -> pd.DataFrame:
-    """Load task/sequences/{task}_sequences.json into a per-trial lookup of
-    just the `values` list, for the per-observation value lookup below."""
-    seq_path = SEQUENCES_DIR / f'{task}_sequences.json'
-    with open(seq_path) as f:
-        seqs = json.load(f)
-    df = pd.DataFrame(seqs)
-    df['task'] = task
-    return df[['task', 'trial', 'values']]
-
 
 def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
     """Parse one participant's JSON file into a DataFrame of observation rows.
-    Only genuinely participant-generated fields are extracted here — see
-    module docstring for what's looked up afterward instead."""
+    Every field here is read directly off the row -- see module docstring
+    for why no lookup/join against a saved sequence file happens anymore."""
     try:
         raw = fpath.read_text(encoding='utf-8').strip()
         # JATOS sometimes wraps multiple result sets with a separator line
@@ -115,7 +110,7 @@ def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
     if not trials:
         return pd.DataFrame()
 
-    rows       = []
+    rows = []
     for t in trials:
         if not isinstance(t, dict):
             continue
@@ -125,8 +120,14 @@ def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
         rows.append({
             'prolific_pid':  t.get('prolific_pid', 'unknown'),
             'task':          t.get('task', 'unknown'),
+            'pool_index':    t.get('pool_index', np.nan),
             'trial':         t.get('trial', np.nan),
             'observation':   t.get('observation', np.nan),
+            'qid':           t.get('qid', np.nan),
+            'value':         t.get('value', np.nan),
+            'true_mean':     t.get('true_mean', np.nan) if t.get('true_mean') is not None else np.nan,
+            'true_std':      t.get('true_std', np.nan) if t.get('true_std') is not None else np.nan,
+            'true_p':        t.get('true_p', np.nan) if t.get('true_p') is not None else np.nan,
             'response':      t.get('response', np.nan) if t.get('response') is not None else np.nan,
             'timed_out':     bool(t.get('timed_out', False)),
             'rt':            t.get('rt', np.nan) if t.get('rt') is not None else np.nan,
@@ -180,41 +181,15 @@ def main():
 
     combined = pd.concat(dfs, ignore_index=True)
 
-    # Cast participant-generated columns
-    for col in ['trial', 'observation']:
+    # Cast columns
+    for col in ['trial', 'observation', 'qid', 'pool_index']:
         combined[col] = pd.to_numeric(combined[col], errors='coerce').astype('Int64')
-    for col in ['response', 'rt']:
+    for col in ['response', 'rt', 'value', 'true_mean', 'true_std', 'true_p']:
         combined[col] = pd.to_numeric(combined[col], errors='coerce')
 
-    # ── Look up `value` from the saved sequence files — see module docstring.
-    #    Only look up per task actually present in the data.
-    tasks_present = [t for t in combined['task'].unique() if t in ('continuous', 'binary')]
-    lookups = {task: load_values_lookup(task) for task in tasks_present}
-
-    parts = []
-    for task in tasks_present:
-        sub    = combined[combined['task'] == task].copy()
-        sub    = sub.merge(lookups[task], on=['task', 'trial'], how='left')
-
-        # Per-observation value lookup from the trial's `values` list —
-        # vectorised column-merge can't index into a list column, so this
-        # needs an explicit row-wise lookup.
-        def _lookup_value(row):
-            vals = row['values']
-            obs  = row['observation']
-            if isinstance(vals, list) and pd.notna(obs) and int(obs) < len(vals):
-                return vals[int(obs)]
-            return np.nan
-        sub['value'] = sub.apply(_lookup_value, axis=1)
-        sub = sub.drop(columns=['values'])
-
-        parts.append(sub)
-
-    combined = pd.concat(parts, ignore_index=True)
-    combined['value'] = pd.to_numeric(combined['value'], errors='coerce')
-
     # Column order matches the documented schema above
-    combined = combined[['prolific_pid', 'task', 'trial', 'observation', 'value',
+    combined = combined[['prolific_pid', 'task', 'pool_index', 'trial', 'observation',
+                          'qid', 'value', 'true_mean', 'true_std', 'true_p',
                           'response', 'timed_out', 'rt', 'time_elapsed']]
 
     # Sort
@@ -224,14 +199,17 @@ def main():
 
     # Summary
     n_pids   = combined['prolific_pid'].nunique()
-    n_tasks  = combined['task'].nunique()
     n_rows   = len(combined)
     timeout_pct = combined['timed_out'].mean() * 100
+    n_pool_missing = combined['pool_index'].isna().sum()
 
     print(f"\nParsed {n_rows} observation rows")
     print(f"  Participants : {n_pids}")
     print(f"  Tasks        : {combined['task'].unique().tolist()}")
     print(f"  Timed out    : {timeout_pct:.1f}%")
+    if n_pool_missing:
+        print(f"  WARNING: {n_pool_missing} row(s) missing pool_index -- likely an export "
+              f"from before pool-based assignment was introduced; check the source file(s).")
     print(f"\nSample:\n{combined.head(6).to_string(index=False)}")
 
     output.parent.mkdir(parents=True, exist_ok=True)

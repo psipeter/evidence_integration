@@ -2,16 +2,20 @@
  * build-trial-timeline.js
  * Pure JS — builds the trial loop portion of the jsPsych timeline.
  * No jsPsych imports, no DOM, no CSS.
- * Used by timeline-builder.js (production) and test_timeline.mjs (tests).
+ * Used by timeline-builder.js (production) and test_browser.mjs (E2E tests,
+ * against the real dev server -- there's no isolated unit test for this
+ * file specifically).
  *
- * Observation rows only export what's genuinely participant-generated
- * (trial, observation, response, timed_out, rt, time_elapsed — the latter
- * three come from the observation plugin's own finishTrial() call, not this
- * file). Everything else (value, true_mean, true_p, true_std, qid,
- * prefix_length, iti_ms, iti_condition) is fully determined by (task, trial)
- * alone — trial order is identical for every participant, no shuffling — so
- * it's reconstructed via a join against task/sequences/{task}_sequences.json
- * in parse_results.py instead of being duplicated into every raw export.
+ * Observation rows export value/true_mean/true_std/true_p/qid directly
+ * (alongside trial/observation/response/timed_out/rt/time_elapsed) rather
+ * than requiring parse_results.py to reconstruct them via a join against a
+ * saved sequence file. That join-based design worked when every
+ * participant shared one file (so (task, trial) alone determined `value`),
+ * but broke once per-participant pool assignment was introduced -- (task,
+ * trial) is no longer enough; you'd also need to know which pool member
+ * that specific participant got. Recording the values directly instead
+ * makes every participant's raw export fully self-contained: no lookup,
+ * no join, no dependency on the pool files still existing/matching later.
  */
 export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   const {
@@ -60,7 +64,16 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
             n_trials: sequences.length, t_obs_ms: tObsMs,
             slider_default: sliderDefault, init_pos: () => lastResponse,
             show_value: showSliderValue,
-            data: { screen: 'observation', trial: t, observation: _o },
+            data: {
+              screen: 'observation', trial: t, observation: _o,
+              // Recorded directly (see module docstring) instead of being
+              // left for parse_results.py to look up -- (task, trial)
+              // alone no longer determines these once each participant can
+              // get a different pool member.
+              value: _val, qid: seq.qid,
+              true_mean: seq.true_mean, true_std: seq.true_std,
+              true_p: seq.true_p ?? null,
+            },
             on_finish: (data) => {
               timedOut = data.timed_out;
               if (data.timed_out) {

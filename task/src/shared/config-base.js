@@ -104,15 +104,19 @@ export function pickTutorialExample(sequencesData, { isBinary, n = 5 } = {}) {
  *
  * @param {object} opts
  * @param {'continuous'|'binary'} opts.taskType
- * @param {Array}  opts.sequencesData   raw sequences JSON for this task
- * @param {Array}  opts.tutorialValues  fixed tutorial sequence
- * @param {number} opts.tutorialMean    true_mean (continuous) or true_p (binary)
- * @param {number} [opts.tutorialStd]   continuous only; defaults to 0
- * @param {object} [opts.overrides]     any DEFAULTS keys this task wants to override
+ * @param {Array}  opts.sequencesPool  array of independent pool members
+ *                                     (each itself an array of trial
+ *                                     objects) -- one is selected per
+ *                                     participant by timeline-builder.js's
+ *                                     poolIndexForParticipant, not here.
+ * @param {Array}  opts.tutorialValues fixed tutorial sequence
+ * @param {number} opts.tutorialMean   true_mean (continuous) or true_p (binary)
+ * @param {number} [opts.tutorialStd]  continuous only; defaults to 0
+ * @param {object} [opts.overrides]    any DEFAULTS keys this task wants to override
  */
 export function buildConfig({
   taskType,
-  sequencesData,
+  sequencesPool,
   tutorialValues,
   tutorialMean,
   tutorialStd = 0,
@@ -122,15 +126,17 @@ export function buildConfig({
 
   return {
     taskType,
-    // Always the full set of trials in sequencesData -- no slicing. A
-    // separate N_TRIALS_TO_RUN/TEST_MODE mechanism used to slice this down
-    // (originally so a manually-maintained number stayed in sync with
-    // sequences.json's actual length, plus a dev-page override on top of
-    // that) -- removed entirely; trial count is now fully implicit from
-    // however many trials sequences.json actually contains, so it can never
-    // silently drift out of sync with the data again.
-    sequences: sequencesData.map(
-      s => ({ ...s, values: s.values.slice(0, P.N_OBS_TO_RUN) })
+    // Every pool member, trimmed to N_OBS_TO_RUN -- no slicing of WHICH
+    // trials, only how many observations within each. Trial count per
+    // member is fully implicit from however many trials that pool member's
+    // JSON actually contains (matches the single-sequence design's own
+    // "never silently drift out of sync" property, just applied per member).
+    // timeline-builder.js selects cfg.sequences = cfg.sequencesPool[i] once
+    // it knows which participant this is -- config-base.js/config.js don't
+    // know about participant identity at all, deliberately (keeps sequence
+    // *data* and participant *assignment* fully decoupled).
+    sequencesPool: sequencesPool.map(
+      pool => pool.map(s => ({ ...s, values: s.values.slice(0, P.N_OBS_TO_RUN) }))
     ),
     tutorialValues,
     tutorialMean,

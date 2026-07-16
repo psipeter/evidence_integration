@@ -82,6 +82,15 @@ scripts/test_sequences_subsampling.py
 task/sequences/sequences.json
 task/sequences/sequences.pkl
 
+# Per-participant sequence pool (task/generate_sequences_pool.py output) --
+# 800 small files (200 members x 2 tasks x .pkl/.json) is too much file-count
+# churn for git to track usefully, and it's fully reproducible on demand via
+# `python task/generate_sequences_pool.py --n_pool 200 --task both --seed 0`
+# (the exact promoted parameters live in that script's own CLI defaults) --
+# resolves the earlier open question about whether to commit this pool or
+# consolidate it into fewer files: neither, just don't track it at all.
+task/sequences_pool/
+
 # Task sequence data files (superseded by task/sequences/*.pkl)
 data/task_continuous.pkl
 data/task_binary.pkl

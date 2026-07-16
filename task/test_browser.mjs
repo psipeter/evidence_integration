@@ -74,6 +74,12 @@ const testUrl = (task) =>
 // so the Prolific branch had zero automated coverage before.
 const testUrlProlific = (task) => `${testUrl(task)}&PROLIFIC_PID=e2e_test_pid`;
 
+// Same idea, but with a caller-chosen PID -- needed by the pool-assignment
+// scenario below, which specifically compares indices across DIFFERENT
+// participant IDs (testUrlProlific's PID is fixed, so it can't be reused
+// for that comparison).
+const testUrlWithPid = (task, pid) => `${testUrl(task)}&PROLIFIC_PID=${pid}`;
+
 // Parsed directly out of timeline-builder.js's PROLIFIC_CODES rather than
 // hardcoded here -- avoids this test silently going stale if those
 // placeholder codes are ever filled in for real Prolific deployment.
@@ -536,6 +542,59 @@ const SCENARIOS = [
       const expectedCode = expectedProlificCode(task, 'earlyExit');
       if (!capturedUrl.includes(`cc=${expectedCode}`)) {
         throw new Error(`Redirect URL had wrong code: ${capturedUrl} (expected cc=${expectedCode})`);
+      }
+    },
+  },
+  {
+    name: 'Pool assignment: deterministic, valid range, embedded fields present',
+    fn: async (p, task) => {
+      const runToEarlyExitAndGetPoolIndex = async (pid) => {
+        await p.goto(testUrlWithPid(task, pid));
+        await doConsent(p); await doTutorial(p);
+        await letObsTimeOutAndRepeat(p);
+        await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+        await letObsTimeOutAndRepeat(p);
+        await waitForScreen(p, 'observation', T_OBS_MS + 5000);
+        await waitForScreen(p, 'terminated', T_OBS_MS + 8000);
+        const before = snapshotResultFiles();
+        await p.click('#early-exit-btn');
+        const savedFile = await waitForNewResultFile(before);
+        const saved = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, savedFile), 'utf8'));
+        fs.unlinkSync(path.join(RESULTS_DIR, savedFile));
+
+        const poolIndices = new Set(saved.map((row) => row.pool_index));
+        if (poolIndices.size !== 1) {
+          throw new Error(`Expected one pool_index across all rows, got: ${[...poolIndices]}`);
+        }
+        const poolIndex = [...poolIndices][0];
+        if (typeof poolIndex !== 'number' || poolIndex < 0 || poolIndex >= 200) {
+          throw new Error(`pool_index out of expected range [0,200): ${poolIndex}`);
+        }
+
+        const obsRows = saved.filter((row) => row.screen === 'observation');
+        if (obsRows.length === 0) throw new Error('No observation rows to check embedded fields on');
+        for (const row of obsRows) {
+          if (row.value === undefined) throw new Error('observation row missing value field');
+          if (task === 'continuous' && row.true_mean === undefined) {
+            throw new Error('observation row missing true_mean field');
+          }
+          if (task === 'binary' && row.true_p === undefined) {
+            throw new Error('observation row missing true_p field');
+          }
+        }
+        return poolIndex;
+      };
+
+      const idxA = await runToEarlyExitAndGetPoolIndex('e2e_pool_test_participant_a');
+      const idxB = await runToEarlyExitAndGetPoolIndex('e2e_pool_test_participant_b');
+      if (idxA === idxB) {
+        console.log(`  NOTE: both test participants hashed to the same pool_index (${idxA}) -- `
+                    + `possible by chance (1/200), only concerning if this recurs.`);
+      }
+
+      const idxA2 = await runToEarlyExitAndGetPoolIndex('e2e_pool_test_participant_a');
+      if (idxA2 !== idxA) {
+        throw new Error(`Same participant ID gave different pool_index across runs: ${idxA} vs ${idxA2}`);
       }
     },
   },

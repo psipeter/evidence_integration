@@ -431,7 +431,7 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="t
 
 
 # ── Human-readable inspection CSV ──────────────────────────────────────────────
-def build_inspection_csv(seq_dir: Path, out_path: Path) -> pd.DataFrame:
+def build_inspection_csv(seq_dir: Path, out_path: Path, pool_dir: Path | None = None) -> pd.DataFrame:
     """Human-readable, ONE-ROW-PER-TRIAL CSV. Each column obs_1..obs_N is one
     observation's raw value (so a whole trial's stimulus sequence reads left
     to right on a single line), followed by true_mean/true_p/true_std and
@@ -447,92 +447,133 @@ def build_inspection_csv(seq_dir: Path, out_path: Path) -> pd.DataFrame:
     human scanning by eye: an entire trial's sequence and its
     target-vs-achieved summary now sit on one line, not spread across 15.
 
-    Reads directly from {task}_sequences.json -- no model/NEF dependency at
-    all, so this is fast and always available regardless of --skip_nef.
+    If pool_dir is given, reads EVERY {task}_*_sequences.json under it (the
+    real per-participant hybrid pool, see generate_sequences_pool.py)
+    instead of the single shared seq_dir/{task}_sequences.json -- adds a
+    pool_index column (extracted from the filename, not just enumerated,
+    so it always matches the real file) right after task. seq_dir is
+    ignored in this mode. The prefix-uniqueness/quota checks below run
+    PER POOL MEMBER (each is independently generated, with its own qid
+    space) and are aggregated into one summary line per task, rather than
+    the single-file mode's one-line-per-task, since printing 200 separate
+    OK lines wouldn't be readable.
+
+    Reads directly from {task}_sequences.json / pool files -- no model/NEF
+    dependency at all, so this is fast and always available regardless of
+    --skip_nef.
     """
     rows = []
     console_summary = []
 
     for task in ("continuous", "binary"):
-        json_path = seq_dir / f"{task}_sequences.json"
-        if not json_path.exists():
-            continue
-        with open(json_path) as f:
-            trials = json.load(f)
+        if pool_dir is not None:
+            json_paths = sorted(Path(pool_dir).glob(f"{task}_*_sequences.json"))
+            if not json_paths:
+                continue
+        else:
+            single = seq_dir / f"{task}_sequences.json"
+            json_paths = [single] if single.exists() else []
+            if not json_paths:
+                continue
 
-        # -- Global prefix-uniqueness check across all qids in this task --
-        # (the actual bug this whole redesign fixed: two different qids
-        # ending up with an identical realized prefix by chance -- see
-        # generate_sequences_momentmatch.py's module docstring)
-        prefix_by_qid: dict = {}
-        for t in trials:
-            pl = t["prefix_length"]
-            prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
-        all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
-        n_distinct = len(set(all_prefixes))
-        n_qids = len(prefix_by_qid)
-        one_prefix_per_qid = all(len(v) == 1 for v in prefix_by_qid.values())
-        prefix_ok = (n_distinct == n_qids) and one_prefix_per_qid
-        console_summary.append(
-            f"[{task}] prefix uniqueness: {n_distinct}/{n_qids} distinct "
-            f"({'OK' if prefix_ok else 'COLLISION DETECTED'})"
-        )
+        n_members_prefix_ok = 0
+        n_members_iti_ok = 0
+        n_quota_bad_total = 0
+        n_trials_total = 0
 
-        # -- iti_condition balance per qid (should be within 1 of even split) --
-        iti_by_qid: dict = {}
-        for t in trials:
-            iti_by_qid.setdefault(t["qid"], []).append(t.get("iti_condition"))
-        imbalanced = [q for q, conds in iti_by_qid.items()
-                      if abs(conds.count("control") - conds.count("distract")) > 1]
-        console_summary.append(
-            f"[{task}] iti_condition balance: "
-            + (f"{len(imbalanced)} qid(s) off by >1 ({imbalanced})"
-               if imbalanced else "OK (every qid within 1 of an even control/distract split)")
-        )
+        for json_path in json_paths:
+            pool_index = None
+            if pool_dir is not None:
+                # Filename is {task}_{NNNN}_sequences.json -- NNNN is the
+                # real pool index, extracted here (not enumerated) so it
+                # always matches the actual file.
+                pool_index = int(json_path.stem.split("_")[1])
+            with open(json_path) as f:
+                trials = json.load(f)
 
-        n_quota_bad = 0
-        for t in trials:
-            pl = t["prefix_length"]
-            vals = t["values"]
-            n = len(vals)
+            # -- Prefix-uniqueness check, scoped to THIS member's own qids --
+            prefix_by_qid: dict = {}
+            for t in trials:
+                pl = t["prefix_length"]
+                prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
+            all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
+            n_distinct = len(set(all_prefixes))
+            n_qids = len(prefix_by_qid)
+            one_prefix_per_qid = all(len(v) == 1 for v in prefix_by_qid.values())
+            prefix_ok = (n_distinct == n_qids) and one_prefix_per_qid
+            n_members_prefix_ok += int(prefix_ok)
 
-            row = {"task": task, "trial": t["trial"], "qid": t["qid"]}
-            for i, v in enumerate(vals, start=1):
-                row[f"obs_{i}"] = v
-                if i == pl:
-                    row["|"] = ""  # separator column, right after the prefix
+            # -- iti_condition balance, scoped to THIS member --
+            iti_by_qid: dict = {}
+            for t in trials:
+                iti_by_qid.setdefault(t["qid"], []).append(t.get("iti_condition"))
+            imbalanced = [q for q, conds in iti_by_qid.items()
+                          if abs(conds.count("control") - conds.count("distract")) > 1]
+            n_members_iti_ok += int(not imbalanced)
 
-            target_mean = t.get("true_mean")
-            target_std  = t.get("true_std")
-            target_p    = t.get("true_p")
+            for t in trials:
+                pl = t["prefix_length"]
+                vals = t["values"]
+                n = len(vals)
+                n_trials_total += 1
 
-            if task == "continuous":
-                obs_mean, obs_std, obs_p = float(np.mean(vals)), float(np.std(vals)), None
-            else:
-                obs_p, obs_mean, obs_std = float(np.mean([v == 1 for v in vals])), None, None
-                achieved_blue = sum(1 for v in vals if v == 1)
-                target_blue = round(target_p * n) if target_p is not None else None
-                if target_blue is not None and achieved_blue != target_blue:
-                    n_quota_bad += 1
+                row = {"task": task}
+                if pool_index is not None:
+                    row["pool_index"] = pool_index
+                row["trial"] = t["trial"]
+                row["qid"] = t["qid"]
+                for i, v in enumerate(vals, start=1):
+                    row[f"obs_{i}"] = v
+                    if i == pl:
+                        row["|"] = ""  # separator column, right after the prefix
 
-            row.update({
-                "true_mean": target_mean, "true_p": target_p, "true_std": target_std,
-                "obs_mean": obs_mean, "obs_p": obs_p, "obs_std": obs_std,
-            })
-            rows.append(row)
+                target_mean = t.get("true_mean")
+                target_std  = t.get("true_std")
+                target_p    = t.get("true_p")
+
+                if task == "continuous":
+                    obs_mean, obs_std, obs_p = float(np.mean(vals)), float(np.std(vals)), None
+                else:
+                    obs_p, obs_mean, obs_std = float(np.mean([v == 1 for v in vals])), None, None
+                    achieved_blue = sum(1 for v in vals if v == 1)
+                    target_blue = round(target_p * n) if target_p is not None else None
+                    if target_blue is not None and achieved_blue != target_blue:
+                        n_quota_bad_total += 1
+
+                row.update({
+                    "true_mean": target_mean, "true_p": target_p, "true_std": target_std,
+                    "obs_mean": obs_mean, "obs_p": obs_p, "obs_std": obs_std,
+                })
+                rows.append(row)
+
+        n_members = len(json_paths)
+        if pool_dir is not None:
+            console_summary.append(
+                f"[{task}] prefix uniqueness: {n_members_prefix_ok}/{n_members} pool members OK")
+            console_summary.append(
+                f"[{task}] iti_condition balance: {n_members_iti_ok}/{n_members} pool members OK")
+        else:
+            console_summary.append(
+                f"[{task}] prefix uniqueness: "
+                f"{'OK' if n_members_prefix_ok == n_members else 'COLLISION DETECTED'}")
+            console_summary.append(
+                f"[{task}] iti_condition balance: "
+                f"{'OK (every qid within 1 of an even control/distract split)' if n_members_iti_ok == n_members else 'off by >1 somewhere'}")
 
         if task == "binary":
             console_summary.append(
-                f"[{task}] exact-quota check: {n_quota_bad} trial(s) with "
+                f"[{task}] exact-quota check: {n_quota_bad_total}/{n_trials_total} trial(s) with "
                 f"achieved blue count != round(true_p * seq_length) "
-                f"({'OK' if n_quota_bad == 0 else 'MISMATCH'})"
+                f"({'OK' if n_quota_bad_total == 0 else 'MISMATCH'})"
             )
 
     df = pd.DataFrame(rows)
     if df.empty:
-        print(f"[csv skip] no {{task}}_sequences.json files found in {seq_dir}")
+        print(f"[csv skip] no sequence files found "
+              f"({'in ' + str(pool_dir) if pool_dir is not None else 'in ' + str(seq_dir)})")
         return df
-    df = df.sort_values(["task", "trial"]).reset_index(drop=True)
+    sort_cols = ["task", "pool_index", "trial"] if pool_dir is not None else ["task", "trial"]
+    df = df.sort_values(sort_cols).reset_index(drop=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
     print(f"Saved: {out_path}  ({len(df)} rows)")
@@ -782,6 +823,14 @@ def parse_args():
         "--skip_csv", action="store_true",
         help="Skip building the inspection CSV (built by default, alongside the figure)",
     )
+    p.add_argument(
+        "--pool_dir", default=None,
+        help="If given, build_inspection_csv reads the real per-participant pool "
+             "(all {task}_*_sequences.json under this dir, see "
+             "generate_sequences_pool.py) instead of the single shared file in "
+             "--seq_dir, adding a pool_index column. Only affects the CSV, not "
+             "the figure (which stays on --seq_dir's single file/agent comparison).",
+    )
     return p.parse_args()
 
 
@@ -812,7 +861,8 @@ if __name__ == "__main__":
 
     if not args.skip_csv:
         csv_out = Path(args.csv_out) if args.csv_out else FIGURES_DIR / "inspect_sequences.csv"
-        build_inspection_csv(Path(args.seq_dir), csv_out)
+        pool_dir = Path(args.pool_dir) if args.pool_dir else None
+        build_inspection_csv(Path(args.seq_dir), csv_out, pool_dir=pool_dir)
 
     out = Path(args.out) if args.out else FIGURES_DIR / "inspect_sequences.pdf"
     make_figure(

@@ -11,7 +11,11 @@
  * Config shape:
  * {
  *   taskType:             'continuous' | 'binary'
- *   sequences:            array of { trial, qid, true_mean, true_p, values[], iti_ms }
+ *   sequencesPool:        array of pool members, each an array of
+ *                         { trial, qid, true_mean, true_p, values[], iti_ms }
+ *                         -- one member is selected per participant via
+ *                         poolIndexForParticipant (deterministic hash of
+ *                         their ID), not here
  *   tutorialValues:       number[]
  *   tutorialMean:         number  (true_mean for continuous, true_p for binary)
  *   tutorialStd:          number  (continuous only)
@@ -24,10 +28,10 @@
  *   showTrialPerformance: boolean
  * }
  *
- * Always runs the FULL sequences array (however many trials it contains),
- * always shows the tutorial, and always uses each trial's own iti_ms —
- * there is no dev-page/override mechanism anymore (removed along with
- * index-dev.html; see CLAUDE.md).
+ * Always runs the FULL trial set of whichever pool member gets assigned
+ * (however many trials it contains), always shows the tutorial, and always
+ * uses each trial's own iti_ms — there is no dev-page/override mechanism
+ * anymore (removed along with index-dev.html; see CLAUDE.md).
  */
 
 import { initJsPsych } from 'jspsych';
@@ -66,10 +70,34 @@ const PROLIFIC_CODES = {
   binary:     { completion: 'C12FEFJU', earlyExit: 'C1L1GGHT' },
 };
 
+/**
+ * poolIndexForParticipant — deterministic, stateless hash of a participant
+ * ID into [0, poolSize). No server-side counter/database needed to track
+ * "who got which pool member" -- the same ID always maps to the same
+ * index, on any machine, any time, just from the string itself. Using the
+ * SAME formula (not seeded by task) for both continuous and binary is what
+ * gives a participant the same pool index for both tasks (decided
+ * explicitly -- see chat history), given both pools are the same size
+ * (200); no cross-task coordination code is needed for that beyond this
+ * one shared function.
+ *
+ * Simple DJB2-style polynomial string hash -- not cryptographic, doesn't
+ * need to be; just needs to spread participant IDs roughly uniformly
+ * across the pool. `>>> 0` keeps it an unsigned 32-bit int so `% poolSize`
+ * never sees a negative operand.
+ */
+export function poolIndexForParticipant(participantId, poolSize) {
+  let hash = 5381;
+  for (let i = 0; i < participantId.length; i++) {
+    hash = ((hash * 33) ^ participantId.charCodeAt(i)) >>> 0;
+  }
+  return hash % poolSize;
+}
+
 export function buildAndRun(cfg) {
   const {
     taskType = 'continuous',
-    sequences,
+    sequencesPool,
     tutorialValues,
     tutorialMean,
     tutorialStd,
@@ -173,9 +201,15 @@ export function buildAndRun(cfg) {
     },
   });
 
-  // Use Prolific PID if present; fall back to JATOS worker ID for pilots
+  // Use Prolific PID if present; fall back to JATOS worker ID for pilots.
+  // Pilots draw from the pool too (decided explicitly -- see chat history),
+  // rather than special-casing them onto some single fixed file, so local/
+  // pilot testing exercises the exact same assignment path real participants
+  // do.
   const participantId = prolificPID ?? `pilot_${jatos.workerId}`;
-  jsPsych.data.addProperties({ prolific_pid: participantId, task: taskType });
+  const poolIndex = poolIndexForParticipant(participantId, sequencesPool.length);
+  const sequences  = sequencesPool[poolIndex];
+  jsPsych.data.addProperties({ prolific_pid: participantId, task: taskType, pool_index: poolIndex });
 
   const earlyExit = createEarlyExit({
     beforeUnloadHandler,
