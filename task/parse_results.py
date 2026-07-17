@@ -78,31 +78,60 @@ import pandas as pd
 import numpy as np
 
 
+def iter_json_values(raw: str):
+    """
+    Yield every top-level JSON value found in `raw`, in order -- handles
+    BOTH the historical single-call-at-the-end shape (one JSON array
+    spanning the whole file) AND the real shape a JATOS plain-text export
+    has once a session makes multiple appendResultData calls (incremental
+    per-trial saving -- see timeline-builder.js/finish-session.js): each
+    call's payload is written back-to-back with ZERO separator (literally
+    `}{`, no comma, no newline), and an actual newline only appears BETWEEN
+    different participants/study-results, not between two appends from the
+    SAME one.
+
+    Confirmed as a REAL bug via a real MindProbe export
+    (dev-results/jatos_test.txt, 6 participants): the previous
+    newline-then-json.loads()-per-line approach silently dropped every row
+    except one lone single-object participant, since json.loads() can't
+    parse "{...}{...}{...}" as a single value and the per-line fallback
+    only ever saw ONE giant no-newline "line" per participant. Using
+    json.JSONDecoder().raw_decode in a loop instead peels off exactly one
+    valid JSON value at a time regardless of what does or doesn't separate
+    it from the next one, so it handles the old single-array shape, the
+    new back-to-back-objects shape, and any newline-separated mix of the
+    two identically, without needing to know in advance which one a given
+    file uses.
+    """
+    decoder = json.JSONDecoder()
+    idx, n = 0, len(raw)
+    while idx < n:
+        while idx < n and raw[idx] in ' \t\r\n':
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            value, end = decoder.raw_decode(raw, idx)
+        except json.JSONDecodeError as e:
+            print(f"  Warning: JSON parse error at position {idx}, stopping this file's parse: {e}")
+            break
+        yield value
+        idx = end
+
+
 def parse_participant_file(fpath: pathlib.Path) -> pd.DataFrame:
     """Parse one participant's JSON file into a DataFrame of observation rows.
     Every field here is read directly off the row -- see module docstring
     for why no lookup/join against a saved sequence file happens anymore."""
     try:
         raw = fpath.read_text(encoding='utf-8').strip()
-        # JATOS sometimes wraps multiple result sets with a separator line
-        # Try parsing as a single JSON array first, then fall back
-        try:
-            trials = json.loads(raw)
-        except json.JSONDecodeError:
-            # JATOS plain text format: multiple JSON arrays separated by newlines
-            records = []
-            for line in raw.splitlines():
-                line = line.strip()
-                if line.startswith('[') or line.startswith('{'):
-                    try:
-                        block = json.loads(line)
-                        if isinstance(block, list):
-                            records.extend(block)
-                        else:
-                            records.append(block)
-                    except json.JSONDecodeError:
-                        continue
-            trials = records
+        trials = []
+        for value in iter_json_values(raw):
+            if isinstance(value, list):
+                trials.extend(value)
+            elif isinstance(value, dict):
+                trials.append(value)
+            # any other top-level JSON type is not a trial row -- ignored
     except Exception as e:
         print(f"  Warning: could not parse {fpath.name}: {e}")
         return pd.DataFrame()

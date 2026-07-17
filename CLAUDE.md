@@ -1129,14 +1129,16 @@ of what changed and, importantly, what's still unverified:
   (`timeline-builder.js`): `on_trial_finish` (global jsPsych option) fires
   `jatos.appendResultData` after EVERY trial -- welcome, consent, each
   tutorial step, every real observation, ITI/BTI resets, everything.
-  Fire-and-forget (not awaited), failures logged via `jatos.log`. A
+  Fire-and-forget (not awaited); failures are logged via `jatos.log`, but
+  see the REAL-TEST FINDINGS bullet at the end of this list for why that's
+  NOT where you should actually look to confirm a failure happened. A
   `"started"` marker (tagged with `jatos.addJatosIds`, giving a
   JATOS-native `studyResultId`/`workerId` cross-reference independent of
   `prolific_pid`) is appended before `jsPsych.run()` even starts, so a
   participant who closes the tab before clicking past welcome still leaves
-  a trace. `jatos.catchAndLogErrors()` is also now wired in early, so
-  uncaught JS errors/rejections reach JATOS's own server log -- previously
-  NOTHING did this.
+  a trace. `jatos.catchAndLogErrors()` is also now wired in early, for the
+  same reason -- forwards uncaught JS errors/rejections to the same
+  `jatos.log` channel.
 - **`finish-session.js` no longer sends the full dataset, and gates
   completion on a confirmed save**: rewritten from a single fire-and-forget
   `jatos.endStudy(data)`/`endStudyAndRedirect(url, data)` call into an
@@ -1187,32 +1189,98 @@ of what changed and, importantly, what's still unverified:
   -- a duplicate/stuck participant now just shows up for manual review
   (see the reconciliation script below) rather than needing to be blocked
   or force-redirected automatically.
-- **New: `task/reconcile_prolific_jatos.py`** -- cross-references a
+- **`task/reconcile_prolific_jatos.py`** -- cross-references a
   Prolific submissions-export CSV against a JATOS plain-text results
   export (every row, not just observations -- see its own docstring vs.
   `parse_results.py`'s), outer-joined on participant ID, producing a
   `recommendation` per participant (OK / TERMINATED / STUCK / NO JATOS DATA
-  AT ALL / pilot-ignore). Verified against five synthetic scenarios
-  covering each branch -- **NOT yet run against a real Prolific export**;
-  its Prolific column-name detection (fuzzy substring match, with
-  `--prolific-*-col` overrides) is a best guess at Prolific's current CSV
-  headers, unconfirmed against an actual downloaded file.
-- **BIGGEST OPEN RISK, genuinely unverified**: `jatos.endStudyWithoutRedirect`
-  -- per jatos.js's own reference docs, this name only exists from **v3.9.7
-  onward** (it's a rename of the older `endStudyAjax`/pre-rename name).
-  MindProbe's actual deployed JATOS version was never checked against this.
-  If it's older than 3.9.7, `finish-session.js` will throw in production
-  the moment a session tries to finish. Confirm the real version (JATOS
-  admin panel, or trigger a real end-of-session on a MindProbe pilot and
-  watch the browser console) before the next real Prolific deployment --
-  this is exactly the "local reasoning isn't enough, a real MindProbe run
-  is what actually catches these" lesson this section already has two
-  other entries for below.
-- **Nothing above has been run against a live MindProbe/Prolific session
-  yet** -- verified only by tracing the real jatos.js source, local
-  `node --check` syntax checks, and synthetic fixtures. Treat this whole
-  bullet list as "implemented, logically sound, pending the same real-pilot
-  confirmation every other claim in this section required."
+  AT ALL / pilot-ignore). Originally verified against five synthetic
+  scenarios only; now ALSO run successfully against a real 6-participant
+  MindProbe export (`dev-results/jatos_test.txt`) after the two parsing
+  bugs below were found and fixed against that same real file. **Still NOT
+  run against a real Prolific export** -- its Prolific column-name
+  detection (fuzzy substring match, with `--prolific-*-col` overrides) is
+  still a best guess at Prolific's current CSV headers, unconfirmed
+  against an actual downloaded file.
+- **`jatos.endStudyWithoutRedirect` CONFIRMED WORKING** (previously listed
+  as the biggest open risk -- see the real-test bullet below): fired
+  correctly on the real completion test, so MindProbe's deployed JATOS
+  version does support it. No longer an open question.
+- **REAL-TEST FINDINGS (this session, real MindProbe/JATOS, six manual
+  scenarios via hand-edited `?PROLIFIC_PID=` params, no real Prolific
+  involved)** -- what got confirmed, and two corrections to claims made
+  earlier in this same session before real testing happened:
+  - Normal completion, abandon-after-started, stuck-mid-session, and
+    timeout-budget termination all produced exactly the expected data
+    shape (`progress` values, `finished`/`terminated` markers) when
+    inspected directly in a downloaded JATOS export.
+  - The save-then-end gating actually works end-to-end: killing network
+    (Chrome DevTools Network tab -> Offline) right at the final "Return to
+    Prolific" click produced the real "Something went wrong saving your
+    data" screen and did NOT redirect -- confirmed by direct observation,
+    not just code tracing.
+  - **CORRECTION: `jatos.log()`'s output is NOT visible anywhere in the
+    JATOS results table/UI** (no "Log column" per result, contrary to what
+    an earlier note in this section assumed) -- it most likely goes to
+    JATOS's own application-level server log, which isn't exposed on a
+    hosted instance like MindProbe at all. Checked directly after the
+    network-failure test above: nothing showed up. Practical consequence:
+    don't rely on `jatos.log`/`catchAndLogErrors` as a way to SEE failures
+    -- the actual signal is the DATA itself. A row that stops mid-session
+    with no `finished`/`terminated` marker (or a gap where the next
+    expected screen's row should be) IS the failure signal; use the last
+    successfully appended row's `progress` value to decide how far someone
+    actually got when making a payment call, exactly what
+    `reconcile_prolific_jatos.py` already does (it never looks for a
+    log message, only for what did or didn't get appended).
+  - **GeneralSingle's block is keyed on the BROWSER's cookie, not on the
+    `PROLIFIC_PID` value in the URL at all** -- confirmed directly:
+    manually editing the URL's `PROLIFIC_PID` to a different value on a
+    second visit in an already-used browser still got blocked with "Study
+    can be done only once." This is good: a participant can't dodge the
+    single-use restriction by relabeling themselves. One practical
+    consequence worth knowing before reading a results export: if a
+    browser was used for an EARLIER, unrelated visit before the one you
+    meant to test, that earlier visit's real (if abandoned) data will
+    show up in the export under whatever ID was in the URL for IT, not
+    the ID you later edited the URL to -- easy to misread as "data got
+    copied" between two attempts when it's actually two independent
+    visits. The blocked attempt itself produces zero data, as expected.
+  - **TWO REAL PARSING BUGS FOUND AND FIXED**, both only catchable with a
+    real multi-append JATOS export (the exact thing this session's
+    incremental-saving change made possible for the first time) --
+    neither was hypothetical:
+    1. `parse_results.py` and `reconcile_prolific_jatos.py` both parsed the
+       real 6-participant export as almost entirely EMPTY (1 row out of
+       what should have been dozens). Cause: JATOS's plain-text export
+       concatenates every `appendResultData` call with ZERO separator
+       within one participant's block (`}{`, no comma, no newline) --
+       newlines only appear BETWEEN different participants. The old
+       newline-split-then-`json.loads()`-per-line approach silently
+       dropped everything that wasn't its own clean line. Fixed in BOTH
+       files with a shared `iter_json_values()` streaming decoder
+       (`json.JSONDecoder().raw_decode` in a loop) that peels off exactly
+       one JSON value at a time regardless of what does or doesn't
+       separate it from the next -- verified against the same real file
+       afterward (86 rows / 5 participants from `parse_results.py`,
+       correct per-participant summaries from `reconcile_prolific_jatos.py`).
+    2. Separately, `reconcile_prolific_jatos.py`'s "last progress" logic
+       was ALSO wrong even once parsing was fixed: it sorted by
+       `time_elapsed` to find each participant's last row, but the
+       `started`/`finished`/`terminated` MARKER rows (the exact ones this
+       whole script exists to detect) carry no `time_elapsed` field at
+       all, since they aren't real jsPsych trials -- sorting with
+       `na_position='first'` shoved them to the wrong end, so a fully
+       finished participant showed their last real trial screen instead of
+       `'finished'`. Fixed by using parse/append order (a monotonic
+       sequence number) instead of `time_elapsed` for ordering -- JATOS
+       writes appends in receipt order, so this is simpler AND correct by
+       construction. Verified: the real completion test now correctly
+       shows `'finished'`, the real termination test now correctly shows
+       `'terminated'`.
+  - Not yet tested against real Prolific traffic (all six scenarios used
+    hand-edited query params on JATOS's own General Single link, per
+    explicit choice to avoid spending real Prolific participants on this).
 
 **The save mechanism** (HISTORICAL -- describes the single-call approach in
 place before the incremental-append rework above; kept for why the
@@ -1451,16 +1519,18 @@ the redirect bug above) -- that class of bug still needs a live MindProbe
 dry-run.
 
 Pre-deployment checklist (before Prolific production):
-  - [ ] **(this session, all unverified against real JATOS)** Confirm
-    MindProbe's actual JATOS server version supports `jatos.endStudyWithoutRedirect`
-    (v3.9.7+ per jatos.js's own reference docs) -- if it's older,
-    `finish-session.js` will throw on every session end. Check the JATOS
-    admin panel's version string, or watch the browser console during a
-    real end-of-session on a MindProbe pilot.
-  - [ ] Confirm the incremental per-trial `appendResultData` calls
+  - [DONE] Confirm MindProbe's actual JATOS server supports
+    `jatos.endStudyWithoutRedirect` -- confirmed working directly via a
+    real completion test this session (see "REAL-TEST FINDINGS" above).
+  - [DONE] Confirm the incremental per-trial `appendResultData` calls
     (`timeline-builder.js`'s `on_trial_finish`) actually land in JATOS's
     results view during a real pilot run, and that `progress`/`prolific_pid`
-    show up first as intended in the raw export.
+    show up first as intended -- confirmed via six real manual test
+    scenarios this session (normal completion, started-only, stuck
+    mid-session, timeout termination, network-failure-at-completion,
+    GeneralSingle reuse-block); see "REAL-TEST FINDINGS" above for the two
+    corrections that came out of that testing (`jatos.log` visibility,
+    GeneralSingle's cookie-based-not-ID-based blocking).
   - [ ] After importing a jzip built with the new `["GeneralSingle"]`-only
     `allowedWorkerTypes`, grab the new General Single link from MindProbe's
     Worker & Batch Manager and update each Prolific study's Study URL to
@@ -1473,13 +1543,20 @@ Pre-deployment checklist (before Prolific production):
   - [ ] Run `task/reconcile_prolific_jatos.py` against a REAL Prolific
     export at least once before relying on it -- its column-name detection
     has only been checked against a synthetic CSV, not Prolific's actual
-    current export format.
+    current export format. (The JATOS-side half IS now done: run
+    successfully against the real `dev-results/jatos_test.txt` export this
+    session, after fixing two real parsing bugs found in the process --
+    see "REAL-TEST FINDINGS" above. Only the Prolific-CSV half remains
+    untested, since no real Prolific export exists yet.)
   - [ ] Before trusting the GeneralSingle worker-type switch as the fix for
     past "leaked through" participants, check the OLD JATOS results table
     (from before this session's changes) for the specific fingerprint that
     motivated it: multiple Result IDs under one participant, one of them
     empty/FAIL -- this was never actually confirmed, only inferred from a
-    matching forum report.
+    matching forum report. (This session's real testing confirmed
+    GeneralSingle's blocking MECHANISM works correctly -- it did NOT
+    confirm this specific historical root-cause attribution, which is a
+    separate claim.)
   - [DONE] Confirm task/sequences/{continuous,binary}_sequences.json holds the
     intended final trial count/parameters -- 8x4 hybrid (32 trials), see
     "Sequence design" above.

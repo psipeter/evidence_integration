@@ -478,12 +478,13 @@ and current per-item status)
 - [DONE] Full 6-way browser/task E2E matrix -- 48/48 passing (8/8 each)
 - [PENDING] A genuinely full completion run via real Prolific preview (not
   just early-exit) -- the one real-platform path not yet exercised
-- [PENDING, this session, UNVERIFIED against real JATOS] Incremental
-  per-trial saving, save-then-end-then-redirect gating, and the
-  GeneralSingle-only worker-type switch -- see CLAUDE.md's "CURRENT
-  ARCHITECTURE" note for the full list of what changed and what's still
-  unconfirmed (in particular: whether MindProbe's JATOS version even has
-  `jatos.endStudyWithoutRedirect`)
+- [DONE] Incremental per-trial saving, save-then-end-then-redirect gating,
+  and the GeneralSingle-only worker-type switch, all confirmed against real
+  MindProbe/JATOS via six manual test scenarios this session (hand-edited
+  `?PROLIFIC_PID=` params, no real Prolific involved) -- see CLAUDE.md's
+  "REAL-TEST FINDINGS" note for what was confirmed and two corrections
+  (`jatos.log` isn't visible anywhere in the JATOS UI; GeneralSingle's block
+  is keyed on the browser's cookie, not the `PROLIFIC_PID` value).
 
 ```bash
 npm run build:continuous && npm run build:binary

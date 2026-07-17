@@ -61,32 +61,57 @@ import pandas as pd
 
 # ── JATOS side ────────────────────────────────────────────────────────────
 
+def iter_json_values(raw: str):
+    """
+    Yield every top-level JSON value found in `raw`, in order -- see
+    parse_results.py's identical function for the full explanation (kept
+    in sync deliberately, per this module's own docstring). Short version:
+    JATOS's plain-text export concatenates every appendResultData call with
+    ZERO separator within one participant's block (`}{`, no comma, no
+    newline), and only puts an actual newline BETWEEN participants -- a
+    naive newline-split-then-json.loads() approach silently drops almost
+    everything once a session makes more than one append call. Confirmed
+    as a real bug against a real 6-participant MindProbe export
+    (dev-results/jatos_test.txt): the old approach parsed 1 row out of what
+    should have been the entire file's worth of data.
+    """
+    decoder = json.JSONDecoder()
+    idx, n = 0, len(raw)
+    while idx < n:
+        while idx < n and raw[idx] in ' \t\r\n':
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            value, end = decoder.raw_decode(raw, idx)
+        except json.JSONDecodeError as e:
+            print(f"  Warning: JSON parse error at position {idx}, stopping this file's parse: {e}")
+            break
+        yield value
+        idx = end
+
+
 def parse_jatos_participant_file(fpath: pathlib.Path) -> list[dict]:
     """
     Parse one JATOS export file into a flat list of ALL trial-row dicts
     (not filtered by screen, unlike parse_results.py's parse_participant_file
     -- reconciliation needs the 'started'/'finished'/'terminated' markers
-    and every screen in between, not just observation rows). Same
-    single-JSON-array-with-newline-separated-fallback parsing as
-    parse_results.py, kept in sync deliberately -- if that file's parsing
-    logic changes to handle some new JATOS export quirk, mirror it here too.
+    and every screen in between, not just observation rows). Uses the same
+    iter_json_values streaming decoder as parse_results.py, kept in sync
+    deliberately -- if that file's parsing logic changes to handle some new
+    JATOS export quirk, mirror it here too. A single file can also contain
+    MULTIPLE participants' data (newline-separated blocks) -- handled
+    correctly here since every yielded dict still carries its own
+    prolific_pid; summarize_jatos below groups by that field, not by file.
     """
     try:
         raw = fpath.read_text(encoding='utf-8').strip()
-        try:
-            trials = json.loads(raw)
-            if not isinstance(trials, list):
-                trials = [trials]
-        except json.JSONDecodeError:
-            trials = []
-            for line in raw.splitlines():
-                line = line.strip()
-                if line.startswith('[') or line.startswith('{'):
-                    try:
-                        block = json.loads(line)
-                        trials.extend(block if isinstance(block, list) else [block])
-                    except json.JSONDecodeError:
-                        continue
+        trials = []
+        for value in iter_json_values(raw):
+            if isinstance(value, list):
+                trials.extend(value)
+            elif isinstance(value, dict):
+                trials.append(value)
     except Exception as e:
         print(f"  Warning: could not parse {fpath.name}: {e}")
         return []
@@ -98,12 +123,26 @@ def summarize_jatos(jatos_dir: pathlib.Path) -> pd.DataFrame:
     """
     One row per prolific_pid seen anywhere in the JATOS export, summarizing
     what's known about that participant's session: whether a 'started'
-    marker exists, the last progress/screen reached (by time_elapsed order
-    within whichever file(s) mention them -- a participant CAN legitimately
-    span multiple files/study-results, e.g. the General-Single-link
-    reload-then-restart pattern from chat history, so rows are pooled
-    across all files before picking the last one, not assumed to live in
-    a single file).
+    marker exists, and the last progress/screen reached.
+
+    "Last" is determined by PARSE/APPEND ORDER (a monotonic sequence number
+    assigned as rows are read), NOT by sorting on `time_elapsed` as an
+    earlier version of this function did. That was a real bug, caught
+    against a real MindProbe export: the 'started'/'finished'/'terminated'
+    marker rows (timeline-builder.js's started marker, finish-session.js's
+    completion marker) carry no `time_elapsed` field at all, since they're
+    not jsPsych trials -- sorting by time_elapsed with NaN-first shoved
+    both the started marker AND the finished marker to the front of each
+    participant's group together, so `.iloc[-1]` picked the last REAL
+    trial instead of the finished marker that actually came after it. Since
+    JATOS receives and writes appendResultData calls in the order they
+    arrive, parse order already IS chronological order -- no need for
+    time_elapsed at all for this purpose. A participant CAN legitimately
+    span multiple files/study-results (e.g. the General-Single-link
+    reload-then-restart pattern from chat history); files are processed in
+    sorted filename order, which is a reasonable but not airtight
+    assumption about which file came first if a participant's data is
+    split across more than one.
     """
     json_files = sorted(jatos_dir.rglob('*.json'))
     if not json_files:
@@ -112,6 +151,7 @@ def summarize_jatos(jatos_dir: pathlib.Path) -> pd.DataFrame:
         sys.exit(f"No JATOS export files (*.json or *.txt) found under {jatos_dir}")
 
     all_rows = []
+    seq = 0
     for fpath in json_files:
         for t in parse_jatos_participant_file(fpath):
             all_rows.append({
@@ -124,18 +164,16 @@ def summarize_jatos(jatos_dir: pathlib.Path) -> pd.DataFrame:
                 'progress':     t.get('progress'),
                 'time_elapsed': t.get('time_elapsed'),
                 'source_file':  fpath.name,
+                'seq':          seq,
             })
+            seq += 1
 
     if not all_rows:
         sys.exit(f"Found {len(json_files)} file(s) under {jatos_dir} but none contained parseable trial rows.")
 
     df = pd.DataFrame(all_rows)
     df['time_elapsed'] = pd.to_numeric(df['time_elapsed'], errors='coerce')
-    # Sort so "last" (via .iloc[-1] below) means chronologically last within
-    # whatever file(s) a participant appears in. Rows missing time_elapsed
-    # sort first (NaN), which only matters for the tiny number of legacy
-    # rows predating time_elapsed being recorded on every screen.
-    df = df.sort_values(['prolific_pid', 'time_elapsed'], na_position='first')
+    df = df.sort_values(['prolific_pid', 'seq'])
 
     summary_rows = []
     for pid, g in df.groupby('prolific_pid'):
