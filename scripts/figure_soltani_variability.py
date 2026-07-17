@@ -81,6 +81,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style, pvalue_to_stars
+from utils.participant_filters import filter_participants
 
 TASK_ROWS     = ["binary", "continuous"]  # standing row-order convention
 PREFIX_LENGTH = 4
@@ -191,7 +192,9 @@ def _plot_panel_crosstask(ax, bin_std: pd.DataFrame, cont_std: pd.DataFrame) -> 
     wide = pd.DataFrame({"binary": b[both], "continuous": c[both]})
 
     if len(wide) < 2:
-        ax.text(0.5, 0.5, "No pids completed both tasks",
+        msg = ("No pids completed both tasks" if len(wide) == 0
+              else f"Only {len(wide)} pid completed both tasks (need >=2 to plot)")
+        ax.text(0.5, 0.5, msg,
                 ha="center", va="center", transform=ax.transAxes,
                 color="0.5", style="italic")
         return
@@ -223,9 +226,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results_file", type=str, default="task_results_pilot1.pkl",
                         help="Filename under data/ produced by task/parse_results.py")
+    parser.add_argument("--skip_filters", action="store_true",
+                        help="Skip utils/participant_filters exclusion (default: applied)")
     args = parser.parse_args()
 
     df = pd.read_pickle(data_path(args.results_file))
+    if not args.skip_filters:
+        df = filter_participants(df, verbose=True)
     apply_style()
 
     fig, axes = plt.subplots(

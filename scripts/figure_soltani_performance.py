@@ -70,6 +70,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
 from utils.binary_transform import apply_binary_transform
+from utils.participant_filters import filter_participants
 
 TASK_ROWS   = ["binary", "continuous"]  # row order convention: binary on top,
                                           # continuous on bottom (for this and
@@ -213,9 +214,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results_file", type=str, default="task_results_pilot1.pkl",
                         help="Filename under data/ produced by task/parse_results.py")
+    parser.add_argument("--skip_filters", action="store_true",
+                        help="Skip utils/participant_filters exclusion (default: applied)")
     args = parser.parse_args()
 
     df = pd.read_pickle(data_path(args.results_file))
+    if not args.skip_filters:
+        df = filter_participants(df, verbose=True)
 
     apply_style()
     pal = get_palette(2)
