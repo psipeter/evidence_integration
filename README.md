@@ -488,14 +488,8 @@ and current per-item status)
 
 ```bash
 npm run build:continuous && npm run build:binary
-python task/generate_jzip.py --max-workers 30   # generates evidence-integration-{task}.jzip
+python task/generate_jzip.py   # generates evidence-integration-{task}.jzip
 ```
-
-`--max-workers` sets a hard JATOS-side cap on total GeneralSingle workers
-for the batch (a backstop independent of Prolific's own participant-slot
-count) -- pass your intended sample size plus a small margin, not omitted
-(omitting it leaves the batch unlimited; a warning prints but the build
-still proceeds).
 
 Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**. The
 batch now only accepts **GeneralSingle** workers (previously all five JATOS

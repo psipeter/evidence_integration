@@ -3,8 +3,8 @@
 Build production assets and package JATOS study archives (.jzip) for MindProbe.
 
 Usage (from repo root or task/):
-    python task/generate_jzip.py --max-workers 30
-    python task/generate_jzip.py --skip-build --max-workers 30   # package existing dist-* only
+    python task/generate_jzip.py
+    python task/generate_jzip.py --skip-build   # package existing dist-* only
 
 UUIDs are freshly generated EVERY run (see STUDIES below) -- deliberately,
 not an oversight. JATOS matches studies by UUID, not filename or content: importing
@@ -198,9 +198,20 @@ STUDIES = {
                         "active": True,
                         "maxActiveMembers": None,
                         "maxTotalMembers": None,
-                        # Filled in from --max-workers in main() below --
-                        # left as None here at module-definition time since
-                        # STUDIES is built before argparse runs.
+                        # Deliberately left unbounded (None), not a
+                        # --max-workers CLI flag as an earlier revision of
+                        # this script had. Considered and dropped: Prolific's
+                        # own "Places" participant cap is the intended
+                        # control for over-recruitment, and a JATOS-side
+                        # ceiling here was never confirmed to have caught
+                        # anything in this project's actual past incidents --
+                        # it would only help against Prolific's own slot
+                        # management failing outright, which is a different
+                        # (and unconfirmed) risk from the repeat-submission
+                        # problem GeneralSingle above actually addresses.
+                        # "+/- a few concurrent submissions" is an accepted
+                        # risk, not something this script tries to guard
+                        # against.
                         "maxTotalWorkers": None,
                         "allowedWorkerTypes": list(ALLOWED_WORKER_TYPES),
                         "comments": None,
@@ -299,7 +310,7 @@ def package_study(name: str, spec: dict) -> Path:
     batch = spec["jas"]["data"]["batchList"][0]
     print(f"  {name}: {out_path.name} ({size_kb:.0f} KiB, {n_files} assets)")
     print(f"    uuid: {study_uuid}  (fresh this run -- will import as a NEW MindProbe study, not overwrite an existing one)")
-    print(f"    allowedWorkerTypes: {batch['allowedWorkerTypes']}, maxTotalWorkers: {batch['maxTotalWorkers']}")
+    print(f"    allowedWorkerTypes: {batch['allowedWorkerTypes']}")
     return out_path
 
 
@@ -316,39 +327,9 @@ def main() -> None:
         default="both",
         help="Which study archive(s) to generate (default: both)",
     )
-    parser.add_argument(
-        "--max-workers",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "Hard cap on total GeneralSingle workers JATOS will ever accept "
-            "for this batch (jas batchList.maxTotalWorkers) -- a server-side "
-            "backstop independent of Prolific's own participant-slot count/"
-            "pause timing. Set this to your intended sample size plus a "
-            "small margin (not exactly N -- Prolific's own cap is still the "
-            "primary control; this is a defense-in-depth ceiling, not the "
-            "mechanism you tune per-run). Omitting this leaves the batch "
-            "UNLIMITED, matching the previous default -- a warning is "
-            "printed (not a build failure) if you don't set it, since "
-            "unlike the showEndPage check above this isn't a correctness "
-            "invariant, just a strongly recommended safety net."
-        ),
-    )
     args = parser.parse_args()
 
     assert_show_end_page_disabled()
-
-    if args.max_workers is None:
-        print(
-            "WARNING: --max-workers not set -- this batch will accept an "
-            "UNLIMITED number of GeneralSingle workers. Pass --max-workers N "
-            "to set a hard JATOS-side cap (recommended for any real "
-            "Prolific deployment, pilot or full study)."
-        )
-    else:
-        for spec in STUDIES.values():
-            spec["jas"]["data"]["batchList"][0]["maxTotalWorkers"] = args.max_workers
 
     if not shutil.which("npm"):
         sys.exit("npm not found on PATH")

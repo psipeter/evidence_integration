@@ -1167,10 +1167,8 @@ of what changed and, importantly, what's still unverified:
   `"trial 7/24"`, `"end"`) so a row can be read at a glance without
   downloading and parsing the file.
 - **Worker type narrowed to GeneralSingle only** (`generate_jzip.py`):
-  `allowedWorkerTypes` was all five JATOS worker types with no
-  `maxTotalWorkers` cap; now just `["GeneralSingle"]`, plus a `--max-workers
-  N` CLI flag (not a hardcoded constant -- varies per deployment) that sets
-  a hard `maxTotalWorkers` ceiling. Motivated by a real JATOS maintainer
+  `allowedWorkerTypes` was all five JATOS worker types; now just
+  `["GeneralSingle"]`. Motivated by a real JATOS maintainer
   (Kristian Lange, JATOS forum) diagnosing a symptom matching this
   project's own ("Prolific shows started/completed, JATOS shows nothing
   matching") as GeneralMultiple + a non-reloadable component (this
@@ -1537,9 +1535,13 @@ Pre-deployment checklist (before Prolific production):
     point at it (same `?PROLIFIC_PID={{%PROLIFIC_PID%}}&...` suffix as
     before) -- the worker-type change alone doesn't update what's already
     pasted into Prolific.
-  - [ ] Decide and pass `--max-workers N` explicitly on the next real
-    `generate_jzip.py` build -- omitting it leaves the batch unlimited
-    (prints a warning, doesn't block).
+  - [REMOVED] `--max-workers`/`maxTotalWorkers` was considered as a
+    JATOS-side backstop, then deliberately dropped: Prolific's own "Places"
+    cap is the intended control for over-recruitment, it was never
+    confirmed to have caught anything in this project's actual past
+    incidents, and "+/- a few concurrent submissions" was explicitly
+    accepted as tolerable risk rather than something worth a code-level
+    guard.
   - [ ] Run `task/reconcile_prolific_jatos.py` against a REAL Prolific
     export at least once before relying on it -- its column-name detection
     has only been checked against a synthetic CSV, not Prolific's actual
