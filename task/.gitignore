@@ -5,4 +5,8 @@ dist-binary/
 sequences/sequences.pkl
 
 dev-results/
+# Raw pilot participant data export (colors.txt/numbers.txt) -- generated/
+# sensitive, same category as dev-results/ above, just not produced by the
+# local dev server.
+pilot1/
 task/.~lock.consent_form.doc#

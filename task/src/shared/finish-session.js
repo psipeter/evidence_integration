@@ -2,66 +2,67 @@
  * finish-session.js
  * Single shared implementation of "how does a session actually end" for
  * both exit paths (normal completion in timeline-builder.js's on_finish,
- * and early-exit in create-early-exit.js). Replaces the earlier
- * resolve-exit-url.js, which just picked a URL for jatos.endStudyAndRedirect
- * to send BOTH Prolific and non-Prolific participants to -- that turned out
- * to be broken for the non-Prolific branch (see below).
+ * and early-exit in create-early-exit.js).
  *
- * Real Prolific participants: jatos.endStudyAndRedirect to the Prolific
- * completion URL. This is an EXTERNAL domain (app.prolific.com), entirely
- * outside anything JATOS itself controls access to.
+ * SAVE-THEN-END-THEN-REDIRECT, EXPLICITLY GATED (see chat history's
+ * "leaked through" investigation -- Prolific showing completions with no
+ * matching JATOS data): the previous version called
+ * jatos.endStudyAndRedirect(url, data) / jatos.endStudy(data, ...) directly.
+ * Tracing those through jatos.js's own source (not just its docs -- this
+ * project has been burned by jatos.js docs being wrong twice before, see
+ * CLAUDE.md) showed that the actual result-data upload and the small
+ * "/end" ajax call that jatos.endStudy* waits on are two INDEPENDENT
+ * requests. Nothing in the old call site confirmed the data upload had
+ * actually succeeded before treating the session as finished and
+ * redirecting a real Prolific participant to their completion code.
  *
- * Everyone else (local dev/test AND non-Prolific JATOS/MindProbe pilots):
- * NO redirect at all -- confirmed via a REAL pilot run that redirecting to
- * a same-origin confirmation page (the old public/exit-complete.html) after
- * ending the study fails on real JATOS: "You tried to access the file
- * .../exit-complete.html but it seems you have no access rights." Best
- * explanation: jatos.endStudyAndRedirect ends/closes the session as part of
- * its own execution, and by the time the browser's follow-up navigation to
- * that file actually fires, JATOS's access-control layer sees the session
- * is no longer active and rejects the request for that study asset --
- * unlike the Prolific case, which was never subject to that check at all
- * since it's not a JATOS-served file in the first place. Confirmation is
- * shown via a DOM update in the CURRENTLY loaded page instead -- nothing
- * new is ever fetched from JATOS past this point, so there's no
- * session-closed access boundary to cross. jatos.endStudy(data) (single
- * call, data passed directly as the argument, no redirect) is also exactly
- * the mechanism empirically proven by task/dev-results/pilot7cont.txt.
+ * Rewritten below into an explicit chain:
+ *   jatos.appendResultData(data)          -- the actual data upload
+ *     .then(() => jatos.endStudyWithoutRedirect(true))  -- mark finished
+ *     .then(() => redirect (Prolific) / show confirmation (everyone else))
+ *     .catch(() => log + show an error screen, do NOT redirect or end)
  *
- * CORRECTNESS NOTE (found during a generate_jzip.py review, not by any
- * local/E2E test -- see below for why): per JATOS's own jatos.js reference,
- * jatos.endStudy's showEndPage parameter DEFAULTS TO TRUE -- "redirects to
- * an end page (either the JATOS default one or the one configured in the
- * study properties) after the study is finished." Calling jatos.endStudy(data)
- * with nothing else, as this file did previously, leaves that default in
- * place, meaning JATOS itself -- not this app's JS -- may redirect
- * non-Prolific participants away from the "Session complete" screen below,
- * to either JATOS's generic end page or whatever's in the study's End
- * Redirect URL property (see generate_jzip.py). This is a SEPARATE,
- * platform-level completion mechanism that the local dev shim
- * (jatos-shim.js) has no representation of at all, since it only mocks
- * jatos.js's client-side API, not server-side study-property enforcement --
- * so no amount of local/E2E testing against the shim could ever have caught
- * this; it can only be confirmed (or ruled out) by an actual MindProbe run.
- * `pilot7cont.txt` only proves data saved correctly, not that no redirect
- * happened afterward -- those are independent facts that were previously
- * conflated. Fixed below by explicitly passing showEndPage=false, so the
- * JS remains the single source of truth for redirect behavior in both
- * local dev and real JATOS, matching the "thin wrapper, identical
- * behavior" principle generate_jzip.py should also follow (see its own
- * endRedirectUrl comment).
+ * On failure at ANY step, the participant is deliberately NOT redirected
+ * to Prolific and the study is NOT marked finished -- the JATOS session is
+ * left open/incomplete rather than risking a Prolific completion with no
+ * matching real data. jatos.log records the failure so it's visible in
+ * JATOS's own server log for manual follow-up, instead of vanishing
+ * silently (which is what happened before -- neither call site attached
+ * onError/onSuccess to anything).
  *
- * SHOW_END_PAGE is exported (not just a literal `false` inline) so that
- * generate_jzip.py can import this exact module at build time and read the
- * real value, rather than either duplicating the assumption as a separate
- * constant (which could silently drift) or regex-matching this file's
- * source text (fragile to reformatting). If this ever needs to become
- * `true` for some future reason, that is a deliberate design change that
- * also requires deciding what generate_jzip.py's endRedirectUrl SHOULD be
- * at that point -- there's no automatically-correct value to derive, so
- * changing this constant alone is not sufficient; see CLAUDE.md's
- * "Two independent completion mechanisms" note for the full picture.
+ * jatos.appendResultData (not submitResultData) is used deliberately: it
+ * never overwrites, so this composes safely with the per-trial incremental
+ * appends added elsewhere (timeline-builder.js).
+ *
+ * WHAT GETS SENT HERE: only a small completion marker (prolific_pid,
+ * progress, task, pool_index), NOT jsPsych.data.get().json(). Every trial's
+ * actual data -- including the final "end"/"terminated" screen's own trial,
+ * which finishes before this function ever runs -- has already gone out
+ * individually via timeline-builder.js's on_trial_finish hook. Sending the
+ * full cumulative dataset again here would be a pure duplicate of
+ * everything already appended (append never overwrites, so it wouldn't
+ * corrupt anything, but it would double the row count and work against the
+ * whole point of appending incrementally -- a lean, quickly-inspectable
+ * JATOS results view). Append is now the ONLY way this app ever sends
+ * trial data; this function's job is solely to mark completion.
+ *
+ * Everyone non-Prolific (local dev/test AND non-Prolific JATOS/MindProbe
+ * pilots): NO redirect at all -- confirmed via a REAL pilot run that
+ * redirecting to a same-origin confirmation page (the old
+ * public/exit-complete.html) after ending the study fails on real JATOS:
+ * "You tried to access the file .../exit-complete.html but it seems you
+ * have no access rights." Confirmation is shown via a DOM update in the
+ * CURRENTLY loaded page instead -- nothing new is ever fetched from JATOS
+ * past this point, so there's no session-closed access boundary to cross.
  */
+
+// Vestigial: no longer passed anywhere below (endStudyWithoutRedirect never
+// shows a JATOS end-page by definition, so there's nothing left to
+// disable). Still exported as `false` purely so generate_jzip.py's
+// assert_show_end_page_disabled() build-time check keeps passing unchanged.
+// Clean this up together when generate_jzip.py's own batch-config edit
+// happens (see CLAUDE.md / chat history's consolidated change list) --
+// removing it here alone would break that script's import.
 export const SHOW_END_PAGE = false;
 
 /**
@@ -70,34 +71,64 @@ export const SHOW_END_PAGE = false;
  * @param {string}  opts.prolificCode  Prolific completion code (unused when !isProlific)
  * @param {*}       opts.jsPsych
  * @param {Element} [opts.contentEl]   element to update with a confirmation
- *                                      message for non-Prolific participants
- *                                      (omit only if the caller is about to
- *                                      replace it itself right after)
+ *                                      or error message (omit only if the
+ *                                      caller is about to replace it itself
+ *                                      right after)
+ * @param {string}  [opts.progress]    completion-marker label -- 'finished'
+ *                                      (normal end screen) or 'terminated'
+ *                                      (timeout-budget early exit). Callers
+ *                                      pass this explicitly rather than it
+ *                                      being inferred here, since this
+ *                                      function has no other way to tell
+ *                                      the two exit paths apart.
  */
-export function finishSession({ isProlific, prolificCode, jsPsych, contentEl }) {
-  const data = jsPsych.data.get().json();
+export function finishSession({ isProlific, prolificCode, jsPsych, contentEl, progress = 'finished' }) {
+  // First trial's data has prolific_pid/task/pool_index on it too (added via
+  // jsPsych.data.addProperties before jsPsych.run() -- see timeline-builder.js),
+  // so this doesn't depend on the participant having reached any particular
+  // point; it's just the smallest available source for these three values.
+  const first = jsPsych.data.get().values()[0] ?? {};
+  const marker = {
+    prolific_pid: first.prolific_pid ?? 'unknown',
+    progress,
+    task: first.task,
+    pool_index: first.pool_index,
+    is_prolific: isProlific,
+  };
 
-  if (isProlific) {
-    const url = `https://app.prolific.com/submissions/complete?cc=${prolificCode}`;
-    jatos.endStudyAndRedirect(url, data);
-    return;
-  }
-
-  if (contentEl) {
-    contentEl.innerHTML = `
-      <div class="screen-wrap" style="text-align:center;">
-        <h2>Session complete</h2>
-        <p style="margin-top:1rem;font-size:1.4rem;color:#555;">
-          Your data has been saved. You may now close this window.
-        </p>
-      </div>`;
-  }
-  // (data, successful=true, message=undefined, showEndPage=SHOW_END_PAGE) --
-  // SHOW_END_PAGE=false is the actual fix; successful/message are passed
-  // through as their own documented defaults rather than left to chance,
-  // since jatos.js checks each positional argument independently and this
-  // is the only way to reach the 4th one. See the module docstring's
-  // CORRECTNESS NOTE for why this matters, and why SHOW_END_PAGE is a named
-  // export rather than an inline literal here.
-  jatos.endStudy(data, true, undefined, SHOW_END_PAGE);
+  jatos.appendResultData(marker)
+    .then(() => jatos.endStudyWithoutRedirect(true))
+    .then(() => {
+      if (isProlific) {
+        window.location.href = `https://app.prolific.com/submissions/complete?cc=${prolificCode}`;
+        return;
+      }
+      if (contentEl) {
+        contentEl.innerHTML = `
+          <div class="screen-wrap" style="text-align:center;">
+            <h2>Session complete</h2>
+            <p style="margin-top:1rem;font-size:1.4rem;color:#555;">
+              Your data has been saved. You may now close this window.
+            </p>
+          </div>`;
+      }
+    })
+    .catch((err) => {
+      // Deliberately NOT redirecting and NOT retrying here -- see module
+      // docstring. The participant sees this on-screen; the failure is
+      // also logged server-side (jatos.log) so it's visible in JATOS's own
+      // results/log for manual follow-up, rather than only visible to a
+      // participant who may just close the tab.
+      jatos.log(`finishSession: save/end FAILED for prolific_pid=${marker.prolific_pid}: ${err}`);
+      if (contentEl) {
+        contentEl.innerHTML = `
+          <div class="screen-wrap" style="text-align:center;">
+            <h2>Something went wrong saving your data</h2>
+            <p style="margin-top:1rem;font-size:1.4rem;color:#555;">
+              Please do not close this window. If this message persists,
+              contact the researcher.
+            </p>
+          </div>`;
+      }
+    });
 }

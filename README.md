@@ -478,25 +478,48 @@ and current per-item status)
 - [DONE] Full 6-way browser/task E2E matrix -- 48/48 passing (8/8 each)
 - [PENDING] A genuinely full completion run via real Prolific preview (not
   just early-exit) -- the one real-platform path not yet exercised
+- [PENDING, this session, UNVERIFIED against real JATOS] Incremental
+  per-trial saving, save-then-end-then-redirect gating, and the
+  GeneralSingle-only worker-type switch -- see CLAUDE.md's "CURRENT
+  ARCHITECTURE" note for the full list of what changed and what's still
+  unconfirmed (in particular: whether MindProbe's JATOS version even has
+  `jatos.endStudyWithoutRedirect`)
 
 ```bash
 npm run build:continuous && npm run build:binary
-python task/generate_jzip.py   # generates evidence-integration-{task}.jzip
+python task/generate_jzip.py --max-workers 30   # generates evidence-integration-{task}.jzip
 ```
 
-Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**.
+`--max-workers` sets a hard JATOS-side cap on total GeneralSingle workers
+for the batch (a backstop independent of Prolific's own participant-slot
+count) -- pass your intended sample size plus a small margin, not omitted
+(omitting it leaves the batch unlimited; a warning prints but the build
+still proceeds).
+
+Import each `.jzip` into MindProbe: Studies → **+** → **Import Study**. The
+batch now only accepts **GeneralSingle** workers (previously all five JATOS
+worker types) -- grab the General Single link from MindProbe's Worker &
+Batch Manager and use that as the Prolific Study URL (same
+`?PROLIFIC_PID={{%PROLIFIC_PID%}}&STUDY_ID=...&SESSION_ID=...` suffix as
+before).
 
 ### Prolific rollout plan
 
 - Publish both studies **simultaneously**; no inter-study screening filter
 - **Free task ordering** — natural counterbalancing via Prolific dashboard
-- Set both to **auto-approve** so second task appears immediately after first
+- Set both to **MANUAL approve** (changed this session from auto-approve) --
+  every submission is reviewed before payment, which is also what makes the
+  "NO JATOS DATA AT ALL" / "STUCK" cases from `reconcile_prolific_jatos.py`
+  (see "Data format" below) actionable rather than already-paid by the time
+  they're noticed
 - End screen: *"one half of a two-part study — look for the other on your dashboard"*
 - **Payment:** $10 for normal completion, $3 for the screen-out/early-exit path
-- **Non-completions:** request return (not rejection) — slot reopens
+- **Non-completions:** request return (not rejection) — slot reopens; Prolific
+  also supports rejecting for "gave no study data" specifically, if caught
+  before its 21-day auto-approval window
 - **Partial compensation:** participants who reach 3 timeouts in one trial receive
   partial payment via the per-task `earlyExit` code in `PROLIFIC_CODES`
-  (timeline-builder.js)
+  (timeline-builder.js) -- appears in JATOS results as `progress: 'terminated'`
 - **Academic discount:** use Dartmouth institutional email for 33.3% platform fee discount
 - **Device restriction:** desktop-only in Prolific study settings
 
@@ -529,3 +552,28 @@ Older (pre-pool) export files remain parseable -- `pool_index` comes back
 missing/NaN with a printed warning rather than crashing.
 
 Both tasks share the same output file — use `df[df.task == 'continuous']` to split.
+
+**Every row now also carries a `progress` field** (e.g. `"welcome"`,
+`"tutorial 2/4"`, `"trial 7/24"`, `"finished"`, `"terminated"`) and has
+`stimulus`/`button_html` (rendered HTML/CSS) stripped -- see CLAUDE.md's
+"CURRENT ARCHITECTURE" note. `parse_results.py` itself is unaffected (still
+filters to `screen='observation'`), but the raw JATOS export is now
+scannable by eye without downloading anything.
+
+**Reconciling Prolific vs. JATOS**: `task/reconcile_prolific_jatos.py`
+cross-references a Prolific submissions-export CSV against a JATOS results
+export and flags every participant as OK / TERMINATED / STUCK / NO JATOS
+DATA AT ALL / pilot-ignore, for manual review under the manual-approve
+workflow above:
+
+```bash
+python task/reconcile_prolific_jatos.py \
+    --jatos_dir <path_to_jatos_export> \
+    --prolific_csv <path_to_prolific_export.csv> \
+    --output reconciliation_report.csv
+```
+
+Verified against synthetic fixtures only so far -- not yet run against a
+real Prolific export (its column-name detection is a best guess at
+Prolific's current CSV headers; override with `--prolific-id-col` etc. if
+it picks the wrong one).

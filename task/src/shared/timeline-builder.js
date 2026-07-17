@@ -94,6 +94,61 @@ export function poolIndexForParticipant(participantId, poolSize) {
   return hash % poolSize;
 }
 
+// Trial-data keys that carry rendered HTML/CSS (jsPsych's own
+// html-button-response stimulus markup, button_html) rather than actual
+// tracking/response data -- stripped from every appended row so the raw
+// JATOS results view stays scannable. Extend this list if any other
+// plugin is found stashing rendered markup under a different key.
+const STRIP_KEYS = ['stimulus', 'button_html'];
+
+/**
+ * toLeanRow -- reshapes one trial's data object for appendResultData:
+ * prolific_pid and progress promoted to the front (so they're the first
+ * thing visible in JATOS's raw results view without scrolling), HTML/CSS
+ * bearing keys dropped, everything else passed through unchanged.
+ */
+function toLeanRow(trialData, progress) {
+  const { prolific_pid, ...rest } = trialData;
+  for (const key of STRIP_KEYS) delete rest[key];
+  return { prolific_pid, progress, ...rest };
+}
+
+/**
+ * progressLabel -- human-readable "how far did they get" string for one
+ * trial, computed from its own screen/trial/observation tags (see
+ * build-*.js / plugin-*.js for where each screen name is set, and
+ * build-trial-timeline.js's module docstring for the trial-loop shape).
+ * Used to populate the `progress` field on every appended row so a JATOS
+ * results row can be scanned at a glance without downloading and parsing
+ * the full file.
+ */
+function progressLabel(trialData, nTutorialObs, nTrials) {
+  const { screen, trial, observation } = trialData;
+  switch (screen) {
+    case 'welcome':
+    case 'consent':
+    case 'end':
+      return screen;
+    case 'tutorial_intro':
+    case 'tutorial_iti':
+    case 'tutorial_observation':
+      return `tutorial ${observation + 1}/${nTutorialObs}`;
+    case 'tutorial_summary':
+      return 'tutorial summary';
+    case 'timeout_demo':
+      return 'timeout demo';
+    case 'inter_trial_reset':
+      return trial < 0 ? 'starting trials' : `trial ${trial + 1}/${nTrials}`;
+    case 'iti':
+    case 'iti_replay':
+    case 'observation':
+    case 'inter_trial':
+      return `trial ${trial + 1}/${nTrials}`;
+    default:
+      return screen ?? 'unknown';
+  }
+}
+
 export function buildAndRun(cfg) {
   const {
     taskType = 'continuous',
@@ -121,6 +176,14 @@ export function buildAndRun(cfg) {
   // onLoad calls back immediately (nothing async to wait for locally), so
   // this wrapper is a no-op timing-wise outside real JATOS.
   jatos.onLoad(() => {
+
+  // Forwards uncaught JS errors/unhandled promise rejections and
+  // console.error/warn calls to JATOS's own server-side log. Previously
+  // NOTHING did this -- a failure anywhere in the app was invisible past
+  // the participant's own browser console (see finish-session.js's own
+  // history for how much that cost when diagnosing lost data). Harmless
+  // if it never fires.
+  jatos.catchAndLogErrors();
 
   const isBinary = taskType === 'binary';
   // "Resolved" prefix distinguishes these task-specific selections from the
@@ -167,6 +230,30 @@ export function buildAndRun(cfg) {
       if (trial?.data?.trial != null)       document.body.dataset.trial       = String(trial.data.trial);
       if (trial?.data?.observation != null) document.body.dataset.observation = String(trial.data.observation);
     },
+    // Fires after EVERY trial (welcome, consent, each tutorial step, each
+    // real observation, ITI/BTI resets -- everything) and appends that
+    // trial's own data to JATOS immediately, rather than only sending
+    // anything at the very end (finish-session.js). This is what makes a
+    // participant who abandons mid-session leave behind an identifiable,
+    // timestamped trail up to wherever they stopped, instead of nothing at
+    // all -- see chat history's "leaked through" investigation. Fire-and-
+    // forget: not awaited, so it never adds latency to the task itself;
+    // failures are logged via jatos.log rather than silently dropped.
+    // `trialResult` is normally already the plain per-trial object jsPsych
+    // 8 passes to on_trial_finish, but the `.values()` guard covers any
+    // jsPsych version/context where it's wrapped in a DataCollection
+    // instead, so this doesn't silently break on a version bump.
+    on_trial_finish: (trialResult) => {
+      const trialData = (trialResult && typeof trialResult.values === 'function')
+        ? trialResult.values()[0]
+        : trialResult;
+      const progress = progressLabel(trialData, tutorialValues.length, sequences.length);
+      jatos.appendResultData(
+        toLeanRow(trialData, progress),
+        undefined,
+        (err) => jatos.log(`per-trial append failed (screen=${trialData?.screen}): ${err}`),
+      );
+    },
     on_finish: () => {
       // Guard against the timeline's own "natural end" firing this before the
       // participant ever sees/clicks a button: once the timeout budget is
@@ -197,6 +284,7 @@ export function buildAndRun(cfg) {
         prolificCode: PROLIFIC_CODES[taskType].completion,
         jsPsych,
         contentEl: document.querySelector('#jspsych-content'),
+        progress: 'finished',
       });
     },
   });
@@ -210,6 +298,29 @@ export function buildAndRun(cfg) {
   const poolIndex = poolIndexForParticipant(participantId, sequencesPool.length);
   const sequences  = sequencesPool[poolIndex];
   jsPsych.data.addProperties({ prolific_pid: participantId, task: taskType, pool_index: poolIndex });
+
+  // "Started" marker -- appended HERE, before jsPsych.run() and therefore
+  // before even the welcome screen's own on_trial_finish append below, so
+  // it captures every participant who opened the link at all, including
+  // anyone who closes the tab before clicking past welcome (the one case
+  // per-trial appends alone can't cover, since they only fire once a
+  // trial actually finishes). jatos.addJatosIds adds JATOS's own
+  // studyResultId/workerId/etc alongside prolific_pid -- a JATOS-native
+  // cross-reference key that doesn't depend on prolific_pid having
+  // arrived intact. Added ONLY on this one marker row, not on every
+  // per-trial row below, to avoid repeating a dozen mostly-constant
+  // fields on every single trial.
+  jatos.appendResultData(
+    jatos.addJatosIds({
+      prolific_pid: participantId,
+      progress: 'started',
+      task: taskType,
+      pool_index: poolIndex,
+      is_prolific: isProlific,
+    }),
+    undefined,
+    (err) => jatos.log(`initial "started" append failed for prolific_pid=${participantId}: ${err}`),
+  );
 
   const earlyExit = createEarlyExit({
     beforeUnloadHandler,

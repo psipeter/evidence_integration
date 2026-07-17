@@ -66,7 +66,7 @@ export function createEarlyExit({ beforeUnloadHandler, isProlific, jsPsych, earl
         // hit a DIFFERENT failure on real JATOS (session already closed),
         // not a harmless no-op.
         btn.disabled = true;
-        finishSession({ isProlific, prolificCode: earlyExitCode, jsPsych, contentEl: el });
+        finishSession({ isProlific, prolificCode: earlyExitCode, jsPsych, contentEl: el, progress: 'terminated' });
       }, { once: true });
     };
 

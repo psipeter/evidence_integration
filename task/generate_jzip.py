@@ -3,8 +3,8 @@
 Build production assets and package JATOS study archives (.jzip) for MindProbe.
 
 Usage (from repo root or task/):
-    python task/generate_jzip.py
-    python task/generate_jzip.py --skip-build   # package existing dist-* only
+    python task/generate_jzip.py --max-workers 30
+    python task/generate_jzip.py --skip-build --max-workers 30   # package existing dist-* only
 
 UUIDs are freshly generated EVERY run (see STUDIES below) -- deliberately,
 not an oversight. JATOS matches studies by UUID, not filename or content: importing
@@ -65,6 +65,41 @@ TASK_DIR = Path(__file__).resolve().parent
 # finish-session.js), fill in a real, freshly-confirmed URL at that time --
 # don't reuse a stale one found lying around.
 UNUSED_END_REDIRECT_URL = ""
+
+# Only GeneralSingle is allowed on the batch now (previously: GeneralMultiple,
+# GeneralSingle, Jatos, PersonalMultiple, PersonalSingle -- all five at once).
+# This is a deliberate narrowing, not just a default:
+#
+# - Prolific gives every participant the SAME Study URL (with PROLIFIC_PID
+#   etc. appended as query params) -- there's no per-participant JATOS
+#   "Personal" link in this workflow, so PersonalSingle/PersonalMultiple were
+#   never actually reachable here; Jatos-type workers are for the researcher
+#   running the study from JATOS's own GUI, not participants. Neither was
+#   ever the real risk -- narrowing to just what's actually used closes the
+#   door on ever accidentally handing out the wrong link type from JATOS's
+#   admin panel and having the batch silently accept it.
+# - GeneralMultiple vs GeneralSingle was the real decision (see chat
+#   history): a real JATOS maintainer (Kristian Lange, on the JATOS forum)
+#   diagnosed a symptom matching this project's own "Prolific shows
+#   started/completed, JATOS shows nothing matching" investigation as
+#   GeneralMultiple + a non-reloadable component (this study's components
+#   are all reloadable: False) -- a reload/retry for ANY reason ends that
+#   run as FAIL, and because the link is GeneralMultiple, nothing stops the
+#   participant from just reopening the same link and starting a brand-new,
+#   independent, possibly-empty run. GeneralSingle converts that from a
+#   SILENT duplicate/empty run into a LOUD "Study can be done only once"
+#   error -- worse for that one participant's experience, but far easier to
+#   notice and reconcile than an invisible data gap.
+# - This does NOT need a matching code change: GeneralSingle still supports
+#   the dynamic PROLIFIC_PID query-param workflow (confirmed against JATOS's
+#   own "Use Prolific" doc, which lists General Single alongside General
+#   Multiple as the two supported options) -- nothing in timeline-builder.js
+#   changes because of this.
+#
+# If a future Prolific study genuinely needs repeat access (e.g. a
+# multi-session design), that's a deliberate exception to revisit here, not
+# something to default back to broad access for.
+ALLOWED_WORKER_TYPES = ["GeneralSingle"]
 
 
 def assert_show_end_page_disabled() -> None:
@@ -163,14 +198,11 @@ STUDIES = {
                         "active": True,
                         "maxActiveMembers": None,
                         "maxTotalMembers": None,
+                        # Filled in from --max-workers in main() below --
+                        # left as None here at module-definition time since
+                        # STUDIES is built before argparse runs.
                         "maxTotalWorkers": None,
-                        "allowedWorkerTypes": [
-                            "GeneralMultiple",
-                            "GeneralSingle",
-                            "Jatos",
-                            "PersonalMultiple",
-                            "PersonalSingle",
-                        ],
+                        "allowedWorkerTypes": list(ALLOWED_WORKER_TYPES),
                         "comments": None,
                         "jsonData": None,
                     }
@@ -214,13 +246,7 @@ STUDIES = {
                         "maxActiveMembers": None,
                         "maxTotalMembers": None,
                         "maxTotalWorkers": None,
-                        "allowedWorkerTypes": [
-                            "GeneralMultiple",
-                            "GeneralSingle",
-                            "Jatos",
-                            "PersonalMultiple",
-                            "PersonalSingle",
-                        ],
+                        "allowedWorkerTypes": list(ALLOWED_WORKER_TYPES),
                         "comments": None,
                         "jsonData": None,
                     }
@@ -270,8 +296,10 @@ def package_study(name: str, spec: dict) -> Path:
     size_kb = out_path.stat().st_size / 1024
     n_files = sum(1 for _ in dist_dir.rglob("*") if _.is_file())
     study_uuid = spec["jas"]["data"]["uuid"]
+    batch = spec["jas"]["data"]["batchList"][0]
     print(f"  {name}: {out_path.name} ({size_kb:.0f} KiB, {n_files} assets)")
     print(f"    uuid: {study_uuid}  (fresh this run -- will import as a NEW MindProbe study, not overwrite an existing one)")
+    print(f"    allowedWorkerTypes: {batch['allowedWorkerTypes']}, maxTotalWorkers: {batch['maxTotalWorkers']}")
     return out_path
 
 
@@ -288,9 +316,39 @@ def main() -> None:
         default="both",
         help="Which study archive(s) to generate (default: both)",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Hard cap on total GeneralSingle workers JATOS will ever accept "
+            "for this batch (jas batchList.maxTotalWorkers) -- a server-side "
+            "backstop independent of Prolific's own participant-slot count/"
+            "pause timing. Set this to your intended sample size plus a "
+            "small margin (not exactly N -- Prolific's own cap is still the "
+            "primary control; this is a defense-in-depth ceiling, not the "
+            "mechanism you tune per-run). Omitting this leaves the batch "
+            "UNLIMITED, matching the previous default -- a warning is "
+            "printed (not a build failure) if you don't set it, since "
+            "unlike the showEndPage check above this isn't a correctness "
+            "invariant, just a strongly recommended safety net."
+        ),
+    )
     args = parser.parse_args()
 
     assert_show_end_page_disabled()
+
+    if args.max_workers is None:
+        print(
+            "WARNING: --max-workers not set -- this batch will accept an "
+            "UNLIMITED number of GeneralSingle workers. Pass --max-workers N "
+            "to set a hard JATOS-side cap (recommended for any real "
+            "Prolific deployment, pilot or full study)."
+        )
+    else:
+        for spec in STUDIES.values():
+            spec["jas"]["data"]["batchList"][0]["maxTotalWorkers"] = args.max_workers
 
     if not shutil.which("npm"):
         sys.exit("npm not found on PATH")

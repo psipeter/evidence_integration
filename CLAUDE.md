@@ -1117,7 +1117,107 @@ already disclosed in the informed-consent text.
 
 ### Exit/redirect and data-saving architecture
 
-**The save mechanism**: a single call, `jatos.endStudyAndRedirect(url, data)`
+**CURRENT ARCHITECTURE (this session) -- supersedes the single-call save
+described in "The save mechanism" just below, which is kept as-is for its
+historical rationale (the data-as-argument shape it settled on is still
+used by every append below).** Prompted by a real discrepancy: more
+Prolific completions/starts than JATOS showed matching data for, well past
+an intended participant cap. Full investigation is in chat history; summary
+of what changed and, importantly, what's still unverified:
+
+- **Incremental per-trial saving, not one call at the end**
+  (`timeline-builder.js`): `on_trial_finish` (global jsPsych option) fires
+  `jatos.appendResultData` after EVERY trial -- welcome, consent, each
+  tutorial step, every real observation, ITI/BTI resets, everything.
+  Fire-and-forget (not awaited), failures logged via `jatos.log`. A
+  `"started"` marker (tagged with `jatos.addJatosIds`, giving a
+  JATOS-native `studyResultId`/`workerId` cross-reference independent of
+  `prolific_pid`) is appended before `jsPsych.run()` even starts, so a
+  participant who closes the tab before clicking past welcome still leaves
+  a trace. `jatos.catchAndLogErrors()` is also now wired in early, so
+  uncaught JS errors/rejections reach JATOS's own server log -- previously
+  NOTHING did this.
+- **`finish-session.js` no longer sends the full dataset, and gates
+  completion on a confirmed save**: rewritten from a single fire-and-forget
+  `jatos.endStudy(data)`/`endStudyAndRedirect(url, data)` call into an
+  explicit chain -- `jatos.appendResultData(marker).then(() =>
+  jatos.endStudyWithoutRedirect(true)).then(redirect/confirm).catch(log +
+  error screen, NO redirect, NOT marked finished)`. `marker` is now a small
+  `{prolific_pid, progress, task, pool_index, is_prolific}` object (not
+  `jsPsych.data.get().json()`) -- the full dataset would be a pure
+  duplicate of everything already appended per-trial, including the final
+  screen's own trial, which finishes before this function ever runs.
+  `progress` is `'finished'` (normal end) or `'terminated'` (timeout-budget
+  early exit) -- passed explicitly by each of the two call sites
+  (timeline-builder.js's `on_finish`, create-early-exit.js's button
+  handler), since `finishSession` itself has no other way to distinguish
+  them. `SHOW_END_PAGE` is still exported (`= false`) purely so
+  `generate_jzip.py`'s build check keeps passing -- it's vestigial now,
+  since `endStudyWithoutRedirect` never shows a JATOS end-page by
+  definition; see "How finish-session.js and generate_jzip.py must stay in
+  sync" below, not yet updated to reflect this.
+- **Every appended row is now lean and scannable**: `toLeanRow()` promotes
+  `prolific_pid`/`progress` to the front of the object and strips
+  `stimulus`/`button_html` (rendered HTML/CSS jsPsych's own
+  html-button-response trials carry, previously cluttering the raw JATOS
+  results view). `progressLabel()` maps each trial's `screen`/`trial`/
+  `observation` tags to a human string (`"welcome"`, `"tutorial 2/4"`,
+  `"trial 7/24"`, `"end"`) so a row can be read at a glance without
+  downloading and parsing the file.
+- **Worker type narrowed to GeneralSingle only** (`generate_jzip.py`):
+  `allowedWorkerTypes` was all five JATOS worker types with no
+  `maxTotalWorkers` cap; now just `["GeneralSingle"]`, plus a `--max-workers
+  N` CLI flag (not a hardcoded constant -- varies per deployment) that sets
+  a hard `maxTotalWorkers` ceiling. Motivated by a real JATOS maintainer
+  (Kristian Lange, JATOS forum) diagnosing a symptom matching this
+  project's own ("Prolific shows started/completed, JATOS shows nothing
+  matching") as GeneralMultiple + a non-reloadable component (this
+  project's components are all `reloadable: false`): a reload/retry for ANY
+  reason ends that run as FAIL, and GeneralMultiple lets the participant
+  just reopen the same link and start a brand-new, possibly-empty run
+  silently. GeneralSingle converts that into a LOUD "Study can be done only
+  once" error instead. **UNCONFIRMED**: this diagnosis was never actually
+  checked against this project's own JATOS results table (would show as
+  multiple Result IDs per participant, one empty/FAIL) -- it's the
+  best-evidenced hypothesis, not a proven root cause for this project's
+  specific past incidents.
+- **Deliberately NOT built**: a `jatos.batchSession`-based dedup guard, and
+  a global-error-handler-forces-a-terminate-code mechanism. Both were
+  scoped and then dropped once the workflow moved to Prolific manual-approve
+  -- a duplicate/stuck participant now just shows up for manual review
+  (see the reconciliation script below) rather than needing to be blocked
+  or force-redirected automatically.
+- **New: `task/reconcile_prolific_jatos.py`** -- cross-references a
+  Prolific submissions-export CSV against a JATOS plain-text results
+  export (every row, not just observations -- see its own docstring vs.
+  `parse_results.py`'s), outer-joined on participant ID, producing a
+  `recommendation` per participant (OK / TERMINATED / STUCK / NO JATOS DATA
+  AT ALL / pilot-ignore). Verified against five synthetic scenarios
+  covering each branch -- **NOT yet run against a real Prolific export**;
+  its Prolific column-name detection (fuzzy substring match, with
+  `--prolific-*-col` overrides) is a best guess at Prolific's current CSV
+  headers, unconfirmed against an actual downloaded file.
+- **BIGGEST OPEN RISK, genuinely unverified**: `jatos.endStudyWithoutRedirect`
+  -- per jatos.js's own reference docs, this name only exists from **v3.9.7
+  onward** (it's a rename of the older `endStudyAjax`/pre-rename name).
+  MindProbe's actual deployed JATOS version was never checked against this.
+  If it's older than 3.9.7, `finish-session.js` will throw in production
+  the moment a session tries to finish. Confirm the real version (JATOS
+  admin panel, or trigger a real end-of-session on a MindProbe pilot and
+  watch the browser console) before the next real Prolific deployment --
+  this is exactly the "local reasoning isn't enough, a real MindProbe run
+  is what actually catches these" lesson this section already has two
+  other entries for below.
+- **Nothing above has been run against a live MindProbe/Prolific session
+  yet** -- verified only by tracing the real jatos.js source, local
+  `node --check` syntax checks, and synthetic fixtures. Treat this whole
+  bullet list as "implemented, logically sound, pending the same real-pilot
+  confirmation every other claim in this section required."
+
+**The save mechanism** (HISTORICAL -- describes the single-call approach in
+place before the incremental-append rework above; kept for why the
+data-as-argument shape was chosen, which the new `appendResultData` calls
+above still rely on): a single call, `jatos.endStudyAndRedirect(url, data)`
 (Prolific) or `jatos.endStudy(data)` (everyone else), with the full
 `jsPsych.data.get().json()` results passed directly as the argument. There
 is no separate `jatos.submitResultData()` call anywhere in the app code (the
@@ -1255,7 +1355,13 @@ same category of risk -- platform-enforced, invisible to local testing --
 though none are currently known to conflict with anything.
 
 **How finish-session.js and generate_jzip.py must stay in sync** (read
-this before touching either file): `generate_jzip.py`'s `UNUSED_END_REDIRECT_URL
+this before touching either file -- NOTE: as of this session, `SHOW_END_PAGE`
+is vestigial in `finish-session.js` itself, since the rewritten save-then-end
+chain calls `jatos.endStudyWithoutRedirect` directly, which never shows a
+JATOS end-page by definition; the constant is kept ONLY so the check below
+keeps passing unchanged, not because anything still passes it as an
+argument -- see "CURRENT ARCHITECTURE" above. The check itself and its
+reasoning below are otherwise unchanged): `generate_jzip.py`'s `UNUSED_END_REDIRECT_URL
 = ""` is a fixed, hardcoded value -- it is NOT derived from
 `finish-session.js` in any general sense, and there is nothing that keeps
 these two files in sync automatically beyond one narrow, explicit check.
@@ -1345,6 +1451,35 @@ the redirect bug above) -- that class of bug still needs a live MindProbe
 dry-run.
 
 Pre-deployment checklist (before Prolific production):
+  - [ ] **(this session, all unverified against real JATOS)** Confirm
+    MindProbe's actual JATOS server version supports `jatos.endStudyWithoutRedirect`
+    (v3.9.7+ per jatos.js's own reference docs) -- if it's older,
+    `finish-session.js` will throw on every session end. Check the JATOS
+    admin panel's version string, or watch the browser console during a
+    real end-of-session on a MindProbe pilot.
+  - [ ] Confirm the incremental per-trial `appendResultData` calls
+    (`timeline-builder.js`'s `on_trial_finish`) actually land in JATOS's
+    results view during a real pilot run, and that `progress`/`prolific_pid`
+    show up first as intended in the raw export.
+  - [ ] After importing a jzip built with the new `["GeneralSingle"]`-only
+    `allowedWorkerTypes`, grab the new General Single link from MindProbe's
+    Worker & Batch Manager and update each Prolific study's Study URL to
+    point at it (same `?PROLIFIC_PID={{%PROLIFIC_PID%}}&...` suffix as
+    before) -- the worker-type change alone doesn't update what's already
+    pasted into Prolific.
+  - [ ] Decide and pass `--max-workers N` explicitly on the next real
+    `generate_jzip.py` build -- omitting it leaves the batch unlimited
+    (prints a warning, doesn't block).
+  - [ ] Run `task/reconcile_prolific_jatos.py` against a REAL Prolific
+    export at least once before relying on it -- its column-name detection
+    has only been checked against a synthetic CSV, not Prolific's actual
+    current export format.
+  - [ ] Before trusting the GeneralSingle worker-type switch as the fix for
+    past "leaked through" participants, check the OLD JATOS results table
+    (from before this session's changes) for the specific fingerprint that
+    motivated it: multiple Result IDs under one participant, one of them
+    empty/FAIL -- this was never actually confirmed, only inferred from a
+    matching forum report.
   - [DONE] Confirm task/sequences/{continuous,binary}_sequences.json holds the
     intended final trial count/parameters -- 8x4 hybrid (32 trials), see
     "Sequence design" above.

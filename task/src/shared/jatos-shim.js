@@ -56,6 +56,66 @@ if (typeof jatos === 'undefined') {
       await saveData(data);
       if (onSuccess) onSuccess();
     },
+    // The two functions finish-session.js's save-then-end-then-redirect
+    // chain actually calls now (see that file's own docstring for why it
+    // moved off submitResultData/endStudy/endStudyAndRedirect below --
+    // those three are kept here unmodified since nothing else currently
+    // references them, not because they're still load-bearing).
+    //
+    // appendResultData never overwrites on real JATOS -- saveData() here
+    // doesn't distinguish append-vs-overwrite (the local dev-server just
+    // writes one file per submission), so this shim can't itself catch a
+    // future misuse that accidentally overwrites earlier real-JATOS rows.
+    // That's a real, known gap between this shim and production for this
+    // one function -- accepted deliberately, since the only thing that
+    // matters locally is that a real network round-trip happens, not
+    // byte-for-byte append semantics.
+    //
+    // NOTE: this can't simulate a save FAILURE either -- saveData() below
+    // catches its own fetch errors and returns normally rather than
+    // rethrowing, so this always resolves/calls onSuccess even if the local
+    // dev server is unreachable. Deliberately left this way (discussed and
+    // decided not worth fixing -- finish-session.js's save-then-end
+    // gating is a production-correctness concern verified against real
+    // jatos.js source, not something that needs local repro). If that
+    // ever needs testing locally, saveData would need to rethrow instead
+    // of swallowing its catch block.
+    appendResultData: async (data, onSuccess) => {
+      await saveData(data);
+      if (onSuccess) onSuccess();
+    },
+    // Real jatos.endStudyWithoutRedirect just marks the study run finished
+    // (no data argument, no redirect) -- data was already sent via the
+    // appendResultData call finish-session.js chains before this. Nothing
+    // to actually persist here locally; this only needs to resolve.
+    endStudyWithoutRedirect: async (successful, message) => {
+      console.log(`[dev mode] endStudyWithoutRedirect (successful=${successful})`);
+    },
+    // Real jatos.log just POSTs a string to JATOS's server-side log --
+    // finish-session.js's .catch() calls this on save failure. Needed here
+    // or that catch handler throws (jatos.log is not a function) before it
+    // ever reaches the innerHTML line that shows the participant an error
+    // screen -- console.log is enough locally, there's no server log to
+    // route it to.
+    log: (msg) => {
+      console.log('[dev mode] jatos.log:', msg);
+    },
+    // Real jatos.catchAndLogErrors forwards uncaught errors/rejections and
+    // console.error/warn to JATOS's own server log -- nothing to forward
+    // to locally, so this is a no-op beyond confirming it was called.
+    catchAndLogErrors: () => {
+      console.log('[dev mode] catchAndLogErrors (no-op locally)');
+    },
+    // Real jatos.addJatosIds mutates/returns obj with studyId, componentId,
+    // workerId, studyResultId, etc. Locally there's no real study/component/
+    // batch concept, so this just tags enough (workerId + a synthetic
+    // per-call studyResultId) to be visibly present and distinguishable as
+    // dev-shim output, not a faithful reproduction of every real ID field.
+    addJatosIds: (obj) => {
+      obj.workerId = jatos.workerId;
+      obj.studyResultId = 'dev_result_' + Date.now();
+      return obj;
+    },
     // Passing the results-data JSON directly as the argument here (single
     // call, no separate submitResultData) is the historically PROVEN
     // mechanism -- confirmed directly against a real downloaded MindProbe
