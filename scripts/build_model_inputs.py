@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""scripts/build_model_inputs.py — build data/task_continuous.pkl and
+data/task_binary.pkl from a parsed task_results pilot file, in the same
+tidy, per-dataset-pkl shape carrabin.pkl/yoo.pkl already use, so the
+existing fitting/models/* pipeline can be pointed at this task with no
+further schema-specific changes.
+
+Steps (see the conversation that produced this script for full rationale):
+  1. Load the parsed pilot data and apply utils.participant_filters
+     (excludes (pid, task) pairs that fail no_integration /
+     noncontingent_sign / noncontingent_magnitude) -- this is the one
+     deliberate departure from carrabin/yoo's own pipeline, which has no
+     analogous exclusion step of its own.
+  2. Keep successful attempts only (timed_out == False), dedup to one row
+     per (prolific_pid, task, trial, observation).
+  3. Map prolific_pid (str) -> a stable integer `pid`, since every
+     downstream piece of fitting/* (fit.py, submit.py, losses.py) assumes
+     `pid` is an int and queries with `==`. The mapping is built ONCE
+     across both tasks together (sorted prolific_pid -> 1, 2, 3, ...) so a
+     participant who did both tasks keeps the same integer pid in both
+     output files.
+  4. Rescale value/response from this task's native [0, 100] scale to the
+     canonical [-1, 1] scale carrabin.pkl and yoo.pkl both already use
+     (verified directly: both files' value/response columns range exactly
+     -1..1). Continuous: value and response both go through x' = x/50 - 1.
+     Binary: `value` is already +-1 (blue/red), so only `response` gets
+     rescaled the same way. Doing this means models/math_models.py's
+     EXISTING _run_carrabin/_run_yoo model code (including clip bounds)
+     can be reused verbatim for this task's data -- no scale-specific
+     branching needed anywhere downstream.
+  5. Keep qid (both tasks) and true_p (binary)/true_mean (continuous) as
+     supplementary columns beyond carrabin/yoo's own minimal schemas --
+     harmless extras, not read by any existing dispatch code, but useful
+     for later validation. true_p is left on its native [0,1] probability
+     scale (matching carrabin's own true_p convention exactly); true_mean
+     is rescaled the same way as value/response for consistency.
+
+Run:
+    python scripts/build_model_inputs.py
+    python scripts/build_model_inputs.py --results_file task_results_pilot2.pkl
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from utils.paths import data_path
+from utils.participant_filters import filter_participants
+
+
+def _dedup_successful(df: pd.DataFrame, task: str) -> pd.DataFrame:
+    sub = df[(df["task"] == task) & (df["timed_out"] == False)]
+    return sub.drop_duplicates(subset=["prolific_pid", "trial", "observation"])
+
+
+def _rescale_0_100_to_neg1_1(x: pd.Series) -> pd.Series:
+    return x / 50.0 - 1.0
+
+
+def build(results_file: str) -> None:
+    df = pd.read_pickle(data_path(results_file))
+    df = filter_participants(df, verbose=True)
+
+    # One pid mapping shared across both tasks, so a participant who did
+    # both tasks gets the same integer pid in both output files.
+    all_pids = sorted(df["prolific_pid"].unique())
+    pid_map = {p: i + 1 for i, p in enumerate(all_pids)}
+    print(f"\nBuilt pid mapping for {len(pid_map)} prolific_pids "
+          f"(1..{len(pid_map)})")
+
+    # ── continuous -> data/task_continuous.pkl ──────────────────────────
+    cont = _dedup_successful(df, "continuous").copy()
+    cont["pid"] = cont["prolific_pid"].map(pid_map).astype("int64")
+    cont["value"] = _rescale_0_100_to_neg1_1(cont["value"])
+    cont["response"] = _rescale_0_100_to_neg1_1(cont["response"])
+    cont["true_mean"] = _rescale_0_100_to_neg1_1(cont["true_mean"])
+    cont = cont[["pid", "trial", "observation", "qid", "value", "response", "true_mean"]]
+    for col in ["trial", "observation", "qid"]:
+        cont[col] = cont[col].astype("int64")
+    cont = cont.sort_values(["pid", "trial", "observation"]).reset_index(drop=True)
+
+    # ── binary -> data/task_binary.pkl ──────────────────────────────────
+    binr = _dedup_successful(df, "binary").copy()
+    binr["pid"] = binr["prolific_pid"].map(pid_map).astype("int64")
+    binr["response"] = _rescale_0_100_to_neg1_1(binr["response"])
+    # value is already +-1 (blue/red) -- no rescale needed
+    binr = binr[["pid", "trial", "observation", "qid", "value", "response", "true_p"]]
+    for col in ["trial", "observation", "qid", "value"]:
+        binr[col] = binr[col].astype("int64")
+    binr = binr.sort_values(["pid", "trial", "observation"]).reset_index(drop=True)
+
+    for name, out in [("task_continuous", cont), ("task_binary", binr)]:
+        path = data_path(f"{name}.pkl")
+        out.to_pickle(path)
+        print(f"\n{name}: {len(out)} rows, {out['pid'].nunique()} pids "
+              f"-> {path}")
+        print(f"  value range:    [{out['value'].min():.3f}, {out['value'].max():.3f}]")
+        print(f"  response range: [{out['response'].min():.3f}, {out['response'].max():.3f}]")
+        print(out.head(3).to_string(index=False))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--results_file", type=str, default="task_results_pilot2.pkl",
+                        help="Filename under data/ produced by task/parse_results.py")
+    args = parser.parse_args()
+    build(args.results_file)

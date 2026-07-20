@@ -9,6 +9,7 @@ dev-results/
 # sensitive, same category as dev-results/ above, just not produced by the
 # local dev server.
 pilot1/
+pilot2/
 # Throwaway 2-trial test jzips (manual JATOS testing only, built from a
 # disposable test pool, never the real production sequences) -- distinct
 # from the real tracked evidence-integration-{continuous,binary}.jzip.

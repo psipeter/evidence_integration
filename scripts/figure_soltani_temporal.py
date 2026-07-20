@@ -6,15 +6,20 @@ Layout: 2x5
   Row 1 = task-binary, Row 2 = task-continuous (standing row-order
   convention for soltani figures — see figure_soltani_performance.py)
   Col 1 (~carrabin temporal panel A / T1): Performance error (RMSE to
-    ground truth) vs observation. Human: mean +/- SEM across pids, with a
-    flag to overlay each pid as a thin grey line (no CI/band on those).
-    Mean model: bootstrapped mean +/- CI pooled directly across every
-    sequence a participant actually saw (see _plot_panel_performance's
-    inline comment for why this differs from the Human aggregation).
+    ground truth) vs observation. Both Human and Mean: mean +/- SEM across
+    pids (per-pid RMSE computed first, collapsing over that pid's own
+    trials, then mean/SEM across pids) — same hierarchy for both lines, so
+    they're directly comparable. Human additionally has a flag to overlay
+    each pid as a thin grey line (no CI/band on those).
   Col 2 (~yoo temporal panel B / T2): Mean |Delta response| vs observation
-    (obs >= 2, matching yoo's own threshold), via sns.lineplot(errorbar=
-    "ci"). Same individual-pid overlay flag as col 1, and the same Mean
-    model line (computed on real stimuli, pooled across all sequences).
+    (obs >= 1, the first observation with a defined delta given this
+    task's 0-indexed `observation` column -- NOT the >=2 yoo itself uses,
+    which is correct only for yoo's own 1-indexed `observation`; see
+    _abs_delta_long's inline comment). Same hierarchy as col 1 for
+    both Human and Mean: per-pid mean |delta| first (collapsed over that
+    pid's own trials), then mean +/- SEM across pids — this is also what
+    the individual-pid overlay flag plots directly, so the thin lines and
+    the bold line are guaranteed to agree with each other.
   Col 3 (~carrabin temporal's RENDERED panel C / T3): Residual variance
     growth — std(resid | obs, qid) vs observation.
   Col 4 (~carrabin temporal's RENDERED panel D / T4): Within-trial lag-k
@@ -138,33 +143,38 @@ def _plot_panel_performance(ax, df_task: pd.DataFrame, task: str,
         for pid, g in rmse_df.groupby("prolific_pid"):
             g = g.sort_values("observation")
             ax.plot(g["observation"], g["rmse"], color=INDIV_COLOR,
-                    lw=0.6, alpha=0.5, zorder=1)
+                    lw=0.6, alpha=0.5, zorder=2)
         handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
         labels.append("Individual pids")
 
     ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR,
             lw=1.8, ms=5, zorder=3)
     ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
-                    stats["mean"] + stats["sem"], color=HUMAN_COLOR, alpha=0.2, zorder=2)
+                    stats["mean"] + stats["sem"], color=HUMAN_COLOR, alpha=0.2, zorder=1)
 
     # Mean model: computed on the same real stimulus sequences participants
-    # actually saw (not resimulated). Pooled directly across every
-    # (prolific_pid, trial) sequence — NOT pre-averaged per pid first, unlike
-    # the Human line above — via a bootstrapped RMSE estimator, since the
-    # model has no meaningful "individual differences" of its own; its only
-    # source of across-sequence spread is which real stimuli each sequence
-    # happened to contain.
+    # actually saw (not resimulated), aggregated with the SAME hierarchy as
+    # the Human line above — per-pid RMSE first (collapsed over that pid's
+    # own trials), then mean +/- SEM across pids. (An earlier version of
+    # this line pooled every individual sequence flat and bootstrapped a CI
+    # over that, which is a different quantity — sequence-draw variability
+    # rather than between-participant variability — and gave a misleadingly
+    # tight band; see the conversation that prompted this fix.)
     mean_df = _mean_model_response(df_task, task)
     gt_df = (_dedup(df_task)
              .assign(ground_truth=lambda d: _ground_truth(d, task))
              [["prolific_pid", "trial", "observation", "ground_truth"]])
     mean_merged = mean_df.merge(gt_df, on=["prolific_pid", "trial", "observation"])
-    mean_merged["sq_err"] = (mean_merged["model_response"] - mean_merged["ground_truth"]) ** 2
+    mean_rmse_df = (mean_merged.assign(
+                        sq_err=(mean_merged["model_response"] - mean_merged["ground_truth"]) ** 2)
+                    .groupby(["prolific_pid", "observation"])["sq_err"].mean()
+                    .apply(np.sqrt).reset_index(name="rmse"))
+    mean_stats = mean_rmse_df.groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index()
 
-    sns.lineplot(data=mean_merged, x="observation", y="sq_err",
-                estimator=lambda a: float(np.sqrt(np.mean(a))),
-                errorbar="ci", color=mean_color, lw=1.8, ax=ax,
-                label="_nolegend_", zorder=4)
+    ax.plot(mean_stats["observation"], mean_stats["mean"], "o-", color=mean_color,
+            lw=1.8, ms=5, zorder=4)
+    ax.fill_between(mean_stats["observation"], mean_stats["mean"] - mean_stats["sem"],
+                    mean_stats["mean"] + mean_stats["sem"], color=mean_color, alpha=0.2, zorder=1)
     handles.append(Line2D([0], [0], color=mean_color, lw=1.8))
     labels.append("Mean")
 
@@ -187,37 +197,56 @@ def _abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
     if not pieces:
         return pd.DataFrame(columns=["prolific_pid", "trial", "observation", "delta"])
     out = pd.concat(pieces, ignore_index=True)
-    return out[out["observation"] >= 2].dropna(subset=["delta"])  # matches yoo's own threshold
+    # First defined delta is at observation=1 (response[1]-response[0]),
+    # since this task's `observation` is 0-indexed. NOT >=2 -- that's only
+    # correct for yoo's own 1-indexed `observation` column, where the first
+    # defined delta lands at observation=2. Blindly copying yoo's literal
+    # threshold without adjusting for the different indexing dropped one
+    # extra valid point; caught and fixed after a direct question about it.
+    return out[out["observation"] >= 1].dropna(subset=["delta"])
 
 
 def _plot_panel_delta(ax, df_task: pd.DataFrame, task: str,
                       show_individual: bool, mean_color: str) -> None:
+    # Per-pid mean |delta| first (pooling over that pid's own trials) —
+    # this is both what the thin individual-pid lines plot directly AND
+    # what the bold Human line's mean/SEM is computed from, so the two are
+    # guaranteed consistent (same convention as _plot_panel_performance).
     delta_df = _abs_delta_long(_dedup(df_task))
+    per_pid = (delta_df.groupby(["prolific_pid", "observation"])["delta"]
+              .mean().reset_index())
+    stats = per_pid.groupby("observation")["delta"].agg(["mean", "sem"]).reset_index()
 
-    sns.lineplot(data=delta_df, x="observation", y="delta", color=HUMAN_COLOR,
-                lw=1.8, errorbar="ci", ax=ax, label="_nolegend_", zorder=3)
-
-    handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=1.8, alpha=0.65)]
+    handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=1.8)]
     labels = ["Human"]
 
     if show_individual:
-        indiv = (delta_df.groupby(["prolific_pid", "observation"])["delta"]
-                 .mean().reset_index())
-        for pid, g in indiv.groupby("prolific_pid"):
+        for pid, g in per_pid.groupby("prolific_pid"):
             g = g.sort_values("observation")
             ax.plot(g["observation"], g["delta"], color=INDIV_COLOR,
-                    lw=0.6, alpha=0.5, zorder=1)
+                    lw=0.6, alpha=0.5, zorder=2)
         handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
         labels.append("Individual pids")
 
-    # Mean model: same real stimulus sequences, same |delta| definition,
-    # pooled directly across all sequences (see _plot_panel_performance's
-    # comment for why this isn't pre-averaged per pid).
+    ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR,
+            lw=1.8, ms=5, zorder=3)
+    ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
+                    stats["mean"] + stats["sem"], color=HUMAN_COLOR, alpha=0.2, zorder=1)
+
+    # Mean model: identical hierarchy — per-pid mean |delta| first, then
+    # mean +/- SEM across pids. Same real stimulus sequences, same |delta|
+    # definition as Human above.
     mean_resp = _mean_model_response(df_task, task).rename(
         columns={"model_response": "response"})
     mean_delta_df = _abs_delta_long(mean_resp)
-    sns.lineplot(data=mean_delta_df, x="observation", y="delta", color=mean_color,
-                lw=1.8, errorbar="ci", ax=ax, label="_nolegend_", zorder=4)
+    mean_per_pid = (mean_delta_df.groupby(["prolific_pid", "observation"])["delta"]
+                   .mean().reset_index())
+    mean_stats = mean_per_pid.groupby("observation")["delta"].agg(["mean", "sem"]).reset_index()
+
+    ax.plot(mean_stats["observation"], mean_stats["mean"], "o-", color=mean_color,
+            lw=1.8, ms=5, zorder=4)
+    ax.fill_between(mean_stats["observation"], mean_stats["mean"] - mean_stats["sem"],
+                    mean_stats["mean"] + mean_stats["sem"], color=mean_color, alpha=0.2, zorder=1)
     handles.append(Line2D([0], [0], color=mean_color, lw=1.8))
     labels.append("Mean")
 
@@ -326,7 +355,8 @@ def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
             pieces.append(g)
         delta = pd.concat(pieces, ignore_index=True)
         curve = delta.groupby("observation")["delta"].mean().dropna()
-        curve = curve[curve.index >= 2]
+        curve = curve[curve.index >= 1]  # first defined delta (0-indexed obs); see
+        # _abs_delta_long's comment -- same yoo-1-indexed-vs-ours-0-indexed fix
         if len(curve) < 3:
             continue
         n = curve.index.values.astype(float)

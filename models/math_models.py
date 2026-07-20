@@ -9,6 +9,13 @@ and collected into a single tabular format with model ``response`` values.
 
 - **carrabin:** ``Mean`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive), ``PrimacyRecency`` (flexible temporal weighting)
 - **yoo:** ``Mean`` (optimal), ``PrimacyRecency`` (flexible temporal weighting), ``RL`` (naive)
+- **task_binary, task_continuous:** ``Mean``, ``LeakyIntegrator``, ``PrimacyRecency``, ``RL_lambda`` --
+  together intended to capture recency-biased (non-shrinking-learning-rate)
+  behavior. Human data for these two comes from
+  ``scripts/build_model_inputs.py``, which rescales this task's native
+  [0,100] response/value scale to the [-1,1] scale carrabin/yoo already use,
+  so the SAME model implementations below (just under new dataset names)
+  apply with no scale-specific changes.
 - diederen models archived in ``archive/misc/math_models_diederen.py``
 
 **Unified interface**
@@ -17,7 +24,7 @@ Every model is run via ``run(params, save=False, trials=None)``. Required keys i
 ``params`` for all models:
 
 - ``"model_type"`` (``str``): one of the strings above for the chosen dataset
-- ``"dataset"`` (``str``): ``"carrabin"`` or ``"yoo"``
+- ``"dataset"`` (``str``): ``"carrabin"``, ``"yoo"``, ``"task_binary"``, or ``"task_continuous"``
 - ``"pid"`` (``int``): participant id
 
 Additional keys are model-specific (learning rates, noise scales, etc.). The
@@ -36,6 +43,14 @@ _CARRABIN_MODELS = frozenset(
     {"Mean", "NoisyCounting", "RL", "RL_lambda", "LeakyIntegrator", "PrimacyRecency"}
 )
 _YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_lambda"})
+# Deliberately narrower than carrabin/yoo: these four together are meant to
+# capture recency-biased (non-shrinking-learning-rate) behavior, which is
+# what this task's human data actually looks like (see the conversation that
+# motivated this integration) -- no NoisyCounting (carrabin-specific) or
+# plain fixed-alpha RL (superseded by RL_lambda, which subsumes it at
+# lambda_->0) for either task dataset.
+_TASK_BINARY_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
+_TASK_CONTINUOUS_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -90,9 +105,14 @@ def _validate_model_dataset(model_type: str, dataset: str) -> None:
         allowed = _CARRABIN_MODELS
     elif dataset == "yoo":
         allowed = _YOO_MODELS
+    elif dataset == "task_binary":
+        allowed = _TASK_BINARY_MODELS
+    elif dataset == "task_continuous":
+        allowed = _TASK_CONTINUOUS_MODELS
     else:
         raise ValueError(
-            f"Unknown dataset {dataset!r}; expected 'carrabin' or 'yoo'"
+            f"Unknown dataset {dataset!r}; expected one of "
+            f"'carrabin', 'yoo', 'task_binary', 'task_continuous'"
         )
     if model_type not in allowed:
         raise ValueError(
@@ -108,6 +128,10 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_carrabin(params, human_pid, trial, step)
     if dataset == "yoo":
         return _run_yoo(params, human_pid, trial, step)
+    if dataset == "task_binary":
+        return _run_task_binary(params, human_pid, trial, step)
+    if dataset == "task_continuous":
+        return _run_task_continuous(params, human_pid, trial, step)
     raise AssertionError("unreachable")
 
 
@@ -237,5 +261,62 @@ def _run_yoo(
     if model_type == "PrimacyRecency":
         return _run_primacy_recency(params, values, observation, trial)
     raise AssertionError("unreachable")
+
+
+def _run_task_common(
+    params: dict, human_pid: pd.DataFrame, trial: int, observation: int
+) -> float:
+    """Shared implementation for task_binary and task_continuous.
+
+    Both datasets are rescaled to the same [-1, 1] scale carrabin/yoo use
+    (see scripts/build_model_inputs.py) and both only support the same
+    four model types (_TASK_BINARY_MODELS == _TASK_CONTINUOUS_MODELS), so
+    there is no dataset-specific branching needed here -- unlike
+    _run_carrabin vs _run_yoo (which differ in which extra models they
+    support: NoisyCounting for carrabin, plain RL for both but not these
+    two), task_binary and task_continuous are identical at this level.
+    _run_task_binary/_run_task_continuous below are kept as separate named
+    entry points (rather than calling this directly from _run()) so the
+    two datasets can diverge later without disturbing the dispatch in
+    _run() -- e.g. if a task_binary-specific or task_continuous-specific
+    model is ever added.
+    """
+    model_type = params["model_type"]
+    subdata = human_pid.query("trial == @trial & observation <= @observation")
+    values = subdata["value"].to_numpy()
+
+    if model_type == "Mean":
+        return float(np.mean(values))
+    if model_type == "RL_lambda":
+        alpha_0 = float(params["alpha_0"])
+        lambda_ = float(params["lambda_"])
+        expectation = 0.0
+        for n, value in enumerate(values, start=1):
+            alpha = alpha_0 / (n ** lambda_)
+            error = value - expectation
+            expectation += alpha * error
+            expectation = float(np.clip(expectation, -1, 1))
+        return expectation
+    if model_type == "LeakyIntegrator":
+        gamma = float(params["gamma"])
+        v = 0.0
+        for x in values:
+            v = gamma * v + (1.0 - gamma) * float(x)
+        return float(np.clip(v, -1.0, 1.0))
+    if model_type == "PrimacyRecency":
+        return _run_primacy_recency(params, values, observation, trial)
+    raise AssertionError("unreachable")
+
+
+def _run_task_binary(
+    params: dict, human_pid: pd.DataFrame, trial: int, observation: int
+) -> float:
+    return _run_task_common(params, human_pid, trial, observation)
+
+
+def _run_task_continuous(
+    params: dict, human_pid: pd.DataFrame, trial: int, observation: int
+) -> float:
+    return _run_task_common(params, human_pid, trial, observation)
 
 

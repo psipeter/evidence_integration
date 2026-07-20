@@ -93,29 +93,13 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
     "task_continuous": {
         "Mean": {},
-        "RL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+        "LeakyIntegrator": {
+            "gamma": (0.001, 0.999, 0.001),
         },
-        "NEF": {
-            **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},
+        "PrimacyRecency": {
+            "eps_p": (0.001, 1.0, 0.001),
+            "eps_r": (0.001, 1.0, 0.001),
         },
-    },
-    "task_binary": {
-        "Mean": {},
-        "RL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-        },
-        "NEF": {
-            **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},
-        },
-    },
-
-    "task_continuous": {
-        "Mean": {},
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
@@ -127,29 +111,13 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
     "task_binary": {
         "Mean": {},
-        "RL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+        "LeakyIntegrator": {
+            "gamma": (0.001, 0.999, 0.001),
         },
-        "NEF": {
-            **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 500},  # 15 obs/trial
+        "PrimacyRecency": {
+            "eps_p": (0.001, 1.0, 0.001),
+            "eps_r": (0.001, 1.0, 0.001),
         },
-    },
-
-    "task_continuous": {
-        "Mean": {},
-        "RL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-        },
-        "NEF": {
-            **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
-        },
-    },
-    "task_binary": {
-        "Mean": {},
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
