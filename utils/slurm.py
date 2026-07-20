@@ -16,7 +16,6 @@ DEFAULT_TIME_LIMITS = {
     "PrimacyRecency": "2:0:0",
     "PearceHall": "2:0:0",
     "NEF": "72:0:0",
-    "NEF": "72:0:0",
 }
 
 DEFAULT_MEM_LIMITS = {
@@ -28,7 +27,6 @@ DEFAULT_MEM_LIMITS = {
     "LeakyIntegrator": "4G",
     "PrimacyRecency": "8G",
     "PearceHall": "8G",
-    "NEF": "32G",
     "NEF": "32G",
 }
 
