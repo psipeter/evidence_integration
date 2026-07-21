@@ -413,13 +413,125 @@ input[type="range"].slider-last::-moz-range-thumb {
   padding: 4px;
   width: 100%;
   height: 100%;
-  min-height: 120px;
+  /* Shrunk from 120px (chat history) to give the tracker below more of the
+     right column's height -- the tracker's own numbers were enlarged at
+     the same time (see .tut-tracker-num* below); since dist-svg is
+     flex:1 and the tracker isn't, growing the tracker's own natural size
+     already shrinks the KDE's share automatically -- this lower floor
+     just lets that actually happen instead of being blocked by a fixed
+     minimum. */
+  min-height: 90px;
+}
+
+/* ── Tutorial observation tracker (15-slot progress row) ─────────────────
+   Lives between #dist-svg and #dist-caption in the right-hand tutorial
+   panel (see plugin-tutorial-{intro,observation}-continuous.js) -- see
+   tutorial-tracker.js's own docstring for why this exists and for the
+   underline-based (not circle-based) design below. */
+.tut-tracker-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 100%;
+  margin: 0.5rem 0;
+}
+.tut-tracker-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.tut-tracker-num {
+  display: inline-block;
+  font-weight: bold;
+  font-size: 1.1rem;
+  min-width: 1.3em;
+  text-align: center;
+  line-height: 1.3;
+  border-bottom: 2px solid #000;
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+.tut-tracker-num-settled {
+  opacity: 0.5;
+}
+.tut-tracker-num-current {
+  font-size: 1.4rem;
+  border-bottom-width: 3.5px;
+}
+.tut-tracker-num-empty {
+  color: transparent;
 }
 
 /* Slider in the tutorial uses same .slider-section/.slider-wrap as main task,
    constrained to 70vw by the parent .tutorial-wrap */
 .tutorial-wrap .slider-section {
   width: 70vw;
+}
+
+/* Standard notification colors for the tutorial's top-right box, one per
+   phase (chat history, plugin-tutorial-observation-continuous.js's
+   rightTopBoxContent) -- white (no class, default .tutorial-info-block),
+   yellow, red (blue was dropped along with phase B -- chat history).
+   Both reduce font-size vs. the 1.4rem .tutorial-info-block default:
+   RECAP_TEXT_1+RECAP_TEXT_2 combined (phase D) is two full sentences,
+   noticeably longer than a typical left-column box, so the smaller size
+   is what actually lets it fit. Red reuses the exact same colors as
+   .consent-info-box, for consistency with that existing convention rather
+   than inventing a new one. Yellow reuses the soft background:#fffbeb/
+   border:#fbbf24 pairing already used for warning-style boxes elsewhere
+   in this app. */
+.tutorial-notify-yellow {
+  background: #fffbeb;
+  border-color: #fbbf24;
+  font-size: 1rem;
+}
+.tutorial-notify-red {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #7f1d1d;
+  font-size: 1rem;
+}
+
+/* Soft-red "empty placeholder" overlay (chat history, phase D) -- covers
+   the KDE figure and tracker without touching any of the JS that still
+   populates them underneath (deliberately simpler than skipping that
+   logic for those screens -- see plugin-tutorial-observation-
+   continuous.js's own docstring). Matches .tutorial-notify-red's own
+   colors exactly -- all three right-column boxes (text + these two) now
+   read as one consistent red phase, not two different colors (previously
+   this used the same soft yellow as .tutorial-notify-yellow, mismatched
+   against the red text box above it). The top-right box is handled
+   differently during this same phase (its own text is replaced with
+   .tutorial-notify-red, not overlaid), so only these two items ever get
+   this treatment. .tutorial-hide-wrap just needs position:relative so the
+   overlay's inset:0 scopes to that ONE item, not the whole right column. */
+.tutorial-hide-wrap {
+  position: relative;
+}
+.tutorial-hidden-overlay {
+  position: absolute;
+  inset: 0;
+  background: #fef2f2;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  z-index: 10;
+}
+
+/* Tracker HIGHLIGHT during phase C (chat history) -- same colors as
+   .tutorial-notify-yellow, but its OWN class rather than combining with
+   .tutorial-info-block directly: that combination's normal 0.6rem/0.8rem
+   padding ate into the already-tight 15-slot tracker row's available
+   width, and at this phase's enlarged number size (see .tut-tracker-num*
+   above) that was enough to make adjacent slots' underlines touch and
+   read as one continuous line instead of 15 separate ones -- a real bug,
+   confirmed visually, not a hypothetical risk. This uses a much smaller
+   padding instead, so the row keeps its full working width. */
+.tutorial-tracker-highlight {
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
+  border-radius: 6px;
+  padding: 4px;
 }
 
 /* ── Tutorial title (top-center) ─────────────────────────────────────────── */

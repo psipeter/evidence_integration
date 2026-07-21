@@ -1,32 +1,48 @@
 #!/usr/bin/env python3
 """figure_soltani_temporal.py — T group figure for the soltani task/ pilot
-(task-continuous + task-binary, Prolific pilot 1).
+(task-continuous + task-binary).
 
 Layout: 2x5
   Row 1 = task-binary, Row 2 = task-continuous (standing row-order
   convention for soltani figures — see figure_soltani_performance.py)
   Col 1 (~carrabin temporal panel A / T1): Performance error (RMSE to
-    ground truth) vs observation. Both Human and Mean: mean +/- SEM across
-    pids (per-pid RMSE computed first, collapsing over that pid's own
-    trials, then mean/SEM across pids) — same hierarchy for both lines, so
-    they're directly comparable. Human additionally has a flag to overlay
-    each pid as a thin grey line (no CI/band on those).
+    ground truth) vs observation. Human always shown; pass --plot_models
+    to add all 4 fitted models (Mean, LeakyIntegrator, PrimacyRecency,
+    RL_lambda): mean +/- SEM across pids (per-pid RMSE computed first,
+    collapsing over that pid's own trials, then mean/SEM across pids) --
+    SAME hierarchy for every line, so they're directly comparable. Only
+    Human gets the individual-pid thin-line overlay
+    (--show_individual/--hide_individual); models show mean/CI only.
   Col 2 (~yoo temporal panel B / T2): Mean |Delta response| vs observation
-    (obs >= 1, the first observation with a defined delta given this
-    task's 0-indexed `observation` column -- NOT the >=2 yoo itself uses,
-    which is correct only for yoo's own 1-indexed `observation`; see
-    _abs_delta_long's inline comment). Same hierarchy as col 1 for
-    both Human and Mean: per-pid mean |delta| first (collapsed over that
-    pid's own trials), then mean +/- SEM across pids — this is also what
-    the individual-pid overlay flag plots directly, so the thin lines and
-    the bold line are guaranteed to agree with each other.
+    (obs >= 1 -- this task's `observation` is 0-indexed, unlike yoo's own
+    1-indexed column; see _abs_delta_long's inline comment). Same
+    hierarchy and same Human-only individual-pid overlay as col 1; same
+    --plot_models gate for the 4 fitted models.
   Col 3 (~carrabin temporal's RENDERED panel C / T3): Residual variance
-    growth — std(resid | obs, qid) vs observation.
+    growth -- std(resid | obs, qid) vs observation. Human only (see below).
   Col 4 (~carrabin temporal's RENDERED panel D / T4): Within-trial lag-k
-    residual autocorrelation (lag 1-3).
+    residual autocorrelation (lag 1-3). Human only.
   Col 5 (~yoo temporal panel C / T3): Split-half reliability of the
-    decay-rate lambda fitted to |Delta response| vs observation, but with
-    scatter=True (raw per-pid points shown, not just the fit line).
+    decay-rate lambda fitted to |Delta response| vs observation, with
+    scatter=True. Human only.
+
+Cols 3-5 stay Human-only in this pass -- extending them to the fitted
+models wasn't requested and isn't a simple copy of the col 1/2 pattern
+(col 3/4 need per-model residuals against a qid-conditional mean, col 5
+needs re-running the lambda power-law fit on each model's own response
+curve), so left for a follow-up if wanted.
+
+DATA SOURCE
+-----------
+Both human and model data come from data/task_continuous.pkl / data/
+task_binary.pkl and data/runs/{run_folder}/{model_type}_{dataset}_
+responses.pkl -- NOT from a raw task_results_pilot*.pkl. Participant
+filtering and the prolific_pid -> int pid mapping already happened when
+those files were built (scripts/build_model_inputs.py), and model
+responses were fit directly against them, so this script does no
+filtering itself and merges everything on integer `pid`. Both are stored
+on the canonical [-1,1] scale carrabin/yoo use; converted back to [0,100]
+here purely for readability (see _to_pct).
 
 NOTE ON CARRABIN'S "PANEL C"/"PANEL D" LABELS
 ------------------------------------------------
@@ -34,33 +50,20 @@ figure_carrabin_temporal.py's own docstring calls its autocorrelation panel
 "C (T4)" and its variance-growth panel "D (T3)", but its main() actually
 plots them in the order [A, B, D(variance growth), C(autocorrelation)], so
 the RENDERED, lettered panel C is variance growth and rendered panel D is
-autocorrelation. Columns 3/4 here follow the rendered lettering (i.e. what
-you'd see if you opened figure_carrabin_temporal.pdf), not the internal
-function names.
+autocorrelation. Columns 3/4 here follow the rendered lettering.
 
 WHY COLS 3/4 ARE RESTRICTED TO THE PREFIX REGION (observation < 4)
 ------------------------------------------------------------------------
-Same reason as figure_soltani_variability.py: this task's qid repeats are
-only identical over the first `prefix_length` (=4) observations; the
-suffix differs by design on every repeat (steered toward different
-targets). carrabin's residual-vs-qid-mean approach assumes the whole
-trial is identical across a qid's repeats, which only holds here within
-the prefix. Applying it to the full trial would fold real signal
-differences (not noise) into "residuals" for observation >= 4, so cols 3
-and 4 are computed only over observation < prefix_length. Cols 1, 2, and 5
-don't rely on qid-repeated identical inputs (they use ground truth,
-trial-to-trial response change, and whole-trial decay dynamics
-respectively) and so are NOT prefix-restricted.
-
-PLACEHOLDER NOTE
-----------------
-Human only — no models have been fit to this pilot yet. Once fits exist,
-add model overlays to every panel, mirroring figure_carrabin_temporal.py /
-figure_yoo_temporal.py.
+This task's qid repeats are only identical over the first `prefix_length`
+(=4) observations; the suffix differs by design on every repeat (steered
+toward different targets). carrabin's residual-vs-qid-mean approach
+assumes the whole trial is identical across a qid's repeats, which only
+holds here within the prefix.
 
 Run:
     python scripts/figure_soltani_temporal.py
-    python scripts/figure_soltani_temporal.py --results_file task_results_pilot1.pkl
+    python scripts/figure_soltani_temporal.py --plot_models
+    python scripts/figure_soltani_temporal.py --plot_models --run_folder soltani_math_v1
     python scripts/figure_soltani_temporal.py --hide_individual
 """
 from __future__ import annotations
@@ -79,110 +82,108 @@ from scipy.stats import pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import FIGURES_DIR, data_path
-from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
-from utils.binary_transform import apply_binary_transform
-from utils.participant_filters import filter_participants
+from utils.paths import FIGURES_DIR, data_path, resolve_run_folder
+from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, pvalue_to_stars
 
-TASK_ROWS     = ["binary", "continuous"]  # standing row-order convention
-PREFIX_LENGTH = 4
-HUMAN_COLOR   = "0.3"
-INDIV_COLOR   = "0.7"
-MIN_CORR_N    = 3  # matches the threshold used in figure_soltani_variability.py
-
-
-def _dedup(df: pd.DataFrame) -> pd.DataFrame:
-    """Successful attempts only, one row per (pid, trial, observation)."""
-    return (df[df["timed_out"] == False]
-            .drop_duplicates(subset=["prolific_pid", "trial", "observation"]))
+TASK_ROWS        = ["binary", "continuous"]  # standing row-order convention
+DATASET_FOR_TASK = {"binary": "task_binary", "continuous": "task_continuous"}
+MODEL_ORDER       = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]
+PREFIX_LENGTH     = 4
+HUMAN_COLOR       = "0.3"
+INDIV_COLOR       = "0.7"
+MIN_CORR_N        = 3  # matches the threshold used in figure_soltani_variability.py
 
 
-def _ground_truth(sub: pd.DataFrame, task: str) -> pd.Series:
-    return sub["true_p"] * 100 if task == "binary" else sub["true_mean"]
-
-
-def _mean_model_response(df_task: pd.DataFrame, task: str) -> pd.DataFrame:
-    """Deterministic Mean-model response (expanding mean of the observed
-    `value` stream, with the same Laplace-smoothing binary_transform used
-    elsewhere for task_binary) computed on every (prolific_pid, trial,
-    observation) sequence actually shown in this pilot — i.e. real stimuli,
-    not resimulated. One row per sequence step; columns
-    [prolific_pid, trial, observation, model_response]."""
-    sub = (df_task[["prolific_pid", "trial", "observation", "value"]]
-           .drop_duplicates(subset=["prolific_pid", "trial", "observation"])
-           .sort_values(["prolific_pid", "trial", "observation"]))
-    sub["model_mean"] = (sub.groupby(["prolific_pid", "trial"])["value"]
-                          .expanding().mean().values)
+def _to_pct(x: pd.Series, task: str) -> pd.Series:
     if task == "binary":
-        smoothed = apply_binary_transform(
-            sub[["observation"]].assign(response=sub["model_mean"]), "task_binary")
-        sub["model_response"] = (smoothed["response"].to_numpy() + 1) / 2 * 100
-    else:
-        sub["model_response"] = sub["model_mean"]
-    return sub[["prolific_pid", "trial", "observation", "model_response"]]
+        return (x + 1.0) / 2.0 * 100.0
+    return (x + 1.0) * 50.0
+
+
+def _load_human(task: str) -> pd.DataFrame:
+    """Human data for one task, on the [0,100] percent scale. Columns:
+    [pid, trial, observation, qid, response, ground_truth]."""
+    dataset = DATASET_FOR_TASK[task]
+    df = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    out = df[["pid", "trial", "observation", "qid"]].copy()
+    out["response"] = _to_pct(df["response"], task)
+    out["ground_truth"] = (df["true_p"] * 100.0 if task == "binary"
+                           else _to_pct(df["true_mean"], task))
+    return out
+
+
+def _load_model(task: str, model_type: str, run_dir: Path) -> pd.DataFrame | None:
+    """Fitted model responses for one (task, model_type), on the [0,100]
+    percent scale. Returns None if not yet fit/collected. Columns:
+    [pid, trial, observation, response]."""
+    dataset = DATASET_FOR_TASK[task]
+    resp_path = run_dir / f"{model_type}_{dataset}_responses.pkl"
+    if not resp_path.exists():
+        print(f"  (missing {resp_path.name} -- skipping {model_type} for {task})")
+        return None
+    df = pd.read_pickle(resp_path)
+    out = df[["pid", "trial", "observation"]].copy()
+    out["response"] = _to_pct(df["response"], task)
+    return out
 
 
 # ── Col 1 — Performance error vs observation ────────────────────────────────
 
-def _rmse_per_pid_obs(df_task: pd.DataFrame, task: str) -> pd.DataFrame:
-    sub = _dedup(df_task).assign(ground_truth=lambda d: _ground_truth(d, task))
-    return (sub.assign(sq_err=(sub["response"] - sub["ground_truth"]) ** 2)
-            .groupby(["prolific_pid", "observation"])["sq_err"].mean()
+def _rmse_per_pid_obs(df: pd.DataFrame, ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """df: [pid,trial,observation,response]; ground_truth: adds
+    [pid,trial,observation,ground_truth]. Returns per-(pid,observation) RMSE."""
+    merged = df.merge(ground_truth[["pid", "trial", "observation", "ground_truth"]],
+                      on=["pid", "trial", "observation"])
+    return (merged.assign(sq_err=(merged["response"] - merged["ground_truth"]) ** 2)
+            .groupby(["pid", "observation"])["sq_err"].mean()
             .apply(np.sqrt).reset_index(name="rmse"))
 
 
-def _plot_panel_performance(ax, df_task: pd.DataFrame, task: str,
-                            show_individual: bool, mean_color: str) -> None:
-    rmse_df = _rmse_per_pid_obs(df_task, task)
-    stats = rmse_df.groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index()
+def _plot_hierarchical_line(ax, per_pid_df: pd.DataFrame, value_col: str,
+                            color: str, zorder_line: float, zorder_fill: float) -> None:
+    """Shared plotting for the mean+/-SEM-across-pids line: per_pid_df must
+    already be one row per (pid, observation) -- i.e. already collapsed
+    over that pid's own trials -- for both Human and every model, so all
+    lines in a panel use the identical hierarchy."""
+    stats = per_pid_df.groupby("observation")[value_col].agg(["mean", "sem"]).reset_index()
+    ax.plot(stats["observation"], stats["mean"], "o-", color=color,
+            lw=1.8, ms=5, zorder=zorder_line)
+    ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
+                    stats["mean"] + stats["sem"], color=color, alpha=0.2, zorder=zorder_fill)
+
+
+def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
+                            show_individual: bool, palette: dict) -> None:
+    rmse_df = _rmse_per_pid_obs(human[["pid", "trial", "observation", "response"]], human)
 
     handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=1.8)]
     labels = ["Human"]
 
     if show_individual:
-        for pid, g in rmse_df.groupby("prolific_pid"):
+        for pid, g in rmse_df.groupby("pid"):
             g = g.sort_values("observation")
             ax.plot(g["observation"], g["rmse"], color=INDIV_COLOR,
                     lw=0.6, alpha=0.5, zorder=2)
         handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
         labels.append("Individual pids")
 
-    ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR,
-            lw=1.8, ms=5, zorder=3)
-    ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
-                    stats["mean"] + stats["sem"], color=HUMAN_COLOR, alpha=0.2, zorder=1)
+    _plot_hierarchical_line(ax, rmse_df, "rmse", HUMAN_COLOR, zorder_line=3, zorder_fill=1)
 
-    # Mean model: computed on the same real stimulus sequences participants
-    # actually saw (not resimulated), aggregated with the SAME hierarchy as
-    # the Human line above — per-pid RMSE first (collapsed over that pid's
-    # own trials), then mean +/- SEM across pids. (An earlier version of
-    # this line pooled every individual sequence flat and bootstrapped a CI
-    # over that, which is a different quantity — sequence-draw variability
-    # rather than between-participant variability — and gave a misleadingly
-    # tight band; see the conversation that prompted this fix.)
-    mean_df = _mean_model_response(df_task, task)
-    gt_df = (_dedup(df_task)
-             .assign(ground_truth=lambda d: _ground_truth(d, task))
-             [["prolific_pid", "trial", "observation", "ground_truth"]])
-    mean_merged = mean_df.merge(gt_df, on=["prolific_pid", "trial", "observation"])
-    mean_rmse_df = (mean_merged.assign(
-                        sq_err=(mean_merged["model_response"] - mean_merged["ground_truth"]) ** 2)
-                    .groupby(["prolific_pid", "observation"])["sq_err"].mean()
-                    .apply(np.sqrt).reset_index(name="rmse"))
-    mean_stats = mean_rmse_df.groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index()
+    for i, (model_type, mdf) in enumerate(models.items()):
+        model_rmse_df = _rmse_per_pid_obs(mdf, human)
+        color = palette[model_type]
+        _plot_hierarchical_line(ax, model_rmse_df, "rmse", color,
+                                zorder_line=4 + i, zorder_fill=1)
+        handles.append(Line2D([0], [0], color=color, lw=1.8))
+        labels.append(model_type)
 
-    ax.plot(mean_stats["observation"], mean_stats["mean"], "o-", color=mean_color,
-            lw=1.8, ms=5, zorder=4)
-    ax.fill_between(mean_stats["observation"], mean_stats["mean"] - mean_stats["sem"],
-                    mean_stats["mean"] + mean_stats["sem"], color=mean_color, alpha=0.2, zorder=1)
-    handles.append(Line2D([0], [0], color=mean_color, lw=1.8))
-    labels.append("Mean")
-
+    obs_ticks = sorted(set(human["observation"]) | {o for m in models.values()
+                                                    for o in m["observation"]})
     ax.set_xlabel("Observation")
     ax.set_ylabel("Performance error vs ground truth (RMSE)")
-    ax.set_xticks(sorted(df_task["observation"].unique()))
+    ax.set_xticks(obs_ticks)
     ax.set_ylim(bottom=0)
-    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
+    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, ncol=1)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -190,101 +191,91 @@ def _plot_panel_performance(ax, df_task: pd.DataFrame, task: str,
 
 def _abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
     pieces = []
-    for (_, _), g in df.groupby(["prolific_pid", "trial"], sort=False):
+    for (_, _), g in df.groupby(["pid", "trial"], sort=False):
         g = g.sort_values("observation").copy()
         g["delta"] = g["response"].diff().abs()
         pieces.append(g)
     if not pieces:
-        return pd.DataFrame(columns=["prolific_pid", "trial", "observation", "delta"])
+        return pd.DataFrame(columns=["pid", "trial", "observation", "delta"])
     out = pd.concat(pieces, ignore_index=True)
     # First defined delta is at observation=1 (response[1]-response[0]),
     # since this task's `observation` is 0-indexed. NOT >=2 -- that's only
     # correct for yoo's own 1-indexed `observation` column, where the first
-    # defined delta lands at observation=2. Blindly copying yoo's literal
-    # threshold without adjusting for the different indexing dropped one
-    # extra valid point; caught and fixed after a direct question about it.
+    # defined delta lands at observation=2.
     return out[out["observation"] >= 1].dropna(subset=["delta"])
 
 
-def _plot_panel_delta(ax, df_task: pd.DataFrame, task: str,
-                      show_individual: bool, mean_color: str) -> None:
-    # Per-pid mean |delta| first (pooling over that pid's own trials) —
+def _plot_panel_delta(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
+                      show_individual: bool, palette: dict) -> None:
+    # Per-pid mean |delta| first (pooling over that pid's own trials) --
     # this is both what the thin individual-pid lines plot directly AND
-    # what the bold Human line's mean/SEM is computed from, so the two are
-    # guaranteed consistent (same convention as _plot_panel_performance).
-    delta_df = _abs_delta_long(_dedup(df_task))
-    per_pid = (delta_df.groupby(["prolific_pid", "observation"])["delta"]
+    # what every bold line's mean/SEM is computed from, so thin lines and
+    # bold lines are guaranteed consistent, and every model uses the exact
+    # same hierarchy as Human.
+    delta_df = _abs_delta_long(human[["pid", "trial", "observation", "response"]])
+    per_pid = (delta_df.groupby(["pid", "observation"])["delta"]
               .mean().reset_index())
-    stats = per_pid.groupby("observation")["delta"].agg(["mean", "sem"]).reset_index()
 
     handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=1.8)]
     labels = ["Human"]
 
     if show_individual:
-        for pid, g in per_pid.groupby("prolific_pid"):
+        for pid, g in per_pid.groupby("pid"):
             g = g.sort_values("observation")
             ax.plot(g["observation"], g["delta"], color=INDIV_COLOR,
                     lw=0.6, alpha=0.5, zorder=2)
         handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
         labels.append("Individual pids")
 
-    ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR,
-            lw=1.8, ms=5, zorder=3)
-    ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
-                    stats["mean"] + stats["sem"], color=HUMAN_COLOR, alpha=0.2, zorder=1)
+    _plot_hierarchical_line(ax, per_pid, "delta", HUMAN_COLOR, zorder_line=3, zorder_fill=1)
 
-    # Mean model: identical hierarchy — per-pid mean |delta| first, then
-    # mean +/- SEM across pids. Same real stimulus sequences, same |delta|
-    # definition as Human above.
-    mean_resp = _mean_model_response(df_task, task).rename(
-        columns={"model_response": "response"})
-    mean_delta_df = _abs_delta_long(mean_resp)
-    mean_per_pid = (mean_delta_df.groupby(["prolific_pid", "observation"])["delta"]
-                   .mean().reset_index())
-    mean_stats = mean_per_pid.groupby("observation")["delta"].agg(["mean", "sem"]).reset_index()
-
-    ax.plot(mean_stats["observation"], mean_stats["mean"], "o-", color=mean_color,
-            lw=1.8, ms=5, zorder=4)
-    ax.fill_between(mean_stats["observation"], mean_stats["mean"] - mean_stats["sem"],
-                    mean_stats["mean"] + mean_stats["sem"], color=mean_color, alpha=0.2, zorder=1)
-    handles.append(Line2D([0], [0], color=mean_color, lw=1.8))
-    labels.append("Mean")
+    obs_ticks = set(human["observation"])
+    for i, (model_type, mdf) in enumerate(models.items()):
+        model_delta_df = _abs_delta_long(mdf)
+        model_per_pid = (model_delta_df.groupby(["pid", "observation"])["delta"]
+                        .mean().reset_index())
+        color = palette[model_type]
+        _plot_hierarchical_line(ax, model_per_pid, "delta", color,
+                                zorder_line=4 + i, zorder_fill=1)
+        handles.append(Line2D([0], [0], color=color, lw=1.8))
+        labels.append(model_type)
+        obs_ticks |= set(mdf["observation"])
 
     ax.set_xlabel("Observation")
     ax.set_ylabel("Mean |\u0394response|")
-    ax.set_xticks(sorted(df_task["observation"].unique()))
+    ax.set_xticks(sorted(obs_ticks))
     ax.set_ylim(bottom=0)
-    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
+    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, ncol=1)
     sns.despine(ax=ax, top=True, right=True)
 
 
 # ── Cols 3/4 shared helper — residuals within the prefix region only ───────
+# Human only in this pass -- see module docstring.
 
-def _add_resid_prefix(df_task: pd.DataFrame) -> pd.DataFrame:
-    sub = _dedup(df_task)
-    sub = sub[sub["observation"] < PREFIX_LENGTH]
-    means = (sub.groupby(["prolific_pid", "observation", "qid"])["response"]
+def _add_resid_prefix(human: pd.DataFrame) -> pd.DataFrame:
+    sub = human[human["observation"] < PREFIX_LENGTH]
+    means = (sub.groupby(["pid", "observation", "qid"])["response"]
              .mean().reset_index().rename(columns={"response": "qid_mean"}))
-    df2 = sub.merge(means, on=["prolific_pid", "observation", "qid"])
+    df2 = sub.merge(means, on=["pid", "observation", "qid"])
     df2["resid"] = df2["response"] - df2["qid_mean"]
     return df2
 
 
 # ── Col 3 — Residual variance growth (prefix only) ──────────────────────────
 
-def _plot_panel_variance_growth(ax, df_task: pd.DataFrame) -> None:
-    df2 = _add_resid_prefix(df_task)
+def _plot_panel_variance_growth(ax, human: pd.DataFrame) -> None:
+    df2 = _add_resid_prefix(human)
     MIN = 2
-    grp = (df2.groupby(["prolific_pid", "observation", "qid"])["resid"]
+    grp = (df2.groupby(["pid", "observation", "qid"])["resid"]
            .apply(lambda x: x.std() if len(x) >= MIN else np.nan)
            .dropna().reset_index(name="std"))
     if grp.empty:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
-    by_pid_obs = grp.groupby(["prolific_pid", "observation"])["std"].mean().reset_index()
+    by_pid_obs = grp.groupby(["pid", "observation"])["std"].mean().reset_index()
     stats = by_pid_obs.groupby("observation")["std"].agg(["mean", "std"]).reset_index()
-    n_pid = by_pid_obs["prolific_pid"].nunique()
+    n_pid = by_pid_obs["pid"].nunique()
     stats["se"] = stats["std"] / np.sqrt(n_pid)
 
     ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR, lw=1.8, ms=5)
@@ -302,15 +293,15 @@ def _plot_panel_variance_growth(ax, df_task: pd.DataFrame) -> None:
 
 # ── Col 4 — Within-trial residual autocorrelation (prefix only) ────────────
 
-def _plot_panel_autocorr(ax, df_task: pd.DataFrame) -> None:
-    df2 = _add_resid_prefix(df_task)
+def _plot_panel_autocorr(ax, human: pd.DataFrame) -> None:
+    df2 = _add_resid_prefix(human)
     lags = [1, 2, 3]
     pid_rs: dict[int, list[float]] = {lag: [] for lag in lags}
 
-    for _, pid_df in df2.groupby("prolific_pid"):
+    for _, pid_df in df2.groupby("pid"):
         for lag in lags:
             pairs = []
-            for (_, _), g in pid_df.groupby(["prolific_pid", "trial"]):
+            for (_, _), g in pid_df.groupby(["pid", "trial"]):
                 r = g.sort_values("observation")["resid"].values
                 if len(r) > lag:
                     pairs.extend(zip(r[:-lag], r[lag:]))
@@ -342,12 +333,13 @@ def _plot_panel_autocorr(ax, df_task: pd.DataFrame) -> None:
 
 
 # ── Col 5 — Split-half reliability of lambda (scatter=True) ────────────────
+# Human only in this pass -- see module docstring.
 
 def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
     def power_law(n, A, lam):
         return A * np.power(np.asarray(n, dtype=float), -lam)
     out: dict = {}
-    for pid, grp in df.groupby("prolific_pid"):
+    for pid, grp in df.groupby("pid"):
         pieces = []
         for _, tg in grp.groupby("trial"):
             g = tg.sort_values("observation").copy()
@@ -355,8 +347,7 @@ def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
             pieces.append(g)
         delta = pd.concat(pieces, ignore_index=True)
         curve = delta.groupby("observation")["delta"].mean().dropna()
-        curve = curve[curve.index >= 1]  # first defined delta (0-indexed obs); see
-        # _abs_delta_long's comment -- same yoo-1-indexed-vs-ours-0-indexed fix
+        curve = curve[curve.index >= 1]
         if len(curve) < 3:
             continue
         n = curve.index.values.astype(float)
@@ -374,28 +365,28 @@ def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
 
 def _fit_lambda_split_half(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for pid, grp in df.groupby("prolific_pid"):
+    for pid, grp in df.groupby("pid"):
         trials = sorted(grp["trial"].unique())
         mid = len(trials) // 2
         if mid < 3:
             continue
         for half_label, trial_set in [("first", trials[:mid]), ("second", trials[mid:])]:
             sub = grp[grp["trial"].isin(trial_set)].copy()
-            lam = _fit_lambda_curve_fit(sub.assign(prolific_pid=pid))
+            lam = _fit_lambda_curve_fit(sub.assign(pid=pid))
             if pid in lam.index:
-                rows.append({"prolific_pid": pid, "half": half_label,
+                rows.append({"pid": pid, "half": half_label,
                              "lambda_": float(lam[pid])})
     if not rows:
-        return pd.DataFrame(columns=["prolific_pid", "first", "second"])
+        return pd.DataFrame(columns=["pid", "first", "second"])
     wide = (pd.DataFrame(rows)
-            .pivot(index="prolific_pid", columns="half", values="lambda_")
+            .pivot(index="pid", columns="half", values="lambda_")
             .dropna())
     wide.columns.name = None
     return wide.reset_index()
 
 
-def _plot_panel_splithalf_lambda(ax, df_task: pd.DataFrame) -> None:
-    wide = _fit_lambda_split_half(_dedup(df_task))
+def _plot_panel_splithalf_lambda(ax, human: pd.DataFrame) -> None:
+    wide = _fit_lambda_split_half(human)
 
     if len(wide) < 2:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
@@ -409,7 +400,6 @@ def _plot_panel_splithalf_lambda(ax, df_task: pd.DataFrame) -> None:
 
     if len(wide) >= MIN_CORR_N:
         r, p = pearsonr(wide["first"], wide["second"])
-        from utils.plot_style import pvalue_to_stars
         ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)],
                   labels=[f"Human r={r:.2f}{pvalue_to_stars(p)}"],
                   fontsize=8, frameon=True, framealpha=0.9)
@@ -427,23 +417,27 @@ def _plot_panel_splithalf_lambda(ax, df_task: pd.DataFrame) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results_file", type=str, default="task_results_pilot1.pkl",
-                        help="Filename under data/ produced by task/parse_results.py")
+    parser.add_argument("--run_folder", type=str, default="soltani_math_v1",
+                        help="Folder under data/runs/ with fitting.submit + "
+                             "fitting.collect output")
     parser.add_argument("--show_individual", dest="show_individual",
                         action="store_true", default=True,
-                        help="Overlay each pid as a thin grey line in cols 1-2 (default on)")
+                        help="Overlay each pid as a thin grey line in cols 1-2 "
+                             "(Human only; default on)")
     parser.add_argument("--hide_individual", dest="show_individual",
                         action="store_false")
-    parser.add_argument("--skip_filters", action="store_true",
-                        help="Skip utils/participant_filters exclusion (default: applied)")
+    parser.add_argument("--plot_models", dest="plot_models",
+                        action="store_true", default=False,
+                        help="Overlay fitted model mean/CI lines in cols 1-2 "
+                             "(default off, to keep pilot-stage human data most "
+                             "visible; pass this flag to add Mean/LeakyIntegrator/"
+                             "PrimacyRecency/RL_lambda)")
     args = parser.parse_args()
 
-    df = pd.read_pickle(data_path(args.results_file))
-    if not args.skip_filters:
-        df = filter_participants(df, verbose=True)
+    run_dir = resolve_run_folder(args.run_folder)
     apply_style()
-    pal = get_palette(2)
-    mean_color = pal[0]
+    pal = get_palette(len(MODEL_ORDER))
+    palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
 
     fig, axes = plt.subplots(
         2, 5,
@@ -452,20 +446,38 @@ def main() -> None:
     )
 
     for row, task in enumerate(TASK_ROWS):
-        sub = df[df["task"] == task]
-        _plot_panel_performance(axes[row, 0], sub, task, args.show_individual, mean_color)
-        _plot_panel_delta(axes[row, 1], sub, task, args.show_individual, mean_color)
-        _plot_panel_variance_growth(axes[row, 2], sub)
-        _plot_panel_autocorr(axes[row, 3], sub)
-        _plot_panel_splithalf_lambda(axes[row, 4], sub)
+        print(f"task-{task}:")
+        human = _load_human(task)
+        models = {}
+        if args.plot_models:
+            for model_type in MODEL_ORDER:
+                mdf = _load_model(task, model_type, run_dir)
+                if mdf is not None:
+                    models[model_type] = mdf
+
+        _plot_panel_performance(axes[row, 0], human, models, args.show_individual, palette)
+        _plot_panel_delta(axes[row, 1], human, models, args.show_individual, palette)
+        _plot_panel_variance_growth(axes[row, 2], human)
+        _plot_panel_autocorr(axes[row, 3], human)
+        _plot_panel_splithalf_lambda(axes[row, 4], human)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
 
     label_panels(axes)
 
-    fig.text(0.5, -0.02,
-              "PLACEHOLDER: human only (no models fit yet). Cols 3-4 restricted to "
-              "observation < prefix_length=4, the only region guaranteed identical "
-              "across a qid's repeats in this task's design (unlike carrabin).",
+    if args.plot_models:
+        footer = (f"Cols 1-2 model fits: {', '.join(MODEL_ORDER)} from run "
+                 f"'{args.run_folder}'. Cols 3-5 remain human-only (not part of "
+                 "this pass) and restricted to observation < prefix_length=4 "
+                 "where relevant, the only region guaranteed identical across "
+                 "a qid's repeats in this task's design.")
+    else:
+        footer = ("Human data only (--plot_models off by default, to keep "
+                 "pilot-stage human data most visible; pass --plot_models to "
+                 "add fitted Mean/LeakyIntegrator/PrimacyRecency/RL_lambda "
+                 "lines to cols 1-2). Cols 3-4 restricted to observation < "
+                 "prefix_length=4, the only region guaranteed identical across "
+                 "a qid's repeats in this task's design.")
+    fig.text(0.5, -0.02, footer,
               ha="center", va="top", fontsize=7, style="italic", color="0.4")
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

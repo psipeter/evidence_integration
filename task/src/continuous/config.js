@@ -10,7 +10,7 @@
  * Common structure lives in shared/config-base.js — this file supplies only
  * what differs for the continuous task.
  */
-import { buildConfig, pickTutorialExample } from '../shared/config-base.js';
+import { buildConfig, pickTutorialExample, DEFAULTS } from '../shared/config-base.js';
 
 // Statically bundled via import.meta.glob(eager) rather than a runtime
 // fetch of a pool directory -- avoids any dependency on JATOS reliably
@@ -37,8 +37,15 @@ const sequencesPool = Object.keys(poolModules).sort().map(k => poolModules[k]);
 // with different mean_range/std_fixed, which already happened once before
 // this file used a pool at all (the tutorial's std=20 no longer matched
 // the real std=15).
+//
+// n: DEFAULTS.N_OBS_TO_RUN (not a second hardcoded 15) -- the tutorial now
+// walks through a FULL real trial's worth of observations (previously 5),
+// so participants see the estimate genuinely accumulate over the same
+// number of observations as a real trial, not a truncated preview of it.
+// Importing the shared constant means this can never silently drift out of
+// sync with N_OBS_TO_RUN again the way the hand-picked std once did above.
 const { values: tutorialValues, mean: TUTORIAL_MEAN, std: TUTORIAL_STD } =
-  pickTutorialExample(sequencesPool[0], { isBinary: false, n: 5 });
+  pickTutorialExample(sequencesPool[0], { isBinary: false, n: DEFAULTS.N_OBS_TO_RUN });
 
 export const config = buildConfig({
   taskType:      'continuous',

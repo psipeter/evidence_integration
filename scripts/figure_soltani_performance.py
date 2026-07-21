@@ -1,55 +1,49 @@
 #!/usr/bin/env python3
 """figure_soltani_performance.py — P group figure for the soltani task/ pilot
-(task-continuous + task-binary, "Human Mixed Task" / Soltani lab, Prolific pilot 1).
+(task-continuous + task-binary, "Human Mixed Task" / Soltani lab).
 
 Layout: 2x3
   Row 1 = task-binary, Row 2 = task-continuous
   Col 1 : Task schematic (placeholder — no schematic PDF exists yet)
-  Col 2 (P1): Estimation error — RMSE to ground truth, per prolific_pid
-  Col 3 (P2): Model fit — RMSE to human responses, per prolific_pid
+  Col 2 (P1): Estimation error — RMSE to ground truth, per pid
+  Col 3 (P2): Model fit — RMSE to human responses, per pid
 
-PLACEHOLDER NOTE
-----------------
-No models have been fit to this pilot data yet. As a stand-in, the Mean
-model (optimal running average of the observed stimulus stream) is
-simulated directly here, since it is fully deterministic and needs no
-fitting. Column 2 shows Human and Mean; column 3 shows Mean only (there is
-no other fitted model yet to compare it against). This entire figure
-should be regenerated from the real fitting pipeline (fitting/submit.py +
-fitting/collect.py, mirroring figure_yoo_performance.py /
-figure_carrabin_performance.py) once carrabin/yoo-style model fits exist
-for this dataset.
+Sources real fitted model responses from a fitting.submit/fitting.collect
+run folder (default "soltani_math_v1"), mirroring figure_carrabin_
+performance.py / figure_yoo_performance.py's own loading pattern, rather
+than the earlier placeholder version's ad-hoc, un-fitted Mean-model
+simulation. Models plotted (per the plan that produced this integration):
+Mean, LeakyIntegrator, PrimacyRecency, RL_lambda — chosen together to
+capture recency-biased (non-shrinking-learning-rate) behavior; NEF is not
+included (not part of this phase).
 
-Ground truth definition (per row):
-  - continuous: true_mean, the fixed generative Normal mean for the trial
-    (already on the same [0,100] scale as value/response — no rescaling).
-  - binary: true_p (fixed generative Bernoulli probability, [0,1]) scaled
-    to the response's [0,100] percent scale via true_p * 100.
-This mirrors carrabin's use of a fixed per-trial generative parameter
-(rather than yoo's expanding-sample-mean ground truth), since — like
-carrabin — every trial here has a genuine fixed hidden parameter recorded
-directly in the data (see CLAUDE.md's "Sequences.json schema" section).
+DATA SOURCE AND SCALE
+----------------------
+Human data comes directly from data/task_continuous.pkl / data/
+task_binary.pkl (built by scripts/build_model_inputs.py), NOT from a raw
+task_results_pilot*.pkl — participant filtering and the prolific_pid ->
+int pid mapping already happened when those files were built, so this
+script does not re-apply utils.participant_filters itself.
 
-Mean model definition (per row):
-  - continuous: expanding (cumulative) mean of the observed `value` stream
-    per (prolific_pid, trial), directly comparable to response/true_mean.
-    No Laplace smoothing — utils/binary_transform.py explicitly exempts
-    task_continuous ("uses raw responses like yoo").
-  - binary: expanding mean of `value` (coded -1/1), then Laplace-smoothed
-    toward the uninformative prior via response = raw * t/(t+2)
-    (utils/binary_transform.apply_binary_transform, dataset='task_binary';
-    Mean is not in that module's _EXEMPT_MODELS, so the shrinkage applies
-    the same way it would for any other non-NoisyCounting model), then
-    rescaled to a [0,100] percent-blue estimate via (smoothed + 1) / 2 * 100,
-    comparable to response/true_p*100.
-Timeout retries replay the same observation index and show the same
-stimulus value, so the value stream is deduplicated to one row per
-(prolific_pid, trial, observation) before computing the running mean;
-human RMSE is computed only over successful (timed_out == False) responses.
+Those files store value/response on the canonical [-1,1] scale carrabin/
+yoo also use (see build_model_inputs.py), and true_mean rescaled the same
+way but true_p left on its native [0,1] probability scale. Fitted model
+responses (data/runs/{run_folder}/{model_type}_{dataset}_responses.pkl)
+are on that same [-1,1] scale, since models/math_models.py operates
+directly on data/task_continuous.pkl/task_binary.pkl. Everything is
+converted back to the original [0,100] percent scale here purely for
+readability/continuity with the earlier placeholder figure's units:
+  continuous : pct = (x + 1) * 50
+  binary     : pct = (x + 1) / 2 * 100   (x already Laplace-transformed
+               where relevant -- both Human's stored `response` and each
+               model's stored `response` column are already the values to
+               compare directly; ground truth true_p is *100 with no +1
+               shift, since it's a genuine [0,1] probability, never put
+               through the [-1,1] rescale.)
 
 Run:
     python scripts/figure_soltani_performance.py
-    python scripts/figure_soltani_performance.py --results_file task_results_pilot1.pkl
+    python scripts/figure_soltani_performance.py --run_folder soltani_math_v1
 """
 from __future__ import annotations
 
@@ -67,15 +61,14 @@ import seaborn as sns
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import FIGURES_DIR, data_path
+from utils.paths import FIGURES_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels
-from utils.binary_transform import apply_binary_transform
-from utils.participant_filters import filter_participants
 
 TASK_ROWS   = ["binary", "continuous"]  # row order convention: binary on top,
-                                          # continuous on bottom (for this and
-                                          # future soltani figures)
+                                          # continuous on bottom
 HUMAN_COLOR = "0.3"
+MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]
+DATASET_FOR_TASK = {"binary": "task_binary", "continuous": "task_continuous"}
 
 
 # ── schematic placeholders (col 1) ──────────────────────────────────────────
@@ -116,95 +109,106 @@ def _plot_schematic(ax, task: str) -> None:
     ax.set_aspect("equal"); ax.set_anchor("C")
 
 
-# ── data prep ────────────────────────────────────────────────────────────────
+# ── scale conversion back to [0,100] for readability ────────────────────────
 
-def _prepare_task_df(df: pd.DataFrame, task: str) -> pd.DataFrame:
-    """Merge human responses (successful attempts only) with a Mean-model
-    running-average response and the appropriate ground truth, all on a
-    common [0,100] scale. Returns one row per (prolific_pid, trial, obs)."""
-    sub = df[df["task"] == task].copy()
-
-    # Stimulus value stream: dedup so timeout retries (same obs index, same
-    # value) don't get double-counted in the running mean.
-    vals = (sub[["prolific_pid", "trial", "observation", "value"]]
-            .drop_duplicates(subset=["prolific_pid", "trial", "observation"])
-            .sort_values(["prolific_pid", "trial", "observation"]))
-    vals["model_mean"] = (vals.groupby(["prolific_pid", "trial"])["value"]
-                               .expanding().mean().values)
+def _to_pct(x: pd.Series, task: str) -> pd.Series:
     if task == "binary":
-        # Laplace-smooth the raw [-1,1] running mean toward the uninformative
-        # prior of 0 before converting to a percent-blue estimate — matches
-        # utils/binary_transform.py's task_binary convention (Mean is not in
-        # its _EXEMPT_MODELS set, so the shrinkage applies). task_continuous
-        # is explicitly exempt in that module ("uses raw responses like
-        # yoo"), so the continuous branch below is left untransformed.
-        smoothed = apply_binary_transform(
-            vals[["observation"]].assign(response=vals["model_mean"]),
-            "task_binary",
-        )
-        vals["model_response"] = (smoothed["response"].to_numpy() + 1) / 2 * 100
-    else:
-        vals["model_response"] = vals["model_mean"]
+        return (x + 1.0) / 2.0 * 100.0
+    return (x + 1.0) * 50.0
 
-    human = (sub[sub["timed_out"] == False]
-             [["prolific_pid", "trial", "observation", "response",
-               "true_mean", "true_p"]]
-             .drop_duplicates(subset=["prolific_pid", "trial", "observation"]))
 
-    merged = human.merge(
-        vals[["prolific_pid", "trial", "observation", "model_response"]],
-        on=["prolific_pid", "trial", "observation"], how="left",
-    )
-    merged["ground_truth"] = (merged["true_mean"] if task == "continuous"
-                               else merged["true_p"] * 100)
-    return merged
+# ── data loading ─────────────────────────────────────────────────────────────
+
+def _load_human(task: str) -> pd.DataFrame:
+    """Human data + ground truth for one task, on the [0,100] percent scale.
+    Columns: [pid, trial, observation, response, ground_truth]."""
+    dataset = DATASET_FOR_TASK[task]
+    df = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    out = df[["pid", "trial", "observation"]].copy()
+    out["response"] = _to_pct(df["response"], task)
+    out["ground_truth"] = (df["true_p"] * 100.0 if task == "binary"
+                           else _to_pct(df["true_mean"], task))
+    return out
+
+
+def _load_model(task: str, model_type: str, run_dir: Path) -> pd.DataFrame | None:
+    """Fitted model responses for one (task, model_type), on the [0,100]
+    percent scale. Returns None if the collected responses file doesn't
+    exist yet (e.g. a model still being fit). Columns:
+    [pid, trial, observation, model_response]."""
+    dataset = DATASET_FOR_TASK[task]
+    resp_path = run_dir / f"{model_type}_{dataset}_responses.pkl"
+    if not resp_path.exists():
+        print(f"  (missing {resp_path.name} -- skipping {model_type} for {task})")
+        return None
+    df = pd.read_pickle(resp_path)
+    out = df[["pid", "trial", "observation"]].copy()
+    out["model_response"] = _to_pct(df["response"], task)
+    return out
 
 
 # ── Panel P1 — Estimation error ─────────────────────────────────────────────
 
-def _plot_panel_p1(ax, merged: pd.DataFrame, palette: dict) -> None:
-    """RMSE to ground truth, per prolific_pid, for Human and Mean model."""
+def _plot_panel_p1(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
+                   palette: dict) -> None:
+    """RMSE to ground truth, per pid, for Human + each fitted model."""
     rows = []
-    human_rmse = (merged.assign(sq_err=(merged["response"] - merged["ground_truth"]) ** 2)
-                  .groupby("prolific_pid")["sq_err"].mean().apply(np.sqrt)
+    human_rmse = (human.assign(sq_err=(human["response"] - human["ground_truth"]) ** 2)
+                  .groupby("pid")["sq_err"].mean().apply(np.sqrt)
                   .reset_index(name="rmse"))
     human_rmse["source"] = "Human"
     rows.append(human_rmse)
 
-    mean_rmse = (merged.assign(sq_err=(merged["model_response"] - merged["ground_truth"]) ** 2)
-                 .groupby("prolific_pid")["sq_err"].mean().apply(np.sqrt)
-                 .reset_index(name="rmse"))
-    mean_rmse["source"] = "Mean"
-    rows.append(mean_rmse)
+    for model_type, mdf in models.items():
+        merged = mdf.merge(human[["pid", "trial", "observation", "ground_truth"]],
+                           on=["pid", "trial", "observation"])
+        rmse = (merged.assign(sq_err=(merged["model_response"] - merged["ground_truth"]) ** 2)
+                .groupby("pid")["sq_err"].mean().apply(np.sqrt)
+                .reset_index(name="rmse"))
+        rmse["source"] = model_type
+        rows.append(rmse)
 
     plot_df = pd.concat(rows, ignore_index=True)
-    order = ["Human", "Mean"]
-    pal = {"Human": HUMAN_COLOR, "Mean": palette.get("Mean", "0.5")}
+    order = ["Human"] + list(models.keys())
+    pal = {"Human": HUMAN_COLOR, **{m: palette[m] for m in models}}
 
     sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
                 hue="source", palette=pal, legend=False, ax=ax)
     ax.set_xlabel("")
     ax.set_ylabel("Performance error vs ground truth (RMSE)")
+    ax.tick_params(axis="x", rotation=30)
     sns.despine(ax=ax, top=True, right=True)
 
 
 # ── Panel P2 — Model fit ────────────────────────────────────────────────────
 
-def _plot_panel_p2(ax, merged: pd.DataFrame, palette: dict) -> None:
-    """RMSE to human responses, per prolific_pid, for the Mean model only
-    (placeholder — no other fitted model exists yet)."""
-    fit_rmse = (merged.assign(sq_err=(merged["model_response"] - merged["response"]) ** 2)
-                .groupby("prolific_pid")["sq_err"].mean().apply(np.sqrt)
+def _plot_panel_p2(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
+                   palette: dict) -> None:
+    """RMSE to human responses, per pid, for each fitted model."""
+    rows = []
+    for model_type, mdf in models.items():
+        merged = mdf.merge(human[["pid", "trial", "observation", "response"]],
+                           on=["pid", "trial", "observation"])
+        rmse = (merged.assign(sq_err=(merged["model_response"] - merged["response"]) ** 2)
+                .groupby("pid")["sq_err"].mean().apply(np.sqrt)
                 .reset_index(name="rmse"))
-    fit_rmse["source"] = "Mean"
+        rmse["source"] = model_type
+        rows.append(rmse)
 
-    order = ["Mean"]
-    pal = {"Mean": palette.get("Mean", "0.5")}
+    if not rows:
+        ax.text(0.5, 0.5, "No fitted models found", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
 
-    sns.boxplot(data=fit_rmse, x="source", y="rmse", order=order,
+    plot_df = pd.concat(rows, ignore_index=True)
+    order = list(models.keys())
+    pal = {m: palette[m] for m in models}
+
+    sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
                 hue="source", palette=pal, legend=False, ax=ax)
     ax.set_xlabel("")
     ax.set_ylabel("Model fit (RMSE to human responses)")
+    ax.tick_params(axis="x", rotation=30)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -212,19 +216,15 @@ def _plot_panel_p2(ax, merged: pd.DataFrame, palette: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results_file", type=str, default="task_results_pilot1.pkl",
-                        help="Filename under data/ produced by task/parse_results.py")
-    parser.add_argument("--skip_filters", action="store_true",
-                        help="Skip utils/participant_filters exclusion (default: applied)")
+    parser.add_argument("--run_folder", type=str, default="soltani_math_v1",
+                        help="Folder under data/runs/ with fitting.submit + "
+                             "fitting.collect output")
     args = parser.parse_args()
 
-    df = pd.read_pickle(data_path(args.results_file))
-    if not args.skip_filters:
-        df = filter_participants(df, verbose=True)
-
+    run_dir = resolve_run_folder(args.run_folder)
     apply_style()
-    pal = get_palette(2)
-    palette = {"Human": HUMAN_COLOR, "Mean": pal[0]}
+    pal = get_palette(len(MODEL_ORDER))
+    palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
 
     fig, axes = plt.subplots(
         2, 3,
@@ -233,18 +233,24 @@ def main() -> None:
     )
 
     for row, task in enumerate(TASK_ROWS):
-        merged = _prepare_task_df(df, task)
+        print(f"task-{task}:")
+        human = _load_human(task)
+        models = {}
+        for model_type in MODEL_ORDER:
+            mdf = _load_model(task, model_type, run_dir)
+            if mdf is not None:
+                models[model_type] = mdf
+
         _plot_schematic(axes[row, 0], task)
-        _plot_panel_p1(axes[row, 1], merged, palette)
-        _plot_panel_p2(axes[row, 2], merged, palette)
+        _plot_panel_p1(axes[row, 1], human, models, palette)
+        _plot_panel_p2(axes[row, 2], human, models, palette)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
 
     label_panels(axes)
 
     fig.text(0.5, -0.02,
-              "PLACEHOLDER: only the deterministic Mean model is simulated here (no "
-              "fitting run yet). Replace with the full carrabin/yoo-style model-fit "
-              "pipeline once fits exist for this dataset.",
+              f"Model fits: {', '.join(MODEL_ORDER)} from run '{args.run_folder}' "
+              "(RMSE-based Optuna + k-fold CV). NEF not yet included.",
               ha="center", va="top", fontsize=7, style="italic", color="0.4")
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

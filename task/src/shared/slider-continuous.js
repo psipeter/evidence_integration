@@ -1,9 +1,17 @@
 /**
  * slider-continuous.js — shared slider component for the continuous task.
  *
- * Two modes (controlled by `unset`):
- *   unset=true  ('none') — thumb hidden, submit disabled until first interaction
- *   unset=false ('last') — thumb at initPos, submit immediately enabled
+ * Two INDEPENDENT things, not one:
+ *   Thumb position/visibility -- controlled by `unset`:
+ *     unset=true  ('none') — thumb hidden, submit disabled until first interaction
+ *     unset=false ('last') — thumb shown at initPos immediately, submit enabled
+ *   Floating number label -- ALWAYS starts hidden regardless of `unset`
+ *     (chat history), only appearing on the participant's first actual
+ *     interaction (mousedown/input) with THIS observation's slider. Lets
+ *     'last' mode show WHERE they left the thumb (helps them remember
+ *     their running estimate) without also revealing the exact number
+ *     before they've deliberately touched it -- previously these were the
+ *     same boolean, so 'last' mode showed both together.
  *
  * initSlider() must be called after on_load() in the plugin's trial()
  * method (trial() must NOT be async — see plugin-observation-continuous.js
@@ -24,10 +32,7 @@ export const buildSliderHTML = ({
 } = {}) => `
   <div class="slider-section">
     <div class="slider-label-float-wrap">
-      <div id="slider-float-label" class="slider-float-label"
-           style="display:${!unset && showValue ? 'block' : 'none'};">
-        ${!unset ? initPos : ''}
-      </div>
+      <div id="slider-float-label" class="slider-float-label" style="display:none;"></div>
     </div>
     <div class="slider-wrap">
       <div class="slider-track-wrap">
@@ -90,7 +95,9 @@ export const initSlider = (display_el, {
   if (!slider || !btn) return;
 
   buildRuler(slider);
-  if (!unset && showValue) updateFloatLabel(slider);
+  // Deliberately NOT calling updateFloatLabel here even when !unset -- see
+  // module docstring. The label only ever appears from the mousedown/input
+  // listeners below, on the participant's own first interaction.
 
   slider.addEventListener('mousedown', () => {
     slider.classList.remove('slider-unset');
@@ -116,7 +123,16 @@ export const initSlider = (display_el, {
 
   if (showValue && typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
-      if (!slider.classList.contains('slider-unset')) updateFloatLabel(slider);
+      // Only reposition an ALREADY-shown label -- both classes are removed
+      // together on first interaction (see the two listeners above), so
+      // their absence means "has interacted", not just "not unset". Without
+      // checking 'slider-last' too, a window resize before the participant's
+      // first touch would call updateFloatLabel (which unconditionally sets
+      // display:block internally) and prematurely reveal the number in
+      // 'last' mode -- exactly the leak this whole change is meant to close.
+      if (!slider.classList.contains('slider-unset') && !slider.classList.contains('slider-last')) {
+        updateFloatLabel(slider);
+      }
     });
     ro.observe(slider);
   }

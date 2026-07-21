@@ -164,6 +164,7 @@ export function buildAndRun(cfg) {
     tObsMs,
     showTrialPerformance,
     distractorType = 'iti_length',
+    errorMode = 'true_mean',
   } = cfg;
 
   // Everything below reads jatos.* variables (workerId, urlQueryParameters),
@@ -347,7 +348,7 @@ export function buildAndRun(cfg) {
     {
       isBinary, tutorialValues, tutorialMean, tutorialStd,
       sliderDefault, defaultValue, showSliderValue,
-      tObsMs, maxTimeoutsPerTrial: MAX_TIMEOUTS_PER_TRIAL, itiShortMs,
+      tObsMs, maxTimeoutsPerTrial: MAX_TIMEOUTS_PER_TRIAL, itiShortMs, errorMode,
     },
     {
       TutorialIntroPlugin,
@@ -373,7 +374,7 @@ export function buildAndRun(cfg) {
       sequences, sliderDefault, defaultValue,
       btiMs, tObsMs,
       showSliderValue, showTrialPerformance,
-      MAX_TIMEOUTS_PER_TRIAL, distractorType,
+      MAX_TIMEOUTS_PER_TRIAL, distractorType, errorMode,
     },
     {
       ItiClockPlugin, TrialObsPlugin,

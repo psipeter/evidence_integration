@@ -64,9 +64,9 @@ const makeBox = (id, realHTML, textAlign, variant = 'red') => `
  * @returns {object} jsPsych timeline node
  */
 export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
-  const BOX_PAY_REAL = `You will be paid <strong>$8.00 - 10.00</strong> based on your performance.`;
+  const BOX_PAY_REAL = `You will be paid <strong>$5.00</strong> for finishing and up to <strong>$5.00</strong> based on your performance.`;
   const BOX0_REAL = `<strong>Warning:</strong> Do not close, refresh, or navigate away during
-            the task — your data will be lost and you will not be paid.`;
+            the task.`;
   const BOX1_REAL = `<strong>Warning:</strong> You must respond within the ${tObsMs / 1000}-second
             time limit — if you repeatedly time out, the experiment will terminate.`;
 

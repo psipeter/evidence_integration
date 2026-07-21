@@ -21,8 +21,8 @@
 import { LAYOUT } from './distribution-continuous.js';
 import { normalPDF } from './draw-performance-continuous.js';
 
+export const FADE_MS = 1000;
 const BUBBLE_MS   = 1050;
-const FADE_MS     = 1000;
 const SPAWN_EVERY = 45;   // ms between bubble spawns
 const BUBBLE_R    = 3.5;
 const BUBBLE_LIFE = 420;  // ms
@@ -45,11 +45,20 @@ const drawSeed = (mu, sigma, obsNum) =>
  * @param {number} opts.true_mean
  * @param {number} opts.true_std
  * @param {number} opts.obsNum          1-based observation index
- * @param {() => void} [opts.onComplete]
+ * @param {() => void} [opts.onReveal]  fired the INSTANT the centre number/
+ *   obs-tick BEGIN fading in (not once they finish) -- use this, not
+ *   onComplete, for anything that should appear visually simultaneous with
+ *   them (e.g. tutorial-tracker.js's current-slot number). onComplete
+ *   fires FADE_MS later, once they're already fully visible -- wiring a
+ *   simultaneous reveal to onComplete instead was a real, reported bug
+ *   (see tutorial-tracker.js/plugin-tutorial-*-continuous.js chat history):
+ *   it made the tracker number visibly lag behind the centre number rather
+ *   than appear together with it.
+ * @param {() => void} [opts.onComplete] fired once the fade-in has fully finished
  * @returns {() => void} cancel
  */
 export function startContinuousDrawAnimation({
-  svgRoot, centerEl, true_mean, true_std, obsNum, onComplete,
+  svgRoot, centerEl, true_mean, true_std, obsNum, onReveal, onComplete,
 }) {
   const { W, H, xMin, xMax, pad } = LAYOUT;
   const plotW = W - pad.l - pad.r;
@@ -68,6 +77,7 @@ export function startContinuousDrawAnimation({
     if (bubbleLayer) bubbleLayer.innerHTML = '';
     if (obsGroup) { obsGroup.style.opacity = '1'; obsGroup.style.transition = ''; }
     if (centerEl) { centerEl.style.opacity = '1'; centerEl.style.transition = ''; }
+    onReveal?.();
     onComplete?.();
   };
 
@@ -157,6 +167,7 @@ export function startContinuousDrawAnimation({
       centerEl.style.transition  = `opacity ${FADE_MS}ms ease`;
       obsGroup.style.opacity = '1';
       centerEl.style.opacity = '1';
+      onReveal?.();
       phaseTimer = setTimeout(() => {
         if (!cancelled) onComplete?.();
       }, FADE_MS);

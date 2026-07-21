@@ -10,13 +10,38 @@
 export const DEFAULTS = {
   N_OBS_TO_RUN:           15,
   SHOW_SLIDER_VALUE:      true,    // float label above thumb
-  SLIDER_DEFAULT:         'none',  // 'none' | 'last'
+  SLIDER_DEFAULT:         'last',  // 'none' | 'last' -- 'last' shows the
+  // thumb pre-positioned at the participant's previous response the
+  // instant a new observation loads, rather than starting invisible until
+  // they first interact (init_pos already always uses lastResponse either
+  // way -- this only controls whether that position is VISIBLE up front).
+  // Changed from 'none' (chat history): helps participants remember where
+  // they left their running estimate before the new number arrived.
   DEFAULT_VALUE:          50,      // midpoint of [0,100] slider
   BTI_MS:                 3000,
   ITI_SHORT_MS:           1000,
   T_OBS_MS:               7000,
   SHOW_TRIAL_PERFORMANCE: true,
   DISTRACTOR_TYPE:        'none',  // 'none' | 'iti_length' | 'popup'
+  // Bonus-payment parameters (chat history) -- deliberately kept here
+  // alongside the other governing constants, not hardcoded in
+  // bonus-continuous.js, since these are exactly the "decide iteratively"
+  // knobs this object already exists for. BASE_PAYMENT_DOLLARS is fixed,
+  // paid-regardless-of-performance. The per-response BONUS scheme itself
+  // (fixed cent bins on raw error, no session-wide total cap -- see
+  // bonus-continuous.js's own docstring for why the original
+  // total-capped/split-evenly design was replaced) has its own tunable
+  // table (BONUS_BINS_CENTS) living in bonus-continuous.js instead of here,
+  // since it's a bonus-specific data structure, not a single scalar.
+  BASE_PAYMENT_DOLLARS:   10,
+  // ERROR_MODE (chat history) -- 'true_mean': error is |response -
+  // trueMean| for every response. 'running_mean' (set for testing, chat
+  // history): error is |response - runningMean| where runningMean is the
+  // cumulative mean of raw observed values up to that point -- also
+  // changes the summary chart's per-row blue tick and the "true mean"/
+  // "running mean" wording in its legend and the tutorial-summary blue
+  // banner. See bonus-continuous.js's own docstring for the full math.
+  ERROR_MODE:             'running_mean',
 };
 
 /**
@@ -149,5 +174,7 @@ export function buildConfig({
     tObsMs:               P.T_OBS_MS,
     showTrialPerformance: P.SHOW_TRIAL_PERFORMANCE,
     distractorType:       P.DISTRACTOR_TYPE,
+    basePaymentDollars:   P.BASE_PAYMENT_DOLLARS,
+    errorMode:            P.ERROR_MODE,
   };
 }

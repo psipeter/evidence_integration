@@ -21,6 +21,16 @@
  *                          continuous-draw-animation.js's resolve step, the
  *                          same way urn-binary.js's #tut-urn-draw circle is
  *                          managed independently of the shared `revealed` flag.
+ *   #tut-svg-history     — small, low-opacity ticks (no labels) for every
+ *                          PAST observation in this tutorial sequence, at
+ *                          the same axis position as #tut-svg-obs but
+ *                          visually subordinate to it (shorter, thinner,
+ *                          faded) -- the on-curve counterpart to
+ *                          tutorial-tracker.js's slot row. Always visible
+ *                          immediately (not gated by `revealed` or the draw
+ *                          animation) since these are settled facts from
+ *                          earlier screens, not something being revealed
+ *                          now.
  *   #tut-svg-bubbles     — ephemeral bubble <circle>s (filled by the animation),
  *                          clipped to the plot area
  *
@@ -42,12 +52,25 @@ export const LAYOUT = {
   pad:  { l: 20, r: 20, t: 26, b: 44 },
 };
 
-export const buildDistributionSVG = (mu, sigma, currentValue, revealed = false) => {
+/**
+ * @param {number} mu
+ * @param {number} sigma
+ * @param {number} currentValue
+ * @param {boolean} [revealed]
+ * @param {number[]} [history]  raw values of every PAST observation in this
+ *   tutorial sequence (NOT including currentValue) -- e.g. for obs_num=4,
+ *   this is tutorialValues[0..2]. Defaults to [] (obs 1/intro has no history
+ *   yet, which is also correct there).
+ */
+export const buildDistributionSVG = (mu, sigma, currentValue, revealed = false, history = []) => {
   const { W, H, xMin, xMax, pad } = LAYOUT;
   const plotW = W - pad.l - pad.r;
   const plotH = H - pad.t - pad.b;
   const axisY = pad.t + plotH;
   const tickH = 12;
+  const historyTickH = 7; // shorter than the current-obs tick (tickH=12), so
+                          // it's immediately readable as "lesser" even before
+                          // opacity is considered
   const vis   = revealed ? '1' : '0';
 
   const xPos  = (x) => pad.l + (x - xMin) / (xMax - xMin) * plotW;
@@ -91,13 +114,17 @@ export const buildDistributionSVG = (mu, sigma, currentValue, revealed = false) 
             font-weight="bold" fill="${GOAL_COLOR}">???</text>
     </g>
     <g id="tut-svg-bubbles" clip-path="url(#tut-svg-plot-clip)" style="opacity:1;"></g>
+    <g id="tut-svg-history" style="opacity:1;">
+      ${history.map(v => `
+      <line x1="${xPos(v).toFixed(2)}" y1="${axisY}"
+            x2="${xPos(v).toFixed(2)}" y2="${axisY + historyTickH}"
+            stroke="${SAMPLE_COLOR}" stroke-width="2" stroke-linecap="round"
+            opacity="0.35"/>`).join('')}
+    </g>
     <g id="tut-svg-obs" style="opacity:0;">
       <line x1="${xPos(currentValue).toFixed(2)}" y1="${axisY}"
             x2="${xPos(currentValue).toFixed(2)}" y2="${axisY + tickH}"
             stroke="${SAMPLE_COLOR}" stroke-width="3" stroke-linecap="round"/>
-      <text x="${xPos(currentValue).toFixed(2)}" y="${axisY + tickH + 12}"
-            text-anchor="middle" font-family="Arial" font-size="14"
-            font-weight="bold" fill="${SAMPLE_COLOR}">${currentValue}</text>
     </g>
   </svg>`;
 };
