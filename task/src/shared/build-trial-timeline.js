@@ -17,7 +17,7 @@
  * makes every participant's raw export fully self-contained: no lookup,
  * no join, no dependency on the pool files still existing/matching later.
  */
-import { computeTrialReward, computeRunningMeans, refForObservation, computeResponseError } from './bonus-continuous.js';
+import { computeTrialReward, computeRunningMeans, computeRunningRatios, refForObservation, computeResponseError } from './bonus-continuous.js';
 
 export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   const {
@@ -33,16 +33,22 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   // Only 'iti_length' extends the ITI; other types ('popup', etc.) use default
   const ITI_DISTRACT_MS = distractorType === 'iti_length' ? 5000 : null;
 
-  // errorMode (chat history, continuous only -- see bonus-continuous.js's
-  // own docstring) -- picks what a response's error is measured AGAINST.
-  // 'true_mean': a single scalar (refForObservation broadcasts it to every
-  // observation). 'running_mean': a per-observation array (this trial's
-  // own raw values' cumulative mean), same one draw-performance-
-  // continuous.js uses for its per-row blue tick -- both via bonus-
-  // continuous.js's computeRunningMeans, never two independent
-  // implementations of "running mean".
-  const errorRefs = (values, trueMean) =>
-    errorMode === 'running_mean' ? computeRunningMeans(values) : trueMean;
+  // errorMode (chat history, see bonus-continuous.js's own docstring) --
+  // picks what a response's error is measured AGAINST. Task-aware: binary
+  // has its OWN errorMode values ('true_p'/'running_p', not continuous's
+  // 'true_mean'/'running_mean'), and its own responses/refs live on a
+  // 0-100 scale like continuous's, so true_p (a 0-1 fraction) needs
+  // scaling by 100 to compare directly -- computeRunningRatios already
+  // returns a 0-100 scale, so only the FIXED (non-running) branch needs
+  // the explicit *100. `trueRef` is whichever of seq.true_mean/seq.true_p
+  // the caller passes in (continuous sequences only populate true_mean,
+  // binary ones only populate true_p).
+  const errorRefs = (values, trueRef) => {
+    if (isBinary) {
+      return errorMode === 'running_p' ? computeRunningRatios(values) : trueRef * 100;
+    }
+    return errorMode === 'running_mean' ? computeRunningMeans(values) : trueRef;
+  };
 
   let lastResponse = defaultValue, timedOut = false, trialTimeouts = 0;
   let exitFlag = false, lastTrialResponses = [];
@@ -57,7 +63,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
     // response-dependent) -- either a single scalar or a full
     // per-observation array, resolved per-observation via
     // refForObservation() below rather than recomputed per response.
-    const _refs = errorRefs(seq.values, seq.true_mean);
+    const _refs = errorRefs(seq.values, isBinary ? seq.true_p : seq.true_mean);
 
     for (let o = 0; o < seq.values.length; o++) {
       const _o = o, _val = seq.values[o];
@@ -115,7 +121,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
                 // (not recomputed independently there) so the two can never
                 // drift apart -- see bonus-continuous.js's own docstring.
                 const ref = refForObservation(_refs, _o);
-                data.error = isBinary ? null : computeResponseError(data.response, ref);
+                data.error = computeResponseError(data.response, ref);
                 trialResponses.push({ observation: _o, value: _val, response: data.response, error: data.error });
               }
             },
@@ -149,11 +155,10 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
         timeline: [{ type: TrialSummaryPlugin, true_mean: seq.true_mean, true_std: seq.true_std,
           true_p: seq.true_p ?? null, values: _values, responses: () => _resp.map(r => r.response),
           error_mode: errorMode,
-          // Per-TRIAL bonus (chat history, continuous only -- see
-          // bonus-continuous.js) -- SUM of the already-stored per-
-          // observation errors above, not recomputed independently.
-          total_error: () => isBinary ? 0 : _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
-          reward:      () => isBinary ? 0 : computeTrialReward(_resp.reduce((sum, r) => sum + (r.error ?? 0), 0)),
+          // Per-TRIAL bonus (chat history) -- SUM of the already-stored
+          // per-observation errors above, not recomputed independently.
+          total_error: () => _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
+          reward:      () => computeTrialReward(_resp.reduce((sum, r) => sum + (r.error ?? 0), 0)),
           show_performance: showTrialPerformance, is_last: false,
           data: { screen: 'inter_trial', trial: _t } }],
         conditional_function: () => !exitFlag,
@@ -173,8 +178,8 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
     timeline: [{ type: TrialSummaryPlugin, true_mean: _seq.true_mean, true_std: _seq.true_std,
       true_p: _seq.true_p ?? null, values: [..._seq.values], responses: () => _resp.map(r => r.response),
       error_mode: errorMode,
-      total_error: () => isBinary ? 0 : _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
-      reward:      () => isBinary ? 0 : computeTrialReward(_resp.reduce((sum, r) => sum + (r.error ?? 0), 0)),
+      total_error: () => _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
+      reward:      () => computeTrialReward(_resp.reduce((sum, r) => sum + (r.error ?? 0), 0)),
       show_performance: showTrialPerformance, is_last: true,
       data: { screen: 'inter_trial', trial: sequences.length - 1 } }],
     conditional_function: () => !exitFlag,

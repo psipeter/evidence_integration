@@ -24,6 +24,21 @@
  * DEFAULTS, since it's specific to this one formula, not a general
  * task-timing/UI parameter.
  *
+ * BUG FOUND AND FIXED (chat history): BONUS_DECAY was originally a plain
+ * 1, which implicitly treated totalError as if it lived on the SAME 0-100
+ * scale as a single observation's error. It doesn't -- totalError is a
+ * SUM across every observation in the trial (N_OBS_TO_RUN of them, ~15),
+ * so it saturates the max(0, ...) floor almost immediately: at
+ * BONUS_DECAY=1, reward hits exactly 0 once the AVERAGE per-observation
+ * error exceeds just 100/15 ≈ 6.67 -- a genuinely GOOD result on a 0-100
+ * scale, not a bad one. This is why bonus was reported as always showing
+ * 0c in the summary screen; it wasn't a display bug, the underlying
+ * reward really was 0 for nearly every real response. Scaling BONUS_DECAY
+ * by N_OBS_TO_RUN makes the formula behave as reward ≈ 100 -
+ * average_error_per_observation instead -- 0 reward now requires an
+ * AVERAGE error of 100 (i.e. consistently as wrong as possible), not an
+ * average of ~7.
+ *
  * ERROR_MODE (chat history, config-base.js's DEFAULTS.ERROR_MODE) -- what
  * a response's error is measured AGAINST:
  *   'true_mean'    -- a single fixed value, the trial's generative mean.
@@ -36,9 +51,23 @@
  *                     "running mean" wording in its legend and the
  *                     tutorial-summary blue banner -- see those files' own
  *                     docstrings.
+ * Binary uses the SAME functions here (computeResponseError/
+ * computeTrialReward/refForObservation are already fully task-agnostic --
+ * they just compare a 0-100 response to a 0-100 reference, regardless of
+ * what that reference represents), plus its own computeRunningRatios
+ * below (binary's analog of computeRunningMeans) and its own errorMode
+ * values 'true_p'/'running_p' (chat history -- kept as distinct strings
+ * from continuous's 'true_mean'/'running_mean' rather than reusing those,
+ * since each task's config.js can set its OWN value via config-base.js's
+ * overrides mechanism independently of the other task's). This file's own
+ * name is now a little dated ("-continuous" in a file used by both tasks)
+ * -- not renamed, to avoid a wide-reaching import-path change across every
+ * file that already imports from here, for what would otherwise be a pure
+ * naming/hygiene concern.
  */
+import { DEFAULTS } from './config-base.js';
 
-export const BONUS_DECAY = 1;
+export const BONUS_DECAY = 1 / DEFAULTS.N_OBS_TO_RUN;
 
 /**
  * @param {number[]} values  one trial's raw observed values, in order
@@ -50,6 +79,25 @@ export function computeRunningMeans(values) {
   for (let i = 0; i < (values || []).length; i++) {
     cum += values[i];
     out.push(cum / (i + 1));
+  }
+  return out;
+}
+
+/**
+ * Binary's analog of computeRunningMeans above -- running PERCENTAGE
+ * (0-100 scale, matching the response slider's own scale) of +1 ("blue")
+ * draws among values[0..i], for each i. +1/-1 is urn-binary.js's own
+ * value encoding (1 = blue, -1 = red -- see binary-draw-animation.js's
+ * own docstring for the same convention).
+ * @param {number[]} values  one trial's raw observed values (+1/-1), in order
+ * @returns {number[]} running percentage of +1 values, 0-100 scale
+ */
+export function computeRunningRatios(values) {
+  const out = [];
+  let countBlue = 0;
+  for (let i = 0; i < (values || []).length; i++) {
+    if (values[i] === 1) countBlue++;
+    out.push((countBlue / (i + 1)) * 100);
   }
   return out;
 }

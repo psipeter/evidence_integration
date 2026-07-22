@@ -19,7 +19,7 @@
 import { LAYOUT, SAMPLE_BLUE, SAMPLE_RED } from './urn-binary.js';
 
 const BUBBLE_MS   = 1050;
-const FADE_MS     = 380;
+export const FADE_MS = 380;
 const SPAWN_EVERY = 45;   // ms between bubble spawns
 const BUBBLE_R    = 3.5;
 const BUBBLE_LIFE = 420;  // ms
@@ -42,11 +42,20 @@ const drawSeed = (trueP, obsNum) =>
  * @param {number} opts.true_p
  * @param {number} opts.currentValue      1 = blue, -1 = red
  * @param {number} opts.obsNum            1-based observation index
- * @param {() => void} [opts.onComplete]
+ * @param {() => void} [opts.onReveal]  fired the INSTANT the centre circle/
+ *   draw circle BEGIN fading to their outcome color (not once they finish)
+ *   -- use this, not onComplete, for anything that should appear visually
+ *   simultaneous with them (e.g. tutorial-tracker.js's current-slot dot).
+ *   onComplete fires FADE_MS later, once they're already fully colored --
+ *   wiring a simultaneous reveal to onComplete instead was a real,
+ *   reported bug in continuous-draw-animation.js's own identical hook
+ *   (chat history); this mirrors that same fix here rather than
+ *   reintroducing it for binary.
+ * @param {() => void} [opts.onComplete] fired once the fade has fully finished
  * @returns {() => void} cancel
  */
 export function startBinaryDrawAnimation({
-  svgRoot, centerEl, true_p, currentValue, obsNum, onComplete,
+  svgRoot, centerEl, true_p, currentValue, obsNum, onReveal, onComplete,
 }) {
   const isBlue      = currentValue === 1;
   const targetColor = isBlue ? SAMPLE_BLUE : SAMPLE_RED;
@@ -90,6 +99,7 @@ export function startBinaryDrawAnimation({
       centerEl.style.border = 'none';
       centerEl.style.transition = '';
     }
+    onReveal?.();
     onComplete?.();
   };
 
@@ -177,6 +187,7 @@ export function startBinaryDrawAnimation({
       drawCircle.setAttribute('stroke', targetColor);
       centerEl.style.background   = targetColor;
       centerEl.style.borderColor  = targetColor;
+      onReveal?.();
       phaseTimer = setTimeout(() => {
         if (!cancelled) onComplete?.();
       }, FADE_MS);

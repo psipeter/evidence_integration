@@ -109,6 +109,7 @@ from generate_sequences_momentmatch import (
     binary_feasible_target_range,
     optimal_matching,
     suffix_for_binary_target,
+    moment_match_binary,
     _build_iti_schedule,
     _shuffle_no_consecutive_qid,
 )
@@ -207,6 +208,116 @@ def suffix_for_continuous_target_iid(rng, prefix_values, target_mean, std_fixed,
         if std_lo <= float(np.std(full_seq)) <= std_hi:
             break
     return vals.tolist()
+
+
+# ---------------------------------------------------------------------------
+# NO-PREFIX branch (binary only, chat history) -- a SEPARATE generation
+# path alongside generate_task_sequences_hybrid's existing prefix/qid-
+# repeat structure, not a replacement for it. Motivation: that structure's
+# prefix-composition allocation (_allocate_binary_composition_counts) is
+# DETERMINISTIC -- every pool member gets the exact same {0:1,1:2,2:2,2:2,
+# 4:1} blue-count split across its 8 prefixes, only the specific
+# arrangements within each level vary. This collapses the |Delta response|
+# curve's between-participant diversity on the prefix portion (observation
+# <= prefix_length) almost down to the handful of distinct values that
+# fixed split can produce, confirmed empirically (chat history) to jump
+# from 3 distinct per-member averages at obs=4 (deterministic allocator) to
+# 9 (randomized allocator, same capacity constraints). This branch goes
+# further: no prefix/qid-repeat concept AT ALL. Each of n_total trials
+# gets its OWN independently-drawn true_p (still spread evenly across
+# blue_range via binary_target_blue_counts, unchanged) and its OWN
+# independently-built, exact-quota FULL seq_length sequence
+# (moment_match_binary) -- no qid ever repeats, so there's no "prefix" to
+# even define length-4 uniqueness against in the first place (see the
+# separate per-qid prefix-repetition investigation this was built to
+# support).
+# ---------------------------------------------------------------------------
+def generate_binary_sequences_no_prefix(args, rng, verbose=True):
+    """Binary, no-prefix branch. Returns (DataFrame, json_trials), SAME
+    schema as generate_task_sequences_hybrid -- qid is set to the trial's
+    own index (never repeated) and prefix_length is recorded as 0, so
+    every existing consumer of this schema (verify_pool's prefix-
+    uniqueness check, parse_results.py, tutorial-example selection, etc.)
+    keeps working unmodified: a qid with exactly one trial and an empty
+    (`values[:0]`) "prefix" is trivially unique, not a special case that
+    needs separate handling downstream.
+    """
+    seq_length = args.seq_length
+    n_total    = args.n_prefix * args.n_repeats  # same trial-count formula
+    # as the prefix branch, so a no-prefix pool member has the same number
+    # of trials as a prefix-branch one -- apples-to-apples pool sizing,
+    # not a different experiment length by accident.
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print("Task: BINARY  (hybrid, NO-PREFIX branch: every trial independent)")
+        print(f"  Total trials   : {n_total} (no prefix/qid-repeat structure)")
+        print(f"  Seq length     : {seq_length}")
+
+    target_blue = binary_target_blue_counts(rng, n_total, args.blue_range)
+    if verbose:
+        from collections import Counter
+        print(f"  target blue-count distribution: {dict(sorted(Counter(target_blue).items()))}")
+
+    ITI_MS = 1000
+    # No qid/prefix identity to key an ITI schedule off of anymore --
+    # _build_iti_schedule assumes per-qid repeats, so build a flat
+    # half-control/half-distract schedule directly instead.
+    iti_pool = (['control'] * (n_total // 2) + ['distract'] * (n_total - n_total // 2))
+    rng.shuffle(iti_pool)
+
+    trials = []
+    for i, target in enumerate(target_blue):
+        true_p = round(target / seq_length, 6)
+        values = moment_match_binary(rng, true_p, seq_length)
+        trials.append({
+            'qid': i, 'true_mean': float('nan'), 'true_std': float('nan'),
+            'true_p': true_p, 'values': values,
+            'iti_ms': ITI_MS, 'iti_condition': iti_pool[i],
+        })
+
+    # Every qid is already unique, so there's no "no consecutive qid"
+    # constraint to enforce -- a plain shuffle is sufficient.
+    rng.shuffle(trials)
+
+    records, json_trials = [], []
+    for t, trial in enumerate(trials):
+        for o, v in enumerate(trial['values'], start=1):
+            records.append({
+                'trial': t, 'qid': trial['qid'],
+                'observation': o, 'value': v,
+                'true_mean': trial['true_mean'],
+                'true_std': trial['true_std'],
+                'true_p': trial['true_p'],
+                'iti_ms': trial['iti_ms'],
+                'iti_condition': trial['iti_condition'],
+            })
+        json_trials.append({
+            'trial': t, 'qid': trial['qid'],
+            'true_mean': None, 'true_std': None,
+            'true_p': trial['true_p'],
+            'values': trial['values'], 'prefix_length': 0,
+            'iti_ms': trial['iti_ms'],
+            'iti_condition': trial['iti_condition'],
+        })
+
+    df = pd.DataFrame(records)
+
+    assert len(df) == n_total * seq_length
+    assert df['value'].isin([-1, 1]).all()
+    assert df['trial'].nunique() == n_total
+    assert df['qid'].nunique() == n_total, "no-prefix branch must give every trial its own unique qid"
+    achieved_blue = df.groupby('trial')['value'].apply(lambda s: (s == 1).sum())
+    expected_blue = (df.groupby('trial')['true_p'].first() * seq_length).round()
+    assert np.array_equal(achieved_blue.reindex(expected_blue.index).values,
+                          expected_blue.values), (
+        "binary quota mismatch -- moment_match_binary should be exact by construction.")
+
+    if verbose:
+        print(f"\n  {len(df)} rows | {n_total} trials, each with its own unique qid")
+        print(f"  true_p range: {df['true_p'].min():.3f} - {df['true_p'].max():.3f}")
+
+    return df, json_trials
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +557,14 @@ def parse_args():
     p.add_argument('--seed',          type=int,   default=0)
     p.add_argument('--report',        action='store_true',
                    help='Print achieved-vs-target moments per trial; no file written')
+    p.add_argument('--no_prefix',     action='store_true',
+                   help='Binary ONLY (chat history) -- use generate_binary_sequences_no_prefix '
+                        'instead of the default prefix/qid-repeat structure. Every trial gets '
+                        'its own independent true_p and its own independent exact-quota full-'
+                        'length sequence; no prefix, no qid repeats at all. A SEPARATE branch, '
+                        'not a replacement -- omit this flag to keep using the existing prefix '
+                        'scheme. Errors if --task is continuous or both (this branch has no '
+                        'continuous equivalent).')
     return p.parse_args()
 
 
@@ -467,6 +586,19 @@ def main():
     out_dir = pathlib.Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     tasks = ['continuous', 'binary'] if args.task == 'both' else [args.task]
+
+    if args.no_prefix:
+        assert args.task == 'binary', (
+            "--no_prefix is binary-only (chat history) -- no continuous equivalent exists. "
+            "Pass --task binary explicitly.")
+        assert not args.report, "--report is not supported for --no_prefix yet"
+        print(f"Generating sequences (hybrid, NO-PREFIX branch) | seed={args.seed}")
+        rng = make_rng(args.seed + 1000)
+        df, json_trials = generate_binary_sequences_no_prefix(args, rng)
+        pkl_path, json_path = _save_sequences(df, json_trials, 'binary_hybrid_noprefix', out_dir)
+        print(f"\n  Saved: {json_path}\n  Saved: {pkl_path}")
+        print("\nJOB_COMPLETE")
+        return
 
     if args.report:
         for task in tasks:

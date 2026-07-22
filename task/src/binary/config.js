@@ -10,7 +10,7 @@
  * Common structure lives in shared/config-base.js — this file supplies only
  * what differs for the binary task.
  */
-import { buildConfig, pickTutorialExample } from '../shared/config-base.js';
+import { buildConfig, pickTutorialExample, DEFAULTS } from '../shared/config-base.js';
 
 // See continuous/config.js's identical comment for why import.meta.glob
 // (eager, statically bundled) rather than a runtime fetch.
@@ -21,8 +21,12 @@ const sequencesPool = Object.keys(poolModules).sort().map(k => poolModules[k]);
 
 // Tutorial example derived from pool member 0 -- see continuous/config.js's
 // identical comment for why (arbitrary but fixed, deterministic choice).
+// n: DEFAULTS.N_OBS_TO_RUN (not a second hardcoded 5, chat history) -- the
+// tutorial now walks through a full real trial's worth of observations,
+// matching real-task length exactly, and can never silently drift out of
+// sync with N_OBS_TO_RUN again -- same fix continuous/config.js already got.
 const { values: tutorialValues, mean: TUTORIAL_P } =
-  pickTutorialExample(sequencesPool[0], { isBinary: true, n: 5 });
+  pickTutorialExample(sequencesPool[0], { isBinary: true, n: DEFAULTS.N_OBS_TO_RUN });
 
 export const config = buildConfig({
   taskType:      'binary',
@@ -30,5 +34,11 @@ export const config = buildConfig({
   tutorialValues,
   tutorialMean:  TUTORIAL_P,
   tutorialStd:   0,
-  // No overrides — binary currently uses all shared defaults.
+  // ERROR_MODE override (chat history) -- binary's own errorMode values
+  // are 'true_p'/'running_p', distinct strings from continuous's
+  // 'true_mean'/'running_mean' -- see bonus-continuous.js's own docstring
+  // for why. Set to 'running_p' here for testing, mirroring continuous's
+  // own DEFAULTS.ERROR_MODE currently being 'running_mean' for the same
+  // reason.
+  overrides: { ERROR_MODE: 'running_p' },
 });

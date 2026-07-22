@@ -48,26 +48,56 @@
  *                both was redundant.)
  *
  * `color` is a parameter (not hardcoded) so this can be reused for binary's
- * blue/red draws later without a rewrite -- continuous is the only caller
- * for now.
+ * blue/red draws -- continuous passes a fixed color string; binary
+ * (chat history) passes a FUNCTION `(value) => colorString` instead
+ * (values are +-1, not numbers to display), and sets `renderDot: true` to
+ * switch every slot from number+underline to a plain colored circle --
+ * there's no separate "number" to show for a binary draw, the color IS
+ * the content, so text would be redundant here in a way it wasn't for
+ * continuous's numeric values. Both modes share the exact same
+ * settled/current/empty state logic and the same #tut-tracker-current-num
+ * id for the reveal-timing wiring (continuous-draw-animation.js's
+ * onReveal / binary-draw-animation.js's own equivalent).
  */
 
-export function buildTrackerHTML({ nObs, obsNum, values, color = '#ef4444', revealCurrent = true }) {
+export function buildTrackerHTML({ nObs, obsNum, values, color = '#ef4444', revealCurrent = true, renderDot = false }) {
   const slots = [];
+  const colorFor = (v) => typeof color === 'function' ? color(v) : color;
 
   for (let i = 0; i < nObs; i++) {
     const idx = i + 1; // 1-indexed slot position
 
+    if (renderDot) {
+      if (idx < obsNum) {
+        slots.push(`
+          <div class="tut-tracker-slot">
+            <span class="tut-tracker-dot tut-tracker-dot-settled" style="background:${colorFor(values[i])};"></span>
+          </div>`);
+      } else if (idx === obsNum) {
+        slots.push(`
+          <div class="tut-tracker-slot">
+            <span class="tut-tracker-dot tut-tracker-dot-current" id="tut-tracker-current-num"
+                  style="background:${colorFor(values[i])};opacity:${revealCurrent ? 1 : 0};"></span>
+          </div>`);
+      } else {
+        slots.push(`
+          <div class="tut-tracker-slot">
+            <span class="tut-tracker-dot tut-tracker-dot-empty"></span>
+          </div>`);
+      }
+      continue;
+    }
+
     if (idx < obsNum) {
       slots.push(`
         <div class="tut-tracker-slot">
-          <span class="tut-tracker-num tut-tracker-num-settled" style="color:${color};">${values[i]}</span>
+          <span class="tut-tracker-num tut-tracker-num-settled" style="color:${colorFor(values[i])};">${values[i]}</span>
         </div>`);
     } else if (idx === obsNum) {
       slots.push(`
         <div class="tut-tracker-slot">
           <span class="tut-tracker-num tut-tracker-num-current" id="tut-tracker-current-num"
-                style="color:${color};opacity:${revealCurrent ? 1 : 0};">${values[i]}</span>
+                style="color:${colorFor(values[i])};opacity:${revealCurrent ? 1 : 0};">${values[i]}</span>
         </div>`);
     } else {
       slots.push(`

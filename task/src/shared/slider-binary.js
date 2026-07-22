@@ -1,9 +1,19 @@
 /**
  * slider-binary.js — shared binary slider component.
  *
- * Two modes:
- *   unset=true  ('none') — thumb hidden, gray track, submit disabled
- *   unset=false ('last') — thumb at initPos, submit disabled until interaction
+ * Two INDEPENDENT things, not one (chat history -- same fix as
+ * slider-continuous.js):
+ *   Thumb position/gradient fill -- controlled by `unset`:
+ *     unset=true  ('none') — thumb hidden, gray track, submit disabled
+ *     unset=false ('last') — thumb/gradient at initPos immediately, submit
+ *                  disabled until interaction
+ *   Floating blue/red %s (v1) / in-bar %s (v2) -- ALWAYS start hidden
+ *   regardless of `unset`, only appearing on the participant's first
+ *   actual interaction (mousedown/input) with THIS observation's slider.
+ *   Lets 'last' mode show WHERE the thumb sits (helps remember the
+ *   running estimate) without also revealing the exact percentages before
+ *   the participant has deliberately touched it -- previously these were
+ *   tied together, so 'last' mode revealed both at once.
  *
  * initBinarySlider() must be called after on_load() in the plugin's trial()
  * method (trial() must NOT be async — see plugin-observation-binary.js header
@@ -33,14 +43,8 @@ export const buildBinarySliderHTML = ({
 } = {}) => `
   <div class="binary-slider-section">
     <div class="slider-label-float-wrap">
-      <div id="slider-float-label-blue" class="slider-float-label-blue"
-           style="display:${!unset && showValue ? 'block' : 'none'};">
-        ${!unset ? Math.round(initPos) + '%' : ''}
-      </div>
-      <div id="slider-float-label-red" class="slider-float-label-red"
-           style="display:${!unset && showValue ? 'block' : 'none'};">
-        ${!unset ? Math.round(100 - initPos) + '%' : ''}
-      </div>
+      <div id="slider-float-label-blue" class="slider-float-label-blue" style="display:none;"></div>
+      <div id="slider-float-label-red" class="slider-float-label-red" style="display:none;"></div>
     </div>
     <div class="binary-slider-row">
       <div class="slider-track-wrap" style="flex:1;">
@@ -262,7 +266,12 @@ export const initBinarySliderV2 = (display_el, {
 
   btn.disabled = true;
   buildBinaryRulerV2(display_el);
-  if (!unset && showValue) { updateBinaryInBarValues(slider); updateBinaryFill(slider); }
+  // Deliberately NOT calling updateBinaryInBarValues/updateBinaryFill here
+  // even when !unset -- see module docstring. The %s only ever appear from
+  // the mousedown/input listeners below, on the participant's own first
+  // interaction. (updateBinaryFill isn't needed here either way -- the
+  // gradient's initial --pct is already set correctly inline in
+  // buildBinarySliderHTMLv2's own markup.)
 
   slider.addEventListener('mousedown', () => {
     slider.classList.remove('slider-unset');
@@ -291,7 +300,16 @@ export const initBinarySliderV2 = (display_el, {
 
   if (showValue && typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
-      if (!slider.classList.contains('slider-unset')) updateBinaryInBarValues(slider);
+      // Only reposition an ALREADY-shown value -- both classes are removed
+      // together on first interaction (see the two listeners above), so
+      // their absence means "has interacted", not just "not unset". Without
+      // checking 'slider-last' too, a window resize before the
+      // participant's first touch would call updateBinaryInBarValues and
+      // prematurely reveal the %s in 'last' mode -- exactly the leak this
+      // whole change is meant to close (same fix as slider-continuous.js).
+      if (!slider.classList.contains('slider-unset') && !slider.classList.contains('slider-last')) {
+        updateBinaryInBarValues(slider);
+      }
     });
     ro.observe(slider);
   }
@@ -311,7 +329,9 @@ export const initBinarySlider = (display_el, {
 
   btn.disabled = true;
   buildBinaryRuler(slider);
-  if (!unset && showValue) { updateBinaryLabel(slider); updateBinaryFill(slider); }
+  // Deliberately NOT calling updateBinaryLabel/updateBinaryFill here even
+  // when !unset -- see module docstring; same fix as initBinarySliderV2
+  // above.
 
   slider.addEventListener('mousedown', () => {
     slider.classList.remove('slider-unset');
@@ -340,7 +360,9 @@ export const initBinarySlider = (display_el, {
 
   if (showValue && typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
-      if (!slider.classList.contains('slider-unset')) updateBinaryLabel(slider);
+      if (!slider.classList.contains('slider-unset') && !slider.classList.contains('slider-last')) {
+        updateBinaryLabel(slider);
+      }
     });
     ro.observe(slider);
   }

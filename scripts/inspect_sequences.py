@@ -393,21 +393,55 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="t
             vals, task, eps_p, eps_r
         ),
     }
+    # Optimal model for the running-ratio objective specifically (chat
+    # history) -- see utils/binary_transform.py's own docstring: Laplace
+    # smoothing IS exactly the correction that makes "Bayes" optimal for
+    # inferring the FIXED underlying true_p (shrinks toward the
+    # uninformative prior, more so at small n). That correction has no
+    # justification if the objective is the running ratio ITSELF, which
+    # needs no prior-shrinkage at all -- it's fully determined by the
+    # observed samples, not a hidden parameter being inferred. This new
+    # agent is IDENTICAL to "Bayes" (same _bayes_responses computation) but
+    # reads response_raw (pre-transform) instead of response, below.
+    # Continuous needed no equivalent addition -- task_continuous was never
+    # in _TRANSFORM_DATASETS to begin with, so its "Bayes" already IS the
+    # untransformed running mean.
+    use_raw_agents = set()
+    if task == "binary":
+        agents["Running ratio (optimal, no Laplace)"] = lambda vals, tm, tp: _bayes_responses(vals, task)
+        use_raw_agents.add("Running ratio (optimal, no Laplace)")
+
     dataset = f"task_{task}"
     results = {}
     for name, fn in agents.items():
+        use_raw = name in use_raw_agents
         rows = []
         for tid in seq_df["trial"].unique():
             g = seq_df[seq_df["trial"] == tid].sort_values("observation")
             vals = g["value"].tolist()
             tm = float(g["true_mean"].iloc[0])
             tp = float(g["true_p"].iloc[0]) if task == "binary" else float("nan")
+            gt_traj = gt_traj_raw = gt_const = None
             if gt_mode == "running_mean":
-                gt_traj = _bayes_responses(vals, task)
+                base_traj = _bayes_responses(vals, task)
                 if task == "binary":
-                    gt_df = pd.DataFrame({"observation": list(range(len(gt_traj))),
-                                         "response": gt_traj})
-                    gt_traj = apply_binary_transform(gt_df, dataset)["response"].tolist()
+                    # Ground truth needs BOTH variants too: the transformed
+                    # trajectory for agents being compared on the
+                    # transformed scale (existing behavior, unchanged --
+                    # otherwise "Bayes" would show spurious nonzero error
+                    # against an untransformed target), and the raw
+                    # trajectory for the new untransformed agent above --
+                    # comparing IT against a transformed target would make
+                    # it show nonzero error too, defeating the point of
+                    # adding it as the correct zero-error reference for
+                    # this objective.
+                    gt_df = pd.DataFrame({"observation": list(range(len(base_traj))),
+                                         "response": base_traj})
+                    gt_df = apply_binary_transform(gt_df, dataset)
+                    gt_traj = gt_df["response"].tolist()
+                    gt_traj_raw = gt_df["response_raw"].tolist()
+                else:
+                    gt_traj = gt_traj_raw = base_traj
             else:
                 gt_const = _ground_truth(task, tm, tp)
             resp = fn(vals, tm, tp)
@@ -417,9 +451,11 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="t
                 "response": resp,
             })
             resp_df = apply_binary_transform(resp_df, dataset)
+            col = "response_raw" if use_raw else "response"
+            active_gt_traj = gt_traj_raw if use_raw else gt_traj
             prev = None
-            for obs_i, r in enumerate(resp_df["response"].tolist()):
-                gt = gt_traj[obs_i] if gt_mode == "running_mean" else gt_const
+            for obs_i, r in enumerate(resp_df[col].tolist()):
+                gt = active_gt_traj[obs_i] if gt_mode == "running_mean" else gt_const
                 rows.append({
                     "observation": obs_i + 1,
                     "err": abs(r - gt),
@@ -428,6 +464,72 @@ def run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="t
                 prev = r
         results[name] = pd.DataFrame(rows)
     return results
+
+
+def run_agents_pooled(pool_dir, task, alpha_0, rl_lambda, gamma, eps_p, eps_r, gt_mode="true"):
+    """Like run_agents, but aggregates over EVERY real pool member's own
+    trials (task/sequences_pool/{task}_*_sequences.pkl), not just one
+    representative file. Chat history -- run_agents alone (called once
+    against a single copied-out pool member) only reflected that ONE
+    member's 32 trials; comparing that against inspect_iid_sequences.py's
+    pool-averaged Mean-agent figure was comparing genuinely different
+    samples (n=32 trials vs n=200 pool members x 32 trials each), which is
+    exactly why the two figures didn't line up.
+
+    For each agent, computes one mean-per-observation curve PER POOL
+    MEMBER (its own 32 trials), then averages + 95% CI (via SEM) ACROSS
+    the population of pool members -- the same two-level aggregation
+    inspect_iid_sequences.py's make_figure already does for its single
+    Mean-only figure, applied here per-agent instead.
+
+    Returns dict: agent_name -> {'err': (mean, lo, hi), 'delta': (mean, lo, hi)}
+    each a Series indexed by observation.
+    """
+    pkls = sorted(Path(pool_dir).glob(f"{task}_*_sequences.pkl"))
+    assert pkls, f"no pool files found for {task} in {pool_dir}"
+
+    member_curves = {}  # agent_name -> {'err': [Series,...], 'delta': [Series,...]}
+    for pkl in pkls:
+        seq_df = pd.read_pickle(pkl)
+        agent_data = run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r,
+                                gt_mode=gt_mode)
+        for name, df in agent_data.items():
+            d = member_curves.setdefault(name, {"err": [], "delta": []})
+            d["err"].append(df.dropna(subset=["err"]).groupby("observation")["err"].mean())
+            d["delta"].append(df.dropna(subset=["delta"]).groupby("observation")["delta"].mean())
+
+    results = {}
+    for name, d in member_curves.items():
+        agg = {}
+        for metric in ("err", "delta"):
+            wide = pd.concat(d[metric], axis=1)
+            mean_c = wide.mean(axis=1)
+            n_eff = wide.notna().sum(axis=1).clip(lower=1)
+            sem = wide.std(axis=1) / np.sqrt(n_eff)
+            ci = 1.96 * sem
+            agg[metric] = (mean_c, (mean_c - ci).clip(lower=0), mean_c + ci)
+        results[name] = agg
+    return results
+
+
+def _plot_panel_pooled(ax, pooled, metric, title, ylabel, colors):
+    """Like _plot_panel, but pooled[name] is already an aggregated
+    (mean, ci_lo, ci_hi) tuple (from run_agents_pooled) instead of a raw
+    per-trial DataFrame -- draws a shaded 95% CI band per agent alongside
+    its mean line, matching inspect_iid_sequences.py's own per-agent CI
+    treatment."""
+    for (name, agg), color in zip(pooled.items(), colors):
+        mean_c, lo, hi = agg[metric]
+        ax.fill_between(mean_c.index, lo, hi, color=color, alpha=0.15, zorder=1)
+        ax.plot(mean_c.index, mean_c.values, color=color, lw=1.8, label=name, zorder=3)
+    ax.set_title(title, fontsize=9, fontweight="bold")
+    ax.set_xlabel("Observation", fontsize=8)
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.set_xlim(left=1)
+    ax.set_ylim(bottom=0)
+    ax.tick_params(labelsize=7)
+    ax.legend(fontsize=6, frameon=False)
+    ax.spines[["top", "right"]].set_visible(False)
 
 
 # ── Human-readable inspection CSV ──────────────────────────────────────────────
@@ -481,6 +583,7 @@ def build_inspection_csv(seq_dir: Path, out_path: Path, pool_dir: Path | None = 
         n_quota_bad_total = 0
         n_trials_total = 0
 
+        n_members_no_prefix = 0
         for json_path in json_paths:
             pool_index = None
             if pool_dir is not None:
@@ -492,15 +595,28 @@ def build_inspection_csv(seq_dir: Path, out_path: Path, pool_dir: Path | None = 
                 trials = json.load(f)
 
             # -- Prefix-uniqueness check, scoped to THIS member's own qids --
-            prefix_by_qid: dict = {}
-            for t in trials:
-                pl = t["prefix_length"]
-                prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
-            all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
-            n_distinct = len(set(all_prefixes))
-            n_qids = len(prefix_by_qid)
-            one_prefix_per_qid = all(len(v) == 1 for v in prefix_by_qid.values())
-            prefix_ok = (n_distinct == n_qids) and one_prefix_per_qid
+            # SKIPPED when prefix_length=0 (chat history,
+            # generate_binary_sequences_no_prefix) -- every trial's own
+            # qid is already unique by construction there, and
+            # values[:0] is the same empty tuple for every trial, which
+            # would otherwise register as a false-positive "collision"
+            # (n_distinct=1 while n_qids=32) rather than a real one. Same
+            # fix already applied to generate_sequences_pool.py's
+            # verify_pool -- kept in sync rather than only fixed in one
+            # of the two places that independently implement this check.
+            if trials and trials[0]["prefix_length"] == 0:
+                n_members_no_prefix += 1
+                prefix_ok = True  # nothing to check; don't count as a failure
+            else:
+                prefix_by_qid: dict = {}
+                for t in trials:
+                    pl = t["prefix_length"]
+                    prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
+                all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
+                n_distinct = len(set(all_prefixes))
+                n_qids = len(prefix_by_qid)
+                one_prefix_per_qid = all(len(v) == 1 for v in prefix_by_qid.values())
+                prefix_ok = (n_distinct == n_qids) and one_prefix_per_qid
             n_members_prefix_ok += int(prefix_ok)
 
             # -- iti_condition balance, scoped to THIS member --
@@ -547,9 +663,16 @@ def build_inspection_csv(seq_dir: Path, out_path: Path, pool_dir: Path | None = 
                 rows.append(row)
 
         n_members = len(json_paths)
-        if pool_dir is not None:
+        if n_members_no_prefix == n_members and n_members > 0:
             console_summary.append(
-                f"[{task}] prefix uniqueness: {n_members_prefix_ok}/{n_members} pool members OK")
+                f"[{task}] prefix uniqueness: SKIPPED for all {n_members} pool members "
+                f"(prefix_length=0 -- no-prefix branch, nothing to check)")
+            console_summary.append(
+                f"[{task}] iti_condition balance: {n_members_iti_ok}/{n_members} pool members OK")
+        elif pool_dir is not None:
+            console_summary.append(
+                f"[{task}] prefix uniqueness: {n_members_prefix_ok}/{n_members} pool members OK"
+                + (f" ({n_members_no_prefix} of those skipped, prefix_length=0)" if n_members_no_prefix else ""))
             console_summary.append(
                 f"[{task}] iti_condition balance: {n_members_iti_ok}/{n_members} pool members OK")
         else:
@@ -687,9 +810,15 @@ def make_figure(
     n_neurons: int | None = None,
     n_neurons_counting: int | None = None,
     gt_mode: str = "running_mean",
+    pool_dir: Path | None = None,
 ):
     assert gt_mode in GT_MODES, f"gt_mode must be one of {GT_MODES}"
     seq_dir = Path(seq_dir)
+    if pool_dir is not None:
+        pool_dir = Path(pool_dir)
+        assert skip_nef, ("pool_dir aggregation isn't wired up for NEF -- NEF metrics "
+                          "would still come from a single seq_dir file, mismatched "
+                          "against the pooled agent curves. Pass --skip_nef.")
     cache_path = nef_cache or default_nef_cache_path(alpha_0, rl_lambda, gt_mode=gt_mode)
     nef_metrics = None
     if not skip_nef:
@@ -704,7 +833,10 @@ def make_figure(
             gt_mode=gt_mode,
         )
 
-    n_models = 5 if nef_metrics else 4
+    n_models = (5 if nef_metrics else 4) + 1  # +1 for binary's "Running ratio
+    # (optimal, no Laplace)" agent above -- always reserve the extra color
+    # slot even when NEF is skipped, since binary's agent_data dict always
+    # has one more entry than continuous's regardless of nef_metrics.
     colors = get_palette(n_models)
     fig, axes = plt.subplots(2, 3, figsize=(13, 6), constrained_layout=True)
 
@@ -713,38 +845,70 @@ def make_figure(
 
     for row, task in enumerate(["binary", "continuous"]):
         pkl = seq_dir / f"{task}_sequences.pkl"
-        if not pkl.exists():
+        if pool_dir is None and not pkl.exists():
             print(f"[skip] {pkl}")
             continue
-        seq_df = pd.read_pickle(pkl)
-        agent_data = run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r,
-                                gt_mode=gt_mode)
-        if nef_metrics and task in nef_metrics:
-            agent_data[f"NEF(α={alpha_0},λ={rl_lambda})"] = nef_metrics[task]
 
-        with open(seq_dir / f"{task}_sequences.json") as f:
-            prefix = int(json.load(f)[0]["prefix_length"])
-        label = task.capitalize()
+        if pool_dir is not None:
+            # Chat history -- aggregate over EVERY real pool member's own
+            # trials, not just one representative file (see
+            # run_agents_pooled's own docstring for why that mismatch was
+            # a real bug, not a cosmetic one).
+            pooled = run_agents_pooled(pool_dir, task, alpha_0, rl_lambda, gamma, eps_p, eps_r,
+                                       gt_mode=gt_mode)
+            n_members = len(sorted(Path(pool_dir).glob(f"{task}_*_sequences.pkl")))
+            with open(sorted(Path(pool_dir).glob(f"{task}_*_sequences.json"))[0]) as f:
+                prefix = int(json.load(f)[0]["prefix_length"])
+            label = task.capitalize()
+            _plot_panel_pooled(
+                axes[row, 0], pooled, "err",
+                f"{label} — RMSE (prefix={prefix}, n={n_members} pool members)",
+                gt_label, colors,
+            )
+            _plot_panel_pooled(
+                axes[row, 1], pooled, "delta",
+                f"{label} — |Δresponse| (prefix={prefix}, n={n_members} pool members)",
+                "Mean |Δresponse|", colors,
+            )
+            for ax in axes[row, :2]:
+                ax.axvline(prefix + 0.5, color="#999", lw=0.8, ls="--", alpha=0.6)
+            # Reliability panel (column 2) stays on the single seq_dir file
+            # below -- that computation is a lambda-sweep-on-one-file
+            # methodology already, not a per-pool-member aggregation
+            # (see compute_split_half_reliability's own docstring), so it's
+            # unaffected by this fix; falls through to the shared code below.
+            seq_df = pd.read_pickle(pkl) if pkl.exists() else pd.read_pickle(
+                sorted(Path(pool_dir).glob(f"{task}_*_sequences.pkl"))[0])
+        else:
+            seq_df = pd.read_pickle(pkl)
+            agent_data = run_agents(seq_df, task, alpha_0, rl_lambda, gamma, eps_p, eps_r,
+                                    gt_mode=gt_mode)
+            if nef_metrics and task in nef_metrics:
+                agent_data[f"NEF(α={alpha_0},λ={rl_lambda})"] = nef_metrics[task]
 
-        _plot_panel(
-            axes[row, 0],
-            agent_data,
-            "err",
-            f"{label} — RMSE (prefix={prefix})",
-            gt_label,
-            colors,
-        )
-        _plot_panel(
-            axes[row, 1],
-            agent_data,
-            "delta",
-            f"{label} — |Δresponse| (prefix={prefix})",
-            "Mean |Δresponse|",
-            colors,
-        )
+            with open(seq_dir / f"{task}_sequences.json") as f:
+                prefix = int(json.load(f)[0]["prefix_length"])
+            label = task.capitalize()
 
-        for ax in axes[row, :2]:
-            ax.axvline(prefix + 0.5, color="#999", lw=0.8, ls="--", alpha=0.6)
+            _plot_panel(
+                axes[row, 0],
+                agent_data,
+                "err",
+                f"{label} — RMSE (prefix={prefix})",
+                gt_label,
+                colors,
+            )
+            _plot_panel(
+                axes[row, 1],
+                agent_data,
+                "delta",
+                f"{label} — |Δresponse| (prefix={prefix})",
+                "Mean |Δresponse|",
+                colors,
+            )
+
+            for ax in axes[row, :2]:
+                ax.axvline(prefix + 0.5, color="#999", lw=0.8, ls="--", alpha=0.6)
 
         # -- Column 2: split-half λ-recovery reliability, comparable to
         # test_sequences.pdf's panels E/L, computed on THESE sequences --
@@ -825,11 +989,18 @@ def parse_args():
     )
     p.add_argument(
         "--pool_dir", default=None,
-        help="If given, build_inspection_csv reads the real per-participant pool "
-             "(all {task}_*_sequences.json under this dir, see "
+        help="If given, both build_inspection_csv AND the figure read the real "
+             "per-participant pool (all {task}_*_sequences.* under this dir, see "
              "generate_sequences_pool.py) instead of the single shared file in "
-             "--seq_dir, adding a pool_index column. Only affects the CSV, not "
-             "the figure (which stays on --seq_dir's single file/agent comparison).",
+             "--seq_dir. For the CSV: adds a pool_index column. For the figure: "
+             "the RMSE/|delta response| panels aggregate (mean + 95% CI) over "
+             "EVERY pool member's own trials, per agent, instead of reflecting "
+             "just one representative file (chat history -- comparing that single-"
+             "file figure against inspect_iid_sequences.py's pool-averaged Mean-"
+             "agent figure was comparing different samples entirely). Requires "
+             "--skip_nef (NEF isn't wired up for pooled aggregation). The "
+             "reliability panel (column 3) is unaffected either way -- see "
+             "compute_split_half_reliability's own docstring for why.",
     )
     return p.parse_args()
 
@@ -879,5 +1050,6 @@ if __name__ == "__main__":
         n_neurons=args.n_neurons,
         n_neurons_counting=args.n_neurons_counting,
         gt_mode=args.gt_mode,
+        pool_dir=Path(args.pool_dir) if args.pool_dir else None,
     )
     print("JOB_COMPLETE")

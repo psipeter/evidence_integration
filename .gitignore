@@ -91,6 +91,15 @@ task/sequences/sequences.pkl
 # consolidate it into fewer files: neither, just don't track it at all.
 task/sequences_pool/
 
+# Backup of the deterministic-prefix binary pool, taken before switching
+# production to the no-prefix scheme (chat history) -- same reasoning as
+# task/sequences_pool/ above (large per-participant file count, and this
+# is specifically the OLD scheme, fully reproducible on demand via
+# `python task/generate_sequences_pool.py --n_pool 200 --task binary --seed 0`
+# with the prefix-based defaults, i.e. without --no_prefix), not something
+# that needs to live in git history to be recoverable.
+task/sequences_pool_binary_prefix_backup/
+
 # Task sequence data files (superseded by task/sequences/*.pkl)
 data/task_continuous.pkl
 data/task_binary.pkl

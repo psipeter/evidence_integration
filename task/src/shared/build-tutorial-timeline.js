@@ -11,7 +11,7 @@
  */
 import ItiClockPlugin      from './plugin-iti-clock.js';
 import TimeoutDemoPlugin   from './plugin-timeout-demo.js';
-import { computeTrialReward, computeRunningMeans, refForObservation, computeResponseError } from './bonus-continuous.js';
+import { computeTrialReward, computeRunningMeans, computeRunningRatios, refForObservation, computeResponseError } from './bonus-continuous.js';
 
 /**
  * @param {object} cfg
@@ -41,10 +41,15 @@ export function buildTutorialTimeline(cfg, plugins) {
 
   // Same errorMode branch as build-trial-timeline.js -- see that file's own
   // comment for the full rationale; kept identical rather than duplicated
-  // differently, since both ultimately call the same bonus-continuous.js
-  // functions.
-  const errorRefs = (values, trueMean) =>
-    errorMode === 'running_mean' ? computeRunningMeans(values) : trueMean;
+  // differently. tutorialMean holds true_p (0-1 scale) for binary and
+  // true_mean for continuous -- same dual role it already plays a few
+  // lines below (true_p: tutorialMean / true_mean: tutorialMean).
+  const errorRefs = (values, trueRef) => {
+    if (isBinary) {
+      return errorMode === 'running_p' ? computeRunningRatios(values) : trueRef * 100;
+    }
+    return errorMode === 'running_mean' ? computeRunningMeans(values) : trueRef;
+  };
   // Computed ONCE (tutorialValues is fixed, not response-dependent) --
   // resolved per-observation via refForObservation() below, index 0 for
   // the intro trial and _o for each subsequent tutorial observation (both
@@ -62,6 +67,10 @@ export function buildTutorialTimeline(cfg, plugins) {
         example_value: tutorialValues[0],
         true_p:        tutorialMean,
         n_obs:         tutorialValues.length,
+        // Tracker param -- see tutorial-tracker.js. Obs 1 has no history
+        // yet; values_so_far is just its own value. Mirrors continuous's
+        // identical param below.
+        values_so_far: tutorialValues.slice(0, 1),
         data: { screen: 'tutorial_intro', observation: 0, value: tutorialValues[0] },
       }
     : {
@@ -84,7 +93,7 @@ export function buildTutorialTimeline(cfg, plugins) {
   introTrial.on_finish = (data) => {
     if (data.response !== null && data.response !== undefined) {
       tutorialLastResponse = data.response;
-      const error = isBinary ? null : computeResponseError(data.response, refForObservation(_refs, 0));
+      const error = computeResponseError(data.response, refForObservation(_refs, 0));
       data.error = error;
       tutorialResponses.push({ value: tutorialValues[0], response: data.response, error });
     }
@@ -124,7 +133,7 @@ export function buildTutorialTimeline(cfg, plugins) {
           on_finish: (data) => {
             if (data.response !== null) {
               tutorialLastResponse = data.response;
-              const error = isBinary ? null : computeResponseError(data.response, refForObservation(_refs, _o));
+              const error = computeResponseError(data.response, refForObservation(_refs, _o));
               data.error = error;
               tutorialResponses.push({ value: _value, response: data.response, error });
             }
@@ -144,12 +153,10 @@ export function buildTutorialTimeline(cfg, plugins) {
     values:     () => tutorialResponses.map(r => r.value),
     responses:  () => tutorialResponses.map(r => r.response),
     error_mode: errorMode,
-    // Per-TRIAL bonus preview (chat history, continuous only -- see
-    // bonus-continuous.js) -- SUM of the already-stored per-observation
-    // errors above, not recomputed independently. isBinary guard matches
-    // build-trial-timeline.js's own (binary has no bonus scheme yet).
-    total_error: () => isBinary ? 0 : tutorialResponses.reduce((sum, r) => sum + (r.error ?? 0), 0),
-    reward:      () => isBinary ? 0 : computeTrialReward(tutorialResponses.reduce((sum, r) => sum + (r.error ?? 0), 0)),
+    // Per-TRIAL bonus preview (chat history) -- SUM of the already-stored
+    // per-observation errors above, not recomputed independently.
+    total_error: () => tutorialResponses.reduce((sum, r) => sum + (r.error ?? 0), 0),
+    reward:      () => computeTrialReward(tutorialResponses.reduce((sum, r) => sum + (r.error ?? 0), 0)),
     data: { screen: 'tutorial_summary' },
   });
 

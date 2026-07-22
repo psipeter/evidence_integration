@@ -437,7 +437,14 @@ def make_figure(raw_df, fits_df, tasks, out_path, n_participants, agent_label="M
                         lw=thin_lw, alpha=thin_alpha, zorder=1)
             all_rmse.append(curve)
         if all_rmse:
-            mean_curve = pd.concat(all_rmse, axis=1).mean(axis=1)
+            rmse_wide = pd.concat(all_rmse, axis=1)
+            mean_curve = rmse_wide.mean(axis=1)
+            n_eff = rmse_wide.notna().sum(axis=1).clip(lower=1)
+            sem = rmse_wide.std(axis=1) / np.sqrt(n_eff)
+            ci = 1.96 * sem
+            ax_rmse.fill_between(mean_curve.index, (mean_curve - ci).clip(lower=0),
+                                mean_curve + ci, color=palette[0], alpha=0.2, zorder=4,
+                                label="95% CI")
             ax_rmse.plot(mean_curve.index, mean_curve.values, color=palette[0],
                         lw=2.2, zorder=5, label="Mean across participants")
         ax_rmse.set_xlabel("Observation")
@@ -459,7 +466,14 @@ def make_figure(raw_df, fits_df, tasks, out_path, n_participants, agent_label="M
                          lw=thin_lw, alpha=thin_alpha, zorder=1)
             all_delta.append(curve)
         if all_delta:
-            mean_curve = pd.concat(all_delta, axis=1).mean(axis=1)
+            delta_wide = pd.concat(all_delta, axis=1)
+            mean_curve = delta_wide.mean(axis=1)
+            n_eff = delta_wide.notna().sum(axis=1).clip(lower=1)
+            sem = delta_wide.std(axis=1) / np.sqrt(n_eff)
+            ci = 1.96 * sem
+            ax_delta.fill_between(mean_curve.index, (mean_curve - ci).clip(lower=0),
+                                 mean_curve + ci, color=palette[1], alpha=0.2, zorder=4,
+                                 label="95% CI")
             ax_delta.plot(mean_curve.index, mean_curve.values, color=palette[1],
                          lw=2.2, zorder=5, label="Mean across participants")
         ax_delta.set_xlabel("Observation")

@@ -50,13 +50,13 @@ import io
 import pathlib
 
 from generate_sequences import make_rng, _save_sequences
-from generate_sequences_hybrid import generate_task_sequences_hybrid
+from generate_sequences_hybrid import generate_task_sequences_hybrid, generate_binary_sequences_no_prefix
 
 
 def build_pool(n_pool, tasks, n_prefix, n_repeats, seq_length,
               prefix_length, mean_range, std_fixed, blue_range,
               boundary_margin, std_tolerance_frac, base_seed,
-              pool_dir, progress_every=20):
+              pool_dir, progress_every=20, no_prefix=False):
     """Generate n_pool independent HYBRID sequence sets per task, each saved
     as its own {task}_{NNNN}_sequences.{pkl,json} under pool_dir. Returns a
     dict {task: [pkl_path, ...]} of everything written, for the caller to
@@ -67,8 +67,19 @@ def build_pool(n_pool, tasks, n_prefix, n_repeats, seq_length,
     this now wraps the hybrid generator instead of the pure-i.i.d. one, so
     a pool member's index N still lines up with whatever a same-index
     comparison run in that tool would use, if that's ever useful.
+
+    no_prefix (chat history, binary only) -- uses
+    generate_binary_sequences_no_prefix instead of
+    generate_task_sequences_hybrid for binary specifically; asserts tasks
+    == ['binary'] if set (no continuous equivalent exists, matching
+    generate_sequences_hybrid.py's own CLI guard). A SEPARATE pool mode,
+    not a replacement -- the caller is expected to point --pool_dir at a
+    DIFFERENT directory than production's, so this never overwrites the
+    existing prefix-based pool.
     """
     from types import SimpleNamespace
+    if no_prefix:
+        assert tasks == ["binary"], "no_prefix is binary-only -- pass tasks=['binary']"
     written = {task: [] for task in tasks}
     for task in tasks:
         pool_task_dir = pathlib.Path(pool_dir)
@@ -88,7 +99,10 @@ def build_pool(n_pool, tasks, n_prefix, n_repeats, seq_length,
             # to keep n_pool calls from flooding the console; a concise
             # progress line is printed here instead.
             with contextlib.redirect_stdout(io.StringIO()):
-                df, json_trials = generate_task_sequences_hybrid(task, args_ns, rng, verbose=True)
+                if no_prefix:
+                    df, json_trials = generate_binary_sequences_no_prefix(args_ns, rng, verbose=True)
+                else:
+                    df, json_trials = generate_task_sequences_hybrid(task, args_ns, rng, verbose=True)
             pkl_path, json_path = _save_sequences(
                 df, json_trials, f"{task}_{i:04d}", pool_task_dir)
             written[task].append(pkl_path)
@@ -110,29 +124,45 @@ def verify_pool(written, tasks, n_pool):
         assert len(written[task]) == n_pool, f"{task}: expected {n_pool} pool members, wrote {len(written[task])}"
         n_prefix_collisions = 0
         n_quota_mismatches = 0
+        is_no_prefix = None
         for pkl_path in written[task]:
             json_path = pkl_path.with_suffix(".json")
             with open(json_path) as f:
                 trials = _json.load(f)
-            prefix_by_qid = {}
-            for t in trials:
-                pl = t["prefix_length"]
-                prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
-            all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
-            if len(set(all_prefixes)) != len(prefix_by_qid):
-                n_prefix_collisions += 1
+            pl_here = trials[0]["prefix_length"] if trials else None
+            if is_no_prefix is None:
+                is_no_prefix = (pl_here == 0)
+            if not is_no_prefix:
+                prefix_by_qid = {}
+                for t in trials:
+                    pl = t["prefix_length"]
+                    prefix_by_qid.setdefault(t["qid"], set()).add(tuple(t["values"][:pl]))
+                all_prefixes = [p for prefs in prefix_by_qid.values() for p in prefs]
+                if len(set(all_prefixes)) != len(prefix_by_qid):
+                    n_prefix_collisions += 1
             if task == "binary":
                 for t in trials:
                     achieved_blue = sum(1 for v in t["values"] if v == 1)
                     target_blue = round(t["true_p"] * len(t["values"]))
                     if achieved_blue != target_blue:
                         n_quota_mismatches += 1
-        status = "OK" if n_prefix_collisions == 0 else f"{n_prefix_collisions} member(s) with a prefix collision"
-        print(f"[verify] {task}: {n_pool} members, prefix uniqueness {status}")
-        assert n_prefix_collisions == 0, (
-            f"{task}: {n_prefix_collisions} pool member(s) have a prefix collision -- "
-            f"should be unreachable given build_{task}_prefixes' own dedup; "
-            f"indicates a real regression if this ever fires.")
+        if is_no_prefix:
+            # prefix_length=0 (chat history, generate_binary_sequences_no_prefix)
+            # -- there is no "prefix" to check uniqueness of at all (every
+            # trial's values[:0] is the same empty tuple by construction,
+            # which would otherwise register as a false-positive collision
+            # against every OTHER trial's own qid). Skipped entirely, not
+            # silently passed -- printed explicitly so it's clear this
+            # check didn't run rather than looking like it passed.
+            print(f"[verify] {task}: {n_pool} members, prefix uniqueness check SKIPPED "
+                  f"(prefix_length=0 -- no-prefix branch, nothing to check)")
+        else:
+            status = "OK" if n_prefix_collisions == 0 else f"{n_prefix_collisions} member(s) with a prefix collision"
+            print(f"[verify] {task}: {n_pool} members, prefix uniqueness {status}")
+            assert n_prefix_collisions == 0, (
+                f"{task}: {n_prefix_collisions} pool member(s) have a prefix collision -- "
+                f"should be unreachable given build_{task}_prefixes' own dedup; "
+                f"indicates a real regression if this ever fires.")
         if task == "binary":
             print(f"[verify] {task}: exact-quota check across pool: "
                   f"{n_quota_mismatches} mismatch(es) ({'OK' if n_quota_mismatches == 0 else 'FAIL'})")
@@ -160,6 +190,13 @@ def parse_args():
     p.add_argument("--std_tolerance_frac", type=float, default=0.25)
     p.add_argument("--base_seed", type=int, default=0)
     p.add_argument("--pool_dir", default="task/sequences_pool")
+    p.add_argument("--no_prefix", action="store_true",
+                   help="Binary ONLY (chat history) -- build the pool via "
+                        "generate_binary_sequences_no_prefix instead of the default "
+                        "prefix/qid-repeat structure. Every trial gets its own independent "
+                        "true_p and its own independent exact-quota full-length sequence. "
+                        "Requires --task binary. Point --pool_dir at a DIFFERENT directory "
+                        "than production's -- this is a separate pool mode, not a migration.")
     return p.parse_args()
 
 
@@ -167,14 +204,22 @@ def main():
     args = parse_args()
     assert args.n_pool > 0
     tasks = ["continuous", "binary"] if args.task == "both" else [args.task]
+    if args.no_prefix:
+        assert tasks == ["binary"], "--no_prefix is binary-only -- pass --task binary"
 
-    print(f"Building a pool of {args.n_pool} independent HYBRID sequence set(s) per task "
-          f"({args.n_prefix} prefixes x {args.n_repeats} repeats each = "
-          f"{args.n_prefix * args.n_repeats} trials/member) -> {args.pool_dir}")
+    if args.no_prefix:
+        print(f"Building a pool of {args.n_pool} independent NO-PREFIX binary sequence "
+              f"set(s) ({args.n_prefix * args.n_repeats} trials/member, each trial fully "
+              f"independent -- no prefix, no qid repeats) -> {args.pool_dir}")
+    else:
+        print(f"Building a pool of {args.n_pool} independent HYBRID sequence set(s) per task "
+              f"({args.n_prefix} prefixes x {args.n_repeats} repeats each = "
+              f"{args.n_prefix * args.n_repeats} trials/member) -> {args.pool_dir}")
     written = build_pool(
         args.n_pool, tasks, args.n_prefix, args.n_repeats, args.seq_length,
         args.prefix_length, args.mean_range, args.std_fixed, args.blue_range,
-        args.boundary_margin, args.std_tolerance_frac, args.base_seed, args.pool_dir)
+        args.boundary_margin, args.std_tolerance_frac, args.base_seed, args.pool_dir,
+        no_prefix=args.no_prefix)
 
     print()
     verify_pool(written, tasks, args.n_pool)
