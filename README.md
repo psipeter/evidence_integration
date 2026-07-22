@@ -46,7 +46,7 @@ theory that the NEF realises biophysically, not a point of direct comparison.
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
 | task-continuous | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 8x4=32 trials (hybrid method, per-participant pool of 200) | **Piloting** |
-| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 8x4=32 trials (hybrid method, per-participant pool of 200) | **Piloting** |
+| task-binary | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 32 trials/participant, per-participant pool of 200, no-prefix method (every trial independent, no forced repeats -- see "Sequence generation" below) | **Piloting** |
 
 task-continuous and task-binary are designed to be completed within-subject
 (same participants recruited via Prolific allowlist). Together they unlock all
@@ -180,25 +180,46 @@ Target: ~50–80 participants per task, within-subject.
 - **Welcome screen**: title/branding page shown first, before consent — "Evidence
   Integration", "Numbers" (continuous) or "Colors" (binary), inside a bordered box,
   matching the study names given on Prolific; "Begin" button leads to consent.
-- **Tutorial**: box 1 (text) → image box (separate click-to-reveal step, showing a
-  bubbling generative animation — binary: bubbles rise inside the blue/red bar;
-  continuous: bubbles fall from under the Gaussian curve to the x-axis, weighted by
-  density) → box 2 (goal text, alongside a yellow tutorial-only-visualization warning
-  box) → box 3 (slider instructions) → slider, across 5 tutorial observations →
-  tutorial summary → timeout demonstration (3 screens, same fade-in as real
-  observations) → BTI → trial 1. The main obs circle/number, and the tutorial's own
-  observation marker, fade in (1000ms) rather than appearing instantly, for a
-  consistent feel between tutorial and real trials. Tutorial's illustrative sequence
-  is derived from a real trial in the sequences data (config-base.js's
-  pickTutorialExample), not hand-picked, so it can't drift out of sync with the
-  actual generation parameters.
-- **Summary slides**: binary — per-obs bar chart (blue/red split at estimate, obs circle left);
-  continuous — per-obs number line (red obs thumb, black circle at estimate)
+- **Tutorial**: full N_OBS_TO_RUN-length tutorial (15 observations, matching
+  real-task length exactly), driven by a three-phase top-right hint system
+  keyed on observation number (default text → yellow goal reminder, obs
+  6-10 → red "use your memory, these graphics won't repeat" warning with
+  the figure/tracker hidden behind an overlay, obs 11-15), plus a 15-slot
+  history tracker between the figure and the hint box (numbers on
+  underlines for continuous; colored dots for binary, since there's no
+  separate "number" for a blue/red draw — the color IS the content). Intro
+  screen: box 1 (text) → image box (separate click-to-reveal step, showing
+  a bubbling generative animation) → box 2 (goal text) → box 3 (slider
+  instructions) → slider. The main obs circle/number, and the tutorial's
+  own observation marker, fade in (1000ms) rather than appearing instantly,
+  for a consistent feel between tutorial and real trials. Tutorial's
+  illustrative sequence is derived from a real trial in the sequences data
+  (config-base.js's pickTutorialExample), not hand-picked, so it can't
+  drift out of sync with the actual generation parameters. See CLAUDE.md's
+  "Tutorial redesign, bonus/error system, and binary no-prefix sequences"
+  section for the full phase mechanism and rationale.
+- **Bonus payments**: per-observation error (measured against either the
+  trial's fixed true mean/probability or a per-observation running mean/
+  ratio of the raw observed values, via config-base.js's `ERROR_MODE`) is
+  summed into a per-trial `total_error`, converted to a `reward` via
+  `reward = max(0, 100 - BONUS_DECAY * total_error)`. Shown on both summary
+  screens as a "Total error / Bonus" box above the chart, alongside a
+  per-row reference tick + error-distance line on the chart itself. See
+  CLAUDE.md for the full mechanism, the real BONUS_DECAY miscalibration bug
+  found and fixed this session, and the methodological rationale for
+  `ERROR_MODE` (running-mean/ratio tracking vs. true-parameter inference
+  are genuinely different cognitive tasks, not just different formulas).
+- **Summary slides**: binary — per-obs bar chart (gray background, black
+  circle at estimate, green reference tick, violet error-distance line, obs
+  circle left, still colored by that draw's own value); continuous —
+  per-obs number line (red obs thumb, black circle at estimate, blue
+  reference tick, green error-distance line)
 - **Consent form**: verbatim IRB-approved text from task/consent_form.txt, followed by
   3 boxes with ordered disclosure (each stays locked until the one before it is
-  revealed): a blue payment-motivation box first ("You will be paid $8.00 -
-  10.00 based on your performance"), then 2 red warning boxes (data-loss /
-  response-deadline). The proceed button doesn't use the native `disabled`
+  revealed): a blue payment-motivation box first ("You will be paid $5.00 for
+  finishing and up to $5.00 based on your performance"), then 2 red warning boxes
+  (data-loss / response-deadline — the data-loss box is now just "Do not close,
+  refresh, or navigate away during the task."). The proceed button doesn't use the native `disabled`
   attribute (disabled buttons never dispatch `click`, so a premature click got
   silently swallowed with zero feedback) — a capturing-phase click listener
   gates it instead.
@@ -245,6 +266,26 @@ pool (not just one member): 200/200 members pass prefix uniqueness both
 tasks, zero binary quota mismatches. scripts/inspect_iid_sequences.py
 --sequence_type pool and scripts/inspect_sequences.py --pool_dir both
 support inspecting the real pool directly -- see CLAUDE.md for usage.
+
+**Binary switched to a NO-PREFIX branch this session** (`--no_prefix` flag
+in generate_sequences_hybrid.py / generate_sequences_pool.py, binary only):
+a real diversity bug was found in the old prefix scheme -- its composition
+allocator gave EVERY pool member the exact same blue-count split across
+its 8 prefixes (deterministic, no RNG), which collapsed the `|Δresponse|`
+curve's between-participant diversity on the prefix portion (obs ≤ 4) down
+to as few as 3 distinct values. The no-prefix branch removes the prefix/
+qid-repeat concept for binary entirely -- every trial gets its own
+independent `true_p` and its own independent exact-quota full-length
+sequence -- confirmed to fix the diversity collapse (smooth 17→23→27→33
+growth across obs 2-5, no collapse anywhere). **Production's binary pool
+now uses this branch**; the old prefix-based binary pool is backed up at
+`task/sequences_pool_binary_prefix_backup/` (gitignored, fully recoverable).
+Continuous's pool is unaffected -- still the prefix-based hybrid method
+above. This trades away a clean, controlled repeated-stimulus design (used
+for response-variability/reliability metrics) for better diversity; a
+per-pid analysis found substantial NATURAL but uncontrolled repetition
+still exists at the 4-observation level (see CLAUDE.md for the numbers) --
+whether that's sufficient is still an open question.
 
 The single reference file (task/sequences/{continuous,binary}_sequences.
 {pkl,json}) remains the promotion/verification target when changing
@@ -324,6 +365,13 @@ task/
       slider-continuous.js         — continuous slider
       slider-binary.js             — binary slider (blue/red gradient after first
                                       interaction; 2-row axis ruler below)
+      bonus-continuous.js          — per-observation error / per-trial bonus formula,
+                                      shared by both tasks despite the name (not
+                                      renamed to avoid a wide import-path change) --
+                                      see CLAUDE.md's "Tutorial redesign, bonus/error
+                                      system..." section
+      tutorial-tracker.js          — 15-slot tutorial history tracker (numbers on
+                                      underlines for continuous; colored dots for binary)
       style.css                    — all shared styles
     continuous/
       config.js
@@ -368,7 +416,11 @@ task/
   generate_sequences.py             — original: k-constrained rejection sampling
   generate_sequences_iid.py         — pure i.i.d., no smoothing, no seed search
   generate_sequences_momentmatch.py — quota/moment-matching, isotonic seed search
-  generate_sequences_hybrid.py      — CURRENT PRODUCTION method (per-task split)
+  generate_sequences_hybrid.py      — CURRENT PRODUCTION method (per-task split);
+                                        also has generate_binary_sequences_no_prefix,
+                                        a SEPARATE binary-only branch (--no_prefix)
+                                        now used in production -- see "Sequence
+                                        generation" above and CLAUDE.md
   generate_sequences_pool.py        — wraps generate_sequences_hybrid.py, writes
                                         the 200-member pool above
   parse_results.py
@@ -391,13 +443,18 @@ as an implicit unsuffixed default. See CLAUDE.md for the fuller rationale.
 // src/shared/config-base.js DEFAULTS (shared by both task configs)
 const N_OBS_TO_RUN           = 15;
 const SHOW_SLIDER_VALUE      = true;
-const SLIDER_DEFAULT         = 'none';
+const SLIDER_DEFAULT         = 'last';  // thumb starts at previous response;
+                                         // numeric label stays hidden until
+                                         // first interaction (see CLAUDE.md)
 const DEFAULT_VALUE          = 50;
 const BTI_MS                 = 3000;
 const ITI_SHORT_MS           = 1000;   // tutorial between-observation ITI
 const T_OBS_MS                = 7000;
 const SHOW_TRIAL_PERFORMANCE = true;
 const DISTRACTOR_TYPE        = 'none';
+const ERROR_MODE             = 'running_mean';  // continuous default;
+                                                 // binary overrides to
+                                                 // 'running_p' -- see CLAUDE.md
 const MAX_TIMEOUTS_PER_TRIAL = 3;      // defined in timeline-builder.js
 ```
 
@@ -470,12 +527,19 @@ python task/parse_results.py --input_dir task/dev-results/ \
 
 **Pre-deployment checklist:** (see CLAUDE.md's own checklist for full detail
 and current per-item status)
-- [DONE] Sequence pool generated and verified (200/task, hybrid method)
+- [DONE] Sequence pool generated and verified (200/task; continuous:
+  prefix-based hybrid method; binary: switched to the no-prefix branch
+  this session -- see "Sequence generation" above)
 - [DONE] PILOT ONLY name field removed
 - [DONE] All 4 Prolific code placeholders filled in timeline-builder.js's `PROLIFIC_CODES`
 - [DONE] Prolific wallet funded; payment rate confirmed ($10 completion, $3 early-exit)
-- [DONE] Jzips rebuilt against the final per-participant-pool state
+- [ ] **evidence-integration-binary.jzip needs a rebuild** -- it predates
+  this session's binary tutorial/bonus/chart work and the production
+  sequence-pool switch. evidence-integration-continuous.jzip WAS rebuilt
+  and is current.
 - [DONE] Full 6-way browser/task E2E matrix -- 48/48 passing (8/8 each)
+  (this predates the latest session's changes -- worth re-running after
+  the binary jzip rebuild above)
 - [PENDING] A genuinely full completion run via real Prolific preview (not
   just early-exit) -- the one real-platform path not yet exercised
 - [DONE] Incremental per-trial saving, save-then-end-then-redirect gating,

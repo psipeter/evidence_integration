@@ -211,7 +211,15 @@ Current task status (as of latest session):
   -- see "Task testing architecture" below). Trial count is fully implicit from
   however many trials task/sequences/{task}_sequences.json contains (currently
   32, the 8x4 hybrid production set -- see "Sequence design" below). BTI_MS=3000ms,
-  DISTRACTOR_TYPE='none' (config-base.js DEFAULTS).
+  DISTRACTOR_TYPE='none' (config-base.js DEFAULTS). SLIDER_DEFAULT is now
+  'last' (changed from 'none' this session -- see "Tutorial redesign, bonus/
+  error system, and binary no-prefix sequences" below): the slider thumb
+  visibly starts at the participant's previous response instead of hidden
+  until first touch, to help them remember their running estimate. The
+  floating numeric label is decoupled from thumb position and still always
+  starts hidden regardless of mode -- see that section for the full
+  mechanism and the real submit-enable bug this change surfaced (now fixed
+  in both tasks).
 - Welcome/title screen (build-welcome-screen.js) is now the first screen shown,
   before consent -- see "Task testing architecture" below.
 
@@ -237,17 +245,18 @@ Stable architecture (established, do not regress):
   accumulates across sessions and is never committed; clear it out periodically.
 
 Consent screen (build-consent-screen.js):
-- 3 boxes: a blue payment-motivation box first ("You will be paid $8.00 - 10.00
-  based on your performance" -- NOT a warning, distinguished via
-  .consent-info-box-blue), followed by the two original red warning boxes
-  (data loss, session termination) with their plain-text "Warning:" label. An
-  earlier redundant 3rd box repeating Prolific's own timing/pay listing was
-  removed at one point; this NEW 3rd box is a different, deliberate addition
-  (motivational framing), not a reintroduction of that one. Stacked vertically,
-  ordered disclosure (each box locked with a "· · ·" placeholder until the one
-  before it is revealed, mirroring the tutorial-intro pattern). The checkbox
-  section (no longer a name+checkbox section -- see "Pilot name field" above)
-  stays behind its own "· · ·" placeholder until all three boxes are done.
+- 3 boxes: a blue payment-motivation box first ("You will be paid $5.00 for
+  finishing and up to $5.00 based on your performance" -- updated this
+  session from an earlier flat "$8.00 - 10.00 based on your performance";
+  NOT a warning, distinguished via .consent-info-box-blue), followed by the
+  two original red warning boxes. The data-loss warning box was trimmed
+  this session to just "Do not close, refresh, or navigate away during the
+  task." (removed a trailing "-- your data will be lost and you will not be
+  paid" clause). Stacked vertically, ordered disclosure (each box locked
+  with a "· · ·" placeholder until the one before it is revealed, mirroring
+  the tutorial-intro pattern). The checkbox section (no longer a
+  name+checkbox section -- see "Pilot name field" above) stays behind its
+  own "· · ·" placeholder until all three boxes are done.
 - "Begin experiment" does NOT use the native `disabled` attribute — disabled
   buttons never dispatch `click` at all, which silently ate premature clicks
   with zero feedback (a real pilot complaint) and in one case the disabled
@@ -344,6 +353,220 @@ distribution" would overclaim novelty it can't always guarantee.
 
 - Distractor system exists (iti_condition per trial, popup/iti_length/none) but
   currently disabled (DISTRACTOR_TYPE='none'). Ready to reactivate.
+
+### Tutorial redesign, bonus/error system, and binary no-prefix sequences
+(this session -- large scope, summarized here; individual files' own
+docstrings have the full blow-by-blow if something here needs more detail)
+
+**Tutorial redesign (both tasks, now in sync structurally)**:
+- Full N_OBS_TO_RUN-length tutorial (15 observations, not a separate
+  hardcoded 5) for both tasks -- matches real-task length exactly now.
+- New tutorial-tracker.js: a 15-slot progress row between the distribution
+  figure and (formerly) its caption, showing the sequence's accumulating
+  history. Continuous renders it as numbers on underlines (settled/
+  current/empty states, distinguished by opacity/underline weight, not
+  color -- an earlier circle-based design was replaced). Binary renders it
+  as colored dots instead (`renderDot:true`, a per-value color FUNCTION
+  passed as `color` instead of a fixed string) -- there's no separate
+  "number" to show for a blue/red draw, the color IS the content.
+- The old static yellow "this graphic won't appear in the real task"
+  caption box (below the figure, both tasks) is GONE, replaced by a
+  **three-phase system in the top-right box** (BOX0B's slot in continuous;
+  a similarly-repurposed slot in binary), driven purely by `obs_num`:
+  - Phase A (obs 1-5): default text, white/plain.
+  - Phase C (obs 6-10): "...mean of all numbers in this sequence"
+    (continuous) / "...ratio over all balls in the sequence" (binary) goal
+    reminder -- YELLOW (`.tutorial-notify-yellow`). The tracker below is
+    ALSO highlighted in that same yellow during this phase
+    (`.tutorial-tracker-highlight`, a dedicated class -- combining
+    `.tutorial-info-block` + `.tutorial-notify-yellow` directly broke the
+    tracker's own tight spacing/underline-touching at the enlarged number
+    size, a real bug not just a hypothetical one).
+  - Phase D (obs 11-15): "you will not see these graphics, use your
+    memory" warning (`RECAP_TEXT_1`/`RECAP_TEXT_2` in tutorial-text-
+    {continuous,binary}.js) -- RED (`.tutorial-notify-red`). The figure and
+    tracker are ALSO hidden behind an opaque red overlay
+    (`.tutorial-hidden-overlay`) during this phase -- the real elements
+    still render underneath, completely unmodified, just visually covered.
+  A dedicated post-summary "recap" screen (plugin-tutorial-recap-
+  continuous.js) was built, then DELETED once phase D started covering the
+  identical ground during the tutorial observations themselves -- a
+  separate screen for it became redundant. Continuous's `BOX0` was split
+  into `BOX0`/`BOX0B` (second sentence moved to the top-right slot);
+  binary's `BOX0` was NOT split the same way (its right-column slot needed
+  new default content anyway) -- see tutorial-text-binary.js's own
+  docstring for why that's a deliberate difference, not an inconsistency.
+- Terminology: continuous's BOX1/BOX2 now use "mean" for the estimation
+  target (unchanged). Binary's now deliberately splits "probability"
+  (describing the hidden GENERATIVE parameter -- BOX0B, RECAP_TEXT_1) from
+  "ratio" (describing what the participant estimates FROM the observed
+  balls -- BOX1, BOX2, phase C's reminder, RECAP_TEXT_2's tail) -- not an
+  inconsistency, a real terminological distinction (see the extended chat
+  discussion on running-mean/running-ratio vs. true-mean/true-probability
+  objectives, summarized below).
+- Real bug found and fixed in BOTH tasks' tutorial-observation plugins: the
+  draw animation's `onComplete` was force-enabling Submit as soon as the
+  animation finished whenever `slider_default` was `'last'`, letting a
+  participant submit their PREVIOUS response unchanged without ever
+  touching the slider on the new observation. Removed -- Submit now only
+  enables via genuine slider interaction in every mode, matching how the
+  real (non-tutorial) observation plugins already worked. Fixing this
+  properly required adding an `onReveal` callback (fired the INSTANT a
+  fade BEGINS, not once it's finished) to both continuous-draw-
+  animation.js and binary-draw-animation.js, since the tracker's current-
+  slot reveal needed to sync with that moment, not `onComplete`'s later one.
+- slider-continuous.js / slider-binary.js: the floating numeric label (and
+  binary's in-bar %s) are now decoupled from thumb position -- both always
+  start hidden regardless of `unset`/`'last'` mode, only appearing on the
+  participant's own first interaction with that observation's slider.
+  Previously `'last'` mode revealed the exact number immediately alongside
+  the thumb position, which defeated some of the point of showing the
+  position without also showing the precise prior value. Binary's
+  `'last'`-mode gradient fill was also changed from full-strength color to
+  real alpha transparency (`rgba(...,0.4)`, not a blended-toward-gray solid
+  color, which read as muddy) -- matches the thumb's own dimmed look.
+
+**Per-observation error + per-trial bonus (bonus-continuous.js -- name is a
+little dated now, used by both tasks; not renamed, to avoid a wide import-
+path change for a pure naming concern)**:
+- Error is computed ONCE per observation, at response time, and attached
+  directly to that observation's own JATOS row (via jsPsych's
+  `on_finish(data)` mutation) -- flows into JATOS via the same per-trial
+  `on_trial_finish` append every other trial already uses. The trial-
+  summary screen's `total_error` is the SUM of those already-stored
+  per-observation errors, never recomputed independently -- one source of
+  truth. `reward = max(0, 100 - BONUS_DECAY * totalError)`.
+- **Real bug found and fixed**: `BONUS_DECAY` was a flat `1`, which
+  implicitly treated `totalError` (a SUM across ~15 observations) as if it
+  lived on the same 0-100 scale as a single observation's error -- reward
+  hit exactly 0 once AVERAGE per-observation error exceeded ~6.67, a
+  genuinely GOOD result, not a bad one. This is why bonus always showed 0c;
+  the underlying reward really was 0 for nearly every real response, not a
+  display bug. Fixed: `BONUS_DECAY = 1 / DEFAULTS.N_OBS_TO_RUN`, so the
+  formula now behaves as `reward ≈ 100 - average_error_per_observation`.
+- `ERROR_MODE` (config-base.js DEFAULTS, currently `'running_mean'` for
+  continuous / `'running_p'` for binary -- set for TESTING, see below) --
+  what a response's error is measured against:
+  - `'true_mean'`/`'true_p'`: the trial's fixed generative parameter.
+  - `'running_mean'`/`'running_p'`: a per-observation MOVING target -- the
+    running mean/ratio of the raw observed values (not responses) up to
+    and including that observation. `computeRunningMeans`/
+    `computeRunningRatios` in bonus-continuous.js. Also changes the summary
+    chart's per-row reference tick and the "true mean"/"running mean" (or
+    "true probability"/"running ratio") wording in its legend and the
+    tutorial-summary blue banner.
+  Binary's own errorMode values (`'true_p'`/`'running_p'`) are DISTINCT
+  strings from continuous's (`'true_mean'`/`'running_mean'`) -- each task's
+  own config.js sets its own via config-base.js's `overrides` mechanism
+  independently.
+- **Why this toggle exists -- a real methodological question, not just an
+  engineering one** (see chat history for the full literature-grounded
+  discussion): asking participants to track the running mean/ratio of
+  observed samples is a genuinely different cognitive task than asking them
+  to infer the fixed underlying parameter -- the former is closer to a pure
+  counting/working-memory task (Prat-Carrabin & Woodford's "imprecise
+  counting" account: primacy/recency effects can emerge purely from
+  uncertainty about *n*, with no deliberate evidence-weighting at all),
+  the latter is a genuine inference problem under irreducible uncertainty.
+  `ERROR_MODE` lets both be run and compared. Confirmed via `utils/
+  binary_transform.py`: the Laplace-smoothing transform used elsewhere in
+  the modeling pipeline (see "Carrabin response transform" section) IS
+  exactly the correction that makes a running-mean-style model optimal for
+  inferring the FIXED true_p -- it has no justification if the objective is
+  the running ratio itself, which needs no prior-shrinkage at all.
+  `scripts/inspect_sequences.py`'s `run_agents` now includes a "Running
+  ratio (optimal, no Laplace)" agent for binary reflecting this.
+- Summary charts (draw-performance-{continuous,binary}.js) redesigned:
+  removed the old shared-reference-row-above-everything design (continuous
+  had a Gaussian curve at the top; binary had a full-height true-p bar) in
+  favor of a per-row reference tick + colored error-distance line, so every
+  individual response's accuracy is visible against its own row. Continuous
+  uses green for the error line, blue for the reference tick (matching its
+  existing color conventions). Binary uses green for the reference tick
+  (matching its pre-existing "True probability" legend convention) and a
+  new VIOLET for the error line (blue/red were already taken by ball
+  colors). Binary's estimate marker changed from a vertical tick to a black
+  CIRCLE (matching continuous's own marker) specifically to reduce visual
+  merging with the reference tick when they're close together.
+  **Real bug found and fixed in binary's chart**: the old blue/red
+  split-bar fill was fully opaque and drawn AFTER the (already-implemented)
+  error line in the per-row loop -- completely hiding it. Not a missing
+  feature, an occlusion bug. Removing the colored fill (replaced with a
+  plain gray background matching continuous's own number-line style) fixed
+  this as a direct side effect.
+  A "Total error: X • Bonus: Y¢" box (green/gold text) now sits above the
+  chart on both summary screens for both tasks.
+
+**Binary sequence generation: new no-prefix branch, now in PRODUCTION**
+(generate_sequences_hybrid.py, generate_sequences_pool.py):
+- Root cause investigated and fixed: `build_binary_prefixes`'s composition
+  allocator (`_allocate_binary_composition_counts`) is a pure DETERMINISTIC
+  function of `n_prefix`/`prefix_length` (no RNG at all) -- every pool
+  member got the EXACT SAME `{0:1,1:2,2:2,3:2,4:1}` blue-count split across
+  its 8 prefixes, only the specific arrangements within each level varying.
+  This collapsed the `|Δresponse|` curve's between-participant diversity on
+  the prefix portion (obs ≤ 4) down to as few as 3 distinct per-member
+  averages at obs=4 (confirmed via a real production plot, not a
+  hypothetical). A randomized (still capacity-respecting) allocator alone
+  raised that to 9; removing the prefix/qid-repeat concept ENTIRELY raised
+  it further, to a smooth 17→23→27→33 growth across obs 2-5 with no
+  collapse anywhere.
+- **New branch**: `generate_binary_sequences_no_prefix` in
+  generate_sequences_hybrid.py (`--no_prefix` flag, binary-only, asserts
+  loudly if combined with `--task continuous/both`) -- a SEPARATE branch
+  alongside the existing prefix/qid-repeat structure, NOT a replacement
+  (the old scheme remains fully intact and re-runnable). Every trial gets
+  its own independently-drawn `true_p` and its own independent exact-quota
+  full-length sequence; `qid` = the trial's own index (never repeated),
+  `prefix_length` recorded as 0. Wired through generate_sequences_pool.py
+  the same way (`--no_prefix`, requires `--task binary`).
+- **PRODUCTION SWITCH**: `task/sequences_pool/binary_*` was replaced with a
+  freshly-generated 200-member no-prefix pool (same 8x4=32 trials/member as
+  before, exact-quota verified, confirmed the diversity fix holds on the
+  real production data). The OLD deterministic-prefix binary pool is
+  backed up at `task/sequences_pool_binary_prefix_backup/` (gitignored
+  alongside `task/sequences_pool/` itself, fully recoverable by re-running
+  `generate_sequences_pool.py` WITHOUT `--no_prefix`). Continuous's pool
+  was NOT touched.
+- **Real methodological tradeoff, not free**: the old prefix/qid-repeat
+  structure existed specifically to give a clean, controlled,
+  equal-n comparison for response-variability/reliability metrics (same
+  stimulus shown `n_repeats` times, letting you separate response noise
+  from genuine stimulus-driven variation). The no-prefix branch removes
+  this by construction. A per-pid investigation of the NEW pool found
+  substantial NATURAL (accidental, uncontrolled) repetition still exists
+  at the 4-observation level purely from the small combinatorial space
+  (only 16 possible ±1 patterns of length 4): 198/200 pids have at least
+  one 4-observation prefix with ≥4 accidental repeats (mean 2.48 such
+  prefixes/pid); coverage at looser thresholds is substantial (86% of
+  trials/pid belong to some ≥2-repeat group, 61% at ≥3, 36% at ≥4); these
+  natural repeats are NOT clustered in time (mean trial-index spread of
+  each pid's best repeat group: 23.1 out of a max possible 39). This makes
+  an OPPORTUNISTIC (not by-design) version of the old variability analysis
+  possible, just uncontrolled -- not yet decided whether this is
+  sufficient, or whether a hybrid (no forced prefix composition, but a
+  small number of DELIBERATE full-trial repeats inserted per participant)
+  is worth building as a third branch. Full 15-observation trials
+  essentially never repeat by chance under either scheme -- if a metric
+  needs full-trial repetition specifically, neither current branch
+  provides it.
+- `scripts/inspect_sequences.py` / `scripts/inspect_iid_sequences.py` got
+  several real, unrelated bug fixes while investigating this (see each
+  file's own updated docstrings): a multi-agent comparison figure that was
+  silently reading only ONE representative pool member instead of
+  aggregating over all 200 (`run_agents_pooled`/`_plot_panel_pooled` now
+  fix this, `--pool_dir` wired through to the figure itself, not just the
+  CSV); TWO independent false-positive prefix-collision checks (one in
+  generate_sequences_pool.py's `verify_pool`, one in inspect_sequences.py's
+  `build_inspection_csv`) that didn't understand `prefix_length=0`; a
+  missing 95% CI band in inspect_iid_sequences.py's per-participant figure.
+
+**Pending / not yet done**: `task/evidence-integration-binary.jzip` is
+STALE -- predates all of this session's binary tutorial/bonus/chart work
+and needs a rebuild (`npm run build:binary` + `python task/
+generate_jzip.py`) before any real pilot testing of these changes.
+`evidence-integration-continuous.jzip` was rebuilt during this session and
+is current.
 
 Sequence design: **8x4 (32 trials) hybrid production design is CURRENT**,
   superseding the earlier 6x4 pure-momentmatch pilot described below.
@@ -852,13 +1075,25 @@ exact for any p in (0,1), the only limitation is 1/n rounding granularity.
   revisiting later -- the hybrid script is a third, separate option, not a
   replacement for either.
 - **Summary screens** (task/src/shared/plugin-trial-summary-{continuous,binary}.js):
-  running-mean overlay requested (matching inspect_sequences.py's --gt_mode
-  running_mean) but explicitly deferred as a separate, bigger UI change —
-  not started.
+  running-mean overlay -- DONE this session (see "Tutorial redesign, bonus/
+  error system, and binary no-prefix sequences" above for the full
+  mechanism: `ERROR_MODE`, per-observation error, per-trial bonus, redesigned
+  charts). Previously listed here as deferred; no longer open.
 - **config-base.js's pickTutorialExample** may still assume a qid's repeats
   share a target (see "Sequences.json schema" above) -- not yet verified
   against the prefix/target-independence redesign. Check before relying on
-  its fallback path.
+  its fallback path. Also NOT yet re-verified against binary's new
+  no-prefix pool (every qid is already unique there, so the specific
+  "falls through a qid's repeats" fallback path this note describes may be
+  entirely moot for binary now, but hasn't been explicitly re-checked).
+- **task/evidence-integration-binary.jzip is stale** -- needs a rebuild
+  before any real pilot testing of this session's tutorial/bonus/chart
+  work (see "Tutorial redesign..." above).
+- **Response-variability/reliability metric tradeoff under binary's new
+  no-prefix sequences** -- not yet decided whether the natural,
+  opportunistic repetition found (see "Tutorial redesign..." above) is
+  sufficient, or whether a deliberate small number of full-trial repeats
+  is worth adding as a third generation branch.
 
 Local dev: open http://localhost:5173/index-continuous.html or
   http://localhost:5174/index-binary.html via `npm run dev:continuous` /
@@ -1592,6 +1827,12 @@ Pre-deployment checklist (before Prolific production):
     postdate the current jzips, and confirmed directly in the built
     bundles (not just source) that pool_index and urlQueryParameters both
     landed correctly.
+  - [ ] **task/evidence-integration-binary.jzip needs a REBUILD** -- it now
+    predates all of the latest session's binary tutorial/bonus/chart work
+    and the production binary sequence-pool switch (see "Tutorial
+    redesign, bonus/error system, and binary no-prefix sequences" above).
+    evidence-integration-continuous.jzip WAS rebuilt that same session and
+    is current; binary was not.
   - (No manual step needed for the showEndPage/endRedirectUrl invariant --
     generate_jzip.py's assert_show_end_page_disabled() enforces it
     automatically on every run and refuses to build if it's ever violated;
@@ -2154,3 +2395,26 @@ change (e.g. "change X to Y", "add Z", "remove W").
   optimal_matching, not tied 1:1 or paired via a greedy heuristic (greedy
   was tried and rejected — see that function's docstring for the measured
   failure mode)
+- Do not reuse the SAME output filename across scripts.inspect_sequences.py
+  and scripts/inspect_iid_sequences.py — they produce structurally
+  different figures (multi-agent comparison on ONE representative pool
+  member's aggregated curves vs. one-agent-only per-pool-member thin lines
+  + mean/CI) and a real mistake this session silently overwrote one with
+  the other by giving both the same --out_pdf. Use distinct, descriptive
+  names (e.g. _running_agents.pdf vs. _running_meanagent.pdf).
+- Do not assume prefix_length is always > 0 when writing a NEW prefix-
+  uniqueness/collision check against sequences.json data — binary's
+  no-prefix branch (generate_binary_sequences_no_prefix) legitimately
+  writes prefix_length=0, and values[:0] is the same empty tuple for every
+  trial regardless of qid, which will false-positive as a collision
+  against any check that doesn't explicitly skip this case (this bit BOTH
+  generate_sequences_pool.py's verify_pool and inspect_sequences.py's
+  build_inspection_csv independently this session — see "Tutorial
+  redesign..." above for both fixes; a third implementation of this same
+  check would need the same guard).
+- Do not treat BONUS_DECAY as a simple 0-100-scale constant without
+  checking what it's actually being multiplied against — totalError is a
+  SUM across N_OBS_TO_RUN observations, not a single observation's error;
+  see "Tutorial redesign..." above for the real bug this caused (reward
+  silently 0 for nearly every real response) and why BONUS_DECAY is now
+  `1 / DEFAULTS.N_OBS_TO_RUN`, not a flat literal.
