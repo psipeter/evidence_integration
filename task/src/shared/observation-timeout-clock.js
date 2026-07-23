@@ -3,13 +3,19 @@
  * Shared countdown-clock renderer, used by:
  *   - plugin-observation-continuous.js / plugin-observation-binary.js
  *     (real observation timeout, ties into finishTrial via onTimeout)
- *   - plugin-timeout-demo.js
- *     (tutorial-only demo of the same clock; onTimeout advances the demo's
- *     own internal screen state instead of calling finishTrial)
+ *   - plugin-tutorial-observation-continuous.js / -binary.js
+ *     (phase E's two decorative demo clocks -- onTimeout is a no-op there,
+ *     since tutorial screens have no real deadline; see that file's own
+ *     "phase E" docstring)
  *
  * Extracted because this logic was previously duplicated verbatim (just
- * variable-name differences) across all three — the kind of duplication
- * that makes it easy to fix a bug in one copy and forget the others.
+ * variable-name differences) across the two real per-observation plugins
+ * -- the kind of duplication that makes it easy to fix a bug in one copy
+ * and forget the other. A third, tutorial-only standalone consumer
+ * (plugin-timeout-demo.js) existed for a while but has since been removed
+ * entirely (chat history) -- the phased per-observation hint progression's
+ * own phase E now covers that same "show what the clock looks like" need
+ * inline, without a dedicated screen/plugin.
  *
  * Draws a shrinking countdown ring on a square canvas, tints the page
  * background as time runs low, and calls onTimeout() once the deadline is

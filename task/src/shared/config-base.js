@@ -28,11 +28,12 @@ export const DEFAULTS = {
   // bonus-continuous.js, since these are exactly the "decide iteratively"
   // knobs this object already exists for. BASE_PAYMENT_DOLLARS is fixed,
   // paid-regardless-of-performance. The per-response BONUS scheme itself
-  // (fixed cent bins on raw error, no session-wide total cap -- see
-  // bonus-continuous.js's own docstring for why the original
-  // total-capped/split-evenly design was replaced) has its own tunable
-  // table (BONUS_BINS_CENTS) living in bonus-continuous.js instead of here,
-  // since it's a bonus-specific data structure, not a single scalar.
+  // is computed PER OBSERVATION from a simple two-scalar formula
+  // (MAX_REWARD, BONUS_DECAY -- see bonus-continuous.js's own "REWARD
+  // FORMULA" docstring for the exact math and current values), not a
+  // lookup table -- kept in bonus-continuous.js itself rather than here,
+  // since it's specific to that one formula, not a general task-timing/
+  // UI parameter this object otherwise holds.
   BASE_PAYMENT_DOLLARS:   10,
   // ERROR_MODE (chat history) -- 'true_mean': error is |response -
   // trueMean| for every response. 'running_mean' (set for testing, chat

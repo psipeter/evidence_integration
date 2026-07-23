@@ -160,8 +160,13 @@ Target: ~50–80 participants per task, within-subject.
 - **Sequences**: hybrid method -- binary via quota/momentmatch construction
   (no seed search), continuous via an unrescaled i.i.d.-suffix construction
   (no seed search either); 8 distinct prefixes × 4 repeats = 32 trials;
-  prefix_length=4; std_fixed=15 (continuous). Each participant gets ONE of
-  200 independently-generated sequence sets per task, assigned via a
+  prefix_length=4; std_fixed=15 (continuous) as documented, but **the
+  actual real 200-member production pool on disk currently has std=10
+  (confirmed directly, `true_std=10.0` uniformly across all 200 continuous
+  pool members) -- this discrepancy is unresolved, see CLAUDE.md's "Open
+  items" for details before assuming either number without checking**.
+  Each participant gets ONE of 200 independently-generated sequence sets
+  per task, assigned via a
   deterministic hash of their participant ID (same index for both tasks) --
   not one shared file. See CLAUDE.md's "Per-participant sequence pool" and
   "Sequence design" sections for the full mechanism and rationale.
@@ -201,14 +206,20 @@ Target: ~50–80 participants per task, within-subject.
 - **Bonus payments**: per-observation error (measured against either the
   trial's fixed true mean/probability or a per-observation running mean/
   ratio of the raw observed values, via config-base.js's `ERROR_MODE`) is
-  summed into a per-trial `total_error`, converted to a `reward` via
-  `reward = max(0, 100 - BONUS_DECAY * total_error)`. Shown on both summary
+  converted to a per-observation reward via `bonus-continuous.js`'s
+  `normError = rawError / MAX_POSSIBLE_ERROR; reward = max(0, MAX_REWARD *
+  (1 - BONUS_DECAY * normError))` (current parameters: `MAX_REWARD = 2`
+  cents, `BONUS_DECAY = 15`, `MAX_POSSIBLE_ERROR = 100`), then summed
+  across observations for the trial/tutorial total. Shown on both summary
   screens as a "Total error / Bonus" box above the chart, alongside a
-  per-row reference tick + error-distance line on the chart itself. See
-  CLAUDE.md for the full mechanism, the real BONUS_DECAY miscalibration bug
-  found and fixed this session, and the methodological rationale for
-  `ERROR_MODE` (running-mean/ratio tracking vs. true-parameter inference
-  are genuinely different cognitive tasks, not just different formulas).
+  per-row reference tick + error-distance line on the chart itself. Real
+  payment is given manually and clipped to a $5 ceiling regardless of the
+  formula's raw sum. See CLAUDE.md for the full mechanism, the formula's
+  own tuning history (this specific MAX_REWARD value was most recently
+  lowered from 3 to 2 to keep total bonus costs down), and the
+  methodological rationale for `ERROR_MODE` (running-mean/ratio tracking
+  vs. true-parameter inference are genuinely different cognitive tasks,
+  not just different formulas).
 - **Summary slides**: binary — per-obs bar chart (gray background, black
   circle at estimate, green reference tick, violet error-distance line, obs
   circle left, still colored by that draw's own value); continuous —
@@ -425,6 +436,10 @@ task/
                                         the 200-member pool above
   parse_results.py
   test_browser.mjs         — Playwright E2E tests (Chromium/Firefox/WebKit, both tasks)
+  test_pool_assignment.mjs — plain Node, no Playwright/Vite; checks the
+                              per-participant pool-hashing mechanism and
+                              real pool data integrity in well under a
+                              second (see "Testing" above)
   index-continuous.html
   index-binary.html
   index-test.html           — test-ONLY entry point, drives test-harness.js; not
@@ -482,10 +497,14 @@ node test_browser.mjs          # Playwright E2E tests (~2-3 min); see Testing be
 
 **`test_browser.mjs`** — spawns the real Vite dev server (not a patched build) and
 drives a test-ONLY entry point (`index-test.html` / `src/test-harness.js`) via
-Playwright across Chromium, Firefox, and WebKit, for both tasks (30 scenarios
-total: normal submit, timeout replay, "N timeouts remaining", 3-timeout
-termination screen, submit-then-continue — tutorial included in full for every
-scenario). That harness is never linked from production code and never
+Playwright across Chromium, Firefox, and WebKit, for both tasks (7 scenarios
+per browser/task combination as of the latest chat session -- was 8, a
+"Pool assignment" scenario was removed and replaced with a much faster,
+browser-free `test_pool_assignment.mjs`, see below): normal submit, timeout
+replay, "N timeouts remaining", 3-timeout termination screen,
+submit-then-continue, completes-all-trials, and Prolific-redirect — tutorial
+included in full for every scenario. That harness is never linked from
+production code and never
 included in any build (vite.config.js's build inputs are only
 index-continuous.html/index-binary.html) — real participants can never reach
 it. It calls the exact same `buildAndRun()` production uses; it only adjusts
@@ -507,6 +526,25 @@ node test_browser.mjs --task=binary --browser=chromium  # a subset
 Firefox/WebKit need their browser binaries installed once:
 `npx playwright install firefox webkit` (plus `sudo npx playwright install-deps`
 for system libraries if missing).
+
+**`task/test_pool_assignment.mjs`** — plain Node script, no Playwright, no
+Vite dev server, runs in well under a second. Checks the per-participant
+sequence-pool mechanism (see "Per-participant sequence pool" in CLAUDE.md):
+`poolIndexForParticipant`'s determinism/range/spread (extracted from
+timeline-builder.js's real source via regex, not a hand-copied duplicate),
+and a spot-check across the real 200-member pool (both tasks, several
+indices) confirming every trial has non-empty values and the correct
+non-null ground-truth field. Replaces a much heavier, Playwright-based
+"Pool assignment" scenario that used to run three full tutorial+session
+flows through real Chromium just to check logic that turned out to have
+zero DOM/browser dependency at all — see CLAUDE.md for the full story,
+including an unresolved "Target page ... has been closed" instability that
+motivated removing the browser dependency entirely rather than continuing
+to chase it.
+
+```bash
+node task/test_pool_assignment.mjs
+```
 
 ### Local testing pipeline
 
@@ -533,15 +571,31 @@ and current per-item status)
 - [DONE] PILOT ONLY name field removed
 - [DONE] All 4 Prolific code placeholders filled in timeline-builder.js's `PROLIFIC_CODES`
 - [DONE] Prolific wallet funded; payment rate confirmed ($10 completion, $3 early-exit)
-- [ ] **evidence-integration-binary.jzip needs a rebuild** -- it predates
-  this session's binary tutorial/bonus/chart work and the production
-  sequence-pool switch. evidence-integration-continuous.jzip WAS rebuilt
-  and is current.
+- [DONE as of the latest chat session] Both production jzips rebuilt fresh
+  (new UUIDs) against the full 200-member pool and the current bonus
+  formula (MAX_REWARD lowered from 3 to 2 cents/observation). This item
+  has flipped stale/done more than once across sessions -- verify actual
+  file timestamps against current source/pool rather than trusting this
+  checkbox blindly.
 - [DONE] Full 6-way browser/task E2E matrix -- 48/48 passing (8/8 each)
-  (this predates the latest session's changes -- worth re-running after
-  the binary jzip rebuild above)
+  as of an earlier session; **STALE COUNT as of the latest chat session**
+  -- the "Pool assignment" scenario was removed (replaced by the much
+  faster, browser-free `task/test_pool_assignment.mjs` -- see "Testing"
+  above), so the matrix is now 7 scenarios/combo (42 total). Only
+  chromium/continuous has been re-verified since (7/7, twice); the other
+  5 combos have not been re-run.
+- [DONE] A 4-trial mini-pool test build (generated by temporarily
+  swapping `sequences_pool/` for a small 10-member/4-trial pool, building
+  jzips, then restoring production -- see CLAUDE.md's "This session..."
+  section for the exact procedure) was validated end-to-end via 2 real
+  Prolific completions + 2 terminations (`dev-results/pilot3testA.txt` /
+  `pilot3testB.txt`). 68/68 automated checks passed: pool-hash
+  determinism/uniqueness, exact alignment with the served mini pool,
+  complete response coverage, correct termination behavior, and bonus
+  formula correctness (recomputed from scratch against the real formula).
 - [PENDING] A genuinely full completion run via real Prolific preview (not
-  just early-exit) -- the one real-platform path not yet exercised
+  just early-exit) against the FULL 32-trial production pool -- the mini-
+  pool test above used a 4-trial pool, not full production content.
 - [DONE] Incremental per-trial saving, save-then-end-then-redirect gating,
   and the GeneralSingle-only worker-type switch, all confirmed against real
   MindProbe/JATOS via six manual test scenarios this session (hand-edited
@@ -549,6 +603,10 @@ and current per-item status)
   "REAL-TEST FINDINGS" note for what was confirmed and two corrections
   (`jatos.log` isn't visible anywhere in the JATOS UI; GeneralSingle's block
   is keyed on the browser's cookie, not the `PROLIFIC_PID` value).
+- [UNRESOLVED] The real production pool's continuous std is 10, not the
+  documented/default 15 (confirmed directly, all 200 members) -- decide
+  whether to fix the docs or regenerate the pool before wide rollout. See
+  CLAUDE.md's "Open items".
 
 ```bash
 npm run build:continuous && npm run build:binary

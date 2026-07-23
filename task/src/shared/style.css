@@ -16,17 +16,6 @@ body {
 .jspsych-content p { line-height: 1.6; }
 .jspsych-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-/* ── Trial counter: fixed top-left ───────────────────────────────────────── */
-.trial-counter {
-  position: fixed;
-  top: 1.2rem;
-  left: 1.5rem;
-  font-size: 0.9rem;
-  color: #888;
-  letter-spacing: 0.03em;
-  z-index: 100;
-}
-
 /* ── Instruction / welcome / consent screens ─────────────────────────────── */
 .screen-wrap {
   max-width: 70vw;
@@ -189,13 +178,6 @@ input[type="range"].slider-last::-moz-range-thumb {
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 }
 
-/* Numeric readout */
-.slider-current {
-  font-size: 1rem;
-  color: #333;
-  height: 1.4rem;
-}
-
 /* ── ITI clock screen ─────────────────────────────────────────────────────── */
 .iti-wrap {
   display: flex;
@@ -244,14 +226,6 @@ input[type="range"].slider-last::-moz-range-thumb {
   z-index: 100;
 }
 
-/* "Too slow" message replacing the stimulus number */
-.too-slow-text {
-  font-size: clamp(3rem, 10vw, 8rem);
-  font-weight: bold;
-  color: #ef4444;
-  line-height: 1;
-}
-
 /* ── Consent form layout ─────────────────────────────────────────────────── */
 .consent-outer {
   max-width: 70vw;
@@ -296,13 +270,13 @@ input[type="range"].slider-last::-moz-range-thumb {
 }
 
 /* Blue variant -- informational/motivational, not a warning. Same blue as
-   plugin-timeout-demo.js's intro banner, reused here for consistency across
-   the app's "blue = informational" visual language rather than inventing a
-   new one. Used for the consent screen's payment-motivation box (as a
+   .info-banner-blue below (this app's "blue = informational" visual
+   language, used consistently rather than inventing a new one per
+   context). Used for the consent screen's payment-motivation box (as a
    click-to-reveal box, same markup shape as .consent-info-box above). NOT
    used for the tutorial-summary reminder boxes -- see .info-banner-blue
-   below, which matches plugin-timeout-demo.js's banner sizing instead
-   (larger font/padding than this click-to-reveal-oriented variant). */
+   below, which uses a larger font/padding suited to a standalone banner
+   rather than this click-to-reveal-oriented variant. */
 .consent-info-box-blue {
   background: #eff6ff;
   border: 1.5px solid #93c5fd;
@@ -310,10 +284,10 @@ input[type="range"].slider-last::-moz-range-thumb {
 }
 
 /* Standalone blue info banner -- NOT the click-to-reveal box shape above.
-   Extracted from plugin-timeout-demo.js's intro banner (that file's own
-   markup now uses this class instead of duplicating the inline style) so
-   both it and the tutorial-summary reminder boxes stay visually identical
-   without copy-pasted styling drifting apart. */
+   Used by the tutorial-summary reminder boxes; kept as its own class
+   (rather than reusing .consent-info-box-blue directly) so its own
+   larger font/padding can differ from that click-to-reveal-oriented
+   variant without the two drifting apart via copy-pasted inline styles. */
 .info-banner-blue {
   text-align: center;
   max-width: 640px;
@@ -494,14 +468,6 @@ input[type="range"].slider-last::-moz-range-thumb {
   display: flex;
   flex-direction: column;
   justify-content: center;
-}
-
-.tutorial-sample-label {
-  font-size: 0.8rem;
-  font-weight: bold;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin-bottom: -0.5rem;
 }
 
 .dist-canvas {
@@ -770,39 +736,6 @@ input[type="range"].slider-last::-moz-range-thumb {
   white-space: nowrap;
 }
 
-/* ── Keyboard shortcut badge ─────────────────────────────────────────────── */
-.key-badge {
-  display: inline-block;
-  font-family: monospace;
-  font-size: 0.8em;
-  font-style: normal;
-  font-weight: normal;
-  color: #333;
-  background: #f3f4f6;
-  border: 1px solid #ccc;
-  border-bottom: 2px solid #aaa;
-  border-radius: 4px;
-  padding: 1px 6px;
-  line-height: 1.4;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-
-/* ── Summary info boxes below plot ──────────────────────────────────────── */
-.summary-info-row {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  max-width: 70vw;
-  margin: 0 auto;
-}
-
-.summary-info-row .tutorial-info-block {
-  flex: 1;
-  text-align: left;
-  font-size: 0.85rem;
-}
-
 /* ── Binary stimulus circle ──────────────────────────────────────────────── */
 .binary-circle {
   width: clamp(60px, 11vw, 160px);
@@ -827,17 +760,6 @@ input[type="range"].slider-last::-moz-range-thumb {
   gap: 0.75rem;
   width: 100%;
 }
-
-/* Ball icons at ends */
-.binary-ball {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-}
-.binary-ball-blue { background: #2563eb; }
-.binary-ball-red  { background: #ef4444; }
 
 /* ── Binary slider v2 layout (experimental) ─────────────────────────────── */
 /* Purely static blue/red tick axis above/below the track (constraint #3);
@@ -1118,105 +1040,6 @@ input[type="range"].binary-slider.slider-last::-moz-range-track {
     rgba(239,68,68,0.4) var(--pct, 50%),
     rgba(239,68,68,0.4) 100%
   ) !important;
-}
-
-/* ── Urn dot grid ─────────────────────────────────────────────────────────── */
-.urn-canvas {
-  display: block;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-  padding: 4px;
-  width: 100%;
-  height: 100%;
-  /* Shrunk from 120px to 90px, matching .dist-canvas's own identical
-     change (chat history) -- gives the tracker below more of the right
-     column's height now that binary has one too. */
-  min-height: 90px;
-}
-
-/* ── Tutorial intro boxes ────────────────────────────────────────────────── */
-.tutorial-box {
-  cursor: default;
-  transition: opacity 0.3s, background 0.2s, border-color 0.2s;
-  min-height: 3.5rem;
-  display: flex;
-  align-items: center;
-}
-
-/* Locked — not yet reachable */
-.tutorial-box-locked {
-  opacity: 0.25;
-  background: #f9fafb;
-  border-color: #e5e7eb;
-}
-
-/* Active — next to click */
-.tutorial-box-active {
-  opacity: 1;
-  background: #eff6ff;
-  border-color: #93c5fd;
-  cursor: pointer;
-  box-shadow: 0 0 0 2px #bfdbfe;
-}
-.tutorial-box-active:hover {
-  background: #dbeafe;
-  border-color: #60a5fa;
-}
-
-/* Revealed */
-.tutorial-box-revealed {
-  opacity: 1;
-  background: #fff;
-  border-color: #d1fae5;
-  cursor: default;
-}
-
-.tutorial-click-hint {
-  font-size: 0.85rem;
-  color: #2563eb;
-  font-weight: bold;
-  width: 100%;
-  text-align: center;
-}
-
-.tutorial-locked-hint {
-  font-size: 1rem;
-  color: #ccc;
-  width: 100%;
-  text-align: center;
-  letter-spacing: 0.2em;
-}
-
-
-/* ── Progress bar (trial summary) ─────────────────────────────────────── */
-.progress-wrap {
-  width: 70vw;
-  margin: 0 auto 1.25rem;
-  text-align: left;
-}
-
-.progress-label {
-  font-size: 1rem;
-  color: #555;
-  margin-bottom: 0.4rem;
-  text-align: center;
-}
-
-.progress-track {
-  width: 100%;
-  height: 12px;
-  background: #e5e7eb;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: #3b82f6;
-  border-radius: 6px;
-  transition: width 0.4s ease;
-  min-width: 4px;  /* always visible even at trial 1 */
 }
 
 /* ── Slider tick ruler ────────────────────────────────────────────────────── */

@@ -7,18 +7,19 @@
  * None of these screens have a response deadline — participants need
  * unhurried time to read and think during the tutorial.
  *
- * Timeout demo DISABLED (chat decision, this session): the 3-screen timeout
- * explanation that used to run after the tutorial summary and before trial 1
- * is commented out below, not deleted -- many participants found it
- * confusing, and the consent screen's own red warning box already discloses
- * the response deadline in text. A live clock demonstration was
- * reintroduced shortly after, but as part of the phase A-D hint
- * progression instead of a standalone screen -- see plugin-tutorial-
- * observation-continuous.js/-binary.js's own "phase E" for that.
+ * The standalone 3-screen timeout demo that used to run after the tutorial
+ * summary and before trial 1 has been REMOVED entirely (chat history --
+ * disabled first, then deleted outright once the phased hint-progression
+ * design below proved itself the better long-term approach, not just a
+ * stopgap): many participants found the standalone demo confusing, and the
+ * consent screen's own red warning box already discloses the response
+ * deadline in text. A live clock demonstration now lives inline as phase E
+ * of the tutorial observation plugins' own per-observation hint progression
+ * instead of a separate screen -- see plugin-tutorial-observation-
+ * continuous.js/-binary.js's own "phase E" for that.
  */
 import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
 import ItiClockPlugin      from './plugin-iti-clock.js';
-import TimeoutDemoPlugin   from './plugin-timeout-demo.js';
 import { computeTrialReward, computeResponseReward, computeRunningMeans, computeRunningRatios, refForObservation, computeResponseError } from './bonus-continuous.js';
 
 /**
@@ -31,7 +32,6 @@ import { computeTrialReward, computeResponseReward, computeRunningMeans, compute
  * @param {number} cfg.defaultValue
  * @param {boolean} cfg.showSliderValue
  * @param {number} cfg.tObsMs
- * @param {number} cfg.maxTimeoutsPerTrial
  * @param {number} [cfg.itiShortMs]  tutorial between-observation ITI, ms (default 1000)
  * @param {object} plugins
  * @param {*} plugins.TutorialIntroPlugin   (task-specific intro plugin, obs 0)
@@ -43,7 +43,7 @@ export function buildTutorialTimeline(cfg, plugins) {
   const {
     isBinary, tutorialValues, tutorialMean, tutorialStd,
     sliderDefault, defaultValue, showSliderValue,
-    tObsMs, maxTimeoutsPerTrial, itiShortMs = 1000, errorMode = 'true_mean',
+    tObsMs, itiShortMs = 1000, errorMode = 'true_mean',
   } = cfg;
   const { TutorialIntroPlugin, TutorialObsPlugin, TutorialSummaryPlugin } = plugins;
 
@@ -190,25 +190,26 @@ export function buildTutorialTimeline(cfg, plugins) {
 
   // Tutorial complete — standalone transition screen between the tutorial
   // summary and the main experiment (this session). This copy/button
-  // previously lived as screen 3 of the now-disabled timeout demo (see
-  // below) -- extracted here so the tutorial still ends on an explicit
+  // previously lived as screen 3 of the now-REMOVED timeout demo (chat
+  // history) -- extracted here so the tutorial still ends on an explicit
   // "you're done, proceed to the real task" confirmation even with the
-  // timeout mechanics no longer explained live. Uses the stock
-  // html-button-response plugin (same pattern as build-welcome-screen.js)
-  // rather than a dedicated custom plugin class, since there's no
-  // interactivity here beyond the one button.
+  // timeout mechanics no longer explained via a standalone screen. Uses
+  // the stock html-button-response plugin (same pattern as build-welcome-
+  // screen.js) rather than a dedicated custom plugin class, since there's
+  // no interactivity here beyond the one button.
   //
   // NOTE on spacing: this plugin renders `choices`/`button_html` as a
   // SEPARATE sibling element AFTER the `stimulus` div, not inside it --
-  // unlike the original demo's screen 3, which built title+button as one
-  // hand-written flex column (so its min-height:50vh + justify-content:
-  // center + gap:2rem correctly centered both together). Reusing that same
-  // min-height/justify-content/gap recipe here centered ONLY the title
-  // inside its own 50vh box, leaving the button to render right after that
-  // already-tall box -- a large, unintended gap. Fixed by dropping the
-  // vertical-centering trick entirely: simple top padding positions the
-  // title, and margin-bottom on the title (not gap, since there's no shared
-  // flex parent) sets the actual visual distance to the button.
+  // unlike the removed demo's own screen 3, which built title+button as
+  // one hand-written flex column (so its min-height:50vh + justify-
+  // content:center + gap:2rem correctly centered both together). Reusing
+  // that same min-height/justify-content/gap recipe here centered ONLY
+  // the title inside its own 50vh box, leaving the button to render right
+  // after that already-tall box -- a large, unintended gap. Fixed by
+  // dropping the vertical-centering trick entirely: simple top padding
+  // positions the title, and margin-bottom on the title (not gap, since
+  // there's no shared flex parent) sets the actual visual distance to the
+  // button.
   tutorialTimeline.push({
     type: jsPsychHtmlButtonResponse,
     stimulus: `
@@ -220,33 +221,6 @@ export function buildTutorialTimeline(cfg, plugins) {
       `<button id="tutorial-complete-btn" class="jspsych-btn" style="font-size:1.6rem;padding:1rem 3.5rem;">${choice}</button>`,
     data: { screen: 'tutorial_complete' },
   });
-
-  // Timeout demo — DISABLED (chat decision): many participants found this
-  // 3-screen live demonstration confusing, and the consent screen already
-  // discloses the response deadline via its own red warning box. Commented
-  // out rather than deleted so it can be reintroduced easily. A live clock
-  // demonstration WAS reintroduced (this session, shortly after this was
-  // disabled) -- but as phase E of the per-observation hint progression in
-  // plugin-tutorial-observation-continuous.js/-binary.js, not by
-  // un-commenting this block. Its own screen 3 ("Tutorial complete" +
-  // "Proceed to experiment") was separately extracted into the standalone
-  // screen above, so re-enabling this block would currently show TWO
-  // consecutive "tutorial complete"-style transitions back to back -- if
-  // this demo is ever reintroduced anyway (e.g. for its specific 3-screen
-  // explanatory framing, distinct from phase E's inline demonstration),
-  // drop its own screen 3 (or the standalone screen above, whichever reads
-  // better in sequence) rather than keeping both.
-  // TimeoutDemoPlugin/its import, plugin-timeout-demo.js, and
-  // timeline-builder.js's 'timeout_demo' progressLabel() case are all left
-  // in place -- none of them need removing for this to take effect, only
-  // this push() call actually wires the screen into the timeline.
-  // tutorialTimeline.push({
-  //   type:         TimeoutDemoPlugin,
-  //   is_binary:    isBinary,
-  //   t_obs_ms:     tObsMs,
-  //   max_timeouts: maxTimeoutsPerTrial,
-  //   data: { screen: 'timeout_demo' },
-  // });
 
   return tutorialTimeline;
 }

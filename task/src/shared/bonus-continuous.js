@@ -32,12 +32,26 @@
  * percentage) -- the worst possible single response (0 vs a reference of
  * 100, or vice versa) is exactly 100 error, so dividing by 100 always
  * lands normError in [0,1] regardless of task. Parameters (chat history,
- * explicitly meant to be iterated on -- tuned twice already this session,
- * from an initial MAX_REWARD=4/BONUS_DECAY=5, then MAX_REWARD=3/
- * BONUS_DECAY=10): MAX_REWARD=3 (cents), BONUS_DECAY=15 -- reward hits
+ * explicitly meant to be iterated on -- tuned three times now, from an
+ * initial MAX_REWARD=4/BONUS_DECAY=5, then MAX_REWARD=3/BONUS_DECAY=10,
+ * then MAX_REWARD=3/BONUS_DECAY=15 (tightened further), and now
+ * MAX_REWARD=2/BONUS_DECAY=15 -- lowered again specifically to keep total
+ * bonus costs down, not for the decay-tightness reasoning behind the
+ * earlier changes): MAX_REWARD=2 (cents), BONUS_DECAY=15 -- reward hits
  * exactly 0 once normError >= 1/BONUS_DECAY ≈ 0.067, i.e. once a single
- * response is off by ~6.7+ (on the 0-100 scale) -- tighter still than the
- * previous 10.
+ * response is off by ~6.7+ (on the 0-100 scale) -- unchanged from before,
+ * since only MAX_REWARD moved this time, not BONUS_DECAY.
+ *
+ * ACTUAL PAYMENT (chat history) -- confirmed decision: real bonus
+ * payments are given MANUALLY (outside this codebase entirely) and
+ * clipped to a $5 ceiling, regardless of what this formula's raw sum
+ * comes to across a full session -- the theoretical max at the current
+ * parameters (32 trials x 15 observations x $0.02 max/observation) is
+ * well above $5 if every single response were error-free, so the clip
+ * is expected to matter in practice, not just a theoretical safeguard.
+ * See build-end-screen.js's own "REMINDER" docstring for a related,
+ * not-yet-implemented idea (showing the participant their own total
+ * earned bonus on the final screen).
  *
  * REPLACED (chat history, this session) a per-TRIAL formula that instead
  * summed every observation's raw error FIRST, then applied one decay/
@@ -89,7 +103,7 @@
 // framing) -- plain exported constants, not config-base.js's DEFAULTS,
 // since they're specific to this one formula, not a general task-timing/
 // UI parameter.
-export const MAX_REWARD  = 3;   // cents, per observation, at normError=0
+export const MAX_REWARD  = 2;   // cents, per observation, at normError=0
 export const BONUS_DECAY = 15;
 
 // Both tasks' responses/refs live on a 0-100 scale (continuous's slider,

@@ -429,6 +429,23 @@ docstrings have the full blow-by-blow if something here needs more detail)
 **Per-observation error + per-trial bonus (bonus-continuous.js -- name is a
 little dated now, used by both tasks; not renamed, to avoid a wide import-
 path change for a pure naming concern)**:
+
+**SUPERSEDED (found while investigating a chat session's bonus questions --
+see "This session: E2E array-bug fix..." below for what actually changed
+in THIS session): the formula narrated in this bullet list
+(`reward = max(0, 100 - BONUS_DECAY * totalError)`, one reward per TRIAL
+from a pre-summed error) is NOT what the code currently does. At some
+point AFTER the session this bullet list describes but BEFORE the most
+recent chat session, bonus-continuous.js's real formula changed to a
+PER-OBSERVATION reward: `normError = rawError / MAX_POSSIBLE_ERROR;
+reward = max(0, MAX_REWARD * (1 - BONUS_DECAY * normError))`, computed
+once per observation and SUMMED for the trial/tutorial total (see
+`computeResponseReward`/`computeTrialReward` in bonus-continuous.js --
+that file's own docstring has the full replacement rationale). Current
+parameters: `MAX_REWARD = 2` cents (lowered from 3 this session, see
+below), `BONUS_DECAY = 15`, `MAX_POSSIBLE_ERROR = 100`. This whole bullet
+list is kept below for the ERROR_MODE/chart/methodology narrative, which
+is still accurate -- only the specific reward FORMULA shown is stale.**
 - Error is computed ONCE per observation, at response time, and attached
   directly to that observation's own JATOS row (via jsPsych's
   `on_finish(data)` mutation) -- flows into JATOS via the same per-trial
@@ -561,12 +578,14 @@ path change for a pure naming concern)**:
   `build_inspection_csv`) that didn't understand `prefix_length=0`; a
   missing 95% CI band in inspect_iid_sequences.py's per-participant figure.
 
-**Pending / not yet done**: `task/evidence-integration-binary.jzip` is
-STALE -- predates all of this session's binary tutorial/bonus/chart work
-and needs a rebuild (`npm run build:binary` + `python task/
-generate_jzip.py`) before any real pilot testing of these changes.
-`evidence-integration-continuous.jzip` was rebuilt during this session and
-is current.
+**Pending / not yet done**: `task/evidence-integration-binary.jzip` was
+STALE (predated an earlier session's binary tutorial/bonus/chart work) --
+**RESOLVED as of this chat session**: both `evidence-integration-
+continuous.jzip` and `evidence-integration-binary.jzip` were rebuilt fresh
+(new UUIDs) against the full 200-member production pool and the current
+bonus formula (MAX_REWARD=2) -- see "This session: E2E array-bug fix..."
+below. Re-verify staleness before trusting this note in a future session;
+it's accurate only as of when it was written.
 
 Sequence design: **8x4 (32 trials) hybrid production design is CURRENT**,
   superseding the earlier 6x4 pure-momentmatch pilot described below.
@@ -581,6 +600,13 @@ Sequence design: **8x4 (32 trials) hybrid production design is CURRENT**,
   questions.md for the full investigation and decision rationale** -- the
   quota-vs-i.i.d. confound this decision was based on, the hybrid design's
   own std-guard tuning, and everything checked before promoting.
+
+  **std_fixed as documented here is 15 -- but the ACTUAL real 200-member
+  production pool currently on disk has std=10 (`true_std=10.0` uniformly
+  across all 200 continuous members, confirmed directly)** -- this
+  discrepancy is UNRESOLVED, see "Open items" below. Don't assume this
+  section's stated parameter values match the real served pool without
+  checking; that's exactly how this discrepancy was found.
 
   Historical context (6x4, momentmatch-only) -- kept for the mechanism
   detail, since the hybrid design reuses this construction UNCHANGED for
@@ -1094,6 +1120,20 @@ exact for any p in (0,1), the only limitation is 1/n rounding granularity.
   opportunistic repetition found (see "Tutorial redesign..." above) is
   sufficient, or whether a deliberate small number of full-trial repeats
   is worth adding as a third generation branch.
+- **std=10 vs std=15 in the real production pool** -- the actual
+  200-member `sequences_pool/` has `true_std=10.0` uniformly (confirmed
+  across all 200 continuous members), but both this file's "Sequence
+  design" section and `generate_sequences_pool.py`'s own `--std_fixed`
+  CLI default say 15. UNRESOLVED which is correct -- see "This session:
+  E2E array-bug fix..." above for the discovery. Needs a decision: fix
+  the docs to say 10, or regenerate the pool at 15 (which changes every
+  trial's actual values and needs a jzip rebuild after).
+- **dev-results/ test-artifact accumulation** -- scenarios in
+  test_browser.mjs that never check saved files never call cleanup, so
+  every per-trial append from those runs accumulates indefinitely
+  (~2000+ stale files found and cleaned once this session -- see "This
+  session..." above). Not fixed at the root; a suite-level teardown step
+  would close this properly if it keeps mattering.
 
 Local dev: open http://localhost:5173/index-continuous.html or
   http://localhost:5174/index-binary.html via `npm run dev:continuous` /
@@ -1237,6 +1277,151 @@ Testing:
   dead checks ('last chance', 'Trial summary') were testing for phrases
   that had never existed anywhere in the source at all. All 30 scenarios
   pass cleanly post-fix.
+
+### This session: E2E array-bug fix, pool-assignment scenario removed, mini-pool test jzips, bonus/std findings
+
+**test_browser.mjs: stale array-assumption bug found and fixed** -- three
+scenarios ("3 timeouts: session terminated", "Completes all trials...",
+and the Prolific-redirect scenario) asserted `Array.isArray(saved) &&
+saved.length > 0` on whatever file a `waitForNewResultFile` helper
+returned after a save click. This predates the incremental per-trial-
+append architecture (see "Exit/redirect and data-saving architecture"
+above) -- the app hasn't sent one full-array dump per session in a long
+time; every append (per-trial AND the final completion marker) is now a
+single small object, and dev-server.js writes one file per POST. The
+array check could never pass anymore, and "grab whichever new file shows
+up first" could also grab an unrelated per-trial append instead of the
+actual completion marker. Confirmed directly: failing files were valid,
+non-empty single objects, exactly as designed -- not data loss, a stale
+test assumption. Fixed by replacing `waitForNewResultFile` with
+`collectNewResultRows(before, predicate, timeout)`, which polls, parses
+EVERY new file (not just the first), and returns once some row satisfies
+`predicate` (e.g. `row.progress === 'finished'`/`'terminated'`) --
+`rows.find(predicate)` then picks the SPECIFIC row relevant to the
+assertion, and `cleanupResultFiles(files)` deletes every file collected,
+not just the matching one. "Completes all trials" also had its
+`snapshotResultFiles()` call moved to session start (not right before the
+final click), since observation rows are appended throughout the whole
+session now, not bundled at the end -- the "has observation rows" check
+needs the merged full-session set to mean anything. All three affected
+scenarios re-verified clean (chromium/continuous, twice).
+
+**dev-results/ had ~2000+ stale result_*.json files accumulated** across
+many past runs -- scenarios that never check saved files (e.g. "Normal
+submit", the timeout-demo ones) never call cleanup at all, so every
+per-trial append from those runs just sits there forever. Cleaned up once
+this session (safe: `result_*.json` is exclusively test-output naming,
+distinct from every named real pilot file -- see "Pilot data files"
+below) but the underlying gap is NOT fixed -- still worth a suite-level
+"delete everything created since server start" step if this keeps
+mattering.
+
+**"Pool assignment" scenario REMOVED from test_browser.mjs entirely**,
+replaced by `task/test_pool_assignment.mjs` (plain Node, no Playwright, no
+Vite, runs in well under a second). The old scenario ran THREE full
+tutorial+session flows through real Chromium just to check pool-hashing
+determinism/range/consistency and embedded-field presence -- all
+checkable without a browser at all: `poolIndexForParticipant` (in
+timeline-builder.js) is a pure DJB2-style string hash with zero DOM/
+jsPsych dependency, and the embedded true_mean/true_p/value fields are
+read straight off the pool's own JSON by build-trial-timeline.js, so
+checking the real sequences_pool/*.json files directly IS checking what a
+real session would see. The old scenario was also the source of a
+genuine, never-resolved "Target page, context or browser has been closed"
+crash during its own tutorial -- investigated at length (per-iteration
+fresh browsers, intercepting the real app.prolific.com redirect its
+`testUrlWithPid` unintentionally triggered on early-exit, minimizing to a
+single real observation) -- none of it fixed the crash, and an isolated
+standalone repro of the SAME code in a fresh process passed cleanly,
+pointing at something specific to this execution environment (NOT a
+process leak -- checked `ps aux`, no leftover Playwright/ms-playwright
+chromium processes, healthy free memory) rather than an app or test-logic
+bug. Removing the browser dependency entirely made the whole question
+moot. `test_pool_assignment.mjs` checks: `poolIndexForParticipant`'s real
+source (extracted via regex from timeline-builder.js, same pattern
+already used for PROLIFIC_CODES parsing, since timeline-builder.js can't
+be imported directly in plain Node -- it pulls in jspsych, which pulls in
+a .css import Node's ESM loader can't resolve) for determinism/range/
+spread; and a spot-check across the real 200-member pool (indices 0, 50,
+100, 199, both tasks) confirming every trial has non-empty `values` and
+the correct non-null ground-truth field (`true_mean` continuous /
+`true_p` binary). `test_browser.mjs` now has 7 scenarios per browser/task
+combo (was 8) -- the removed one is not replaced 1:1 in the matrix, since
+its checks moved entirely to the new standalone script. NOT yet re-run
+across the full 6-way browser/task matrix since this change -- only
+chromium/continuous has been re-verified so far (twice, clean).
+
+**Mini-pool test jzips (for quick manual JATOS/Prolific completion
+checks)**: generating a real jzip a human can click through in minutes
+(rather than the full 32-trial production experience) needed DATA, not
+CODE, changed -- `config.js`'s `import.meta.glob(
+'../../sequences_pool/{task}_*_sequences.json')` path is fixed at build
+time, so there's no config-level override (and deliberately no dev-only
+knob was added, per this file's own "What NOT to do" convention).
+Procedure used (fully code-free, safe to repeat): back up the real
+`task/sequences_pool/` (gitignored, no other copy exists) -> generate a
+small pool into that same path via `generate_sequences_pool.py`
+(`--n_pool 10 --n_prefix 2 --n_repeats 2`, i.e. 4 trials/member -- for
+binary, `--no_prefix` too, matching the real production branch) -> run
+`generate_jzip.py` (the REAL unmodified build/package pipeline) -> rename
+the resulting jzips to `-TEST-Ntrial.jzip` so they're never confused with
+production -> restore the real pool -> rebuild the real production jzips
+again so nothing is left mismatched. Produced
+`evidence-integration-{continuous,binary}-TEST-4trial.jzip` this session
+(a `-TEST-2trial` pair from an earlier, unrelated session already existed
+and was left untouched).
+
+**Real Prolific pilot validated end-to-end against the 4-trial mini pool**
+(`dev-results/pilot3testA.txt` / `pilot3testB.txt`, 2 completions + 2
+terminations, real Prolific submissions): verified via a temporary Python
+script (streaming JSON decoder, same `iter_json_values` pattern as
+parse_results.py/reconcile_prolific_jatos.py, since JATOS's raw export
+concatenates appends with no separator within a participant's block --
+see "Exit/redirect..." above) -- 68/68 checks passed, covering:
+  - `poolIndexForParticipant` recomputed directly from real pids matched
+    the recorded `pool_index` in every case; the SAME real pid got the
+    SAME pool_index in both tasks (cross-task hash consistency, confirmed
+    on real data, not just in isolation).
+  - Every real observation row's `value`/`qid`/`true_mean`/`true_p`
+    matched the (regenerated, same-seed) mini pool file exactly at
+    `[trial][observation]` -- zero mismatches.
+  - Completed sessions: every one of the 60 (trial, observation) pairs
+    (4 trials x 15 obs) had a resolved response, correct trial-summary
+    count, `end` screen present. Terminated sessions: exactly one (trial,
+    observation) pair timed out 3 times in a row (`trial_timeouts`
+    1->2->3), no `finished` marker, no `end` screen.
+  - Per-observation `error`/`reward` recomputed from scratch using the
+    REAL formula in bonus-continuous.js (running-mean/running-ratio
+    reference, confirmed `ERROR_MODE` is still `running_mean`/`running_p`)
+    matched exactly; trial-summary `total_error`/`reward` matched the sum
+    of that trial's own observation-level values, for both real trials
+    and the tutorial's own summary row.
+  - `time_elapsed` strictly increasing throughout, tutorial always exactly
+    15 observations 0..14 with no gaps, `is_prolific: true` correctly set.
+  Bonus earned (at the MAX_REWARD=3 formula active AT THE TIME of this
+  test, since lowered to 2 -- see below): binary completion ~$1.16
+  (115.67 cents across 4 trials), continuous completion ~$0.17 (16.86
+  cents) -- both well under the existing $5 manual-payment ceiling.
+
+**MAX_REWARD lowered from 3 to 2 cents per observation** (bonus-
+continuous.js) -- explicit decision to keep total bonus costs down at
+production scale (theoretical per-session max drops from ~$14.40 to
+~$9.60 at 32 trials x 15 obs, before the $5 ceiling clip). BONUS_DECAY
+(15) unchanged. Docstring's parameter-tuning history and theoretical-max
+calculation updated to match. Production jzips rebuilt against this
+change and the full 200-member pool (fresh UUIDs, per generate_jzip.py's
+own always-fresh-UUID design).
+
+**Discrepancy found: the real production 200-member pool has std=10, not
+std=15** -- confirmed directly (`true_std` uniformly `10.0` across ALL 200
+continuous pool members, file timestamps predate this session), despite
+BOTH this file's own "Sequence design" section AND
+`generate_sequences_pool.py`'s own `--std_fixed` CLI default stating 15.
+UNRESOLVED -- not yet decided whether to (a) leave the pool as std=10 and
+correct the documentation, or (b) regenerate the pool at std=15 to match
+the documented/default value (which would change every trial's actual
+generated values and require rebuilding jzips again). See "Open items"
+below.
 
 jsPsych 8 plugin conventions (IMPORTANT — do not regress):
 - Custom plugins use: trial(display_el, trial, on_load) — NEVER declare this `async`.
@@ -1819,20 +2004,25 @@ Pre-deployment checklist (before Prolific production):
   - [DONE] Prolific wallet funded; payment rate confirmed: $10 for normal
     completion, $3 for the screen-out/early-exit path (see "PROLIFIC_CODES"
     note above for the reasoning behind the $3 figure specifically).
-  - [DONE] node test_browser.mjs: all 6 browser x task combinations confirmed
-    48/48 passing (8/8 each) against the final per-participant-pool state,
-    including the new pool-assignment scenario.
+  - [DONE, BUT STALE COUNT] node test_browser.mjs: all 6 browser x task
+    combinations confirmed 48/48 passing (8/8 each) against the final
+    per-participant-pool state, including the pool-assignment scenario.
+    **That scenario was REMOVED this chat session** (replaced by the
+    much faster task/test_pool_assignment.mjs -- see "This session: E2E
+    array-bug fix..." above), so the matrix is now 7 scenarios/combo (42
+    total), not 8/48. Only chromium/continuous has been re-verified
+    since (7/7, twice) -- the other 5 combos have NOT been re-run.
   - [DONE] Rebuild jzips (python task/generate_jzip.py) -- rebuilt after
     the per-participant pool work landed; confirmed no source/pool files
     postdate the current jzips, and confirmed directly in the built
     bundles (not just source) that pool_index and urlQueryParameters both
     landed correctly.
-  - [ ] **task/evidence-integration-binary.jzip needs a REBUILD** -- it now
-    predates all of the latest session's binary tutorial/bonus/chart work
-    and the production binary sequence-pool switch (see "Tutorial
-    redesign, bonus/error system, and binary no-prefix sequences" above).
-    evidence-integration-continuous.jzip WAS rebuilt that same session and
-    is current; binary was not.
+  - [DONE as of this chat session] **task/evidence-integration-binary.jzip
+    rebuild** -- both continuous and binary jzips rebuilt fresh (new
+    UUIDs) against the full 200-member pool and the current MAX_REWARD=2
+    bonus formula. This specific checkbox has flipped stale/done more
+    than once across sessions now -- check actual file timestamps against
+    current source/pool before trusting it blindly in a future session.
   - (No manual step needed for the showEndPage/endRedirectUrl invariant --
     generate_jzip.py's assert_show_end_page_disabled() enforces it
     automatically on every run and refuses to build if it's ever violated;

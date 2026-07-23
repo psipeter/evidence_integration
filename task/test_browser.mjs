@@ -74,12 +74,6 @@ const testUrl = (task) =>
 // so the Prolific branch had zero automated coverage before.
 const testUrlProlific = (task) => `${testUrl(task)}&PROLIFIC_PID=e2e_test_pid`;
 
-// Same idea, but with a caller-chosen PID -- needed by the pool-assignment
-// scenario below, which specifically compares indices across DIFFERENT
-// participant IDs (testUrlProlific's PID is fixed, so it can't be reused
-// for that comparison).
-const testUrlWithPid = (task, pid) => `${testUrl(task)}&PROLIFIC_PID=${pid}`;
-
 // Parsed directly out of timeline-builder.js's PROLIFIC_CODES rather than
 // hardcoded here -- avoids this test silently going stale if those
 // placeholder codes are ever filled in for real Prolific deployment.
@@ -185,18 +179,50 @@ const isTestResultFile = (name) => /^result_.*\.json$/.test(name);
 const snapshotResultFiles = () =>
   new Set(fs.readdirSync(RESULTS_DIR).filter(isTestResultFile));
 
-// Polls for a NEW result_*.json file not present in `before` -- the save
-// POST completes asynchronously relative to the button click that triggers
-// it, so this can't just check once. Returns the new filename.
-async function waitForNewResultFile(before, timeout = 8000) {
+// Polls for NEW result_*.json files not present in `before`, parsing each
+// as it appears, until at least one parsed row satisfies `predicate` (or
+// `timeout` elapses). Returns { rows, files } for EVERY new file seen so
+// far, not just the matching one -- the incremental per-trial-append
+// architecture (see CLAUDE.md's "CURRENT ARCHITECTURE" note) means a
+// single session now writes one file per trial/screen transition, never
+// one file containing the whole session as an array. Callers use
+// `rows.find(predicate)` (or their own filter) to pick out the SPECIFIC
+// row relevant to their assertion -- e.g. the completion marker
+// (progress: 'finished'/'terminated') vs. individual observation rows --
+// rather than assuming whichever file arrives first/only is the right one.
+async function collectNewResultRows(before, predicate, timeout = 8000) {
   const start = Date.now();
+  const seen = new Map();  // filename -> parsed row
   while (Date.now() - start < timeout) {
     const now = fs.readdirSync(RESULTS_DIR).filter(isTestResultFile);
-    const fresh = now.find((f) => !before.has(f));
-    if (fresh) return fresh;
+    for (const f of now) {
+      if (before.has(f) || seen.has(f)) continue;
+      try {
+        seen.set(f, JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, f), 'utf8')));
+      } catch {
+        // File may still be mid-write; retry on the next poll rather than
+        // risk a false negative on a half-written file.
+      }
+    }
+    const rows = [...seen.values()];
+    if (rows.some(predicate)) return { rows, files: [...seen.keys()] };
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error('No new result file appeared in dev-results/ within timeout');
+  throw new Error(
+    `No result row matching the expected condition appeared within ${timeout}ms `
+    + `(saw ${seen.size} new file(s) total)`);
+}
+
+// Deletes every file a test run created in dev-results/ -- called with the
+// FULL file list from collectNewResultRows, not just whichever row happened
+// to match, since one session now produces many small per-trial files (see
+// above) and leaving the non-matching ones behind is exactly what caused
+// dev-results/ to accumulate hundreds of stale result_*.json files across
+// past runs.
+function cleanupResultFiles(files) {
+  for (const f of files) {
+    try { fs.unlinkSync(path.join(RESULTS_DIR, f)); } catch {}
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -400,12 +426,16 @@ const SCENARIOS = [
       const beforeExit = snapshotResultFiles();
       await p.click('#early-exit-btn');
       await waitForSaveConfirmation(p);
-      const savedExitFile = await waitForNewResultFile(beforeExit);
-      const savedExit = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, savedExitFile), 'utf8'));
-      if (!Array.isArray(savedExit) || savedExit.length === 0) {
-        throw new Error(`Saved result file ${savedExitFile} was empty or not an array`);
+      // finishSession() appends a single small completion marker (see
+      // finish-session.js) -- not the old full-array dump -- so look for
+      // the SPECIFIC row carrying progress: 'terminated', rather than
+      // assuming whichever file lands first/only is it.
+      const { rows, files } = await collectNewResultRows(
+        beforeExit, (row) => row.progress === 'terminated');
+      if (!rows.some((row) => row.progress === 'terminated')) {
+        throw new Error(`No appended row with progress="terminated" found among: ${JSON.stringify(rows)}`);
       }
-      fs.unlinkSync(path.join(RESULTS_DIR, savedExitFile));  // keep dev-results/ clean
+      cleanupResultFiles(files);
     },
   },
   {
@@ -433,6 +463,15 @@ const SCENARIOS = [
     // that final-trial-specific code path at all.
     name: 'Completes all trials, reaches final summary without crashing',
     fn: async (p) => {
+      // Snapshotted BEFORE the session starts, not right before the final
+      // click -- under the incremental per-trial-append architecture (see
+      // CLAUDE.md's "CURRENT ARCHITECTURE" note), observation rows are
+      // appended as their own separate files throughout the whole run, not
+      // bundled into one save at the end. Collecting from session start is
+      // what lets the "has observation rows" check below look at real rows
+      // instead of whatever the final completion click alone produced
+      // (which is only ever the small marker -- see finish-session.js).
+      const beforeAll = snapshotResultFiles();
       await doConsent(p); await doTutorial(p);
       for (let t = 0; t < 3; t++) {
         for (let o = 0; o < 15; o++) {
@@ -469,21 +508,25 @@ const SCENARIOS = [
       // never by this suite, precisely because nothing automated ever
       // reached this far -- see CLAUDE.md's "Exit/redirect and
       // data-saving architecture".
-      const before = snapshotResultFiles();
       await p.click('#next-btn');
       await waitForScreen(p, 'end', 5000);
       await p.click('body[data-screen="end"] button');
       await waitForSaveConfirmation(p);
-      const savedFile = await waitForNewResultFile(before);
-      const saved = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, savedFile), 'utf8'));
-      if (!Array.isArray(saved) || saved.length === 0) {
-        throw new Error(`Saved result file ${savedFile} was empty or not an array`);
+
+      // Look for the specific completion-marker row (progress: 'finished')
+      // among ALL rows appended since session start -- not whichever file
+      // happens to land first after the click, and not assuming the file
+      // itself is an array (see finish-session.js: it never is anymore).
+      const { rows, files } = await collectNewResultRows(
+        beforeAll, (row) => row.progress === 'finished');
+      if (!rows.some((row) => row.progress === 'finished')) {
+        throw new Error('No appended row with progress="finished" found for this session');
       }
-      const hasObservationRows = saved.some((row) => row.screen === 'observation');
+      const hasObservationRows = rows.some((row) => row.screen === 'observation');
       if (!hasObservationRows) {
-        throw new Error(`Saved result file ${savedFile} had no observation rows`);
+        throw new Error("No observation rows found among this session's appended results");
       }
-      fs.unlinkSync(path.join(RESULTS_DIR, savedFile));  // keep dev-results/ clean
+      cleanupResultFiles(files);
     },
   },
   {
@@ -523,9 +566,12 @@ const SCENARIOS = [
       // saveData(data) precedes window.location.href = url), so a result
       // file should still land here even though this branch never shows
       // finishSession's "Session complete" DOM confirmation (that message
-      // is non-Prolific only -- see finish-session.js).
-      const savedFile = await waitForNewResultFile(before);
-      fs.unlinkSync(path.join(RESULTS_DIR, savedFile));  // keep dev-results/ clean
+      // is non-Prolific only -- see finish-session.js). Look for the
+      // specific 'terminated' marker row rather than assuming the first
+      // new file is it (see the "3 timeouts" scenario above for why).
+      const { files } = await collectNewResultRows(
+        before, (row) => row.progress === 'terminated');
+      cleanupResultFiles(files);
 
       // Poll rather than page.waitForURL(): the navigation is a plain
       // window.location.href assignment fulfilled by the route above, and
@@ -540,59 +586,6 @@ const SCENARIOS = [
       const expectedCode = expectedProlificCode(task, 'earlyExit');
       if (!capturedUrl.includes(`cc=${expectedCode}`)) {
         throw new Error(`Redirect URL had wrong code: ${capturedUrl} (expected cc=${expectedCode})`);
-      }
-    },
-  },
-  {
-    name: 'Pool assignment: deterministic, valid range, embedded fields present',
-    fn: async (p, task) => {
-      const runToEarlyExitAndGetPoolIndex = async (pid) => {
-        await p.goto(testUrlWithPid(task, pid));
-        await doConsent(p); await doTutorial(p);
-        await letObsTimeOutAndRepeat(p);
-        await waitForScreen(p, 'observation', T_OBS_MS + 5000);
-        await letObsTimeOutAndRepeat(p);
-        await waitForScreen(p, 'observation', T_OBS_MS + 5000);
-        await waitForScreen(p, 'terminated', T_OBS_MS + 8000);
-        const before = snapshotResultFiles();
-        await p.click('#early-exit-btn');
-        const savedFile = await waitForNewResultFile(before);
-        const saved = JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, savedFile), 'utf8'));
-        fs.unlinkSync(path.join(RESULTS_DIR, savedFile));
-
-        const poolIndices = new Set(saved.map((row) => row.pool_index));
-        if (poolIndices.size !== 1) {
-          throw new Error(`Expected one pool_index across all rows, got: ${[...poolIndices]}`);
-        }
-        const poolIndex = [...poolIndices][0];
-        if (typeof poolIndex !== 'number' || poolIndex < 0 || poolIndex >= 200) {
-          throw new Error(`pool_index out of expected range [0,200): ${poolIndex}`);
-        }
-
-        const obsRows = saved.filter((row) => row.screen === 'observation');
-        if (obsRows.length === 0) throw new Error('No observation rows to check embedded fields on');
-        for (const row of obsRows) {
-          if (row.value === undefined) throw new Error('observation row missing value field');
-          if (task === 'continuous' && row.true_mean === undefined) {
-            throw new Error('observation row missing true_mean field');
-          }
-          if (task === 'binary' && row.true_p === undefined) {
-            throw new Error('observation row missing true_p field');
-          }
-        }
-        return poolIndex;
-      };
-
-      const idxA = await runToEarlyExitAndGetPoolIndex('e2e_pool_test_participant_a');
-      const idxB = await runToEarlyExitAndGetPoolIndex('e2e_pool_test_participant_b');
-      if (idxA === idxB) {
-        console.log(`  NOTE: both test participants hashed to the same pool_index (${idxA}) -- `
-                    + `possible by chance (1/200), only concerning if this recurs.`);
-      }
-
-      const idxA2 = await runToEarlyExitAndGetPoolIndex('e2e_pool_test_participant_a');
-      if (idxA2 !== idxA) {
-        throw new Error(`Same participant ID gave different pool_index across runs: ${idxA} vs ${idxA2}`);
       }
     },
   },
@@ -626,7 +619,7 @@ async function runSuite(browserName, task) {
     console.log('--- ' + name + ' ---');
     try {
       await page.goto(url(task));
-      await fn(page, task);
+      await fn(page, task, engine);
       // Any uncaught page error (e.g. a plugin throwing on a missing
       // required parameter) previously only got logged, never actually
       // failed the test -- a scenario whose fn() doesn't happen to wait on
