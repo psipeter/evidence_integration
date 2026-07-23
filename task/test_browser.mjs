@@ -257,7 +257,14 @@ const doConsent = async (p) => {
 // Walks through the FULL tutorial (no skip option exists anymore): intro
 // (progressive box/image reveal, first response) -> remaining tutorial
 // observations (each preceded by a fixed 1s tutorial_iti, no click needed)
-// -> tutorial summary -> 3-screen timeout demo -> real trial 1.
+// -> tutorial summary -> tutorial complete -> real trial 1. The 3-screen
+// timeout demo that used to run between the summary and trial 1 is DISABLED
+// (see build-tutorial-timeline.js's own comment); its former screen 3
+// ("Tutorial complete" + "Proceed to experiment") now lives as its own
+// standalone screen (data-screen='tutorial_complete', button
+// #tutorial-complete-btn) directly after the summary, so this helper waits
+// for/clicks through that instead of the old #demo-next-btn/#demo-
+// proceed-btn sequence.
 // Same IDs across both tasks (tut-box-0/1/2, tut-image-placeholder,
 // response-slider, submit-btn, proceed-btn) per the project's naming
 // convention, so this one implementation covers both without branching.
@@ -293,20 +300,11 @@ const doTutorial = async (p) => {
     await submit(p);
   }
 
-  // Tutorial summary -> Next
+  // Tutorial summary -> Next -> tutorial complete screen -> Proceed to
+  // experiment -> real trial 1.
   await p.click('#proceed-btn');
-
-  // Timeout demo: 3 sub-screens inside a SINGLE jsPsych trial (data-screen
-  // stays 'timeout_demo' throughout -- these are plain DOM swaps, not new
-  // jsPsych trials -- so wait for specific elements, not attribute changes).
-  await waitForScreen(p, 'timeout_demo');
-  // Screen 1 has a real countdown clock (respects the tObsMs override, so
-  // this resolves quickly under test timing) that must run out on its own
-  // before screen 2's button exists.
-  await p.waitForSelector('#demo-next-btn', { timeout: T_OBS_MS + 8000 });
-  await p.click('#demo-next-btn');
-  await p.waitForSelector('#demo-proceed-btn', { timeout: 5000 });
-  await p.click('#demo-proceed-btn');
+  await waitForScreen(p, 'tutorial_complete');
+  await p.click('#tutorial-complete-btn');
 
   // Real trial 1
   await waitForScreen(p, 'observation', 10000);

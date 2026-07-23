@@ -32,8 +32,8 @@ const info = {
   },
 };
 
-const makeBox = (id, realHTML, isActive, extraStyle = '') => `
-  <div id="${id}" class="tutorial-info-block" style="position:relative;${extraStyle}${isActive ? 'cursor:pointer;' : ''}">
+const makeBox = (id, realHTML, isActive, extraStyle = '', extraClass = '') => `
+  <div id="${id}" class="tutorial-info-block${extraClass ? ' ' + extraClass : ''}" style="position:relative;${extraStyle}${isActive ? 'cursor:pointer;' : ''}">
     <span id="${id}-placeholder"
           style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
                  font-weight:bold;color:${isActive ? '#555' : '#ccc'};white-space:nowrap;">
@@ -67,8 +67,8 @@ class TutorialIntroContinuousPlugin {
           </div>
 
           <div class="tutorial-panel tutorial-panel-right">
-            ${makeBox('tut-box-0b', BOX0B, false)}
-            <div id="tut-image-box" style="position:relative;flex:1;">
+            ${makeBox('tut-box-0b', BOX0B, false, '', 'tutorial-right-top-box')}
+            <div id="tut-image-box" class="tutorial-right-image-box" style="position:relative;">
               <div id="dist-svg" class="dist-canvas" style="line-height:0;"></div>
               <div id="tut-image-placeholder"
                    style="position:absolute;inset:0;display:flex;align-items:center;
@@ -77,7 +77,7 @@ class TutorialIntroContinuousPlugin {
                 · · ·
               </div>
             </div>
-            <div id="tut-tracker" style="opacity:0;"></div>
+            <div id="tut-tracker" class="tutorial-right-tracker-box tutorial-tracker-highlight-white" style="opacity:0;"></div>
           </div>
 
         </div>
@@ -147,6 +147,14 @@ class TutorialIntroContinuousPlugin {
       const dist = svg?.querySelector('#tut-svg-dist');
       if (axis) axis.style.opacity = '1';
       if (dist) dist.style.opacity = '1';
+      // "0"/"100" labels are now HTML siblings of the <svg>, not SVG
+      // <text> inside it (see distribution-continuous.js's module
+      // docstring) -- so they're queried from display_el directly, not
+      // via svgRoot()?.querySelector like the SVG groups above.
+      const label0   = display_el.querySelector('#tut-svg-axis-label-0');
+      const label100 = display_el.querySelector('#tut-svg-axis-label-100');
+      if (label0)   label0.style.opacity = '1';
+      if (label100) label100.style.opacity = '1';
     };
 
     // Image box is its own click-to-reveal step, AFTER box 0's text and
@@ -197,6 +205,11 @@ class TutorialIntroContinuousPlugin {
       revealBox('tut-box-1');
       const meanGroup = svgRoot()?.querySelector('#tut-svg-mean');
       if (meanGroup) meanGroup.style.opacity = '1';
+      // "???" label is now an HTML sibling of the <svg>, not an SVG
+      // <text> inside #tut-svg-mean (see distribution-continuous.js's
+      // module docstring) -- queried from display_el directly.
+      const meanLabel = display_el.querySelector('#tut-svg-mean-label');
+      if (meanLabel) meanLabel.style.opacity = '1';
       activateBox('tut-box-2', onBox2);
     };
     const onBox2 = () => {

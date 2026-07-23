@@ -17,7 +17,7 @@
  * makes every participant's raw export fully self-contained: no lookup,
  * no join, no dependency on the pool files still existing/matching later.
  */
-import { computeTrialReward, computeRunningMeans, computeRunningRatios, refForObservation, computeResponseError } from './bonus-continuous.js';
+import { computeTrialReward, computeResponseReward, computeRunningMeans, computeRunningRatios, refForObservation, computeResponseError } from './bonus-continuous.js';
 
 export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
   const {
@@ -120,8 +120,14 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
                 // existing one fires. Summed at the trial-summary screen
                 // (not recomputed independently there) so the two can never
                 // drift apart -- see bonus-continuous.js's own docstring.
+                // `data.reward` (chat history, this session) is the SAME
+                // per-observation-then-summed pattern, now that reward
+                // itself is computed per observation, not once per trial
+                // from a pre-summed error -- see bonus-continuous.js's own
+                // "REWARD FORMULA" docstring.
                 const ref = refForObservation(_refs, _o);
                 data.error = computeResponseError(data.response, ref);
+                data.reward = computeResponseReward(data.error);
                 trialResponses.push({ observation: _o, value: _val, response: data.response, error: data.error });
               }
             },
@@ -155,10 +161,15 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
         timeline: [{ type: TrialSummaryPlugin, true_mean: seq.true_mean, true_std: seq.true_std,
           true_p: seq.true_p ?? null, values: _values, responses: () => _resp.map(r => r.response),
           error_mode: errorMode,
-          // Per-TRIAL bonus (chat history) -- SUM of the already-stored
-          // per-observation errors above, not recomputed independently.
+          // Per-TRIAL bonus (chat history, this session) -- SUM of the
+          // already-stored per-observation REWARDS now, not one formula
+          // applied to a pre-summed error -- see bonus-continuous.js's own
+          // "REWARD FORMULA" docstring. computeTrialReward takes the
+          // per-observation ERRORS array and internally maps each through
+          // computeResponseReward before summing, so this file itself
+          // never duplicates that formula.
           total_error: () => _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
-          reward:      () => computeTrialReward(_resp.reduce((sum, r) => sum + (r.error ?? 0), 0)),
+          reward:      () => computeTrialReward(_resp.map(r => r.error)),
           show_performance: showTrialPerformance, is_last: false,
           data: { screen: 'inter_trial', trial: _t } }],
         conditional_function: () => !exitFlag,
@@ -179,7 +190,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, earlyExit) {
       true_p: _seq.true_p ?? null, values: [..._seq.values], responses: () => _resp.map(r => r.response),
       error_mode: errorMode,
       total_error: () => _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
-      reward:      () => computeTrialReward(_resp.reduce((sum, r) => sum + (r.error ?? 0), 0)),
+      reward:      () => computeTrialReward(_resp.map(r => r.error)),
       show_performance: showTrialPerformance, is_last: true,
       data: { screen: 'inter_trial', trial: sequences.length - 1 } }],
     conditional_function: () => !exitFlag,

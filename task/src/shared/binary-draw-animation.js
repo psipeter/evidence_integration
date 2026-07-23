@@ -7,16 +7,34 @@
  *      (white background, gray border) throughout bubbling — a fixed visual
  *      anchor showing "this is where the outcome will land," without giving
  *      away the outcome itself.
- *   2. Small bubbles rise inside the blue/red probability bar (clipped). The
- *      draw circle above the bar stays fully invisible during this phase.
- *   3. Bubbling stops; the draw circle appears (pops in, white) at its
- *      already-known final position, and both it and the centre circle's
- *      ring fade white/gray → outcome colour simultaneously.
+ *   2. Small bubbles rise inside the blue/red probability bar (clipped),
+ *      proportionally to true_p -- more bubbles on whichever side is
+ *      larger, so the bubbling itself visually connects to the bar's own
+ *      proportions, not just decorative noise.
+ *   3. Bubbling stops; the LOSING bar segment DIMS (fill -> DIM_BLUE/
+ *      DIM_RED, plain alpha transparency) while the WINNING segment
+ *      keeps its exact original color, untouched -- and the centre
+ *      circle's ring fades white/gray -> outcome colour, simultaneously.
+ *
+ * REPLACED a separate "draw outcome" circle that used to pop in ABOVE the
+ * bar and fade to the outcome color (chat history, this session) --
+ * explicit feedback: that circle had no visual connection to the bar's
+ * own proportions below it, and duplicated an outcome ALREADY shown twice
+ * more (centre panel, tracker). Dimming the LOSING segment directly ties
+ * the reveal to the actual mechanism being illustrated ("blue is drawn
+ * with probability = blue's own share of this bar") instead of adding a
+ * fourth, disconnected place to look. An earlier revision of this same
+ * fix also BRIGHTENED the winning segment (an HSL-derived variant) --
+ * dropped per explicit direction ("doesn't look great"); the winner is
+ * now left completely alone, only the loser changes. See urn-binary.js's
+ * own module docstring for the removed circle's history and the
+ * DIM_BLUE/DIM_RED color definitions (plain rgba alpha, matching this
+ * app's existing dimmed-slider convention, not a new one).
  *
  * Outcome colour is always fixed to currentValue (not a live Bernoulli sample).
  */
 
-import { LAYOUT, SAMPLE_BLUE, SAMPLE_RED } from './urn-binary.js';
+import { LAYOUT, SAMPLE_BLUE, SAMPLE_RED, DIM_BLUE, DIM_RED } from './urn-binary.js';
 
 const BUBBLE_MS   = 1050;
 export const FADE_MS = 380;
@@ -43,14 +61,14 @@ const drawSeed = (trueP, obsNum) =>
  * @param {number} opts.currentValue      1 = blue, -1 = red
  * @param {number} opts.obsNum            1-based observation index
  * @param {() => void} [opts.onReveal]  fired the INSTANT the centre circle/
- *   draw circle BEGIN fading to their outcome color (not once they finish)
- *   -- use this, not onComplete, for anything that should appear visually
- *   simultaneous with them (e.g. tutorial-tracker.js's current-slot dot).
- *   onComplete fires FADE_MS later, once they're already fully colored --
- *   wiring a simultaneous reveal to onComplete instead was a real,
- *   reported bug in continuous-draw-animation.js's own identical hook
- *   (chat history); this mirrors that same fix here rather than
- *   reintroducing it for binary.
+ *   bar segments BEGIN fading to their outcome-reveal state (not once they
+ *   finish) -- use this, not onComplete, for anything that should appear
+ *   visually simultaneous with them (e.g. tutorial-tracker.js's
+ *   current-slot dot). onComplete fires FADE_MS later, once they're
+ *   already fully colored -- wiring a simultaneous reveal to onComplete
+ *   instead was a real, reported bug in continuous-draw-animation.js's own
+ *   identical hook (chat history); this mirrors that same fix here rather
+ *   than reintroducing it for binary.
  * @param {() => void} [opts.onComplete] fired once the fade has fully finished
  * @returns {() => void} cancel
  */
@@ -59,20 +77,18 @@ export function startBinaryDrawAnimation({
 }) {
   const isBlue      = currentValue === 1;
   const targetColor = isBlue ? SAMPLE_BLUE : SAMPLE_RED;
-  const { W, barY, barH, drawR, drawGap } = LAYOUT;
+  // Only the LOSING segment gets a fill change (to its own DIM_* variant
+  // -- see urn-binary.js's own comment); the winning one is left
+  // completely untouched, keeping its exact original SAMPLE_BLUE/RED.
+  const loserDim = isBlue ? DIM_RED : DIM_BLUE;
+  const { W, barY, barH } = LAYOUT;
   const midX        = true_p * W;
-  const drawCy      = barY - drawGap - drawR;
   const rnd         = makeRng(drawSeed(true_p, obsNum));
 
   const bubbleLayer = svgRoot.querySelector('#tut-urn-bubbles');
-  const drawCircle  = svgRoot.querySelector('#tut-urn-draw');
-
-  // Final x position is determined now (currentValue is already known) so
-  // the draw circle can appear at its real spot once it pops in after
-  // bubbling, with no repositioning.
-  const drawX = isBlue
-    ? 10 + rnd() * Math.max(midX - 20, 20)
-    : midX + 10 + rnd() * Math.max(W - midX - 20, 20);
+  const barBlue      = svgRoot.querySelector('#tut-urn-bar-blue');
+  const barRed       = svgRoot.querySelector('#tut-urn-bar-red');
+  const loser        = isBlue ? barRed : barBlue;
 
   const showEmptyRing = () => {
     if (!centerEl) return;
@@ -84,14 +100,9 @@ export function startBinaryDrawAnimation({
 
   const showFinal = () => {
     if (bubbleLayer) bubbleLayer.innerHTML = '';
-    if (drawCircle) {
-      drawCircle.setAttribute('cx', drawX.toFixed(1));
-      drawCircle.setAttribute('cy', String(drawCy));
-      drawCircle.setAttribute('fill', targetColor);
-      drawCircle.setAttribute('stroke', targetColor);
-      drawCircle.setAttribute('stroke-width', '1.5');
-      drawCircle.style.opacity = '1';
-      drawCircle.style.transition = '';
+    if (loser) {
+      loser.setAttribute('fill', loserDim);
+      loser.style.transition = '';
     }
     if (centerEl) {
       centerEl.style.opacity = '1';
@@ -108,7 +119,7 @@ export function startBinaryDrawAnimation({
     return () => {};
   }
 
-  if (!bubbleLayer || !drawCircle || !centerEl) {
+  if (!bubbleLayer || !barBlue || !barRed || !centerEl) {
     showFinal();
     return () => {};
   }
@@ -170,21 +181,15 @@ export function startBinaryDrawAnimation({
     bubbles.length = 0;
     if (rafId) cancelAnimationFrame(rafId);
 
-    // Draw circle pops in now (was fully invisible during bubbling), white,
-    // at its already-known final position.
-    drawCircle.setAttribute('cx', drawX.toFixed(1));
-    drawCircle.setAttribute('cy', String(drawCy));
-    drawCircle.setAttribute('fill', '#fff');
-    drawCircle.setAttribute('stroke', '#fff');
-    drawCircle.style.opacity = '1';
-    drawCircle.style.transition = '';
-
     requestAnimationFrame(() => {
       if (cancelled) return;
-      drawCircle.style.transition = `fill ${FADE_MS}ms ease, stroke ${FADE_MS}ms ease`;
-      centerEl.style.transition   = `background ${FADE_MS}ms ease, border-color ${FADE_MS}ms ease`;
-      drawCircle.setAttribute('fill', targetColor);
-      drawCircle.setAttribute('stroke', targetColor);
+      // Only the loser's fill transitions -- the winner stays exactly as
+      // it was built (see module docstring for why this replaced the
+      // old draw-outcome circle, and why the winner is untouched rather
+      // than also brightened).
+      loser.style.transition = `fill ${FADE_MS}ms ease`;
+      centerEl.style.transition = `background ${FADE_MS}ms ease, border-color ${FADE_MS}ms ease`;
+      loser.setAttribute('fill', loserDim);
       centerEl.style.background   = targetColor;
       centerEl.style.borderColor  = targetColor;
       onReveal?.();
@@ -194,10 +199,9 @@ export function startBinaryDrawAnimation({
     });
   };
 
-  // centre visible as an empty ring throughout bubbling; draw circle stays
-  // fully invisible until it pops in at resolve
+  // centre visible as an empty ring throughout bubbling; bar segments stay
+  // at their base (unrecolored) fill until resolve
   showEmptyRing();
-  drawCircle.style.opacity = '0';
 
   spawnBubble();
   spawnTimer = setInterval(() => { if (!cancelled) spawnBubble(); }, SPAWN_EVERY);

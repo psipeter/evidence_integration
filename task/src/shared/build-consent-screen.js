@@ -13,11 +13,15 @@
  * Three boxes: a blue payment-motivation box first (NOT a warning --
  * distinguished with its own blue background/border, see
  * .consent-info-box-blue in style.css), followed by the two original red
- * warning boxes (data loss, session termination), both still carrying a
- * plain-text "Warning:" label. An earlier third box repeating Prolific's
- * own timing/compensation listing was removed as redundant -- this NEW
- * third box is a different, deliberate addition (motivational framing, not
- * a redundant repeat of the Prolific listing).
+ * warning boxes (data loss, session termination). Those two no longer
+ * carry a bolded "Warning:" label (chat history, this session, dropped
+ * per explicit direction) -- the red outline/background (.consent-info-
+ * box's own default red styling) plus the text itself already signal
+ * that these are warnings, without needing to say so directly. An
+ * earlier third box repeating Prolific's own timing/compensation listing
+ * was removed as redundant -- this NEW third box is a different,
+ * deliberate addition (motivational framing, not a redundant repeat of
+ * the Prolific listing).
  *
  * "Begin experiment" is NOT given a native `disabled` attribute. Disabled
  * buttons never dispatch a `click` event at all in any browser, which meant
@@ -65,9 +69,9 @@ const makeBox = (id, realHTML, textAlign, variant = 'red') => `
  */
 export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
   const BOX_PAY_REAL = `You will be paid <strong>$5.00</strong> for finishing and up to <strong>$5.00</strong> based on your performance.`;
-  const BOX0_REAL = `<strong>Warning:</strong> Do not close, refresh, or navigate away during
+  const BOX0_REAL = `Do not close, refresh, or navigate away during
             the task.`;
-  const BOX1_REAL = `<strong>Warning:</strong> You must respond within the ${tObsMs / 1000}-second
+  const BOX1_REAL = `You must respond within the ${tObsMs / 1000}-second
             time limit — if you repeatedly time out, the experiment will terminate.`;
 
   return {

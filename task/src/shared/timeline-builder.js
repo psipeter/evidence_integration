@@ -135,7 +135,13 @@ function progressLabel(trialData, nTutorialObs, nTrials) {
       return `tutorial ${observation + 1}/${nTutorialObs}`;
     case 'tutorial_summary':
       return 'tutorial summary';
+    case 'tutorial_complete':
+      return 'tutorial complete';
     case 'timeout_demo':
+      // Currently unreachable -- build-tutorial-timeline.js no longer pushes
+      // a 'timeout_demo' node onto the tutorial timeline (disabled this
+      // session). Left in place, harmlessly, in case the screen is
+      // reintroduced -- see that file's own comment.
       return 'timeout demo';
     case 'inter_trial_reset':
       return trial < 0 ? 'starting trials' : `trial ${trial + 1}/${nTrials}`;

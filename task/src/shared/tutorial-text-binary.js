@@ -37,6 +37,11 @@ import { SAMPLE_BLUE, SAMPLE_RED, DIST_COLOR } from './urn-binary.js';
 // SAMPLE_BLUE/RED/DIST_COLOR are ALSO separately defined per task (in
 // urn-binary.js vs. distribution-continuous.js) rather than a shared
 // cross-task color module.
+// Currently UNUSED within this file (RECAP_TEXT_1 below no longer colors
+// "will not see" with it -- chat history, dropped along with that text's
+// other color/wording changes, mirrors continuous's identical change).
+// Left defined, not deleted, in case a future revision wants colored
+// warning text again.
 const WARNING_YELLOW = '#b45309';
 
 export const BOX0 = `In this task, you'll see a <strong>sequence</strong> of balls,
@@ -79,16 +84,25 @@ export const URN_CAPTION = `This bar shows the true
 
 // Recap-phase text (phase D -- see plugin-tutorial-observation-binary.js's
 // rightTopBoxContent) -- mirrors tutorial-text-continuous.js's identical
-// RECAP_TEXT_1/RECAP_TEXT_2 constants (RECAP_TEXT_1 needed no wording
-// change at all -- "these probability and history graphics" describes the
-// GRAPHICS being hidden, which still say "probability", not the
-// participant's estimate). RECAP_TEXT_2's tail says "ratio" now, matching
-// BOX1/BOX2's terminology for the estimation target rather than
-// "probability" -- "memory" bolded (not colored), "will not see"/"ratio"
-// colored, same convention as continuous.
+// RECAP_TEXT_1/RECAP_TEXT_2 constants (wording simplified this session
+// per explicit direction -- dropped "probability and history"/"of the
+// ratio", now identical task-agnostic wording to continuous's own
+// version: "these graphics"/"your estimate"). "will not see"/"memory"
+// bolded, plain (no color) -- WARNING_YELLOW is no longer used here as a
+// result (see its own now-stale-looking but still-used-elsewhere-if-ever
+// note above; kept defined regardless).
 export const RECAP_TEXT_1 = `In the experiment, you
-  <span style="color:${WARNING_YELLOW};font-weight:bold;">will not see</span>
-  these probability and history graphics.`;
+  <strong>will not see</strong> these graphics.`;
 export const RECAP_TEXT_2 = `Use your <strong>memory</strong> of the sequence to update your
-  estimate of the <span style="color:${DIST_COLOR};font-weight:bold;">ratio</span>.`;
+  estimate.`;
+
+// SLIDER_REMINDER -- phase B (chat history: reintroduced this session,
+// mirrors tutorial-text-continuous.js's identical constant/rationale --
+// see that file's own comment and plugin-tutorial-observation-binary.js's
+// docstring). "number" swapped for "ball" per this file's own
+// terminology; "remembers"/"update" bolded per explicit direction (chat
+// history), mirrors continuous's identical change -- plain bold, no
+// color.
+export const SLIDER_REMINDER = `The slider <strong>remembers</strong> your last estimate. Move it to <strong>update</strong>
+  your estimate after seeing each new ball.`;
 

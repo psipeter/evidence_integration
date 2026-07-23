@@ -32,6 +32,10 @@ export const DIST_COLOR    = '#16a34a';   // green  — distribution curve
 // Darker than the warning-yellow box border (#fbbf24) used elsewhere in
 // this app -- that shade reads fine as a border/background but is too low-
 // contrast as body text on white. Same family, legible as text.
+// Currently UNUSED within this file (RECAP_TEXT_1 below no longer colors
+// "will not see" with it -- chat history, dropped along with that text's
+// other color/wording changes). Left defined/exported, not deleted, in
+// case a future revision wants colored warning text again.
 export const WARNING_YELLOW = '#b45309';
 
 export const BOX0 = `In this task, you'll see a <strong>sequence</strong> of
@@ -62,14 +66,28 @@ export const DIST_CAPTION = `This graphic shows the true
 // RECAP_TEXT_1/2 -- originally written for a dedicated post-summary recap
 // screen (plugin-tutorial-recap-continuous.js, since deleted -- chat
 // history). Now used by plugin-tutorial-observation-continuous.js's
-// buildHintHTML as the obs-11-15 yellow hint-popup text instead (shown
+// buildHintHTML as the phase-D yellow hint-popup text instead (shown
 // DURING the tutorial observations, not as a separate screen after) --
-// same text, same color rules, just a different home. "memory" bolded
-// (not colored) per an explicit request; "will not see"/"mean" colored to
-// match the yellow-highlighted graphics / GOAL_COLOR conventions used
-// everywhere else in this file.
+// same text, same color rules, just a different home. Wording simplified
+// this session per explicit direction (dropped "probability and history"
+// and "of the mean" -- just "these graphics"/"your estimate" now, task-
+// agnostic wording that happens to read identically for continuous and
+// binary). "will not see"/"memory" bolded, plain (no color) -- an
+// earlier revision colored "will not see" WARNING_YELLOW, dropped this
+// session per explicit direction (bold only, no color).
 export const RECAP_TEXT_1 = `In the experiment, you
-  <span style="color:${WARNING_YELLOW};font-weight:bold;">will not see</span>
-  these probability and history graphics.`;
+  <strong>will not see</strong> these graphics.`;
 export const RECAP_TEXT_2 = `Use your <strong>memory</strong> of the sequence to update your
-  estimate of the <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>.`;
+  estimate.`;
+
+// SLIDER_REMINDER -- phase B (chat history: reintroduced this session,
+// after being designed-then-dropped in an earlier one -- see
+// plugin-tutorial-observation-continuous.js's own docstring). Reminds
+// participants that the slider's position PERSISTS between observations
+// (config-base.js's SLIDER_DEFAULT='last') rather than resetting, so they
+// should move it to reflect their updated estimate rather than assuming
+// it already reset for them. "remembers"/"update" bolded per explicit
+// direction (chat history) -- plain bold, no color, matching RECAP_TEXT_1/
+// 2's own "bold only" convention above rather than introducing a color.
+export const SLIDER_REMINDER = `The slider <strong>remembers</strong> your last estimate. Move it to <strong>update</strong>
+  your estimate after seeing each new number.`;

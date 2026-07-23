@@ -17,17 +17,17 @@
  * showed that accumulation happening. This does.
  *
  * Slot rendering (chat history -- REPLACED an earlier colored-circle
- * design): each slot is just its number, colored, sitting on a black
- * underline ("underscore") -- no circle/background fill at all. Dropping
- * the circle freed up room for bigger, more legible numbers and removed a
- * layer of color that wasn't actually carrying information (the circle's
- * own fill color duplicated what the text color already said). Text color
- * is ALWAYS `color` (red, by default) -- opacity and underline weight are
- * what distinguish the three states, not a color change:
- *   1..obsNum-1  (SETTLED) -- faded ${color} text, thin underline.
- *   obsNum       (CURRENT) -- full-opacity, bold ${color} text, on a
- *                THICKER underline -- echoes the SAME value shown big in
- *                the centre-panel stimulus number. The number itself
+ * design; briefly tried a small black dot below every slot this session
+ * to mark position, then REMOVED again per explicit direction -- "they
+ * don't add anything useful" -- back to plain number/circle with no
+ * marker at all beneath it): each slot is just its number (or, in
+ * dot-mode, a colored circle) -- nothing else. Text/circle color is
+ * ALWAYS `color` (red, by default) -- opacity is what distinguishes the
+ * three states, not a color change:
+ *   1..obsNum-1  (SETTLED) -- faded ${color} text/circle.
+ *   obsNum       (CURRENT) -- full-opacity, bold ${color} text/circle,
+ *                larger than settled -- echoes the SAME value shown big
+ *                in the centre-panel stimulus. The number/circle itself
  *                starts hidden (`revealCurrent: false`) when the caller
  *                wants it to appear in sync with the bubbling-draw
  *                animation's own reveal rather than instantly on render --
@@ -37,27 +37,24 @@
  *                INSTANT the centre number begins its fade, not once it's
  *                already finished -- see continuous-draw-animation.js's
  *                own docstring for why onComplete was the wrong hook
- *                here). The underline itself is NOT hidden/revealed --
- *                only the number text fades in; the underline is just
- *                framing, not "the answer".
- *   obsNum+1..nObs (EMPTY) -- a bare underline, no text -- so the
- *                remaining count is always visible at a glance without a
- *                separate textual counter. (The earlier design's separate
- *                "pointer dot" marking the current slot was dropped here
- *                too -- the bolded underline already does that job; having
- *                both was redundant.)
+ *                here).
+ *   obsNum+1..nObs (EMPTY) -- invisible placeholder (transparent text/
+ *                circle, same footprint) -- so the remaining count is
+ *                still visible at a glance via the settled/current slots'
+ *                own presence, and the row's height stays consistent
+ *                without a visible marker for slots not yet reached.
  *
  * `color` is a parameter (not hardcoded) so this can be reused for binary's
  * blue/red draws -- continuous passes a fixed color string; binary
  * (chat history) passes a FUNCTION `(value) => colorString` instead
  * (values are +-1, not numbers to display), and sets `renderDot: true` to
- * switch every slot from number+underline to a plain colored circle --
- * there's no separate "number" to show for a binary draw, the color IS
- * the content, so text would be redundant here in a way it wasn't for
- * continuous's numeric values. Both modes share the exact same
- * settled/current/empty state logic and the same #tut-tracker-current-num
- * id for the reveal-timing wiring (continuous-draw-animation.js's
- * onReveal / binary-draw-animation.js's own equivalent).
+ * switch every slot from number to a colored circle -- there's no
+ * separate "number" to show for a binary draw, the color IS the content,
+ * so text would be redundant here in a way it wasn't for continuous's
+ * numeric values. Both modes share the exact same settled/current/empty
+ * state logic and the same #tut-tracker-current-num id for the
+ * reveal-timing wiring (continuous-draw-animation.js's onReveal /
+ * binary-draw-animation.js's own equivalent).
  */
 
 export function buildTrackerHTML({ nObs, obsNum, values, color = '#ef4444', revealCurrent = true, renderDot = false }) {
