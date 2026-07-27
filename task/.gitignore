@@ -10,6 +10,12 @@ dev-results/
 # local dev server.
 pilot1/
 pilot2/
+pilot3/
+# Scratch scripts computing bonus payments directly from pilot3/'s raw
+# data (hardcoded paths into pilot3/) -- same sensitivity category, not
+# meant to be tracked.
+compute_bonus_tmp.py
+compute_bonus_numbers_tmp.py
 # Throwaway 2-trial test jzips (manual JATOS testing only, built from a
 # disposable test pool, never the real production sequences) -- distinct
 # from the real tracked evidence-integration-{continuous,binary}.jzip.

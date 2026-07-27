@@ -601,12 +601,18 @@ Sequence design: **8x4 (32 trials) hybrid production design is CURRENT**,
   quota-vs-i.i.d. confound this decision was based on, the hybrid design's
   own std-guard tuning, and everything checked before promoting.
 
-  **std_fixed as documented here is 15 -- but the ACTUAL real 200-member
-  production pool currently on disk has std=10 (`true_std=10.0` uniformly
-  across all 200 continuous members, confirmed directly)** -- this
-  discrepancy is UNRESOLVED, see "Open items" below. Don't assume this
-  section's stated parameter values match the real served pool without
-  checking; that's exactly how this discrepancy was found.
+  **RESOLVED: production std is 10, not 15 as this section previously
+  stated as a target/default.** The real 200-member production pool has
+  `true_std=10.0` uniformly across all 200 continuous members (confirmed
+  directly), and pilot #3 is now LIVE on this pool -- std=10 is the
+  actual, confirmed, currently-deployed value. `generate_sequences_pool.py`'s
+  own `--std_fixed` CLI default is still 15 and was NOT changed to match
+  (a code change wasn't requested) -- if the pool is ever regenerated
+  using that script's bare defaults, it will silently produce std=15
+  sequences, not the std=10 currently live. Pass `--std_fixed 10`
+  explicitly for any future regeneration intended to match current
+  production, and update the script's own default at that point if this
+  keeps being a trap.
 
   Historical context (6x4, momentmatch-only) -- kept for the mechanism
   detail, since the hybrid design reuses this construction UNCHANGED for
@@ -1120,14 +1126,15 @@ exact for any p in (0,1), the only limitation is 1/n rounding granularity.
   opportunistic repetition found (see "Tutorial redesign..." above) is
   sufficient, or whether a deliberate small number of full-trial repeats
   is worth adding as a third generation branch.
-- **std=10 vs std=15 in the real production pool** -- the actual
-  200-member `sequences_pool/` has `true_std=10.0` uniformly (confirmed
-  across all 200 continuous members), but both this file's "Sequence
-  design" section and `generate_sequences_pool.py`'s own `--std_fixed`
-  CLI default say 15. UNRESOLVED which is correct -- see "This session:
-  E2E array-bug fix..." above for the discovery. Needs a decision: fix
-  the docs to say 10, or regenerate the pool at 15 (which changes every
-  trial's actual values and needs a jzip rebuild after).
+- **std=10 confirmed as the actual production value -- RESOLVED**. The
+  real 200-member `sequences_pool/` has `true_std=10.0` uniformly across
+  all 200 continuous members; pilot #3 is now LIVE on this pool, which
+  settled the question -- std=10 is correct/current, not std=15
+  ("Sequence design" section above updated to match). Remaining loose
+  end: `generate_sequences_pool.py`'s own `--std_fixed` CLI default is
+  still 15 and was deliberately left unchanged (not asked for) -- pass
+  `--std_fixed 10` explicitly for any future regeneration meant to match
+  current production.
 - **dev-results/ test-artifact accumulation** -- scenarios in
   test_browser.mjs that never check saved files never call cleanup, so
   every per-trial append from those runs accumulates indefinitely
@@ -1412,16 +1419,302 @@ calculation updated to match. Production jzips rebuilt against this
 change and the full 200-member pool (fresh UUIDs, per generate_jzip.py's
 own always-fresh-UUID design).
 
-**Discrepancy found: the real production 200-member pool has std=10, not
-std=15** -- confirmed directly (`true_std` uniformly `10.0` across ALL 200
-continuous pool members, file timestamps predate this session), despite
-BOTH this file's own "Sequence design" section AND
+**Discrepancy found and RESOLVED: the real production 200-member pool has
+std=10, not std=15** -- confirmed directly (`true_std` uniformly `10.0`
+across ALL 200 continuous pool members, file timestamps predate this
+session), despite BOTH this file's own "Sequence design" section AND
 `generate_sequences_pool.py`'s own `--std_fixed` CLI default stating 15.
-UNRESOLVED -- not yet decided whether to (a) leave the pool as std=10 and
-correct the documentation, or (b) regenerate the pool at std=15 to match
-the documented/default value (which would change every trial's actual
-generated values and require rebuilding jzips again). See "Open items"
-below.
+**Resolved by real-world fact rather than a documentation debate: pilot
+#3 launched live on the std=10 pool**, which settles which value is
+actually current production -- std=10. Docs updated to match ("Sequence
+design" and "Open items" above); `generate_sequences_pool.py`'s own
+`--std_fixed` default was deliberately LEFT at 15 (a code change, not
+asked for) -- pass `--std_fixed 10` explicitly for any future
+regeneration meant to match what's actually live.
+
+### Pilot #3 real-participant incidents -> JATOS reliability investigation -> decision to prototype a Gorilla migration
+
+Two real Prolific participants during pilot #3 hit genuine, distinct
+JATOS-level failures (not app bugs) -- both root-caused with hard evidence
+(a downloaded JATOS Results Archive's `metadata.json`, and JATOS's own
+official docs/forum, including direct answers from JATOS's own maintainer
+Kristian Lange):
+1. **`dev-results/requested_return.txt` / `returned_results_archive.zip`**:
+   a continuous-task participant's session died mid-tutorial (last real
+   append: tutorial observation 15/15, never reached a single real trial).
+   The archive's `metadata.json` showed `componentState: FAIL` /
+   `studyState: FAIL` with JATOS's own message ("It's not allowed to
+   reload this component... Study is finished") and a `lastSeenDate` ~31
+   min after `endDate` -- confirmed via a JATOS maintainer's own forum
+   answer that a reload attempt on a `reloadable: false` component is
+   EXACTLY what produces this FAIL state. The participant's own claim of
+   having completed all 32 trials does not match this evidence anywhere
+   (no `finished` marker, no real trial data, no button text match --
+   checked verbatim: the app's real Prolific-facing strings are "Return to
+   Prolific to complete your submission" / "Return to Prolific", never
+   "Return to the Prolific site").
+2. **A second, binary-task participant** hit "It's not allowed to reload
+   this component... Study is finished" on their VERY FIRST click, before
+   ever starting -- then "Study can be done only once" on retry. Root
+   cause (per JATOS's own "Tips & Tricks" doc): `GeneralSingle`'s
+   single-use tracking lives in ONE shared browser cookie
+   (`JATOS_GENERALSINGLE_UUIDS`), most likely pre-consumed by an
+   email/Prolific link-prefetch scanner before the real click. Resolved
+   for that participant via an incognito window (bypasses the cookie).
+
+**A direct, empirical simulation confirmed a third, more serious, and
+separate risk**: temporarily patched `jatos-shim.js` (`saveData`
+deliberately made to reject after the tutorial, then fully reverted --
+see this exact edit's diff in chat history if ever needed again) and ran a
+full session through Playwright. Result: every single per-trial
+`appendResultData` call after the patch point was silently rejected, with
+**zero visible symptom** -- the participant clicked through all 15
+observations, the trial summary, and the real "Thank you!" end screen
+completely normally. Only the very LAST step (clicking the end-screen
+button, triggering `finishSession()`) surfaced anything, and even then
+only our own on-screen "Something went wrong saving your data" message --
+NOT a blank page. This is a REAL, confirmed gap: `on_trial_finish`'s
+fire-and-forget `appendResultData` (timeline-builder.js) has no feedback
+loop, so a participant can lose an entire session's data with no warning
+until (at best) the very last click.
+
+**Investigated `GeneralSingle` vs `GeneralMultiple` vs Personal links** as
+a fix -- concluded NEITHER solves this cleanly: `GeneralSingle` (current)
+trades a LOUD, manageable failure (what happened above) for eliminating a
+WORSE one `GeneralMultiple` has (a reload-triggered FAIL on `GeneralMultiple`
+lets a participant silently reopen the link and start an independent
+SECOND run -- a silent duplicate, per the SAME JATOS maintainer's own
+diagnosis of an earlier incident in this project's history -- see the
+`ALLOWED_WORKER_TYPES` comment in generate_jzip.py for that original
+decision). Personal Single/Multiple don't fit Prolific's shared-URL flow
+without new JIT-link-generation infrastructure. **Conclusion: worker-type
+choice can't fix this -- the underlying gap (jsPsych/JATOS have NO
+native crash/reload recovery) has to be fixed architecturally, not by
+picking a different link type.** Confirmed directly from BOTH jsPsych's
+and JATOS's own core maintainers (2020 GitHub discussion,
+jspsych/jsPsych#811): *"it's not possible to [recover] if the experiment
+crashes due to an error on the page"* -- this is a documented, acknowledged
+gap in the underlying tools, not something we're missing via
+misconfiguration.
+
+**Proposed redesign** (not yet built): make the experiment-hosting layer a
+"dumb pipe" -- a small backend WE control becomes the source of truth for
+progress/data (idempotent, keyed on `prolific_pid`, not a browser cookie),
+with client-side checkpointing enabling real resumability (reload/crash
+recovery instead of restart-from-scratch or a hard block), and the
+Prolific completion code delivered independent of any single save
+call's success. Grounded in documented practice: jsPsych's own team built
+DataPipe (Sasha & de Leeuw et al., *Behavior Research Methods*, 2023)
+precisely on "decouple data persistence from the experiment host"; jsPsych's
+docs separately recommend blocking-on-save + client retry over
+fire-and-forget.
+
+**Alternative-platform research (this session), given building our own
+backend is real, error-prone engineering work**: re-evaluated JATOS
+against Pavlovia, Cognition.run, and Gorilla specifically on "native
+Prolific-ID-keyed resumability, not cookie-based."
+- **Pavlovia**: WORSE, not better -- its own FAQ states outright there's
+  "no way to recover your data" on a forced/aborted session; defaults to
+  batch-at-end saving (not even per-trial appends); costs real money for
+  non-"born-open" (i.e. non-public) data; long tail of community-reported
+  major data-loss bugs. Ruled out.
+- **Cognition.run**: no documented resumability/reconnect feature found;
+  appears to carry similar exposure to raw jsPsych's own save-timing
+  risks. No clear improvement over JATOS on the axis that matters. Not
+  pursued further.
+- **Gorilla Experiment Builder**: the strong candidate. Its own docs state
+  directly: "Gorilla will always remember where in the tree a participant
+  needs to be placed in order to resume the experiment, based on their
+  unique Prolific ID" -- i.e. NATIVE, documented, Prolific-ID-keyed
+  resumability, plus bidirectional Prolific<->Gorilla status sync
+  (participants who return/timeout on either side get rejected on both).
+  Also has a dedicated "Code Editor" import path SPECIFICALLY for existing
+  jsPsych code (official tutorial, ~10 min for a basic case; described in
+  Gorilla's own peer-reviewed paper -- Anwyl-Irvine et al., PMC7005094 --
+  as built to host jsPsych tasks with proper participant/data management)
+  -- this is a bounded migration (swap the JATOS integration layer for
+  Gorilla's API, keep jsPsych plugin/timeline code largely intact), NOT a
+  full rewrite in Gorilla's GUI builder.
+
+**Gorilla pricing** (verified against Gorilla's own pages, though two
+different figures turned up across pages -- likely old vs. current, NOT
+independently confirmed which is authoritative): free to build/test
+(Code Editor included in the free standard toolset, no separate
+complexity-based charge); pay-per-participant via tokens, 1
+token/participant who starts the study; academic rate either **£0.85** or
+**£1.09** per token depending on source. At ~200 real participants: roughly
+**£170-£220**. Appears to be a one-time per-study-run cost (no evidence
+found of ongoing storage/retention fees), but NEITHER the exact current
+rate NOR the storage-fee question has been confirmed directly with
+Gorilla -- don't treat either as final without checking their live
+pricing page or emailing them.
+
+**STATUS: Gorilla NOT pursued further -- superseded by the own-backend
+decision below.** The PI reviewed Gorilla and pushed back: "Gorilla
+platform is worse. It aims for people with no coding skills and has many
+more glitches based on what I have heard from people." This prompted a
+deeper comparison rather than an immediate pivot -- see "Own-backend
+decision (Supabase)" below for the full investigation (Cognition.run,
+Labvanced) and why it ended on building our own small backend instead of
+any hosted platform. A separate chat/session was started to prototype a
+Gorilla port (in a `task_gorilla/`-style folder) before this pushback
+arrived -- **that direction is abandoned; if any `task_gorilla/` artifacts
+exist, they're dead and can be deleted, not a parallel track to maintain.**
+The existing JATOS-based production pipeline (task/, generate_jzip.py,
+the currently-live pilot #3) was never touched by any of this and remains
+the live/fallback system throughout.
+
+### Own-backend decision (Supabase) -- chosen over Gorilla/Cognition.run/Labvanced/JATOS
+
+**STATUS UPDATE (this note added once building actually started, updated
+as the build progressed): the plan below ("Architecture" and "Next
+steps") is now superseded by `task_backend/TODO.md`, which is the live,
+actively-maintained build doc -- read that instead of treating what
+follows as current. The Supabase backend and the full `task_backend/`
+client port are built, deployed, and verified end-to-end against the real
+database, including trial-boundary resume, the timeout-retry/`attempt`
+path, and all three session-ending screens. The `task/` JATOS pipeline
+described everywhere else in this file remains completely untouched and
+live as the fallback throughout. `task_backend/TODO.md`'s "Status note
+for future sessions" (bottom of that file) has the current, exact list of
+what's still open -- as of the last update: a persistent test suite, the
+weekly backup process, and finishing the hosting deployment (repo is now
+public; GitHub Pages decided, workflow prepped, not yet live -- see that
+doc's "Hosting" section for the full story, including why hosting wasn't
+part of the original plan at all).**
+
+**Why not the hosted alternatives** (full investigation above; summary
+for quick reference):
+- **Gorilla**: strong native resumability (Prolific-ID-keyed, not cookie-
+  based) and a real jsPsych-import path ("Code Editor") -- but the PI
+  specifically rejected it as too no-code-focused / anecdotally glitchy
+  for this project's needs (see PI quote above).
+- **Cognition.run**: investigated as a code-first alternative (addresses
+  the "no-code" half of the PI's concern) but found WORSE on the
+  reliability axis that actually matters: a detailed instructor's
+  integration writeup states it saves data only ONCE AT THE END, not
+  trial-by-trial (worse than even our current JATOS setup); a real GitHub
+  jsPsych discussion (#1850) documents the EXACT "data not saved before
+  Prolific redirect" failure we're trying to escape, on Cognition.run
+  specifically; no documented resumability/duplicate-prevention feature
+  anywhere; run by a single person as a free/hobby-scale service ("a
+  small group of neuroscientists... working from home since 2020") --
+  thinner operational backing than either JATOS or Gorilla, undermining
+  any assumption that "simpler" implies "more reliable."
+- **Labvanced**: mature, well-resourced, peer-reviewed-validated platform
+  with a genuinely relevant native "re-identify subjects across sessions"
+  setting keyed on Prolific ID (though this reads as aimed at multi-day/
+  longitudinal designs, not confirmed for mid-session crash recovery
+  specifically) -- but its own marketing is if anything MORE strongly
+  no-code-positioned than Gorilla's ("Experiment Creation without
+  Coding" is literally the first highlighted feature), and it has NO
+  jsPsych-import equivalent to Gorilla's Code Editor -- porting would mean
+  rebuilding the whole experiment inside Labvanced's own proprietary
+  frame/event-system GUI, a much larger lift than the Gorilla port would
+  have been. Rejected on migration-cost grounds, not reliability grounds
+  (no direct evidence of major complaints was found for it, unlike the
+  other three platforms investigated this session).
+
+**Conclusion**: no existing hosted platform cleanly satisfies both "code-
+  first, not aimed at non-coders" AND "native resumability/reliability"
+  AND "low migration cost from our existing jsPsych codebase." Building a
+  small backend ourselves, while real new engineering work, gives full
+  control over exactly the failure modes this whole investigation
+  surfaced, using a well-established, heavily-used managed platform
+  (Supabase) rather than self-hosting on a personal workstation (a
+  meaningfully more fragile option, considered and set aside -- see chat
+  history for the university-firewall/tunneling, single-point-of-failure,
+  and "no one else's forum to ask" concerns that ruled it out relative to
+  a managed backend-as-a-service).
+
+**Architecture** (not yet built -- this is the plan for the next chat
+session, see "Next steps" below):
+- **Supabase** (managed Postgres + Edge Functions + auto-generated REST),
+  chosen over a raw Firebase-style/rules-DSL approach specifically so all
+  logic stays in plain JS functions rather than a separate declarative
+  rules language, and over self-hosting for the operational reasons above.
+- Two tables:
+  - `progress` (one row per participant): `prolific_pid` (PK), `task`,
+    `pool_index`, `last_trial`, `last_observation`, `status`
+    ('in_progress'/'finished'/'terminated'), `updated_at`.
+  - `events` (append-only log, mirrors what `jatos.appendResultData` does
+    today): `id`, `prolific_pid`, `trial`, `observation`, `screen`,
+    `payload` (jsonb), `created_at` -- upserted keyed on
+    `(prolific_pid, trial, observation, screen)` so a retried request
+    overwrites itself instead of creating a duplicate (the actual
+    mechanism behind "idempotent" from chat history).
+- Three Edge Functions / request flow:
+  1. `/progress-check` (called BEFORE building the jsPsych timeline, on
+     load) -- returns `finished` (skip straight to completion code, don't
+     rebuild the timeline at all), `in_progress` + a checkpoint (resume
+     the timeline from that trial/observation instead of the tutorial),
+     or not-found (normal full run).
+  2. `/progress-append` (replaces `on_trial_finish`'s `jatos.
+     appendResultData` call) -- fire-and-forget is NOT repeated here on
+     purpose: track consecutive failures client-side and surface a
+     visible (non-blocking) warning after N in a row, rather than JATOS's
+     confirmed-this-session silent-failure-through-an-entire-session gap.
+  3. `/progress-finish` -- sanity-checks the expected number of trial
+     rows actually exist before accepting a "finished" claim (a
+     self-built API is exactly as trusting of whatever the browser sends
+     as `jatos.appendResultData` was, so this check matters), then the
+     participant is shown the completion code as VISIBLE TEXT **and** the
+     redirect is attempted -- closing the "NOCODE" gap Prolific's own
+     docs describe (a participant whose redirect fails for any reason
+     currently has no way to get their code at all; Prolific explicitly
+     supports/expects manual code entry as a fallback).
+- Row Level Security (RLS) scopes every request to only read/write its
+  own `prolific_pid`'s rows -- the browser calls these endpoints directly
+  and unsupervised, same trust model as `jatos.appendResultData` today,
+  so this isn't optional.
+- The existing JATOS-based `task/` pipeline is NOT touched -- this is
+  built in a new folder from scratch, preserving the current live/
+  fallback system exactly as-is throughout development.
+
+**Pricing/ops decision**: start on Supabase's FREE tier. Verified against
+our actual scale (not just generic tier limits): ~540 rows/participant
+(32 trials x 15 obs + tutorial/summary/marker rows) x 200 participants x
+~300 bytes/row =~ 30-50MB total, comfortably under the 500MB free limit;
+~120,000 total Edge Function calls against a 500,000/month free
+allowance; bandwidth similarly well under the 5GB/month free limit. The
+real risk on free tier isn't capacity -- it's that free projects have
+**zero automated backups** (a Pro-plan-only feature) and **auto-pause
+after 7 days of no database activity** (recoverable with one dashboard
+click while paused, but only within a 90-day window; past that, or if
+the project is fully deleted, recovery is not guaranteed -- confirmed
+directly via a real Supabase GitHub support thread where a paused
+project's resume failed with a server-side "no backups found" error).
+**Decision: stay on free tier, but maintain our OWN scheduled backup**
+(a weekly database-backup download, either the manual one-click button in
+Supabase Studio's Backups section, or a scripted `pg_dump` -- Supabase is
+standard Postgres, no proprietary export format) -- this replaces
+reliance on Supabase's own pause/restore mechanism, which is usually fine
+but has at least one documented real failure case.
+
+**Next steps** (this is the actual TODO list for the next chat session --
+nothing below has been built yet):
+1. Create the Supabase project; design/create the `progress` and `events`
+   tables and RLS policies exactly as specified above.
+2. Write the three Edge Functions (`progress-check`, `progress-append`,
+   `progress-finish`), including the consecutive-failure-warning logic
+   for `progress-append`.
+3. Build the client-side resumability logic: on load, call
+   `progress-check` before building the jsPsych timeline; if resuming,
+   construct a timeline starting from the right trial/observation instead
+   of from the tutorial.
+4. Swap `on_trial_finish`'s `jatos.appendResultData` call
+   (timeline-builder.js) for the new `progress-append` call; swap
+   `finish-session.js`'s save-then-end-then-redirect chain for
+   `progress-finish` + visible-completion-code-as-text + redirect.
+5. Set up the weekly backup process (manual reminder or scripted).
+6. Build all of this in a NEW folder (not `task/`) so the existing JATOS
+   pipeline stays completely untouched and deployable throughout.
+7. Test the exact three failure modes this whole investigation was about
+   before considering this done: (a) reload mid-session actually resumes
+   correctly instead of restarting or blocking; (b) a simulated backend
+   outage during a session surfaces a visible warning instead of silent
+   data loss; (c) a completed participant re-visiting the link gets sent
+   straight to their completion code, not a duplicate run.
 
 jsPsych 8 plugin conventions (IMPORTANT — do not regress):
 - Custom plugins use: trial(display_el, trial, on_load) — NEVER declare this `async`.

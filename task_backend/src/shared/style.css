@@ -1,0 +1,1105 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f5f5f5;
+}
+
+.jspsych-display-element {
+  padding: 1rem 1rem;
+  position: relative;
+}
+.jspsych-content {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.jspsych-content p { line-height: 1.6; }
+.jspsych-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Instruction / welcome / consent screens ─────────────────────────────── */
+.screen-wrap {
+  max-width: 70vw;
+  width: 100%;
+  text-align: left;
+  margin: auto;
+  padding: 0 1rem;
+}
+
+/* ── Welcome / title screen ────────────────────────────────────────────── */
+.welcome-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  text-align: center;
+  padding: 0 1.5rem;
+}
+.welcome-box {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  padding: 3rem 4rem;
+}
+.welcome-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2.6rem, 6vw, 4.2rem);
+  font-weight: bold;
+  color: #1f2937;
+  letter-spacing: 0.01em;
+  margin-bottom: 2.5rem;
+}
+.welcome-subtitle {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2rem, 4.5vw, 3rem);
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  margin-top: 0.5rem;
+}
+.welcome-subtitle-a { color: #2563eb; }
+.welcome-subtitle-b { color: #ef4444; }
+.welcome-begin-btn {
+  font-size: 1.6rem;
+  padding: 1rem 3.5rem;
+  margin-top: 2.5rem;
+  position: relative;
+  z-index: 2;
+}
+.screen-wrap h2 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+/* ── Observation screen: centred column ──────────────────────────────────── */
+.obs-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1rem, 3vw, 2.5rem);
+  padding: clamp(1rem, 3vh, 3rem) 0;
+}
+
+/* Big stimulus number — border only as wide as the rendered text */
+.stimulus-number {
+  font-size: clamp(3rem, 10vw, 8rem);
+  font-weight: bold;
+  color: #222;
+  line-height: 1;
+}
+
+/* Slider block */
+.slider-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  width: 70vw;
+}
+
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.slider-label {
+  font-size: 1rem;
+  color: #555;
+  min-width: 2.5rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  cursor: pointer;
+  background: transparent;
+  height: 96px;             /* hit area */
+  position: relative;
+  z-index: 1;
+}
+
+/* Track: thin flat line */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 16px;
+  border-radius: 8px;
+  background: #aaa;
+}
+input[type="range"]::-moz-range-track {
+  height: 16px;
+  border-radius: 8px;
+  background: #aaa;
+}
+
+/* Thumb: narrow tall rectangle — a precise positional marker */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  margin-top: -12px;        /* centres thumb: (40-16)/2 = 12 */
+  cursor: ew-resize;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: ew-resize;
+}
+
+/* 'none' mode: hide thumb */
+input[type="range"].slider-unset::-webkit-slider-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+input[type="range"].slider-unset::-moz-range-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 'last' mode: light gray thumb until clicked */
+input[type="range"].slider-last::-webkit-slider-thumb {
+  background: #ccc;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+input[type="range"].slider-last::-moz-range-thumb {
+  background: #ccc;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+/* ── ITI clock screen ─────────────────────────────────────────────────────── */
+.iti-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+/* ── Floating value label above slider thumb ─────────────────────────────── */
+.slider-label-float-wrap {
+  position: relative;
+  width: 100%;
+  height: 3rem;        /* reserves space for the float label above the thumb */
+  overflow: visible;
+  pointer-events: none;
+}
+
+.slider-float-label-blue,
+.slider-float-label-red {
+  position: absolute;
+  top: -0.1rem;
+  font-size: 1.9rem;
+  font-weight: bold;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.slider-float-label-blue { color: #2563eb; }
+.slider-float-label-red  { color: #ef4444; }
+
+.slider-float-label {
+  position: absolute;
+  top: -0.1rem;
+  transform: translateX(-50%);
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #222;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Timeout countdown clock (top-right of obs screen) ───────────────────── */
+.timeout-clock {
+  position: fixed;
+  top: 1.2rem;
+  right: 1.5rem;
+  z-index: 100;
+}
+
+/* ── Consent form layout ─────────────────────────────────────────────────── */
+.consent-outer {
+  max-width: 70vw;
+  width: 100%;
+  margin: auto;
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  height: clamp(400px, 75vh, 800px);
+}
+
+.consent-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+}
+
+.consent-info-boxes {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0;
+}
+
+.consent-info-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  min-height: 3rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  background: #fef2f2;
+  border: 1.5px solid #ef4444;
+  color: #7f1d1d;
+}
+
+/* Blue variant -- informational/motivational, not a warning. Same blue as
+   .info-banner-blue below (this app's "blue = informational" visual
+   language, used consistently rather than inventing a new one per
+   context). Used for the consent screen's payment-motivation box (as a
+   click-to-reveal box, same markup shape as .consent-info-box above). NOT
+   used for the tutorial-summary reminder boxes -- see .info-banner-blue
+   below, which uses a larger font/padding suited to a standalone banner
+   rather than this click-to-reveal-oriented variant. */
+.consent-info-box-blue {
+  background: #eff6ff;
+  border: 1.5px solid #93c5fd;
+  color: #1e3a8a;
+}
+
+/* Standalone blue info banner -- NOT the click-to-reveal box shape above.
+   Used by the tutorial-summary reminder boxes; kept as its own class
+   (rather than reusing .consent-info-box-blue directly) so its own
+   larger font/padding can differ from that click-to-reveal-oriented
+   variant without the two drifting apart via copy-pasted inline styles. */
+.info-banner-blue {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto 1.5rem;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  padding: 0.9rem 1.3rem;
+  font-size: 1.3rem;
+  color: #1e3a8a;
+}
+
+.consent-footer {
+  flex-shrink: 0;
+  padding-top: 1rem;
+}
+
+/* "Begin experiment" button, before all consent steps are complete. Plain
+   class-based dimming (not the native :disabled pseudo-class) — decoupled
+   from browser/extension color overrides that can neutralize disabled-button
+   styling. Actual click gating happens in JS (build-consent-screen.js), not
+   here; this is purely cosmetic. */
+.consent-btn-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Tutorial layout ────────────────────────────────────────────────────── */
+.tutorial-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.5rem 0;
+  width: 100%;
+}
+
+/* Top row: three equal-width panels */
+.tutorial-top-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2.5rem;
+  width: 70vw;
+}
+
+.tutorial-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tutorial-panel-centre {
+  align-items: center;
+  justify-content: center;
+}
+
+.tutorial-panel-right {
+  align-items: stretch;
+}
+
+.tutorial-info-block > span {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.tutorial-info-block {
+  flex: 1;
+  font-size: 1.4rem;
+  color: #333;
+  line-height: 1.6;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* Right column's ROTATING top box only (chat history, plugin-tutorial-
+   {intro,observation}-{numbers,colors}.js's phase system) -- fixes its
+   height so the box's own flex-basis stops tracking its (phase-dependent,
+   variable-length) text content. Without this, `.tutorial-info-block`'s
+   plain `flex:1` let this ONE box grow/shrink the whole right-hand column
+   -- and therefore the whole row's height, since `.tutorial-top-row` uses
+   align-items:stretch -- every time the phase's text got longer or
+   shorter, visibly shifting the slider's vertical position beneath it.
+   `flex: 0 0 <height>` (not `min-height`) is what actually fixes this --
+   flex-basis overrides height/min-height along a column flex container's
+   main axis, so a plain `height` rule alone would have had no effect here.
+   `overflow: hidden` is NOT just a safety margin -- flex items have an
+   "automatic minimum size" (min-height:auto) that, by spec, is based on
+   their CONTENT'S size whenever overflow is visible, which can force a
+   flex-basis-0-flex-grow-0 item taller anyway if its content doesn't fit
+   (confirmed as a real, not just theoretical, cause of resizing here --
+   chat history). Setting any non-visible overflow makes the browser
+   resolve that automatic minimum to 0 instead, so this flex-basis is
+   FINALLY actually fixed regardless of text length -- excess text is
+   clipped rather than growing the box. Applied to EVERY phase's box (not
+   just the longer ones) so obs 1's fixed intro text and phase A's short
+   default sit at the exact same height as phases B-E's longer text,
+   rather than only some of them matching.
+   `clamp(min, Nvh, max)` (not a flat rem value) -- chat history: the
+   viewport can vary a lot across browsers/platforms/window sizes, so a
+   flat rem value that happens to look right at one window size can be
+   too cramped or too roomy at another. clamp() lets this track the
+   ACTUAL available vertical space (vh) while still guaranteeing sane
+   floor/ceiling bounds, matching the exact pattern already used
+   elsewhere in this file (e.g. .consent-outer's height:
+   clamp(400px,75vh,800px)) rather than introducing a new convention.
+   This re-resolves cleanly on window resize too, unlike a flat rem
+   value, without reintroducing any content-driven measurement (it's
+   still pure CSS, resolved at layout time -- no flash-then-resize risk).
+   Sized generously for the longest current text at the full 1.4rem
+   .tutorial-info-block size (all phases now share that size, no
+   per-phase override -- see .tutorial-notify-yellow/red/blue's own
+   comment); shrink the font-size here (not on the color classes) if a
+   future phase's text needs trimming instead of clipping. */
+.tutorial-right-top-box {
+  flex: 0 0 clamp(6rem, 9vh, 8.5rem);
+  overflow: hidden;
+  /* Reduced from the 1.4rem this would otherwise inherit from
+     .tutorial-info-block (chat history) -- an earlier revision
+     deliberately matched that 1.4rem for uniformity across phases, but at
+     that size the box felt cramped/dominant relative to the rest of the
+     right column; sizing it here (not per-color-class -- see
+     .tutorial-notify-yellow/red/blue's own comment) keeps the
+     uniform-across-all-phases property while just being smaller overall. */
+  font-size: 1.1rem;
+}
+
+/* Right column's KDE/urn figure box (chat history, this session --
+   REPLACES an earlier single merged .tutorial-right-bottom-box that
+   shared one budget between this and the tracker below; un-merged again
+   per explicit direction, since sharing a budget squeezed this box too
+   small to read comfortably). Same fixed-size mechanism as
+   .tutorial-right-top-box above (flex:0 0 <clamp> + overflow:hidden --
+   see that rule's own comment for the full flex-quirk rationale); giving
+   THIS box its own independent, generous budget rather than merging it
+   with the tracker is what actually fixes the size-vs-readability
+   tradeoff -- the two boxes no longer negotiate space with each other at
+   all. Phase E's clock canvas (see plugin-tutorial-{observation}-
+   {numbers,colors}.js) is sized to comfortably fit well inside this
+   box's floor value, not the other way around -- the box's size is
+   chosen for what makes the KDE/urn figure legible, and the clock is
+   sized to match, rather than shrinking the clock to fit an
+   under-sized box the way an earlier revision did. */
+.tutorial-right-image-box {
+  flex: 0 0 clamp(11rem, 18vh, 16rem);
+  overflow: hidden;
+}
+
+/* Right column's tracker box (chat history, this session -- the other
+   half of the un-merged former .tutorial-right-bottom-box; see
+   .tutorial-right-image-box's own comment above for why they're
+   independent now). Same fixed-size mechanism, just a much smaller
+   budget -- the tracker's own content (a single row of numbers/dots)
+   never needed much room even before any of this session's changes.
+   display:flex + justify-content:center (chat history) -- without this,
+   the tracker row (a plain block-level child, #tut-tracker or
+   .tut-tracker-row depending on which plugin wires it -- see
+   plugin-tutorial-{intro,observation}-{numbers,colors}.js) just sits
+   at the TOP of this now-fixed-height box via normal block flow, leaving
+   the row visibly not centered (all the box's slack space ends up below
+   it instead of split evenly above/below) -- reported directly as "balls
+   aren't vertically centered". flex-direction:column (not row) is what
+   makes justify-content:center act on the VERTICAL axis here; the
+   child's own width still fills normally via column flex's default
+   align-items:stretch, so nothing about the row's horizontal layout
+   changes. */
+.tutorial-right-tracker-box {
+  flex: 0 0 clamp(3.5rem, 6vh, 4.5rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.dist-canvas {
+  display: block;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+  width: 100%;
+  height: 100%;
+  /* Shrunk from 120px (chat history) to give the tracker below more of the
+     right column's height -- the tracker's own numbers were enlarged at
+     the same time (see .tut-tracker-num* below); since dist-svg is
+     flex:1 and the tracker isn't, growing the tracker's own natural size
+     already shrinks the KDE's share automatically -- this lower floor
+     just lets that actually happen instead of being blocked by a fixed
+     minimum. */
+  min-height: 90px;
+}
+/* Phase E's clock box (chat history) -- same footprint as .dist-canvas
+   (used alongside it, not instead of it), just recolored yellow to match
+   the top text box during that phase ("both right hand boxes" get the
+   same styling -- see plugin-tutorial-observation-numbers.js/
+   -colors.js's own phase-E note). Same yellow as .tutorial-notify-yellow/
+   .tutorial-tracker-highlight, not a new color. */
+.dist-canvas-yellow {
+  background: #fffbeb;
+  border-color: #fbbf24;
+}
+
+/* ── Tutorial observation tracker (15-slot progress row) ─────────────────
+   Lives between #dist-svg and #dist-caption in the right-hand tutorial
+   panel (see plugin-tutorial-{intro,observation}-numbers.js) -- see
+   tutorial-tracker.js's own docstring for why this exists and for its
+   plain number/colored-circle design (no underline, no marker dot --
+   both tried and dropped, chat history) below. */
+.tut-tracker-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 100%;
+  margin: 0.5rem 0;
+}
+.tut-tracker-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.tut-tracker-num {
+  display: inline-block;
+  font-weight: bold;
+  font-size: 1.1rem;
+  min-width: 1.3em;
+  text-align: center;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+/* Settled (past) numbers stay the SAME size as the current one -- an
+   earlier revision shrank them to the base 1.1rem instead of the
+   current's 1.4rem, which read as the tracker actively shrinking past
+   entries rather than just fading them; dropped per explicit direction
+   ("aren't shrunk"). Fading is carried by opacity alone now, not size.
+   Opacity also nudged down slightly (0.5 -> 0.4, chat history) per the
+   same request ("decrease their alpha slightly"). */
+.tut-tracker-num-settled {
+  opacity: 0.4;
+  font-size: 1.25rem;
+}
+.tut-tracker-num-current {
+  /* Slightly decreased from 1.4rem (chat history), matching
+     .tut-tracker-num-settled above so settled/current stay the same
+     size as each other. */
+  font-size: 1.25rem;
+}
+.tut-tracker-num-empty {
+  color: transparent;
+}
+
+/* Empty (not-yet-reached) placeholder for colors's dot-mode tracker
+   (chat history) -- fully transparent (not a hollow ring, not a black
+   dot -- both were tried and explicitly dropped: "they don't add
+   anything useful") so it carries no visible marker at all, existing
+   purely to reserve the same circular footprint as a settled/current
+   dot would occupy, keeping the row's height consistent. Mirrors the
+   numbers tracker's own .tut-tracker-num-empty (transparent text via
+   &nbsp;, same idea). */
+.tut-tracker-dot-empty {
+  background: transparent;
+  width: 0.65rem;
+  height: 0.65rem;
+}
+
+/* Dot-mode variant (chat history, colors's tracker -- see
+   tutorial-tracker.js's own docstring for why colors uses colored circles
+   instead of number+underline: there's no separate "number" to show for
+   a blue/red draw, the color IS the content). Sizing intentionally larger
+   than a typical circular indicator elsewhere in this app -- 15 dots in
+   one row via the same .tut-tracker-row/.tut-tracker-slot layout as the
+   numeric version, so each dot needs to stay clearly visible at that
+   density without the underline-merging risk text had (circles don't
+   visually blend into each other at a gap the way touching underlines
+   did). */
+.tut-tracker-dot {
+  display: inline-block;
+  border-radius: 50%;
+  width: 1rem;
+  height: 1rem;
+}
+/* Settled (past) dots stay the SAME size as the current one -- an
+   earlier revision shrank them slightly (0.92rem, smaller than both the
+   1rem base and the current's 1.15rem), which read as the tracker
+   actively shrinking past entries rather than just fading them; dropped
+   per explicit direction ("aren't shrunk"), mirrors the identical fix
+   for .tut-tracker-num-settled above. Fading is carried by opacity
+   alone now, not size. Opacity also nudged down slightly (0.5 -> 0.4,
+   chat history) per the same request ("decrease their alpha slightly"). */
+.tut-tracker-dot-settled {
+  opacity: 0.4;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.tut-tracker-dot-current {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+/* Slider in the tutorial uses same .slider-section/.slider-wrap as main task,
+   constrained to 70vw by the parent .tutorial-wrap */
+.tutorial-wrap .slider-section {
+  width: 70vw;
+}
+
+/* Standard notification colors for the tutorial's top-right box, one per
+   phase (chat history, plugin-tutorial-observation-numbers.js's
+   rightTopBoxContent) -- white (no class, default .tutorial-info-block),
+   blue, yellow, red. Font-size is intentionally NOT overridden here --
+   an earlier revision set font-size:1rem on all three colored variants
+   (smaller than .tutorial-info-block's 1.4rem default) so the longer
+   phase D/E text would fit, but that made phase A visibly LARGER than
+   every other phase, an inconsistency flagged directly (chat history).
+   Every phase now uses the exact same 1.4rem as the left-column boxes
+   ("the same text formatting as the other boxes") -- if a future phase's
+   text overflows .tutorial-right-top-box's fixed height at that size,
+   shrink the size on .tutorial-right-top-box itself (one place, applies
+   to every phase uniformly), not per-color-class again. Red reuses the
+   exact same colors as .consent-info-box, for consistency with that
+   existing convention rather than inventing a new one. Yellow reuses the
+   soft background:#fffbeb/border:#fbbf24 pairing already used for
+   warning-style boxes elsewhere in this app. Blue matches
+   .info-banner-blue (this app's "blue = informational" convention). */
+.tutorial-notify-yellow {
+  background: #fffbeb;
+  border-color: #fbbf24;
+}
+.tutorial-notify-red {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #7f1d1d;
+}
+/* Phase B (chat history: reintroduced this session -- "the slider
+   remembers" reminder, see plugin-tutorial-observation-numbers.js/
+   -colors.js's own docstring). Not a warning color like yellow/red above
+   -- this phase isn't cautioning against anything, just a neutral
+   reminder. */
+.tutorial-notify-blue {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1e3a8a;
+}
+
+/* Soft-red "empty placeholder" overlay (chat history, phase D) -- covers
+   the KDE figure and tracker without touching any of the JS that still
+   populates them underneath (deliberately simpler than skipping that
+   logic for those screens -- see plugin-tutorial-observation-
+   numbers.js's own docstring). Matches .tutorial-notify-red's own
+   colors exactly -- all three right-column boxes (text + these two) now
+   read as one consistent red phase, not two different colors (previously
+   this used the same soft yellow as .tutorial-notify-yellow, mismatched
+   against the red text box above it). The top-right box is handled
+   differently during this same phase (its own text is replaced with
+   .tutorial-notify-red, not overlaid), so only these two items ever get
+   this treatment. .tutorial-hide-wrap just needs position:relative so the
+   overlay's inset:0 scopes to that ONE item, not the whole right column. */
+.tutorial-hide-wrap {
+  position: relative;
+  /* Lets this element's OWN flex:1 (set inline where it's used as the
+     KDE/urn/clock wrap -- see plugin-tutorial-{intro,observation}-
+     {numbers,colors}.js) actually shrink to fit .tutorial-right-
+     image-box's fixed height, rather than being forced to at least its
+     content's natural size (same automatic-minimum-size flex quirk
+     described on .tutorial-right-top-box/-image-box above). Harmless
+     when this class is reused for the tracker wrap instead (no flex:1
+     there to interact with). */
+  min-height: 0;
+}
+.tutorial-hidden-overlay {
+  position: absolute;
+  inset: 0;
+  background: #fef2f2;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  z-index: 10;
+}
+/* Phase E's tracker cover (chat history) -- same mechanism as the red
+   overlay above (opaque box over .tutorial-hide-wrap, preserving the
+   tracker's own layout space rather than collapsing it), but YELLOW,
+   matching the other two right-column boxes during this same phase (top
+   text box + KDE/clock box, both .tutorial-notify-yellow/.dist-canvas-
+   yellow) for full color consistency across all three -- an earlier
+   revision used white/gray here instead, which read as inconsistent
+   next to the other two boxes' yellow (chat history, this session).
+   Only the tracker is covered this way in phase E; the KDE/urn box's
+   contents are REPLACED outright (a clock canvas) rather than covered,
+   so it never needs this overlay itself. */
+.tutorial-hidden-overlay-yellow {
+  position: absolute;
+  inset: 0;
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
+  border-radius: 6px;
+  z-index: 10;
+}
+
+/* Tracker HIGHLIGHT during phase C (chat history) -- same colors as
+   .tutorial-notify-yellow, but its OWN class rather than combining with
+   .tutorial-info-block directly: that combination's normal 0.6rem/0.8rem
+   padding ate into the already-tight 15-slot tracker row's available
+   width, and at this phase's enlarged number size (see .tut-tracker-num*
+   above) that was enough to make adjacent slots' underlines touch and
+   read as ONE_NUMBERS_LINE_PLACEHOLDER instead of 15 separate ones -- a real bug,
+   confirmed visually, not a hypothetical risk. This uses a much smaller
+   padding instead, so the row keeps its full working width. */
+.tutorial-tracker-highlight {
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
+  border-radius: 6px;
+  padding: 4px;
+}
+
+/* Same box shape as .tutorial-tracker-highlight above, but WHITE/gray
+   instead of yellow (chat history) -- used for phases A and B, which
+   have no reason to highlight the tracker in any particular color, but
+   should still get the same "boxed" visual treatment underneath the
+   tracker as phase C does, rather than looking bare by comparison. Same
+   colors as .dist-canvas's own default white/#e5e7eb scheme, for
+   consistency with that box rather than inventing a new white. */
+.tutorial-tracker-highlight-white {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px;
+}
+
+/* ── Tutorial title (top-center) ─────────────────────────────────────────── */
+.tutorial-title {
+  position: fixed;
+  top: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  font-size: 2.2rem;
+  font-weight: bold;
+  color: #333;
+  z-index: 100;
+  white-space: nowrap;
+}
+
+/* ── Colors stimulus circle ──────────────────────────────────────────────── */
+.colors-circle {
+  width: clamp(60px, 11vw, 160px);
+  height: clamp(60px, 11vw, 160px);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* ── Colors slider ───────────────────────────────────────────────────────── */
+.colors-slider-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  width: 70vw;
+  margin-top: 0.5rem;
+}
+
+.colors-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+/* ── Colors slider v2 layout (experimental) ─────────────────────────────── */
+/* Purely static blue/red tick axis above/below the track (constraint #3);
+   the dynamic %s live INSIDE the bar itself now, flanking the thumb (see
+   .colors-input-wrap/.colors-inbar-value below and slider-colors.js's
+   updateColorsInBarValues) -- NOT in this axis. Two earlier attempts tried
+   putting the dynamic value in this axis space (first centered over the
+   ticks, then offset toward the numbers with a small occluding
+   background); both kept leaking a visible sliver of whatever was
+   "underneath" once the actual rendered text size didn't match the
+   approximated occlusion box. Moving the dynamic value out of this space
+   entirely sidesteps that whole class of bug. Kept alongside the original
+   .colors-slider-section/.colors-ruler layout above (unchanged) -- this is
+   a deliberate A/B, not a replacement; see slider-colors.js's
+   buildColorsSliderHTMLv2 for how to revert (switch the plugin's import
+   back to the non-v2 functions). */
+.colors-slider-section-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 85vw;   /* wider than the original/default .colors-slider-section */
+  margin-top: 0.5rem;
+}
+.slider-track-wrap-v2 {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.5rem;
+  box-sizing: border-box;
+}
+.slider-track-wrap-v2 input[type="range"] {
+  width: 100%;
+}
+/* Reserves the band's full height (numbers row + gap + ticks row + top/bottom
+   padding) from the very first render, BEFORE slider-colors.js's
+   buildColorsRulerV2 ever populates .colors-ruler-inner's actual content --
+   without this, an empty band collapses to 0 height (nothing inside it yet
+   to give it size), then jumps to its real height once the ruler content is
+   built. In the tutorial intro specifically, that build is deferred until
+   the participant clicks through to reveal the slider (see
+   plugin-tutorial-intro-colors.js's activateSlider), so the collapse-then-
+   grow was visible as the surrounding boxes shifting at that exact click --
+   the same class of layout-shift bug this codebase already guards against
+   elsewhere via reserved space (see the consent-screen/tutorial-intro-box
+   notes on visibility:hidden vs display:none), just via a different
+   mechanism here (missing explicit size vs a display toggle). */
+.colors-ruler-band {
+  position: relative;
+  min-height: 2rem;
+}
+.colors-ruler-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0.05rem 0;   /* minimal -- brings ticks/numbers close to the bar */
+}
+/* Same child HTML/order as the top band -- reversed visually via flexbox so
+   ticks stay nearest the track, mirroring the top band without duplicating
+   HTML-building logic. */
+.colors-ruler-band-bottom .colors-ruler-inner {
+  flex-direction: column-reverse;
+}
+.colors-ruler-numbers {
+  position: relative;
+  height: 1.3rem;
+}
+.colors-ruler-num {
+  position: absolute;
+  top: 0;
+  font-weight: bold;
+  font-size: 1.3rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.colors-ruler-ticks {
+  position: relative;
+  height: 8px;
+}
+.colors-ruler-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 5px;
+  background: #aaa;
+  transform: translateX(-50%);
+}
+.colors-ruler-tick-major {
+  height: 8px;
+  width: 1.5px;
+  background: #666;
+}
+
+/* Wraps ONLY the input + its in-bar value overlay (not the ruler bands
+   above/below) -- position:relative here scopes the overlay's inset:0 to
+   exactly the input's own box, not the whole 3-row .slider-track-wrap-v2.
+   height is explicit (matching input's own 44px hit-area override below)
+   rather than left to shrink-to-fit auto-sizing -- measured directly: the
+   wrap was rendering ~8px TALLER than the input's own true box (a default
+   inline-block line-height quirk), and since .colors-inbar-value centres
+   on the WRAP not the input, that extra height silently pushed the text
+   down by half of it (~4px) -- exactly the "not quite centered, sitting a
+   bit low" reported. An explicit, matching height removes the ambiguity
+   entirely rather than compensating with a manual offset. */
+.colors-input-wrap {
+  position: relative;
+  height: 44px;
+}
+.colors-inbar-values {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;   /* above the input's own z-index:1, or the numbers/badges
+                   would render but sit invisibly behind the track/thumb */
+}
+.colors-inbar-value {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.7rem;   /* as large as comfortably fits the 34px bar below */
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  /* Arial has no true 800-weight glyph, so font-weight alone likely renders
+     identically to plain bold (700) -- this adds real, visible extra
+     boldness on top of that, regardless of what the browser's synthetic
+     bold rendering does for the font-weight value alone. */
+  -webkit-text-stroke: 0.6px currentColor;
+  paint-order: stroke fill;
+}
+/* Taller bar than the original/default .colors-slider -- gives the in-bar
+   %s comfortable room. Scoped to .colors-slider-v2 specifically (an
+   ADDITIONAL class alongside the shared .colors-slider, applied only in
+   buildColorsSliderHTMLv2) so this doesn't affect the original non-v2
+   slider at all.
+
+   The HIT-AREA height is also overridden here (44px, down from the shared
+   96px default) -- this matters beyond just visual size: .colors-input-wrap
+   has no explicit height of its own, it just wraps snugly around the
+   input's own box, and .colors-inbar-value is vertically centred (top:50%)
+   relative to THAT wrap. With the original 96px hit-area, the visible
+   track/thumb don't necessarily render exactly centred within that much
+   taller invisible click-target box, so centring text on the wrap's full
+   height visibly drifted off the actual bar (reported as "numbers sitting
+   closer to the bottom"). Shrinking the hit-area close to the visible
+   track's own height removes most of that slack, so centring on the wrap
+   now closely tracks centring on the bar itself. */
+input[type="range"].colors-slider.colors-slider-v2 {
+  height: 44px;
+}
+input[type="range"].colors-slider.colors-slider-v2::-webkit-slider-runnable-track {
+  height: 34px;
+}
+input[type="range"].colors-slider.colors-slider-v2::-moz-range-track {
+  height: 34px;
+}
+input[type="range"].colors-slider.colors-slider-v2::-webkit-slider-thumb {
+  height: 42px;
+  margin-top: -4px;   /* (42-34)/2 = 4, keeps thumb centred on the taller track */
+}
+input[type="range"].colors-slider.colors-slider-v2::-moz-range-thumb {
+  height: 42px;
+}
+
+/* Gradient-fill track — CSS custom property --pct drives the split point.
+   Only visible AFTER the first interaction ('unset' state below overrides it
+   with flat gray). An earlier revision made the gradient visible from first
+   render at a default 50/50 split to help participants guess which side is
+   which — but pre-filling any specific split, even a neutral one, creates a
+   prior/anchor before the participant has made any judgment. Removed pending
+   a value-free way to convey side orientation (e.g. a fixed legend that
+   doesn't imply a proportion) instead. */
+input[type="range"].colors-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  cursor: pointer;
+  background: transparent;
+  height: 96px;
+}
+
+input[type="range"].colors-slider::-webkit-slider-runnable-track {
+  height: 16px;
+  border-radius: 8px;
+  /* solid blue left of thumb, solid red right of thumb */
+  background: linear-gradient(
+    to right,
+    #2563eb 0%,
+    #2563eb var(--pct, 50%),
+    #ef4444 var(--pct, 50%),
+    #ef4444 100%
+  );
+}
+input[type="range"].colors-slider::-moz-range-track {
+  height: 16px;
+  border-radius: 8px;
+  background: linear-gradient(
+    to right,
+    #2563eb 0%,
+    #2563eb var(--pct, 50%),
+    #ef4444 var(--pct, 50%),
+    #ef4444 100%
+  );
+}
+
+input[type="range"].colors-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  margin-top: -18px;
+  cursor: ew-resize;
+}
+input[type="range"].colors-slider::-moz-range-thumb {
+  width: 6px;
+  height: 40px;
+  border-radius: 2px;
+  background: #222;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: ew-resize;
+}
+
+/* Unset state: hide thumb AND override the gradient with flat gray —
+   nothing about the color split is shown until the participant interacts. */
+input[type="range"].colors-slider.slider-unset::-webkit-slider-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+input[type="range"].colors-slider.slider-unset::-moz-range-thumb {
+  background: transparent;
+  box-shadow: none;
+}
+input[type="range"].colors-slider.slider-unset::-webkit-slider-runnable-track {
+  background: #d1d5db;
+}
+input[type="range"].colors-slider.slider-unset::-moz-range-track {
+  background: #d1d5db;
+}
+
+/* Last mode: gray thumb + TRANSPARENT gradient (chat history -- an
+   earlier revision blended toward solid #ccc gray here, which read as
+   muddy/dark rather than dimmed; using real alpha transparency instead
+   lets the page's own light background show through, giving a lighter,
+   genuinely "faded" look rather than a flat desaturated one).
+   !important matches the existing thumb rules in this same block, for
+   consistency with that established defensive convention here.
+   slider_default='last' is config-base.js's shared DEFAULTS value now
+   (chat history), so this mode is actively used by both tasks, not a
+   dormant fallback. */
+input[type="range"].colors-slider.slider-last::-webkit-slider-thumb {
+  background: #ccc !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
+}
+input[type="range"].colors-slider.slider-last::-moz-range-thumb {
+  background: #ccc !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
+}
+input[type="range"].colors-slider.slider-last::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    rgba(37,99,235,0.4) 0%,
+    rgba(37,99,235,0.4) var(--pct, 50%),
+    rgba(239,68,68,0.4) var(--pct, 50%),
+    rgba(239,68,68,0.4) 100%
+  ) !important;
+}
+input[type="range"].colors-slider.slider-last::-moz-range-track {
+  background: linear-gradient(
+    to right,
+    rgba(37,99,235,0.4) 0%,
+    rgba(37,99,235,0.4) var(--pct, 50%),
+    rgba(239,68,68,0.4) var(--pct, 50%),
+    rgba(239,68,68,0.4) 100%
+  ) !important;
+}
+
+/* ── Slider tick ruler ────────────────────────────────────────────────────── */
+.slider-track-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.5rem;  /* room for edge tick labels (-100, 100) */
+  box-sizing: border-box;
+}
+
+.slider-track-wrap input[type="range"] {
+  width: 100%;
+}
+
+.slider-ruler {
+  position: relative;
+  height: 32px;
+  width: 100%;
+  margin-top: 2px;
+  overflow: visible;
+  z-index: 1;
+  pointer-events: none;  /* clicks pass through to slider */
+}
+
+/* Colors ruler needs more vertical room than the numbers one — two
+   stacked rows (blue values, then red values) instead of one row of
+   numeric ticks. See buildColorsRuler() in slider-colors.js. */
+.colors-ruler {
+  height: 66px;
+}
+
+.slider-tick {
+  position: absolute;
+  width: 1px;
+  background: #aaa;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.slider-tick-major {
+  background: #666;
+  width: 1.5px;
+}
+
+.slider-tick-label {
+  position: absolute;
+  top: 10px;
+  transform: translateX(-50%);
+  font-family: Arial, sans-serif;
+  font-size: 1.5rem;
+  color: #777;
+  white-space: nowrap;
+}
+
+/* ── Ghost line: previous estimate ──────────────────────────────────────── */
+/* Ghost overlays the slider input. Placed AFTER input in DOM so it
+ * paints on top. position:absolute anchors to slider-track-wrap.
+ * The input height is 96px; thumb is 40px tall, centred via margin-top:-12px
+ * on a 16px track. Track centre = 96/2 = 48px from input top.
+ * Ghost visible rect: 40px tall, centred at 48px → top = 48-20 = 28px. */
+

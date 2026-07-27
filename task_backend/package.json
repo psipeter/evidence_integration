@@ -1,0 +1,27 @@
+{
+  "name": "task_backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:numbers": "vite --mode numbers",
+    "dev:colors": "vite --mode colors",
+    "build": "vite build",
+    "build:numbers": "vite build --mode numbers",
+    "build:colors": "vite build --mode colors",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "jsPsych sequential evidence integration task, Supabase-backed backend",
+  "dependencies": {
+    "@jspsych/plugin-html-button-response": "^2.1.0",
+    "jspsych": "^8.2.3",
+    "vite": "^6.4.3"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0",
+    "supabase": "^2.109.1"
+  }
+}

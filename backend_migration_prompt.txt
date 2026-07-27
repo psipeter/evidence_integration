@@ -1,0 +1,56 @@
+Prompt for new chat: build the Supabase-backed backend, ported sequentially
+
+I want to start building a small backend for our evidence-integration
+jsPsych task (currently on JATOS/MindProbe + Prolific, in `task/`), using
+Supabase, to fix real reliability gaps we found this pilot -- while
+keeping the existing JATOS-based version completely untouched and
+deployable as a fallback throughout.
+
+Before doing anything else, read /home/psipeter/evidence_integration/CLAUDE.md
+in full -- it's the authoritative source of truth for this project, and
+takes precedence over README.md. Specifically read the "Pilot #3 real-
+participant incidents -> JATOS reliability investigation" and "Own-backend
+decision (Supabase)" sections near the end -- that's the full context for
+why this is happening (two real participants hit genuine JATOS-level
+failures; a direct empirical test confirmed per-trial saves can fail
+silently for an entire session with zero visible symptom; Gorilla,
+Cognition.run, and Labvanced were all evaluated as hosted alternatives and
+each rejected for a specific, documented reason) and the exact plan
+(architecture, table schemas, the three Edge Functions, the pricing/backup
+decision, and the numbered "Next steps" list). Also read README.md in
+full, including its "Future architecture" pointer section, for the
+scientific narrative and figure intentions.
+
+How I want to work through this
+
+Sequentially, one step at a time, following CLAUDE.md's "Next steps" list
+in order -- not building everything at once. Before writing any code:
+
+1. Confirm you understand the plan as written in CLAUDE.md, and flag
+   anything in it that seems wrong, underspecified, or worth reconsidering
+   before we start -- I'd rather catch that now than after building on top
+   of it.
+2. Propose the concrete first step (Supabase project setup: tables, RLS
+   policies) in enough detail that I know exactly what to click/configure
+   on my end, since I'll need to do the actual Supabase account/project
+   creation myself.
+3. Build everything in a new folder (not task/) -- e.g. task_backend/ or
+   similar, your call -- so the existing JATOS pipeline stays completely
+   intact throughout. Note: an earlier, now-abandoned attempt at a
+   different migration (to Gorilla) may have left a task_gorilla/ folder
+   or similar around -- if so, that's dead, not something to build on top
+   of or reference.
+4. As we port each piece (the Edge Functions, the client-side resumability
+   logic, the timeline-builder.js/finish-session.js swaps), remove dead
+   code and now-unnecessary JATOS-specific logic as you encounter it
+   rather than leaving it commented out "just in case." Ask if something
+   is genuinely ambiguous rather than guessing.
+5. Before considering any piece "done," test it against the actual failure
+   modes this whole effort is about -- CLAUDE.md's "Next steps" item 7
+   lists the three specific scenarios to verify (resume-on-reload works,
+   a simulated backend outage surfaces a visible warning instead of
+   silent loss, a completed participant gets sent straight to their code
+   instead of a duplicate run) -- not just "does it run once, happily."
+
+Let's start with step 1 -- tell me what you think of the plan as written
+before we touch anything.

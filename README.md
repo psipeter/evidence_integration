@@ -160,13 +160,15 @@ Target: ~50–80 participants per task, within-subject.
 - **Sequences**: hybrid method -- binary via quota/momentmatch construction
   (no seed search), continuous via an unrescaled i.i.d.-suffix construction
   (no seed search either); 8 distinct prefixes × 4 repeats = 32 trials;
-  prefix_length=4; std_fixed=15 (continuous) as documented, but **the
-  actual real 200-member production pool on disk currently has std=10
-  (confirmed directly, `true_std=10.0` uniformly across all 200 continuous
-  pool members) -- this discrepancy is unresolved, see CLAUDE.md's "Open
-  items" for details before assuming either number without checking**.
-  Each participant gets ONE of 200 independently-generated sequence sets
-  per task, assigned via a
+  prefix_length=4; **std=10 (continuous)** -- confirmed as the actual
+  current production value (`true_std=10.0` uniformly across all 200
+  continuous pool members; pilot #3 is live on this pool). An earlier
+  version of this doc, and `generate_sequences_pool.py`'s own
+  `--std_fixed` CLI default, both say 15 -- that's the value the script
+  defaults to, not what's actually deployed; pass `--std_fixed 10`
+  explicitly for any future regeneration meant to match current
+  production. Each participant gets ONE of 200 independently-generated
+  sequence sets per task, assigned via a
   deterministic hash of their participant ID (same index for both tasks) --
   not one shared file. See CLAUDE.md's "Per-participant sequence pool" and
   "Sequence design" sections for the full mechanism and rationale.
@@ -603,10 +605,12 @@ and current per-item status)
   "REAL-TEST FINDINGS" note for what was confirmed and two corrections
   (`jatos.log` isn't visible anywhere in the JATOS UI; GeneralSingle's block
   is keyed on the browser's cookie, not the `PROLIFIC_PID` value).
-- [UNRESOLVED] The real production pool's continuous std is 10, not the
-  documented/default 15 (confirmed directly, all 200 members) -- decide
-  whether to fix the docs or regenerate the pool before wide rollout. See
-  CLAUDE.md's "Open items".
+- [RESOLVED] The real production pool's continuous std is 10, not the
+  script-default 15 (confirmed directly, all 200 members) -- **pilot #3
+  is now live on the std=10 pool, which settles it: std=10 is current
+  production.** Docs updated to match. `generate_sequences_pool.py`'s
+  own `--std_fixed` default is still 15 -- pass `--std_fixed 10`
+  explicitly for any future regeneration meant to match production.
 
 ```bash
 npm run build:continuous && npm run build:binary
@@ -619,6 +623,44 @@ worker types) -- grab the General Single link from MindProbe's Worker &
 Batch Manager and use that as the Prolific Study URL (same
 `?PROLIFIC_PID={{%PROLIFIC_PID%}}&STUDY_ID=...&SESSION_ID=...` suffix as
 before).
+
+### Future architecture: moving off JATOS's participant-tracking layer
+
+**Built and tested; hosting deployment in progress** -- see CLAUDE.md's
+"Pilot #3 real-participant incidents..." and "Own-backend decision
+(Supabase)" sections, and `task_backend/TODO.md` (the actively-maintained
+build doc, supersedes CLAUDE.md's own "Architecture"/"Next steps" plan
+for this), for the full investigation and current status; this is a
+pointer, not the detail. Short version: two real pilot #3 participants
+hit genuine JATOS-level failures (a reload-triggered session loss, and a
+GeneralSingle cookie/link-prefetch collision blocking a legitimate first
+attempt), plus a confirmed, empirically-tested gap where per-trial saves
+can fail silently for an entire session with zero participant-visible
+symptom. Gorilla, Cognition.run, and Labvanced were all evaluated as
+hosted alternatives and rejected (see CLAUDE.md for why each one
+specifically fell short). **A small backend on Supabase** (progress-
+check/append/finish, keyed on `prolific_pid` rather than a browser
+cookie, enabling real reload/resume instead of restart-or-block) is built
+in `task_backend/` alongside -- **not replacing** -- the JATOS pipeline
+described above, which remains the live/fallback system throughout.
+
+`task_backend/` is a from-scratch port, not a copy: the two tasks are
+called **numbers**/**colors** there (not `continuous`/`binary` -- matches
+the participant-facing labels; `task/` keeps its own original naming,
+the two codebases don't share terminology), the old JATOS-era blanket
+per-screen save hook was dropped entirely in favor of checkpointing only
+the 3-4 phases that actually matter for resume, and sequence generation
+was consolidated from five scripts down to one
+(`task_backend/generate_sequences.py`) with the dead/unused methods
+removed. Verified end-to-end against the real deployed backend (not
+mocked): trial-boundary resume across a real reload, the timeout-retry/
+`attempt` mechanism, and all three session-ending screens showing a
+visible, redirect-independent completion code. Still open: a persistent
+automated test suite (everything verified so far was one-off scripts),
+a weekly database backup process, and finishing the hosting deployment
+(GitHub Pages, decided and prepped, not yet live -- see
+`task_backend/TODO.md`'s "Hosting" section, including the discovery that
+hosting was never actually part of the original plan at all).
 
 ### Prolific rollout plan
 

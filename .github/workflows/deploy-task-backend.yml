@@ -1,0 +1,72 @@
+name: Deploy task_backend to GitHub Pages
+
+# Deploys ONLY task_backend/ -- the JATOS pipeline (task/) has no build/
+# deploy step at all (JATOS/MindProbe serves it directly) and this
+# workflow never touches it. Path-filtered so unrelated commits elsewhere
+# in the repo (task/, docs, analysis scripts) don't trigger a rebuild.
+#
+# Prerequisite (one-time, done in the GitHub UI, not in this file):
+#   - Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+#   - Settings -> Secrets and variables -> Actions -> two repo secrets:
+#       VITE_SUPABASE_URL
+#       VITE_SUPABASE_PUBLISHABLE_KEY
+#     (see task_backend/TODO.md's "Hosting" section for the actual values
+#     and the rationale for why these are safe to build into the client
+#     bundle despite living in "Secrets" -- they're publishable values,
+#     just stored there because that's the conventional place for
+#     anything env-specific, not because they're sensitive.)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'task_backend/**'
+      - '.github/workflows/deploy-task-backend.yml'
+  workflow_dispatch:  # allows a manual re-deploy from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deploy in flight at a time; a newer push supersedes an
+# in-progress older one rather than queuing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: task_backend
+        run: npm ci
+
+      - name: Build (both tasks, one combined dist/)
+        working-directory: task_backend
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: task_backend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
