@@ -483,3 +483,94 @@ the entire plan is the deferred manual-backup guidance above, which is
 intentionally not something to build now -- it's something to ask for
 when it's actually needed.
 
+---
+
+## Post-buildout review: deployment readiness (brainstorm session)
+
+A step-back review turned up two real gaps neither of which had been
+noticed before, plus a decision on a few more:
+
+1. **Supabase free-tier 7-day auto-pause -- ACCEPTED, not fixed.** A
+   project with zero DB activity for 7 days pauses until manually
+   resumed; a real participant hitting a paused project during a gap
+   would see total silence, arguably worse than the JATOS failure modes
+   this backend was built to fix. Decided NOT to build a keep-alive ping
+   for this: real data collection is expected to take only a few days
+   once the study launches, well under the 7-day window. Revisit if
+   collection ever stretches longer or happens in separated waves.
+2. **No path from `events` back into the analysis pipeline (`fitting/`,
+   `models/`) -- DEFERRED ON PURPOSE.** Confirmed via grep: zero existing
+   script has any Supabase awareness. Decided to wait until the database
+   is actually populated (even with fake/test data) before building this,
+   and to do participant-data anonymization as PART OF that export step
+   (distinct from the earlier repo-publicity anonymization, which was
+   about `task/pilot3/`'s files, not the live database).
+3. ~~**Bonus-payment CSV**~~ DONE -- `task_backend/compute_bonus.py`.
+   Matches the original `task/compute_bonus_tmp.py`'s exact convention
+   (only `phase='trial'` rows count toward bonus, mirroring the old
+   schema's `screen=='observation'` exclusion of tutorial rows; reward in
+   cents; $5.00 clip per participant). Verified against real data in the
+   live table (paginated fetch, 1443 rows across 8 participants, correct
+   per-participant sums and clipping).
+
+   **Extended** to solve the Submission-ID-vs-Participant-ID mismatch
+   found while building it: Prolific's dashboard bulk-bonus box wants
+   `<submission_id>,<amount>` lines, not `prolific_pid`-keyed ones.
+   `--prolific-export <path>` now takes Prolific's own demographic/
+   submissions export (Submission ID + Participant ID side by side) and
+   joins on `prolific_pid` automatically, printing ready-to-paste lines
+   directly (the bulk-bonus box is copy-paste text, not a file upload --
+   confirmed by the person testing it against the real UI). Nonzero-
+   bonus participants NOT found in the export are excluded from the
+   output and explicitly flagged for manual handling, rather than
+   silently dropped or included with a blank ID that would fail the
+   whole paste.
+
+   Column matching reuses the exact fuzzy-substring-match-with-override
+   pattern already proven in `task/reconcile_prolific_jatos.py`
+   (`find_col`/`--prolific-id-col`) -- found this existing tool via a
+   commit-message search *after* independently arriving at the same
+   design, which is reassuring convergence rather than a wasted
+   rediscovery. Added the same `--submission-id-col`/`--participant-id-col`
+   override flags for consistency and resilience if Prolific's export
+   wording ever shifts again (their own docs note it already has, more
+   than once).
+
+   Tested against a REAL Prolific demographic export (not synthetic) --
+   confirmed correct parsing of the real header row
+   (`Submission id,Participant id,Status,...`), correct join behavior in
+   both directions (our test participants correctly reported "not found"
+   in the real export; the real export's participants correctly reported
+   "not found" against our test-only Supabase data), and the nonzero-
+   bonus warning path firing correctly for real mismatched data.
+
+4. **URGENT SAFETY GAP FOUND AND FIXED**: the real Prolific export used
+   to test the above (containing real Participant IDs, real Submission
+   IDs, and -- confirmed via a real `Completion code: C12FEFJU` value in
+   one row -- tied to the actual live `colors` study) was placed directly
+   in `task_backend/` with **zero gitignore protection**, in a repo
+   that's now public. A `git add .` at that moment would have committed
+   real participant PII. Fixed immediately: `task_backend/.gitignore`
+   now excludes `prolific_*export*.csv` and, preemptively, `compute_bonus.py`'s
+   own default output (`bonus_numbers.csv`/`bonus_colors.csv`/`bonus_*.csv`),
+   which is exactly as sensitive (real IDs paired with real payment
+   amounts) and would hit the identical gap the moment it's ever run for
+   real. Confirmed via `git log --all --full-history` that nothing
+   matching this was ever actually committed -- caught before any harm,
+   not after. **Lesson for future sessions: any new file dropped into
+   task_backend/ containing real participant identifiers needs an
+   explicit gitignore entry checked immediately, not eventually** -- this
+   is the second time in this project a real-data file has needed this
+   exact reactive fix (the first was `task/pilot3/`); a proactive habit
+   of checking before doing anything else with a newly-added file would
+   be better than reacting each time.
+5. **Desktop/laptop-only enrollment**: handled entirely on Prolific's
+   side (their own device filters screen this out) -- no code needed.
+6. **Researcher-facing monitoring and a kill-switch/maintenance-mode**
+   -- discussed, deliberately NOT building either. Given the short
+   (few-day) collection window: monitoring reduces to "glance at a couple
+   of SQL queries during the first hour after launch," and a kill-switch
+   is judged not worth building when the existing levers (pause the
+   Prolific study to stop new starts; resume already means nobody loses
+   progress if a fix requires a pause) are adequate at this scale.
+

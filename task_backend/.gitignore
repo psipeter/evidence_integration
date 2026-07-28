@@ -6,3 +6,16 @@ dist-colors/
 .env.test
 test-results/
 playwright-report/
+
+# Real participant data -- Prolific exports and compute_bonus.py's own
+# output both contain real Participant/Submission IDs paired with real
+# payment amounts. Never tracked, regardless of exact filename -- these
+# patterns cover Prolific's own export naming and compute_bonus.py's
+# default output naming, but ANY file with real participant data in this
+# directory should never be committed, named like this or not.
+prolific_*export*.csv
+prolific_demographic_export_*.csv
+bonus_numbers.csv
+bonus_colors.csv
+bonus_*.csv
+.~lock.*#
