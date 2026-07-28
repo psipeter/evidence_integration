@@ -83,6 +83,19 @@ NUMBERS_STD_TOLERANCE_FRAC = 0.25
 COLORS_N_TRIALS = 32
 COLORS_BLUE_RANGE = (2, 13)
 
+# Small TEST-variant constants -- a SEPARATE set, never touched by the
+# production ones above. Gated behind an explicit --name flag (see CLI):
+# passing --name is the only way to reach these, and doing so also forces
+# a distinctly-suffixed output filename, so there's no way to accidentally
+# produce a real-shaped production file with a tiny trial count, or vice
+# versa. Exists so a full session (through Prolific or locally) can be
+# driven end-to-end in seconds/minutes instead of ~15-30 minutes, for
+# testing -- same statistical design (mean_range, std_fixed, blue_range),
+# just far fewer trials per member.
+TEST_NUMBERS_N_PREFIX = 2
+TEST_NUMBERS_N_REPEATS = 1
+TEST_COLORS_N_TRIALS = 2
+
 
 def make_rng(seed: int) -> np.random.Generator:
     return np.random.default_rng(seed)
@@ -365,37 +378,60 @@ def verify_colors_trials(trials, n_trials, seq_length):
 # ---------------------------------------------------------------------------
 # Pool assembly
 # ---------------------------------------------------------------------------
-def build_numbers_pool(n_pool, pool_dir, base_seed=0):
-    """Builds all n_pool independent numbers members (fixed design --
-    see NUMBERS_* constants above) in memory, then writes them as ONE
-    file: {pool_dir}/sequences_numbers.json."""
+def _build_numbers_pool_impl(n_pool, pool_dir, name, n_prefix, n_repeats, base_seed):
     members = []
     for i in range(n_pool):
         rng = make_rng(base_seed + i * 100_000)
         trials = generate_numbers_trials(
-            rng, NUMBERS_N_PREFIX, NUMBERS_N_REPEATS, NUMBERS_PREFIX_LENGTH, SEQ_LENGTH,
+            rng, n_prefix, n_repeats, NUMBERS_PREFIX_LENGTH, SEQ_LENGTH,
             NUMBERS_MEAN_RANGE, NUMBERS_STD_FIXED, NUMBERS_BOUNDARY_MARGIN,
             NUMBERS_STD_TOLERANCE_FRAC, verbose=False)
-        verify_numbers_trials(trials, NUMBERS_N_PREFIX, NUMBERS_N_REPEATS, SEQ_LENGTH)
+        verify_numbers_trials(trials, n_prefix, n_repeats, SEQ_LENGTH)
         members.append(trials)
         if (i + 1) % 20 == 0 or i == n_pool - 1:
             print(f"  [numbers] {i + 1}/{n_pool} pool members built")
-    return save_pool(members, 'sequences_numbers', pool_dir)
+    return save_pool(members, name, pool_dir)
+
+
+def build_numbers_pool(n_pool, pool_dir, base_seed=0):
+    """Builds all n_pool independent numbers members (fixed design --
+    see NUMBERS_* constants above) in memory, then writes them as ONE
+    file: {pool_dir}/sequences_numbers.json."""
+    return _build_numbers_pool_impl(n_pool, pool_dir, 'sequences_numbers',
+                                     NUMBERS_N_PREFIX, NUMBERS_N_REPEATS, base_seed)
+
+
+def build_test_numbers_pool(n_pool, pool_dir, name, base_seed=0):
+    """Small (TEST_NUMBERS_N_PREFIX x TEST_NUMBERS_N_REPEATS trials/member,
+    default 2x1=2) variant for testing -- see the TEST_* constants' own
+    comment above for why. Written to {pool_dir}/{name}.json."""
+    return _build_numbers_pool_impl(n_pool, pool_dir, name,
+                                     TEST_NUMBERS_N_PREFIX, TEST_NUMBERS_N_REPEATS, base_seed)
+
+
+def _build_colors_pool_impl(n_pool, pool_dir, name, n_trials, base_seed):
+    members = []
+    for i in range(n_pool):
+        rng = make_rng(base_seed + i * 100_000)
+        trials = generate_colors_trials(rng, n_trials, SEQ_LENGTH, COLORS_BLUE_RANGE, verbose=False)
+        verify_colors_trials(trials, n_trials, SEQ_LENGTH)
+        members.append(trials)
+        if (i + 1) % 20 == 0 or i == n_pool - 1:
+            print(f"  [colors] {i + 1}/{n_pool} pool members built")
+    return save_pool(members, name, pool_dir)
 
 
 def build_colors_pool(n_pool, pool_dir, base_seed=50_000):
     """Builds all n_pool independent colors members (fixed design -- see
     COLORS_* constants above) in memory, then writes them as ONE file:
     {pool_dir}/sequences_colors.json."""
-    members = []
-    for i in range(n_pool):
-        rng = make_rng(base_seed + i * 100_000)
-        trials = generate_colors_trials(rng, COLORS_N_TRIALS, SEQ_LENGTH, COLORS_BLUE_RANGE, verbose=False)
-        verify_colors_trials(trials, COLORS_N_TRIALS, SEQ_LENGTH)
-        members.append(trials)
-        if (i + 1) % 20 == 0 or i == n_pool - 1:
-            print(f"  [colors] {i + 1}/{n_pool} pool members built")
-    return save_pool(members, 'sequences_colors', pool_dir)
+    return _build_colors_pool_impl(n_pool, pool_dir, 'sequences_colors', COLORS_N_TRIALS, base_seed)
+
+
+def build_test_colors_pool(n_pool, pool_dir, name, base_seed=50_000):
+    """Small (TEST_COLORS_N_TRIALS trials/member, default 2) variant for
+    testing. Written to {pool_dir}/{name}.json."""
+    return _build_colors_pool_impl(n_pool, pool_dir, name, TEST_COLORS_N_TRIALS, base_seed)
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +443,13 @@ def parse_args():
     p.add_argument('--n_pool', type=int, default=200)
     p.add_argument('--pool_dir', default='.')
     p.add_argument('--base_seed', type=int, default=0)
+    p.add_argument('--name', default=None,
+                   help="If given, builds a SMALL TEST variant "
+                        f"({TEST_NUMBERS_N_PREFIX * TEST_NUMBERS_N_REPEATS} trials/member for numbers, "
+                        f"{TEST_COLORS_N_TRIALS} for colors) instead of the full production pool, written "
+                        "to sequences_<task>_<name>.json (e.g. --name test2trial). Omit for the real "
+                        "production pool (sequences_<task>.json) -- this flag not being passed at all "
+                        "leaves production behavior completely unaffected.")
     return p.parse_args()
 
 
@@ -416,12 +459,24 @@ def main():
     tasks = ['numbers', 'colors'] if args.task == 'both' else [args.task]
 
     if 'numbers' in tasks:
-        print(f"Building numbers pool: {args.n_pool} members -> {args.pool_dir}")
-        build_numbers_pool(args.n_pool, args.pool_dir, base_seed=args.base_seed)
+        if args.name:
+            name = f'sequences_numbers_{args.name}'
+            print(f"Building TEST numbers pool ({TEST_NUMBERS_N_PREFIX}x{TEST_NUMBERS_N_REPEATS} "
+                  f"trials/member): {args.n_pool} members -> {args.pool_dir}/{name}.json")
+            build_test_numbers_pool(args.n_pool, args.pool_dir, name, base_seed=args.base_seed)
+        else:
+            print(f"Building numbers pool: {args.n_pool} members -> {args.pool_dir}")
+            build_numbers_pool(args.n_pool, args.pool_dir, base_seed=args.base_seed)
 
     if 'colors' in tasks:
-        print(f"Building colors pool: {args.n_pool} members -> {args.pool_dir}")
-        build_colors_pool(args.n_pool, args.pool_dir, base_seed=args.base_seed + 50_000)
+        if args.name:
+            name = f'sequences_colors_{args.name}'
+            print(f"Building TEST colors pool ({TEST_COLORS_N_TRIALS} trials/member): "
+                  f"{args.n_pool} members -> {args.pool_dir}/{name}.json")
+            build_test_colors_pool(args.n_pool, args.pool_dir, name, base_seed=args.base_seed + 50_000)
+        else:
+            print(f"Building colors pool: {args.n_pool} members -> {args.pool_dir}")
+            build_colors_pool(args.n_pool, args.pool_dir, base_seed=args.base_seed + 50_000)
 
     print("\nJOB_COMPLETE")
 

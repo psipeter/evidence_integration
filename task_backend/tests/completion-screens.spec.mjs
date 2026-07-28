@@ -4,15 +4,21 @@
 // embedded silently in a redirect URL -- the direct fix for a real bug
 // found during development (a failed redirect would have left a
 // participant with no way to know their own code). Seeds a fully-
-// complete trial loop directly via the API rather than driving 480 real
-// UI interactions through Playwright -- resume.spec.mjs already proves
-// the trial loop itself works; this file only cares about what happens
-// after a session is over.
+// complete trial loop directly via the API rather than driving real UI
+// interactions through Playwright -- resume.spec.mjs and
+// full-session-bonus.spec.mjs already prove the trial loop itself works
+// end to end; this file only cares about what happens after a session
+// is over. N_TRIALS=2 matches the dev servers' 2-trial sequence variant
+// (see playwright.config.mjs) -- seeding a different trial count than
+// what the running client actually sees would trigger a real
+// dataComplete=false mismatch in progress-finish's own sanity check.
 import { test, expect } from '@playwright/test';
 import {
   NUMBERS_URL, testPid, cleanupTestRows,
   seedFullTrialCompletion, callFunction,
 } from './helpers.mjs';
+
+const N_TRIALS = 2;
 
 test.describe('completion screens show a visible code', () => {
   const finishPid = testPid('finish');
@@ -24,11 +30,11 @@ test.describe('completion screens show a visible code', () => {
   });
 
   test('finish path: end screen shows the code + Continue button', async ({ page }) => {
-    await seedFullTrialCompletion(finishPid, 'numbers');
+    await seedFullTrialCompletion(finishPid, 'numbers', 0, N_TRIALS);
 
     await page.goto(`${NUMBERS_URL}?PROLIFIC_PID=${finishPid}`);
     // Fully-complete trial loop -> skips straight to the end screen,
-    // never replays any of the 32 seeded trials.
+    // never replays any of the N_TRIALS seeded trials.
     await expect(page.locator('body[data-screen="end"]')).toBeAttached({ timeout: 15000 });
     await page.click('button.jspsych-btn');
     await page.waitForTimeout(1500);

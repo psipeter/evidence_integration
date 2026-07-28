@@ -19,3 +19,16 @@ bonus_numbers.csv
 bonus_colors.csv
 bonus_*.csv
 .~lock.*#
+
+# Test-variant sequence files (generate_sequences.py --name <suffix>) --
+# gitignored deliberately, not just for tidiness: import.meta.glob's
+# eager mode bundles EVERY matching sequences_*.json file into the build
+# regardless of which one gets selected at runtime, and the GitHub Actions
+# deploy workflow does a fresh checkout + build on every push. If a test
+# variant were committed, it would get baked into every production
+# deploy automatically, with no "remember to delete it first" step even
+# possible in CI. Generate these locally/on-demand instead
+# (`python generate_sequences.py --name test2trial`) -- cheap, fast,
+# deterministic, never needs to touch git at all.
+sequences_numbers_*.json
+sequences_colors_*.json

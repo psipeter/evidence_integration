@@ -574,3 +574,74 @@ noticed before, plus a decision on a few more:
    Prolific study to stop new starts; resume already means nobody loses
    progress if a fix requires a pause) are adequate at this scale.
 
+---
+
+## Small-sequence test variants (generate_sequences.py --name)
+
+Added after a real design flaw was caught in an earlier attempt at a
+full-session test: seeding most of a session directly via the API and
+only driving a few observations for real ends up testing "does my seeded
+data model of the app match the app" more than "does the app actually
+work" -- exactly the kind of thing a real bug in the trial loop could
+slip through undetected. The fix: generate a genuinely small (2-trial)
+sequence file and drive the ENTIRE session through it for real, with
+zero seeding anywhere. Same idea directly enables fast manual testing
+too (locally or through a real Prolific preview), not just automated
+tests.
+
+**`generate_sequences.py --name <suffix>`**: builds a small variant
+(`TEST_NUMBERS_N_PREFIX=2 x TEST_NUMBERS_N_REPEATS=1` = 2 trials for
+numbers, `TEST_COLORS_N_TRIALS=2` for colors) using its OWN separate
+constants, never the production `NUMBERS_*`/`COLORS_*` ones -- gated
+behind the explicit `--name` flag specifically so there's no way to
+accidentally produce a real-shaped production file with a tiny trial
+count, or vice versa. Output: `sequences_<task>_<name>.json` -- omitting
+`--name` leaves production behavior (`sequences_<task>.json`) completely
+unaffected. Verified against real generated output: correct trial count,
+correct distinct qids, correct schema.
+
+**Client side** (`src/numbers|colors/config.js`): `VITE_SEQUENCES_VARIANT`
+env var selects which file to load, via `import.meta.glob` (auto-
+discovers ANY matching `sequences_<task>_*.json` file -- a new variant
+never requires editing these files again, directly solving the "awkward
+rerunning/copying/renaming" pain point from the old JATOS-era workflow).
+Verified live in a real browser: with the variant set, the trial-
+transition screen correctly showed "Trial 1 / 2", confirming the small
+pool is genuinely loaded at runtime, not just that the build succeeded.
+
+**Real tradeoff, deliberately accepted**: `import.meta.glob(..., {eager:
+true})` bundles EVERY matching file at build time regardless of which
+one gets selected at runtime -- confirmed directly (bundle size grew
+~240KB just from the variant file existing on disk during a build).
+Given this, and that the GitHub Actions deploy workflow does a fresh
+checkout + build on every push (no "forgot to delete it" protection
+possible in CI if a variant file were ever committed), **test-variant
+files are gitignored** (`sequences_numbers_*.json` / `sequences_colors_
+*.json` in `.gitignore`) -- generated locally/on-demand, never enter git
+at all. `playwright.config.mjs` generates the `test2trial` variant
+automatically if missing, so the test suite is self-sufficient on a
+fresh checkout with no manual setup step.
+
+**`tests/full-session-bonus.spec.mjs` rewritten** using this -- two
+participants, each driven through a COMPLETE real session (welcome,
+consent, tutorial, both real trials, the genuine `end` screen) with zero
+seeding anywhere, using the `test2trial` variant. Captures the ACTUAL
+`reward` the app computes per real observation (via the real outgoing
+`progress-append` request bodies) rather than trying to hand-predict it
+-- the slider has `step="1"` (confirmed directly), so any fractional
+target response gets silently rounded by the browser itself, making
+exact-value prediction fragile for no real benefit; capturing what the
+app actually computed and verifying it survives intact through to
+`compute_bonus.py`'s output is the property that actually matters.
+Verified: all 10 tests in the full suite pass together (4.7 minutes
+total), including this one and every pre-existing test now running
+against the small variant instead of the 32-trial production pool.
+
+**One coverage gap accepted, not fixed**: with only 2 trials (max 60
+cents raw per participant), `compute_bonus.py`'s $5.00 clip can never
+trigger in this test -- that branch was already verified manually
+earlier this session against real over-$5 smoke-test data (see the
+"Post-buildout review" section's bonus-CSV item above). This test's job
+is full-pipeline integrity at a genuinely real, fast scale, not
+exhaustive coverage of every reward magnitude.
+
