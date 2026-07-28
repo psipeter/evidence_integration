@@ -23,12 +23,11 @@
  */
 import { buildColorsSliderHTMLv2 as buildColorsSliderHTML, initColorsSliderV2 as initColorsSlider } from './slider-colors.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
+import { BLUE as SAMPLE_BLUE, RED as SAMPLE_RED } from './palette.js';
 
-const SAMPLE_BLUE = '#2563eb';
-const SAMPLE_RED  = '#ef4444';
-const FADE_MS     = 1000; // slower than the tutorial's 380ms fade — more
-                          // noticeable in the main task where there's no
-                          // preceding bubbling animation to build anticipation
+const FADE_MS     = 1000; // matches the tutorial's correct-answer-colors.js
+                          // FADE_MS -- same duration, consistent feel between
+                          // tutorial and main task
 
 const info = {
   name: 'observation-colors',
@@ -79,7 +78,7 @@ class ObservationColorsPlugin {
     on_load();
 
     // Fade the circle white → its actual color — purely cosmetic (mirrors the
-    // tutorial's centre-circle fade in colors-draw-animation.js), doesn't gate
+    // tutorial's centre-circle fade in correct-answer-colors.js), doesn't gate
     // interactivity: the timeout clock and slider start immediately below
     // regardless of whether this transition has finished.
     const circle = display_el.querySelector('#obs-circle');

@@ -78,8 +78,8 @@ export function computeRunningMeans(values) {
 /**
  * Colors's analog of computeRunningMeans above -- running PERCENTAGE
  * (0-100 scale, matching the response slider's own scale) of +1 ("blue")
- * draws among values[0..i], for each i. +1/-1 is urn-colors.js's own
- * value encoding (1 = blue, -1 = red).
+ * draws among values[0..i], for each i. +1/-1 is this task's own value
+ * encoding (1 = blue, -1 = red).
  * @param {number[]} values  one trial's raw observed values (+1/-1), in order
  * @returns {number[]} running percentage of +1 values, 0-100 scale
  */

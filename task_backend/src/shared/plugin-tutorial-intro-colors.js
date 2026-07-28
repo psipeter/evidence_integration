@@ -1,8 +1,7 @@
 import { buildCorrectAnswerColorsHTML, renderCorrectAnswerColors, FADE_MS } from './correct-answer-colors.js';
 import { buildColorsSliderHTMLv2 as buildColorsSliderHTML, initColorsSliderV2 as initColorsSlider } from './slider-colors.js';
-import { SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
 import { buildTrackerHTML } from './tutorial-tracker.js';
-import { BOX0, BOX0B, BOX1, BOX2 } from './tutorial-text-colors.js';
+import { BOX0, BOX0B, BOX1, BOX2, SAMPLE_BLUE, SAMPLE_RED } from './tutorial-text-colors.js';
 /**
  * plugin-tutorial-intro-colors.js
  * Obs 1 of the colors tutorial — progressive reveal via click, redesigned
@@ -30,11 +29,12 @@ import { BOX0, BOX0B, BOX1, BOX2 } from './tutorial-text-colors.js';
  * sequence longer than one value.
  *
  * The right panel's middle box used to show a blue/red bar + a bubbling-
- * then-reveal draw animation (urn-colors.js's buildUrnSVG +
- * colors-draw-animation.js, the latter deleted this session -- still
- * under task/ if this ever needs reverting), then revealed via its OWN
- * separate click step -- also removed this session, per the three-click
- * redesign above.
+ * then-reveal draw animation (tutorial-text-colors.js's own
+ * SAMPLE_BLUE/SAMPLE_RED used to come via a separate urn-colors.js's
+ * buildUrnSVG + colors-draw-animation.js, the latter deleted this
+ * session -- still under task/ if this ever needs reverting), then
+ * revealed via its OWN separate click step -- also removed this session,
+ * per the three-click redesign above.
  *
  * Both right-column boxes show a "..." placeholder (matching the left
  * column's own locked-box convention) until their real content is

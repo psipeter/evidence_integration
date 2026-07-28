@@ -56,10 +56,11 @@
  * the ball colors, so a fourth, previously-unused color was needed.
  */
 import { computeRunningRatios } from './scoring.js';
+import { BLUE, RED, GREEN } from './palette.js';
 
-const SAMPLE_BLUE  = '#2563eb';
-const SAMPLE_RED   = '#ef4444';
-const DIST_COLOR   = '#16a34a';
+const SAMPLE_BLUE  = BLUE;
+const SAMPLE_RED   = RED;
+const DIST_COLOR   = GREEN;
 const ERROR_VIOLET = '#9333ea';
 
 const OBS_R     = 5;    // observation circle radius

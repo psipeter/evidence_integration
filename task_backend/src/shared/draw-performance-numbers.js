@@ -39,15 +39,15 @@
  * gone now; shrunk back down since there's nothing needing extra margin.
  */
 import { computeRunningMeans } from './scoring.js';
+import { RED, BLUE, GREEN } from './palette.js';
 
 export const normalPDF = (x, mu, sigma) =>
   Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
 
-export const SAMPLE_RED   = '#ef4444';
-export const MEAN_BLUE    = '#2563eb';
-export const ERROR_GREEN  = '#16a34a';
+export const SAMPLE_RED   = RED;
+export const MEAN_BLUE    = BLUE;
+export const ERROR_GREEN  = GREEN;
 export const COIN_FILL    = '#f59e0b';
-export const COIN_STROKE  = '#92400e';
 
 const BAR_H_OBS  = 4;    // height of each obs row (thin)
 const ROW_GAP    = 3;    // gap between obs rows
@@ -80,23 +80,6 @@ const _errorLine = (xEst, xMean, y, h) =>
 const _estCircle = (x, y, h) =>
   `<circle cx="${x}" cy="${y + h / 2}" r="${EST_R}"
      fill="#222"/>`;
-
-/**
- * A single stylized coin glyph, as a standalone inline SVG (not tied to
- * this file's row/legend coordinate system) -- used by the new total-
- * error/reward box on both summary screens (plugin-trial-summary-
- * numbers.js / plugin-tutorial-summary-numbers.js), NOT inside the
- * plot itself.
- */
-export function coinGlyph(size = 14) {
-  const r = size / 2 - 1;
-  const c = size / 2;
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"
-    style="vertical-align:middle;">
-    <circle cx="${c}" cy="${c}" r="${r}" fill="${COIN_FILL}" stroke="${COIN_STROKE}" stroke-width="0.8"/>
-    <circle cx="${c}" cy="${c}" r="${r * 0.55}" fill="none" stroke="${COIN_STROKE}" stroke-width="0.5" opacity="0.6"/>
-  </svg>`;
-}
 
 export const buildPerformanceSVG = (mu, sigma, values, responses, errorMode = 'true_mean') => {
   const vals  = values    || [];

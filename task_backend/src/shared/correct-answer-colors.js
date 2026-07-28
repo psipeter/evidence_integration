@@ -1,7 +1,9 @@
 /**
  * correct-answer-colors.js
- * Replaces urn-colors.js's buildUrnSVG (tutorial usage only -- urn-colors.js
- * itself stays, its color constants are still used elsewhere) +
+ * Replaces urn-colors.js's buildUrnSVG (that file's remaining color
+ * constants later folded into tutorial-text-colors.js during a cleanup
+ * pass, for symmetry with numbers not having an equivalent separate
+ * file at all -- urn-colors.js itself no longer exists) +
  * colors-draw-animation.js entirely (colors-draw-animation.js deleted this
  * session -- still under task/ if this ever needs reverting). The old bar
  * + bubbling-then-reveal animation taught the FIXED true_p (a value the
@@ -32,7 +34,7 @@
  * is shown as text, or left as a visual-only bar split. Same flag/
  * rationale as correct-answer-numbers.js's identical constant.
  */
-import { SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
+import { SAMPLE_BLUE, SAMPLE_RED } from './tutorial-text-colors.js';
 
 export const SHOW_EXACT_VALUE = false;
 export const FADE_MS = 1000;

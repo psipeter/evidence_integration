@@ -20,17 +20,22 @@
  * module's own docstring for why).
  *
  * The right column's middle box used to show a blue/red bar + a bubbling-
- * then-reveal draw animation, teaching the FIXED true_p (urn-colors.js's
- * buildUrnSVG + colors-draw-animation.js, the latter deleted this session
- * -- still under task/ if this ever needs reverting). Replaced entirely
- * with correct-answer-colors.js's bar+dots design: a bar that SLIDES to
- * the RUNNING blue-proportion's split point each time a new observation
- * arrives, with a dot per observation. Mirrors the identical fix already
- * applied to plugin-tutorial-observation-numbers.js: the real task scores
- * against the running proportion (config-base.js's colors override,
- * ERROR_MODE: 'running_p'), not the fixed true_p the old figure taught --
- * and removes an artificial ~1s "wait for the bubbles" delay that existed
- * for every phase, not just the ones later hidden behind an overlay.
+ * then-reveal draw animation, teaching the FIXED true_p (a separate
+ * urn-colors.js's buildUrnSVG + colors-draw-animation.js, the latter
+ * deleted this session -- still under task/ if this ever needs
+ * reverting; SAMPLE_BLUE/SAMPLE_RED now come from tutorial-text-
+ * colors.js directly, which folded urn-colors.js's remaining color
+ * constants into itself during a later cleanup pass, for symmetry with
+ * numbers not having an equivalent separate file at all). Replaced
+ * entirely with correct-answer-colors.js's bar+dots design: a bar that
+ * SLIDES to the RUNNING blue-proportion's split point each time a new
+ * observation arrives, with a dot per observation. Mirrors the identical
+ * fix already applied to plugin-tutorial-observation-numbers.js: the
+ * real task scores against the running proportion (config-base.js's
+ * colors override, ERROR_MODE: 'running_p'), not the fixed true_p the
+ * old figure taught -- and removes an artificial ~1s "wait for the
+ * bubbles" delay that existed for every phase, not just the ones later
+ * hidden behind an overlay.
  *
  * FIVE PHASES (A, B, C, D, E -- mirrors plugin-tutorial-observation-
  * numbers.js's identically-named/ranged phases), by obs_num -- each phase
@@ -100,10 +105,9 @@
 
 import { buildColorsSliderHTMLv2 as buildColorsSliderHTML, initColorsSliderV2 as initColorsSlider } from './slider-colors.js';
 import { buildCorrectAnswerColorsHTML, renderCorrectAnswerColors, FADE_MS } from './correct-answer-colors.js';
-import { SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
 import { buildTrackerHTML } from './tutorial-tracker.js';
-import { BOX0, BOX0B, BOX1, BOX2, RECAP_TEXT_1, RECAP_TEXT_2, SLIDER_REMINDER } from './tutorial-text-colors.js';
+import { BOX0, BOX0B, BOX1, BOX2, RECAP_TEXT_1, RECAP_TEXT_2, SLIDER_REMINDER, SAMPLE_BLUE, SAMPLE_RED } from './tutorial-text-colors.js';
 
 const info = {
   name: 'tutorial-observation-colors',

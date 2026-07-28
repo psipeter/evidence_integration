@@ -393,8 +393,8 @@ input[type="range"].slider-last::-moz-range-thumb {
    that floated "0"/"100" in a separate row pinned to the BOTTOM of the
    whole (much taller) box. That reserved real vertical space the box
    didn't actually need to spend just for two static end labels --
-   compacting them onto the bar is what let .correct-answer-box-short
-   below shrink the box significantly without losing them. */
+   compacting them onto the bar is what let the box shrink significantly
+   (see .numbers-tutorial-box below) without losing them. */
 .correct-answer-endtick {
   position: absolute;
   top: 50%;
@@ -595,101 +595,52 @@ input[type="range"].slider-last::-moz-range-thumb {
   text-align: center;
 }
 
-/* Right column's ROTATING top box only (chat history, plugin-tutorial-
-   {intro,observation}-{numbers,colors}.js's phase system) -- fixes its
-   height so the box's own flex-basis stops tracking its (phase-dependent,
-   variable-length) text content. Without this, `.tutorial-info-block`'s
-   plain `flex:1` let this ONE box grow/shrink the whole right-hand column
-   -- and therefore the whole row's height, since `.tutorial-top-row` uses
-   align-items:stretch -- every time the phase's text got longer or
-   shorter, visibly shifting the slider's vertical position beneath it.
-   `flex: 0 0 <height>` (not `min-height`) is what actually fixes this --
-   flex-basis overrides height/min-height along a column flex container's
-   main axis, so a plain `height` rule alone would have had no effect here.
-   `overflow: hidden` is NOT just a safety margin -- flex items have an
-   "automatic minimum size" (min-height:auto) that, by spec, is based on
-   their CONTENT'S size whenever overflow is visible, which can force a
-   flex-basis-0-flex-grow-0 item taller anyway if its content doesn't fit
-   (confirmed as a real, not just theoretical, cause of resizing here --
-   chat history). Setting any non-visible overflow makes the browser
-   resolve that automatic minimum to 0 instead, so this flex-basis is
-   FINALLY actually fixed regardless of text length -- excess text is
-   clipped rather than growing the box. Applied to EVERY phase's box (not
-   just the longer ones) so obs 1's fixed intro text and phase A's short
-   default sit at the exact same height as phases B-E's longer text,
-   rather than only some of them matching.
-   `clamp(min, Nvh, max)` (not a flat rem value) -- chat history: the
-   viewport can vary a lot across browsers/platforms/window sizes, so a
-   flat rem value that happens to look right at one window size can be
-   too cramped or too roomy at another. clamp() lets this track the
-   ACTUAL available vertical space (vh) while still guaranteeing sane
-   floor/ceiling bounds, matching the exact pattern already used
-   elsewhere in this file (e.g. .consent-outer's height:
-   clamp(400px,75vh,800px)) rather than introducing a new convention.
-   This re-resolves cleanly on window resize too, unlike a flat rem
-   value, without reintroducing any content-driven measurement (it's
-   still pure CSS, resolved at layout time -- no flash-then-resize risk).
-   Sized generously for the longest current text at the full 1.4rem
-   .tutorial-info-block size (all phases now share that size, no
-   per-phase override -- see .tutorial-notify-yellow/red/blue's own
-   comment); shrink the font-size here (not on the color classes) if a
-   future phase's text needs trimming instead of clipping. */
+/* Right column's ROTATING top box only (plugin-tutorial-{intro,
+   observation}-{numbers,colors}.js's phase system) -- its own flex-basis
+   used to fix this box's height directly here (a plain clamp()), but
+   BOTH tasks now always pair this class with their own task-specific
+   override (.numbers-tutorial-box/.colors-tutorial-box, see that
+   class's own comment above) whose higher specificity wins for `flex`/
+   `overflow` regardless -- confirmed directly (computed flex-basis
+   matches the override's 18vh, not this rule's old clamp value). Only
+   `font-size` is still uniquely provided here, since neither override
+   touches it. */
 .tutorial-right-top-box {
-  flex: 0 0 clamp(6rem, 9vh, 8.5rem);
-  overflow: hidden;
   /* Reduced from the 1.4rem this would otherwise inherit from
-     .tutorial-info-block (chat history) -- an earlier revision
-     deliberately matched that 1.4rem for uniformity across phases, but at
-     that size the box felt cramped/dominant relative to the rest of the
-     right column; sizing it here (not per-color-class -- see
-     .tutorial-notify-yellow/red/blue's own comment) keeps the
-     uniform-across-all-phases property while just being smaller overall. */
+     .tutorial-info-block -- at that size the box felt cramped/dominant
+     relative to the rest of the right column; sizing it here (not
+     per-color-class -- see .tutorial-notify-yellow/red/blue's own
+     comment) keeps the uniform-across-all-phases property while just
+     being smaller overall. */
   font-size: 1.1rem;
 }
 
-/* Right column's KDE/urn figure box (chat history, this session --
-   REPLACES an earlier single merged .tutorial-right-bottom-box that
-   shared one budget between this and the tracker below; un-merged again
-   per explicit direction, since sharing a budget squeezed this box too
-   small to read comfortably). Same fixed-size mechanism as
-   .tutorial-right-top-box above (flex:0 0 <clamp> + overflow:hidden --
-   see that rule's own comment for the full flex-quirk rationale); giving
-   THIS box its own independent, generous budget rather than merging it
-   with the tracker is what actually fixes the size-vs-readability
-   tradeoff -- the two boxes no longer negotiate space with each other at
-   all. Phase E's clock canvas (see plugin-tutorial-{observation}-
-   {numbers,colors}.js) is sized to comfortably fit well inside this
-   box's floor value, not the other way around -- the box's size is
-   chosen for what makes the KDE/urn figure legible, and the clock is
-   sized to match, rather than shrinking the clock to fit an
-   under-sized box the way an earlier revision did. */
+/* Right column's image/urn/correct-answer box (shared by BOTH tasks'
+   tutorials). Currently EVERY usage across both tasks also applies a
+   task-specific override (.numbers-tutorial-box/.colors-tutorial-box,
+   see their own comment above) that's what actually sets this box's
+   height -- this base rule only carries `position:relative` (the reveal
+   overlays' positioning anchor) now. Kept as a real class rather than
+   folded into the overrides, since a future revision could still use it
+   alone -- in which case it would fall back to auto/content-driven
+   sizing rather than any specific height, worth remembering if that
+   ever happens. */
 .tutorial-right-image-box {
   position: relative;
-  flex: 0 0 clamp(11rem, 18vh, 16rem);
-  overflow: hidden;
 }
 
-/* Right column's tracker box (chat history, this session -- the other
-   half of the un-merged former .tutorial-right-bottom-box; see
-   .tutorial-right-image-box's own comment above for why they're
-   independent now). Same fixed-size mechanism, just a much smaller
-   budget -- the tracker's own content (a single row of numbers/dots)
-   never needed much room even before any of this session's changes.
-   display:flex + justify-content:center (chat history) -- without this,
-   the tracker row (a plain block-level child, #tut-tracker or
-   .tut-tracker-row depending on which plugin wires it -- see
-   plugin-tutorial-{intro,observation}-{numbers,colors}.js) just sits
-   at the TOP of this now-fixed-height box via normal block flow, leaving
-   the row visibly not centered (all the box's slack space ends up below
-   it instead of split evenly above/below) -- reported directly as "balls
-   aren't vertically centered". flex-direction:column (not row) is what
-   makes justify-content:center act on the VERTICAL axis here; the
-   child's own width still fills normally via column flex's default
-   align-items:stretch, so nothing about the row's horizontal layout
-   changes. */
+/* Right column's tracker box (shared by BOTH tasks' tutorials, same
+   height-delegation note as .tutorial-right-image-box above). Unlike
+   that box, this one's `display:flex; flex-direction:column;
+   justify-content:center;` are NOT overridden by either task-specific
+   class (which only ever sets `flex`/`overflow`) -- so those three
+   properties stay here, genuinely load-bearing: without them the
+   tracker row (a plain block-level child) sits at the TOP of the box via
+   normal block flow rather than vertically centered, which was reported
+   directly as "balls aren't vertically centered" the first time this
+   box existed without them. */
 .tutorial-right-tracker-box {
   position: relative;
-  flex: 0 0 clamp(3.5rem, 6vh, 4.5rem);
   overflow: hidden;
   display: flex;
   flex-direction: column;

@@ -8,7 +8,7 @@
 
 import { buildSummaryBarSVG } from './draw-performance-colors.js';
 import { COIN_FILL, ERROR_GREEN } from './draw-performance-numbers.js';
-import { DIST_COLOR } from './urn-colors.js';
+import { DIST_COLOR } from './tutorial-text-colors.js';
 
 const info = {
   name: 'tutorial-summary-colors',

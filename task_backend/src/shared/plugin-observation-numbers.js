@@ -23,9 +23,10 @@
  */
 import { buildSliderHTML, initSlider } from './slider-numbers.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
+import { RED as SAMPLE_COLOR } from './palette.js';
 
-const FADE_MS = 1000; // mirrors the tutorial's numbers-draw-animation.js
-                       // fade-in, for a consistent feel between tutorial and
+const FADE_MS = 1000; // mirrors the tutorial's correct-answer-numbers.js
+                       // FADE_MS, for a consistent feel between tutorial and
                        // main task (same duration as plugin-observation-colors.js's
                        // circle fade too)
 
@@ -62,7 +63,7 @@ class ObservationNumbersPlugin {
     display_el.innerHTML = `
       <canvas id="timeout-clock" class="timeout-clock" width="88" height="88"></canvas>
       <div class="obs-wrap">
-        <div id="stimulus-display" class="stimulus-number" style="color:#ef4444;opacity:0;">${value}</div>
+        <div id="stimulus-display" class="stimulus-number" style="color:${SAMPLE_COLOR};opacity:0;">${value}</div>
         ${buildSliderHTML({ unset, initPos: resolvedInitPos, showValue: show_value })}
       </div>
       <div style="text-align:center;">
@@ -76,7 +77,7 @@ class ObservationNumbersPlugin {
     on_load();
 
     // Fade the number in — purely cosmetic (mirrors the tutorial's centre-
-    // number fade in numbers-draw-animation.js), doesn't gate
+    // number fade in correct-answer-numbers.js), doesn't gate
     // interactivity: the timeout clock and slider start immediately below
     // regardless of whether this transition has finished.
     const stimulus = display_el.querySelector('#stimulus-display');

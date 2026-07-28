@@ -801,3 +801,111 @@ leaned on precise element geometry/computed style as the primary
 evidence, with screenshots as a secondary, lower-confidence sanity check
 rather than the main source of truth.
 
+
+---
+
+## Codebase cleanup pass (post-tutorial-redesign)
+
+After the "Correct answer" panel redesign (previous section) left a lot of
+now-inapplicable comments/exports scattered around, asked for a thorough
+cleanup: remove dead code and stale comments referencing methods no longer
+in use, then consider further consolidation/renaming. Two-part effort,
+tackled in that order.
+
+### Part 1: dead code removal -- DONE
+
+Verified via a full sweep of every exported symbol against the WHOLE
+`src/` tree (not just `shared/` -- an early version of this check was
+wrongly scoped and produced false positives for `pickTutorialExample`/
+`buildConfig`, which are used in `numbers/config.js`/`colors/config.js`).
+
+Removed:
+- `urn-colors.js`: `buildUrnSVG`, `LAYOUT`, `DIM_BLUE`, `DIM_RED` -- all
+  only used by the tutorial's old bar-drawing code (deleted the session
+  before this one). File was reduced to 3 color constants, then later
+  folded away entirely (see Part 2).
+- `tutorial-text-colors.js` / `tutorial-text-numbers.js`: `URN_CAPTION` /
+  `DIST_CAPTION` (both dead, both had admitted as much in their own
+  "pending a later pass" comments -- that pass never happened) and
+  `WARNING_YELLOW` (dead in both files).
+- `draw-performance-numbers.js`: `coinGlyph` (never called anywhere, not
+  even internally -- confirmed only its own declaration existed) and
+  `COIN_STROKE` (only used inside the now-deleted `coinGlyph`).
+- Fixed every docstring caught pointing at deleted files/functions
+  (`buildHintHTML`, `distribution-numbers.js`, etc.) or describing CSS
+  values that no longer apply.
+- CSS: found (and confirmed EMPIRICALLY via computed-style checks in a
+  real browser, not just reasoning about specificity) that
+  `.tutorial-right-image-box`/`.tutorial-right-tracker-box`/
+  `.tutorial-right-top-box`'s own `flex`/`overflow` rules are now ALWAYS
+  overridden by the newer `.numbers-tutorial-box`/`.colors-tutorial-box`
+  classes (2-class selectors beat 1-class ones, and every current usage
+  pairs them) -- trimmed the dead lines and the comments explaining
+  reasoning that no longer applies. Fixed two stale comment references to
+  classes renamed away earlier in the redesign
+  (`.correct-answer-box-short`, `.tutorial-right-bottom-box`).
+
+### Part 2: consolidation -- DONE (one significant finding), IN PROGRESS (broader pass)
+
+**Found and fixed**: the same 3 hex colors (`#2563eb` blue / `#ef4444`
+red / `#16a34a` green) were independently redeclared as "canonical"
+named constants in 5+ different files -- `tutorial-text-numbers.js`'s
+GOAL_COLOR/SAMPLE_COLOR/DIST_COLOR, the old `urn-colors.js`'s
+SAMPLE_BLUE/SAMPLE_RED/DIST_COLOR, `draw-performance-numbers.js`'s
+MEAN_BLUE/SAMPLE_RED/ERROR_GREEN, `draw-performance-colors.js`'s own
+local SAMPLE_BLUE/SAMPLE_RED/DIST_COLOR, plus `plugin-observation-
+numbers.js` hardcoding the red inline and `plugin-observation-colors.js`
+redeclaring blue/red locally instead of importing its own task's
+existing canonical source.
+
+New `palette.js` is now the ONE underlying source (`BLUE`/`RED`/`GREEN`).
+Every one of the files above now imports from it, keeping its own
+semantically-named local alias (e.g. numbers's GOAL_COLOR vs colors's
+SAMPLE_BLUE for the identical hex value) -- this fixes there being one
+underlying value per color, not that every file must call it the same
+thing. Deliberately did NOT extend this to the more incidental one-off
+uses of the same hex values (`plugin-iti-clock.js`'s clock rendering,
+`create-terminate-session.js`'s "Too slow" message, `slider-colors.js`'s
+ruler bands, `observation-timeout-clock.js`'s warning color,
+`tutorial-tracker.js`'s default parameter) -- those are standalone UI-
+styling choices that happen to reuse the same brand colors, not
+canonical named constants multiple files were each separately trying to
+own; touching all of those too would be a much bigger, lower-value
+refactor. Revisit only if a real inconsistency (not just a style
+preference) surfaces there too.
+
+Went one step further: `urn-colors.js`, once stripped to just 3 re-
+exported constants, was folded directly INTO `tutorial-text-colors.js`
+and deleted entirely -- numbers never had an equivalent separate color
+file (its colors are defined directly in `tutorial-text-numbers.js`), so
+this gives both tasks the exact same file structure. Redirected all 4
+remaining importers (`correct-answer-colors.js`, `plugin-tutorial-intro-
+colors.js`, `plugin-tutorial-observation-colors.js`, `plugin-tutorial-
+summary-colors.js`), merging duplicate import lines where a file was
+already importing separately from both. Verified: zero dangling
+imports, every touched file syntax-checks clean.
+
+**Outstanding from this pass** (left exactly where the previous session
+ended, for whoever picks this back up):
+1. **Naming question, not yet resolved**: `plugin-inter-trial.js` (the
+   "Trial X / 40, generating new sequence…" between-trials reset screen)
+   vs `plugin-iti-clock.js` -- "inter-trial" vs "ITI" (the standard
+   abbreviation for the identical term) used inconsistently across two
+   filenames. Had just re-read `plugin-inter-trial.js` (confirmed: the
+   reset screen) but had NOT yet read `plugin-iti-clock.js` to determine
+   whether it's a genuinely separate concept (names fine as-is) or the
+   same thing named two different ways (one should be renamed for
+   consistency) before running out of room in that session.
+2. **`phases.js`** -- not yet opened/reviewed at all this pass.
+3. **Broader naming-consistency pass** not yet done: whether `build-*.js`
+   vs `plugin-*.js` naming holds up consistently throughout, and whether
+   any OTHER file has the same kind of duplicated-canonical-constant
+   pattern the color consolidation just fixed (the color case was found
+   by deliberately checking; nothing guarantees it's the only instance).
+4. **Nothing has been tested since this whole cleanup/consolidation pass
+   began** -- explicitly deferred; testing happens only when asked for
+   directly, not proactively during this pass. This includes the color
+   consolidation, which touched 9 files and deleted one -- real risk
+   surface that hasn't been exercised in a browser at all yet, despite
+   every individual file syntax-checking clean.
+

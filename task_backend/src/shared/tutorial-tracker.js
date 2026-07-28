@@ -1,11 +1,9 @@
 /**
  * tutorial-tracker.js
  * Row of N slots showing progress through the tutorial's illustrative
- * 15-observation sequence -- rendered as its own DOM row directly between
- * the distribution SVG and its caption (see plugin-tutorial-intro-
- * numbers.js / plugin-tutorial-observation-numbers.js), NOT inside
- * distribution-numbers.js's own SVG coordinate system, since this is a
- * separate flex row, not part of that plot.
+ * 15-observation sequence -- rendered as its own box in the right column
+ * ("Sequence history", see plugin-tutorial-{intro,observation}-
+ * {numbers,colors}.js), separate from the correct-answer panel above it.
  *
  * Added specifically to address a real pattern flagged from real pilot
  * data (chat history, chat #13): participants copying the raw stimulus
@@ -32,11 +30,11 @@
  *                wants it to appear in sync with a reveal animation's own
  *                timing rather than instantly on render -- see
  *                plugin-tutorial-observation-{numbers,colors}.js's own
- *                revealTrackerNum/revealTrackerDot helpers (numbers's
- *                intro plugin no longer has an equivalent staged reveal
- *                for this at all -- the tracker box stays fully hidden
- *                for all of obs 1 regardless of this flag, see that
- *                file's own docstring for why, redesigned this session).
+ *                revealTrackerNum/revealTrackerDot helpers (NEITHER
+ *                intro plugin has an equivalent staged reveal for this
+ *                at all -- the tracker box stays fully hidden for all of
+ *                obs 1 in both tasks, see those files' own docstrings
+ *                for why).
  *   obsNum+1..nObs (EMPTY) -- invisible placeholder (transparent text/
  *                circle, same footprint) -- so the remaining count is
  *                still visible at a glance via the settled/current slots'
@@ -52,8 +50,7 @@
  * so text would be redundant here in a way it wasn't for numbers's
  * numeric values. Both modes share the exact same settled/current/empty
  * state logic and the same #tut-tracker-current-num id for the
- * reveal-timing wiring (numbers-draw-animation.js's onReveal /
- * colors-draw-animation.js's own equivalent).
+ * reveal-timing wiring described above.
  */
 
 export function buildTrackerHTML({ nObs, obsNum, values, color = '#ef4444', revealCurrent = true, renderDot = false }) {
