@@ -626,12 +626,11 @@ before).
 
 ### Future architecture: moving off JATOS's participant-tracking layer
 
-**Built and tested; hosting deployment in progress** -- see CLAUDE.md's
-"Pilot #3 real-participant incidents..." and "Own-backend decision
-(Supabase)" sections, and `task_backend/TODO.md` (the actively-maintained
-build doc, supersedes CLAUDE.md's own "Architecture"/"Next steps" plan
-for this), for the full investigation and current status; this is a
-pointer, not the detail. Short version: two real pilot #3 participants
+**Built, tested, and live** -- see CLAUDE.md's "Pilot #3 real-
+participant incidents..." and "Own-backend decision (Supabase)" sections,
+and `task_backend/TODO.md` (the actively-maintained build doc, supersedes
+CLAUDE.md's own "Architecture"/"Next steps" plan for this), for the full
+investigation and current status; this is a pointer, not the detail. Short version: two real pilot #3 participants
 hit genuine JATOS-level failures (a reload-triggered session loss, and a
 GeneralSingle cookie/link-prefetch collision blocking a legitimate first
 attempt), plus a confirmed, empirically-tested gap where per-trial saves
@@ -652,15 +651,15 @@ per-screen save hook was dropped entirely in favor of checkpointing only
 the 3-4 phases that actually matter for resume, and sequence generation
 was consolidated from five scripts down to one
 (`task_backend/generate_sequences.py`) with the dead/unused methods
-removed. Verified end-to-end against the real deployed backend (not
-mocked): trial-boundary resume across a real reload, the timeout-retry/
-`attempt` mechanism, and all three session-ending screens showing a
-visible, redirect-independent completion code. Still open: a persistent
-automated test suite (everything verified so far was one-off scripts),
-a weekly database backup process, and finishing the hosting deployment
-(GitHub Pages, decided and prepped, not yet live -- see
-`task_backend/TODO.md`'s "Hosting" section, including the discovery that
-hosting was never actually part of the original plan at all).
+removed. Verified end-to-end against the real deployed backend AND the
+real deployed site (not mocked, not just localhost): trial-boundary
+resume across a real reload, the timeout-retry/`attempt` mechanism, and
+all three session-ending screens showing a visible, redirect-independent
+completion code -- confirmed both on the local dev server and on the
+live GitHub Pages URL. Still open: a persistent automated test suite
+(everything verified so far was one-off scripts) and a weekly database
+backup process -- see `task_backend/TODO.md`'s "Status note for future
+sessions" for the current, exact list.
 
 ### Prolific rollout plan
 

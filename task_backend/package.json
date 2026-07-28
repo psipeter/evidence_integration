@@ -9,7 +9,8 @@
     "build": "vite build",
     "build:numbers": "vite build --mode numbers",
     "build:colors": "vite build --mode colors",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +22,7 @@
     "vite": "^6.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "playwright": "^1.62.0",
     "supabase": "^2.109.1"
   }

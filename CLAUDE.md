@@ -1573,15 +1573,14 @@ actively-maintained build doc -- read that instead of treating what
 follows as current. The Supabase backend and the full `task_backend/`
 client port are built, deployed, and verified end-to-end against the real
 database, including trial-boundary resume, the timeout-retry/`attempt`
-path, and all three session-ending screens. The `task/` JATOS pipeline
-described everywhere else in this file remains completely untouched and
-live as the fallback throughout. `task_backend/TODO.md`'s "Status note
-for future sessions" (bottom of that file) has the current, exact list of
-what's still open -- as of the last update: a persistent test suite, the
-weekly backup process, and finishing the hosting deployment (repo is now
-public; GitHub Pages decided, workflow prepped, not yet live -- see that
-doc's "Hosting" section for the full story, including why hosting wasn't
-part of the original plan at all).**
+path, and all three session-ending screens. The site itself is now live
+on GitHub Pages (repo made public for this), verified against the real
+deployed URL, not just localhost. The `task/` JATOS pipeline described
+everywhere else in this file remains completely untouched and live as
+the fallback throughout. `task_backend/TODO.md`'s "Status note for
+future sessions" (bottom of that file) has the current, exact list of
+what's still open -- as of the last update: a persistent test suite and
+the weekly backup process, nothing else.**
 
 **Why not the hosted alternatives** (full investigation above; summary
 for quick reference):

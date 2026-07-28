@@ -3,3 +3,6 @@ dist/
 dist-numbers/
 dist-colors/
 .env
+.env.test
+test-results/
+playwright-report/

@@ -165,6 +165,14 @@ alter table events enable row level security;
 -- nothing (verified via curl in step 2); service_role needs exactly this:
 grant select, insert, update on public.events to service_role;
 grant usage, select on sequence public.events_id_seq to service_role;
+
+-- SAME GAP, FOUND AGAIN LATER (building the test suite): none of the
+-- Edge Functions ever issue a DELETE, so this went unnoticed until the
+-- test suite's own cleanup step (a DIRECT DELETE against the REST API
+-- using the secret key, for removing test rows -- see tests/helpers.mjs's
+-- cleanupTestRows) hit a real 403. Same root cause as above, just a
+-- privilege nothing had exercised yet:
+grant delete on public.events to service_role;
 ```
 
 ---
@@ -265,8 +273,14 @@ instead. A blind find-and-replace will get this wrong; fix it by hand.
    network call under the new schema). `jatos-shim.js` and `PROLIFIC_CODES`
    no longer exist client-side at all -- the server hands back the code
    directly from `progress-finish`.
-5. **Not yet done**: set up the weekly backup process (manual reminder or
-   scripted `pg_dump`).
+5. ~~Set up the weekly backup process~~ -- DECIDED AGAINST: no scheduled/
+   automated backup. Instead, manual backup on demand once real
+   participant data actually exists in the table (ask Claude for the
+   exact steps at that point -- a `pg_dump` against the project's
+   connection string, or the dashboard's own backup/export feature,
+   whichever is simpler at the time). Revisit this decision if data
+   volume or collection duration ever makes "manual, occasional" feel
+   inadequate.
 6. ~~Test the three failure modes directly~~ — (a) and (b) now fully done;
    (c) still open, see below.
    - **(a) mid-session resume, including a real trial-boundary case**: DONE,
@@ -410,11 +424,26 @@ repo secrets (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` -- see
 Actions"** set once in the GitHub UI -- neither is scriptable from this
 repo, both are one-time manual steps.
 
-**Not yet done**: the two repo secrets and the Pages source setting
-haven't actually been set yet, so nothing has deployed for real. The
-workflow file exists and the local build is verified, but the *actual
-deployed* site (as opposed to local `npm run dev`) has never been loaded
-in a browser. Verify that once the one-time GitHub setup is done.
+**Verified live** (this session): the deployed site returns `200` at both
+`https://psipeter.github.io/evidence_integration/index-numbers.html` and
+`.../index-colors.html`, including the JS bundle itself (not a 404) --
+confirming the `/evidence_integration/` base path resolved correctly at
+build time. A real browser test against the live (not local-dev) site
+confirmed the backend calls succeed too (the two secrets baked in
+correctly, not `undefined`) and that reload/resume works end-to-end on
+the actual deployed URL, not just localhost.
+
+One real point of confusion hit during that verification, worth
+recording since it'll recur: a close-tab-then-reopen test using the
+**bare** URL (no `?PROLIFIC_PID=`) looked like a resume failure (landed
+back on welcome) but wasn't one -- the dev/local fallback
+(`dev_${Date.now()}`) deliberately mints a NEW, different participant ID
+every page load with no query param present, specifically so repeated
+local test runs don't collide with each other's rows. `progress-check`
+correctly reported "new" for what was, from the server's perspective,
+genuinely a brand-new participant both times. Testing resume on any
+deployment (live or local) requires reusing the SAME explicit
+`?PROLIFIC_PID=` value across both loads.
 
 ---
 
@@ -430,15 +459,27 @@ participant) showing the correct visible completion code. `CLAUDE.md`'s
 "Own-backend decision (Supabase)" section already points here; no
 further doc pointer needed.
 
-Three things remain genuinely open, none blocking the others:
-1. **A persistent, re-runnable test suite.** Everything verified above was
-   a throwaway one-off script, written, run once, deleted. Agreed to
-   build a real suite (`@playwright/test`, a `tests/` directory,
-   self-cleaning via a local-only secret key) but this hasn't been built
-   yet -- still just an agreement, not code.
-2. **The weekly backup process** (`Next steps` item 5) -- not started.
-3. **Hosting deployment** (`Hosting` section above) -- decided (GitHub
-   Pages) and prepped (workflow file, build config), but not yet live --
-   the two repo secrets and the Pages source setting are one-time manual
-   GitHub-UI steps nobody has done yet.
+Two things remain genuinely open, neither blocking the other:
+1. ~~A persistent, re-runnable test suite.~~ DONE -- `task_backend/tests/`
+   (`@playwright/test`), 5 spec files covering everything verified
+   throughout this doc (basic flow, trial-boundary resume, timeout-retry/
+   `attempt`, all three completion screens, a colors-task smoke check).
+   Runs against the real deployed backend, not mocked. Self-cleaning via
+   a local-only `.env.test` secret key (`SUPABASE_SECRET_KEY`) --
+   surfaced one more instance of the same GRANT gap from the DDL section
+   above (`DELETE` was never granted to `service_role` either, since no
+   Edge Function had ever needed it until the suite's own cleanup step
+   did); fixed the same way. All 7 tests pass.
+2. ~~The weekly backup process~~ -- DECIDED AGAINST (see "Next steps" item
+   5 above): manual, on-demand backup once real data exists, not a
+   scheduled job. Nothing left to build here unless that decision changes.
+
+Hosting (`Hosting` section above) is now fully done: repo public, GitHub
+Pages live, verified against the real deployed URL (not just localhost).
+
+**Everything from CLAUDE.md's original "Pilot #3" incident investigation
+through this build-out is now done.** The only remaining open item in
+the entire plan is the deferred manual-backup guidance above, which is
+intentionally not something to build now -- it's something to ask for
+when it's actually needed.
 
