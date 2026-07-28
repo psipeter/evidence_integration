@@ -29,15 +29,14 @@
  *                larger than settled -- echoes the SAME value shown big
  *                in the centre-panel stimulus. The number/circle itself
  *                starts hidden (`revealCurrent: false`) when the caller
- *                wants it to appear in sync with the bubbling-draw
- *                animation's own reveal rather than instantly on render --
- *                see plugin-tutorial-intro-numbers.js's onImageBox,
- *                which flips #tut-tracker-current-num's opacity from
- *                inside that animation's onReveal callback (fired the
- *                INSTANT the centre number begins its fade, not once it's
- *                already finished -- see numbers-draw-animation.js's
- *                own docstring for why onComplete was the wrong hook
- *                here).
+ *                wants it to appear in sync with a reveal animation's own
+ *                timing rather than instantly on render -- see
+ *                plugin-tutorial-observation-{numbers,colors}.js's own
+ *                revealTrackerNum/revealTrackerDot helpers (numbers's
+ *                intro plugin no longer has an equivalent staged reveal
+ *                for this at all -- the tracker box stays fully hidden
+ *                for all of obs 1 regardless of this flag, see that
+ *                file's own docstring for why, redesigned this session).
  *   obsNum+1..nObs (EMPTY) -- invisible placeholder (transparent text/
  *                circle, same footprint) -- so the remaining count is
  *                still visible at a glance via the settled/current slots'

@@ -645,3 +645,159 @@ earlier this session against real over-$5 smoke-test data (see the
 is full-pipeline integrity at a genuinely real, fast scale, not
 exhaustive coverage of every reward magnitude.
 
+
+---
+
+## Tutorial redesign: "Correct answer" panel replaces the old KDE/urn
+## figure (numbers + colors), pilot #3's comprehension problem
+
+Motivated by a pilot #3 finding, brainstormed at length before any code:
+a substantial fraction of participants appeared to just repeat the most
+recently shown stimulus as their response, rather than integrating across
+the sequence. Real-task-side interventions (mid-task nudges, always-on
+scaffolding during actual trials) were explicitly rejected as too
+intrusive / too likely to contaminate the measured behavior itself.
+Decision: strengthen the TUTORIAL only, where added clarity can't
+contaminate real trial data, and separately rely on post-hoc filtering
+(an anchoring-score exclusion criterion) for whatever comprehension gap
+remains -- not attempted yet, noted as a follow-up, not a blocker.
+
+**A more fundamental problem found before touching the visuals**: the old
+KDE curve (numbers) / urn bar (colors) visually taught the FIXED
+population parameter (`true_mean`/`true_p`) as "the answer" -- but
+`config-base.js`'s `ERROR_MODE` (`'running_mean'` for numbers, `'running_p'`
+for colors) scores against the RUNNING statistic of what's been observed
+so far, a materially different, evolving quantity, especially early in a
+trial. The tutorial was pointing at the wrong target. Confirmed this
+wasn't a stale/leftover config value before proceeding -- current,
+intended scoring behavior for both tasks.
+
+### The new "Correct answer" panel
+
+`correct-answer-numbers.js` (numbers) / `correct-answer-colors.js`
+(colors) -- both new files, replacing `distribution-numbers.js` +
+`numbers-draw-animation.js` (numbers) and `colors-draw-animation.js`
+(colors, `urn-colors.js` itself KEPT for its color constants, just no
+longer used for the tutorial's own SVG bar) -- **all three deleted
+entirely this session**; still present under `task/` if this ever needs
+reverting.
+
+- **Numbers**: a thin 0-100 slider-style track. A small BLUE CIRCLE thumb
+  (not a bar -- deliberately small enough that the taller red ticks
+  protrude visibly above/below it) SLIDES to the RUNNING MEAN's position
+  every time a new observation arrives -- directly visualizing "this is
+  what should move, and by how much." Red ticks mark every observation
+  (faded for history, bold/taller for the current one).
+- **Colors**: a thin blue/red bar, split at the RUNNING PROPORTION of
+  blue draws so far (blue-left/red-right, SLIDES its split point the same
+  way the numbers thumb slides). Small dots accumulate ABOVE the bar --
+  one per draw, blue dots packed in from the LEFT edge, red dots packed
+  in from the RIGHT edge, so their COUNTS (not a continuous position,
+  unlike numbers -- colors' draws have no natural axis position) are
+  what's shown. Dot spacing (`100/(N_OBS+1)`) guarantees the two
+  sequences can never collide even in the all-one-color extreme.
+- Both: NO bubbling animation, NO artificial delay of any kind (the old
+  design's ~1s "wait for the bubbles before anything appears" -- found
+  and removed for every phase, not just the ones later hidden behind an
+  overlay). `SHOW_EXACT_VALUE` (both modules): whether the running
+  statistic's exact number is shown as text next to the indicator, or
+  left purely visual -- a flag, not a final decision; currently `false`.
+  `renderCorrectAnswer(Colors)` reveals its own container and is fully
+  self-sufficient for the observation plugin's every-call-already-visible
+  usage; the intro plugin's one-time reveal passes `fadeIn:true`.
+
+### Intro plugin (obs 1): three-click progression, redesigned from an
+### earlier four-click version
+
+Click 1 (left box 1) -> reveals box 1's own text AND the top-right box
+(box 0b) together, plus the centre example number/circle fading in.
+Click 2 (left box 2, the goal text) -> reveals box 2's own text AND the
+whole correct-answer panel (no more separate click just for the panel).
+Click 3 (left box 3, the slider instructions) -> reveals box 3's own text
+AND activates the real response slider. The "Sequence history" tracker is
+DELIBERATELY never revealed anywhere in either intro plugin file -- it
+first becomes visible starting at observation 2 (the observation plugin,
+which shows it unconditionally on every call), since sequence history
+doesn't meaningfully apply yet with only one value.
+
+Both right-column boxes show a "..." placeholder (matching the LEFT
+column's own locked-box convention) until their real content is revealed.
+
+### Box captions + sizing (numbers AND colors)
+
+"Correct answer" / "Sequence history" captions: INSIDE each box,
+top-center, absolutely positioned -- iterated through THREE placements
+this session (above-as-flow-element, then an in-box overlay, back to
+in-box) before landing here; kept for the record since the reasoning
+mattered each time (see below). Only render when the box's OWN real
+content is genuinely visible (`showCaptions = !hideGraphics && !showClock`
+in both observation plugins) -- NOT during phase D (hidden behind an
+overlay) or phase E (correct-answer replaced by the clock demo, tracker
+hidden behind its own overlay) -- a caption reading "Correct answer" over
+an opaque cover or a clock demo doesn't make sense, so the caller skips
+rendering the caption's markup entirely rather than fighting stacking
+order to hide something still in the DOM.
+
+Six boxes total (3 left text boxes + 3 right boxes: top-box/correct-
+answer/tracker), each `flex: 0 0 18vh` -- deliberately EQUAL on both
+sides, not independently tuned/guessed per box (an explicit instruction,
+after an earlier per-box-clamp() approach kept guessing wrong). Numbers
+and colors use SEPARATE classes (`.numbers-tutorial-box` /
+`.colors-tutorial-box`, identical properties) rather than one shared
+class -- `.tutorial-info-block`/`.tutorial-right-top-box`/-image-box/
+-tracker-box are ALL also used by the OTHER task's tutorial, and
+coupling their box heights through one class would be a new exception to
+this codebase's existing "independently designed tutorials" pattern for
+no real benefit.
+
+### Real bugs found and fixed while building this (all confirmed via
+### direct DOM/geometry checks in a real browser, not visual guessing)
+
+1. **Observation plugin never revealed the panel's own container.**
+   `renderCorrectAnswer(Colors)`'s wrapper starts at CSS `opacity:0`
+   (meant to be revealed by a staged-reveal helper); the intro plugin
+   called that helper, the OBSERVATION plugin never did, since it has no
+   staged reveal at all. Result: ticks/thumb were being positioned
+   correctly the whole time (confirmed via computed style) but stayed
+   invisible because the PARENT's opacity zeroed out everything inside it
+   regardless -- a bug an earlier round of "check the child's own
+   opacity" testing completely missed. Fixed by having the render
+   function reveal its own container unconditionally.
+2. **The box's own white background/border was placed INSIDE the
+   hidden-until-revealed content wrapper.** Before reveal, the entire box
+   frame vanished along with the content, leaving the bare page
+   background showing through (reported directly as "an empty gray
+   area"). Fixed by moving `.dist-canvas` (the class providing that
+   background) onto the OUTER, always-visible box element, matching the
+   left column's own `makeBox` convention (box chrome always visible;
+   only the specific real-content span toggles).
+3. **The hidden content wrapper had no explicit height**, so
+   `correct-answer-outer`'s `height:100%` had nothing real to resolve
+   against, collapsing/misplacing the indicator (reported as "a shrunk
+   and overlapping box"). Fixed with an explicit `height:100%` on that
+   wrapper, verified after the fix via exact pixel geometry (content
+   rect height matches the box minus padding; the track's own vertical
+   center matches the box's vertical center exactly).
+4. **An early height-overflow diagnosis was wrong.** A "boxes taller than
+   an 800px window" symptom was initially (incorrectly) attributed to two
+   new caption elements; measured scroll-height was BYTE-IDENTICAL before
+   and after removing that theory's own fix, proving captions were never
+   the cause. The real, much larger factor turned out to be the LEFT
+   column's own text boxes, which never had a `vh`-based height budget at
+   all (`flex:1`, pure content-driven height, ~20-25vh per box measured
+   directly) -- unlike every box in the right column. Surfaced only once
+   asked to reason in `vh` terms consistently, per this project's own
+   established sizing convention, rather than chasing absolute pixel
+   numbers against one arbitrarily-chosen window size.
+
+### Verification discipline
+
+Every claim above was confirmed via real headless-browser checks (exact
+`getComputedStyle`/`getBoundingClientRect` values, not just "the code
+looks right") -- this was itself a lesson relearned mid-session: an
+early screenshot misread ("the centre panel looks blank") turned out
+wrong once cross-checked against the DOM directly, so subsequent checks
+leaned on precise element geometry/computed style as the primary
+evidence, with screenshots as a secondary, lower-confidence sanity check
+rather than the main source of truth.
+

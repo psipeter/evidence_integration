@@ -13,78 +13,82 @@
  * without ever touching the slider on this new observation -- removed
  * (chat history), matching the identical fix already applied to
  * plugin-tutorial-observation-numbers.js and plugin-observation-
- * numbers.js's own real-task behavior, which never had that shortcut.
+ * colors.js's own real-task behavior, which never had that shortcut.
  *
  * Box text is imported from tutorial-text-colors.js, shared with
  * plugin-tutorial-intro-colors.js -- never hardcode it here again (see that
  * module's own docstring for why).
  *
+ * The right column's middle box used to show a blue/red bar + a bubbling-
+ * then-reveal draw animation, teaching the FIXED true_p (urn-colors.js's
+ * buildUrnSVG + colors-draw-animation.js, the latter deleted this session
+ * -- still under task/ if this ever needs reverting). Replaced entirely
+ * with correct-answer-colors.js's bar+dots design: a bar that SLIDES to
+ * the RUNNING blue-proportion's split point each time a new observation
+ * arrives, with a dot per observation. Mirrors the identical fix already
+ * applied to plugin-tutorial-observation-numbers.js: the real task scores
+ * against the running proportion (config-base.js's colors override,
+ * ERROR_MODE: 'running_p'), not the fixed true_p the old figure taught --
+ * and removes an artificial ~1s "wait for the bubbles" delay that existed
+ * for every phase, not just the ones later hidden behind an overlay.
+ *
  * FIVE PHASES (A, B, C, D, E -- mirrors plugin-tutorial-observation-
- * numbers.js's identically-named/ranged phases, chat history; B
- * reintroduced and each phase evened out to exactly 3 observations this
- * session), by obs_num -- each phase ONLY changes the top-right box's own
- * text/color and, for E only, the urn box's contents and the tracker's
- * visibility; nothing else moves or appears/disappears elsewhere on
- * screen:
+ * numbers.js's identically-named/ranged phases), by obs_num -- each phase
+ * ONLY changes the top-right box's own text/color and, for E only, the
+ * correct-answer panel's contents and the tracker's visibility; nothing
+ * else moves or appears/disappears elsewhere on screen:
  *   A (obs 1-3)   -- BOX0B's normal "each ball reflects a hidden
  *                    probability" text, white/plain. Obs 1 specifically is
  *                    the intro plugin, not this file -- it already shows
  *                    BOX0B the same way by default.
  *   B (obs 4-6)   -- SLIDER_REMINDER "the slider remembers your last
  *                    position" reminder -- BLUE (.tutorial-notify-blue).
- *                    Mirrors numbers's identical phase B (chat
- *                    history: reintroduced this session).
  *   C (obs 7-9)  -- "...ratio over all balls in the sequence" goal
  *                    reminder -- YELLOW (.tutorial-notify-yellow). The
- *                    history tracker below the urn figure is ALSO
- *                    highlighted in that same yellow during this phase
- *                    (.tutorial-tracker-highlight, NOT .tutorial-info-block
- *                    + .tutorial-notify-yellow directly -- see numbers's
- *                    own identical note on why that combination's padding
- *                    broke a tight tracker row's spacing) -- a highlight,
+ *                    history tracker below the correct-answer panel is
+ *                    ALSO highlighted in that same yellow during this
+ *                    phase (.tutorial-tracker-highlight) -- a highlight,
  *                    not a cover: the tracker's own content stays fully
  *                    visible inside it, unlike phase D below.
  *   D (obs 10-12) -- RECAP_TEXT_1/RECAP_TEXT_2 "use your memory" warning --
- *                    RED (.tutorial-notify-red). The urn figure and tracker
- *                    below it are SEPARATELY hidden behind an opaque RED
- *                    "empty placeholder" overlay (.tutorial-hide-wrap/
- *                    .tutorial-hidden-overlay) during this same phase --
- *                    the real elements still render underneath, completely
- *                    unmodified; only visually covered.
- *   E (obs 13-15) -- Clock demonstration (mirrors plugin-tutorial-
- *                    observation-numbers.js's identical phase E, chat
- *                    history) -- YELLOW (.tutorial-notify-yellow, matching
- *                    phase C -- both right-hand boxes get this same
- *                    styling), text: "You have N seconds to submit your
- *                    response. The countdown clock looks like this." (N
- *                    derived from the real t_obs_ms, not hardcoded). The
- *                    urn box's contents are REPLACED (not wrapped/
- *                    overlaid, unlike phase D) with a real countdown-clock
- *                    canvas -- the same observation-timeout-clock.js
- *                    renderer the main task's per-observation deadline
- *                    uses -- and recolored yellow (.dist-canvas-yellow) to
- *                    match the top box. The TRACKER, unlike the urn box,
- *                    is not replaced with anything -- it's covered by an
- *                    opaque YELLOW overlay (.tutorial-hidden-overlay-
- *                    yellow, same mechanism as phase D's red one,
- *                    matching the other two right-column boxes' color
- *                    during this phase -- an earlier revision used
- *                    white/gray here, since dropped for consistency)
- *                    rather than left plain, since this phase has
- *                    nothing to do with sequence history. A second,
- *                    visually identical clock
- *                    also renders in the real fixed top-right corner
- *                    position (.timeout-clock) that real trials use.
- *                    Both are purely decorative (no-op onTimeout --
- *                    tutorial screens have no real deadline) and are
- *                    explicitly stopped once the participant submits --
- *                    see numbers's own phase-E note for the full
- *                    rationale, identical here.
+ *                    RED (.tutorial-notify-red). The correct-answer panel
+ *                    and tracker below it are SEPARATELY hidden behind an
+ *                    opaque RED "empty placeholder" overlay
+ *                    (.tutorial-hide-wrap/.tutorial-hidden-overlay) during
+ *                    this same phase -- the real elements still render
+ *                    underneath, completely unmodified; only visually
+ *                    covered.
+ *   E (obs 13-15) -- Clock demonstration -- YELLOW (.tutorial-notify-
+ *                    yellow, matching phase C), text: "You have N seconds
+ *                    to submit your response. The countdown clock looks
+ *                    like this." (N derived from the real t_obs_ms, not
+ *                    hardcoded). The correct-answer panel's contents are
+ *                    REPLACED (not hidden behind an overlay, unlike phase
+ *                    D) with a real countdown-clock canvas -- the same
+ *                    observation-timeout-clock.js renderer the main
+ *                    task's per-observation deadline uses -- and
+ *                    recolored yellow (.dist-canvas-yellow) to match the
+ *                    top box. The TRACKER, unlike the correct-answer
+ *                    panel, is not replaced with anything -- it's covered
+ *                    by an opaque YELLOW overlay
+ *                    (.tutorial-hidden-overlay-yellow, same mechanism as
+ *                    phase D's red one). A SECOND clock, visually
+ *                    identical to (and started in sync with) the panel
+ *                    one, also renders in the actual fixed top-right
+ *                    corner position (.timeout-clock) that real trials
+ *                    use. Both clocks are PURELY decorative here --
+ *                    onTimeout is a no-op, since tutorial screens
+ *                    deliberately have no response deadline -- and are
+ *                    explicitly stopped once the participant submits,
+ *                    matching plugin-observation-colors.js's own
+ *                    `stopClock` cleanup.
  *
- * FIXED-HEIGHT TOP BOX (chat history, this session, mirrors numbers):
- * the top-right box always carries .tutorial-right-top-box (see
- * style.css) regardless of phase, so its own phase-dependent text length
- * can't shift the slider's vertical position beneath it.
+ * Captions ("Correct answer"/"Sequence history") only render when each
+ * box's OWN real content is genuinely visible -- not during phase D (both
+ * boxes hidden behind an overlay) or phase E (correct-answer box
+ * replaced by the clock demo, tracker hidden behind its own overlay). See
+ * showCaptions below -- mirrors plugin-tutorial-observation-numbers.js's
+ * identical logic exactly.
  *
  * TRACKER: unlike numbers's numeric tracker, colors's observations are
  * colors, not numbers to display -- there's no separate "number" to show
@@ -92,18 +96,11 @@
  * renderDot:true and a per-value color FUNCTION (not a fixed color string)
  * to tutorial-tracker.js's buildTrackerHTML -- see that module's own
  * docstring for the shared settled/current/empty logic both modes use.
- * Also, deliberately NOT adding a "faded history of past draws" overlay
- * to the urn figure itself the way distribution-numbers.js's
- * #tut-svg-history does for the KDE curve: that numbers feature places
- * each past VALUE at its own x-position along a 0-100 axis, which the urn
- * bar has no equivalent of (a categorical blue/red split has no "position"
- * a past draw's color could sit at). The tracker alone carries the
- * "history" function for colors; no urn-colors.js changes were needed.
  */
 
 import { buildColorsSliderHTMLv2 as buildColorsSliderHTML, initColorsSliderV2 as initColorsSlider } from './slider-colors.js';
-import { buildUrnSVG, SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
-import { startColorsDrawAnimation, FADE_MS as DRAW_FADE_MS } from './colors-draw-animation.js';
+import { buildCorrectAnswerColorsHTML, renderCorrectAnswerColors, FADE_MS } from './correct-answer-colors.js';
+import { SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
 import { buildTrackerHTML } from './tutorial-tracker.js';
 import { BOX0, BOX0B, BOX1, BOX2, RECAP_TEXT_1, RECAP_TEXT_2, SLIDER_REMINDER } from './tutorial-text-colors.js';
@@ -158,7 +155,7 @@ class TutorialObservationColorsPlugin {
     if (document.activeElement && document.activeElement !== document.body)
       document.activeElement.blur();
 
-    const { value, obs_num, n_obs, true_p,
+    const { value, obs_num, n_obs,
             slider_default, init_pos, show_value, values_so_far, t_obs_ms } = trial;
     const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 50);
     const unset = slider_default === 'none';
@@ -166,25 +163,18 @@ class TutorialObservationColorsPlugin {
     const hideGraphics = rightTop.phase === 'D';
     const showClock     = rightTop.phase === 'E';
     const kdeOverlay = hideGraphics ? '<div class="tutorial-hidden-overlay"></div>' : '';
-    // Tracker's own wrapper/overlay: phase D hides it (opaque red
-    // overlay, module docstring); phase E ALSO hides it, but with a
-    // YELLOW overlay instead (.tutorial-hidden-overlay-yellow, mirrors
-    // numbers's identical treatment) -- matches the other two right-
-    // column boxes' color during this same phase (chat history, this
-    // session -- an earlier revision used white/gray here instead).
-    // Phase C instead HIGHLIGHTS the tracker in the same yellow, via a
-    // dedicated .tutorial-tracker-highlight class (not .tutorial-info-
-    // block + .tutorial-notify-yellow directly -- see numbers's
-    // identical note on why). Content stays fully visible inside it
-    // during C only. Phases A/B get the SAME highlight-box treatment,
-    // just white instead of yellow (.tutorial-tracker-highlight-white,
-    // chat history) -- mirrors numbers's identical change.
     const trackerWrapClass = (hideGraphics || showClock) ? 'tutorial-hide-wrap'
       : rightTop.phase === 'C' ? 'tutorial-tracker-highlight'
       : 'tutorial-tracker-highlight-white';
     const trackerOverlay = hideGraphics ? '<div class="tutorial-hidden-overlay"></div>'
       : showClock ? '<div class="tutorial-hidden-overlay-yellow"></div>'
       : '';
+    // Captions only render when each box's OWN real content is genuinely
+    // visible -- not during phase D (both boxes hidden behind an
+    // overlay) or phase E (correct-answer box replaced by the clock
+    // demo, tracker hidden behind its own overlay). Mirrors
+    // plugin-tutorial-observation-numbers.js's identical logic exactly.
+    const showCaptions = !hideGraphics && !showClock;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
@@ -192,24 +182,26 @@ class TutorialObservationColorsPlugin {
       <div class="tutorial-wrap">
         <div class="tutorial-top-row">
           <div class="tutorial-panel">
-            <p class="tutorial-info-block"><span>${BOX0}</span></p>
-            <p class="tutorial-info-block"><span>${BOX1}</span></p>
-            <p class="tutorial-info-block"><span>${BOX2}</span></p>
+            <p class="tutorial-info-block colors-tutorial-box"><span>${BOX0}</span></p>
+            <p class="tutorial-info-block colors-tutorial-box"><span>${BOX1}</span></p>
+            <p class="tutorial-info-block colors-tutorial-box"><span>${BOX2}</span></p>
           </div>
           <div class="tutorial-panel tutorial-panel-centre">
             <div id="tut-ball" class="colors-circle" style="opacity:0;"></div>
           </div>
           <div class="tutorial-panel tutorial-panel-right">
-            <p class="tutorial-info-block tutorial-right-top-box${rightTop.colorClass ? ' ' + rightTop.colorClass : ''}">
+            <p class="tutorial-info-block tutorial-right-top-box colors-tutorial-box${rightTop.colorClass ? ' ' + rightTop.colorClass : ''}">
               <span>${rightTop.html}</span>
             </p>
-            <div class="tutorial-hide-wrap tutorial-right-image-box">
+            <div class="tutorial-hide-wrap tutorial-right-image-box colors-tutorial-box">
+              ${showCaptions ? '<div class="tutorial-panel-caption">Correct answer</div>' : ''}
               ${showClock
                 ? '<div class="dist-canvas dist-canvas-yellow" style="display:flex;align-items:center;justify-content:center;"><canvas id="tut-obs-clock" width="120" height="120"></canvas></div>'
-                : '<div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>'}
+                : `<div class="dist-canvas">${buildCorrectAnswerColorsHTML()}</div>`}
               ${kdeOverlay}
             </div>
-            <div class="tutorial-right-tracker-box ${trackerWrapClass}">
+            <div class="tutorial-right-tracker-box colors-tutorial-box ${trackerWrapClass}">
+              ${showCaptions ? '<div class="tutorial-panel-caption">Sequence history</div>' : ''}
               <div id="tut-tracker"></div>
               ${trackerOverlay}
             </div>
@@ -228,32 +220,35 @@ class TutorialObservationColorsPlugin {
     let stopCornerClock = null;
     let stopKdeClock    = null;
 
+    // Centre circle's own reveal -- a simple fade, uniform across EVERY
+    // phase now (no more bubble-animation-linked timing at all). Runs
+    // regardless of phase, including E (whose own clock demo below is
+    // independent of this).
+    const finalColor = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
+    centerEl.style.background = '#fff';
+    centerEl.style.border = '2px solid #ccc';
+    centerEl.style.opacity = '1';
+    requestAnimationFrame(() => {
+      centerEl.style.transition = `background ${FADE_MS}ms ease, border-color ${FADE_MS}ms ease`;
+      centerEl.style.background = finalColor;
+      centerEl.style.borderColor = finalColor;
+    });
+
+    const revealTrackerDot = () => {
+      const trackerDot = display_el.querySelector('#tut-tracker-current-num');
+      if (trackerDot) {
+        trackerDot.style.transition = `opacity ${FADE_MS}ms ease`;
+        trackerDot.style.opacity = '1';
+      }
+    };
+
     if (showClock) {
-      // Phase E: no urn SVG exists to bubble-animate around (see module
-      // docstring), so reveal the centre circle/tracker slot directly in
-      // its outcome color instead -- the same end-state colors-draw-
-      // animation.js's showFinal() sets on centerEl, just inlined here
-      // rather than routed through that module (which assumes an svgRoot
-      // and bar segments to animate).
       display_el.querySelector('#tut-tracker').innerHTML = buildTrackerHTML({
         nObs: n_obs, obsNum: obs_num, values: values_so_far,
         color: (v) => v === 1 ? SAMPLE_BLUE : SAMPLE_RED,
         revealCurrent: false, renderDot: true,
       });
-      const targetColor = value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
-      centerEl.style.background = '#fff';
-      centerEl.style.border = '2px solid #ccc';
-      centerEl.style.opacity = '1';
-      requestAnimationFrame(() => {
-        centerEl.style.transition = `background ${DRAW_FADE_MS}ms ease, border-color ${DRAW_FADE_MS}ms ease`;
-        centerEl.style.background = targetColor;
-        centerEl.style.borderColor = targetColor;
-      });
-      const trackerDot = display_el.querySelector('#tut-tracker-current-num');
-      if (trackerDot) {
-        trackerDot.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-        trackerDot.style.opacity = '1';
-      }
+      revealTrackerDot();
 
       // Both clocks are purely decorative -- onTimeout is a no-op, since
       // tutorial screens have no real deadline (module docstring). Both
@@ -264,30 +259,23 @@ class TutorialObservationColorsPlugin {
       stopCornerClock = startTimeoutClock(cornerCanvas, t_obs_ms, () => {});
       stopKdeClock    = startTimeoutClock(kdeCanvas, t_obs_ms, () => {});
     } else {
-      display_el.querySelector('#urn-svg').innerHTML = buildUrnSVG(true_p, true);
+      // history = all values BEFORE this one; renderCorrectAnswerColors
+      // adds the new dot for `value` itself and SLIDES the bar from
+      // history's own running blue-proportion to history+[value]'s.
+      // Still rendered unconditionally even during phase D (hidden
+      // behind the red overlay above) -- deliberately not skipped,
+      // matching the correct-answer panel's whole point of representing
+      // ground truth regardless of whether the participant can currently
+      // see it.
+      const history = values_so_far.slice(0, -1);
+      renderCorrectAnswerColors(display_el, { history, currentValue: value });
 
       display_el.querySelector('#tut-tracker').innerHTML = buildTrackerHTML({
         nObs: n_obs, obsNum: obs_num, values: values_so_far,
         color: (v) => v === 1 ? SAMPLE_BLUE : SAMPLE_RED,
         revealCurrent: false, renderDot: true,
       });
-
-      const svgRoot = display_el.querySelector('#urn-svg svg');
-
-      startColorsDrawAnimation({
-        svgRoot,
-        centerEl,
-        true_p,
-        currentValue: value,
-        obsNum:       obs_num,
-        onReveal: () => {
-          const trackerDot = display_el.querySelector('#tut-tracker-current-num');
-          if (trackerDot) {
-            trackerDot.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-            trackerDot.style.opacity = '1';
-          }
-        },
-      });
+      revealTrackerDot();
     }
 
     initColorsSlider(display_el, {

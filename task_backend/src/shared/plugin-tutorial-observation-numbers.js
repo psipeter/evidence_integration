@@ -1,24 +1,27 @@
 /**
  * plugin-tutorial-observation-numbers.js
  * Obs 2-15 of the numbers tutorial. Three-column layout:
- *   Left  — goal/observation text
+ *   Left   — goal/observation text
  *   Centre — identical to main task (number + slider + submit)
- *   Right  — distribution plot
+ *   Right  — "Correct answer" panel + "Sequence history" tracker
  *
  * No timeout clock, deliberately — participants need unhurried time to read
  * and think during the tutorial. Wires the slider synchronously right after
  * setting innerHTML (Pattern A: no on_load, no async, no rAF/setTimeout
  * deferral) — same shape as plugin-tutorial-observation-colors.js.
  *
- * The distribution SVG is built by the shared distribution-numbers.js
- * (revealed=true here — axis/dist/mean fully shown; the #tut-svg-obs marker
- * always starts hidden regardless, and the falling-bubble draw animation
- * (numbers-draw-animation.js) reveals it — same auto-running pattern as
- * plugin-tutorial-observation-colors.js's startColorsDrawAnimation. Submit
- * stays disabled until the participant actually interacts with the slider
- * (mousedown/input, via slider-numbers.js's initSlider) -- NOT just
- * once the animation completes -- see chat history for why an earlier
- * revision's shortcut here was removed.
+ * The right column's middle box used to show a KDE curve + a bubbling-then-
+ * reveal draw animation, teaching the FIXED population mean
+ * (distribution-numbers.js/numbers-draw-animation.js, both deleted this
+ * session -- still under task/ if this ever needs reverting). Replaced
+ * entirely with correct-answer-numbers.js's slider-style track: a thumb
+ * that SLIDES to the RUNNING mean's position each time a new observation
+ * arrives, with a tick per observation. This fixes a real mismatch found
+ * this session: the real task scores against the running mean
+ * (config-base.js's ERROR_MODE), not the fixed population mean the old
+ * figure taught -- and removes an artificial ~1s "wait for the bubbles"
+ * delay before anything appeared at all, which existed for every phase,
+ * not just the ones where the box was later hidden behind an overlay.
  *
  * Box text is imported from tutorial-text-numbers.js, shared with
  * plugin-tutorial-intro-numbers.js -- never hardcode it here again (see
@@ -32,12 +35,12 @@
  * FIVE PHASES (A, B, C, D, E -- B reintroduced this session after being
  * designed-then-dropped in an earlier one; each phase is now exactly 3
  * observations, chat history), by obs_num -- each phase ONLY changes the
- * top-right box's own text/color and, for E only, the KDE box's contents
- * and the tracker's visibility; nothing else moves or appears/disappears
- * elsewhere on screen (an earlier revision also had a separate box next to
- * the Submit button -- removed, "no more extra box near submit").
- * Explicit obs ranges (3 each, 5 phases x 3 = 15 total, matching the
- * tutorial's full length):
+ * top-right box's own text/color and, for E only, the correct-answer
+ * panel's contents and the tracker's visibility; nothing else moves or
+ * appears/disappears elsewhere on screen (an earlier revision also had a
+ * separate box next to the Submit button -- removed, "no more extra box
+ * near submit"). Explicit obs ranges (3 each, 5 phases x 3 = 15 total,
+ * matching the tutorial's full length):
  *   A (obs 1-3)   -- BOX0B's normal "hidden distribution" text,
  *                    white/plain (no color class at all). Obs 1
  *                    specifically is the intro plugin (plugin-tutorial-
@@ -47,91 +50,71 @@
  *                    though only 2-3 are actually implemented here.
  *   B (obs 4-6)   -- SLIDER_REMINDER "the slider remembers your last
  *                    position" reminder -- BLUE (.tutorial-notify-blue).
- *                    Reintroduced this session -- an earlier session
- *                    designed this exact phase, then dropped it entirely
- *                    per explicit direction rather than renumbering the
- *                    rest (obs 2-15 simply fell under phase A/C/D at the
- *                    time). Brought back now that phase E (below) also
- *                    needed a slot, evening every phase out to 3
- *                    observations apiece.
  *   C (obs 7-9)  -- "...mean of all numbers in this sequence" goal
  *                    reminder -- YELLOW (.tutorial-notify-yellow). The
- *                    history tracker below the KDE figure is ALSO
- *                    highlighted in that same yellow during this phase --
- *                    a highlight, not a cover: the tracker's own content
- *                    stays fully visible inside it, unlike phase D below.
- *                    Uses its OWN class (.tutorial-tracker-highlight), not
- *                    .tutorial-info-block + .tutorial-notify-yellow
- *                    directly, despite matching those colors exactly --
- *                    .tutorial-info-block's normal 0.6rem/0.8rem padding
- *                    ate into the already-tight 15-slot tracker row's
- *                    available width, and at this phase's enlarged font
- *                    size (chat history) that was JUST enough to make
- *                    adjacent slots' markers touch and read as one
- *                    numbers line rather than 15 separate ones -- a
- *                    real bug, not a hypothetical risk. The dedicated
- *                    class uses a much smaller padding instead, so the
- *                    row keeps its full working width.
+ *                    history tracker below the correct-answer panel is
+ *                    ALSO highlighted in that same yellow during this
+ *                    phase -- a highlight, not a cover: the tracker's own
+ *                    content stays fully visible inside it, unlike phase
+ *                    D below. Uses its OWN class
+ *                    (.tutorial-tracker-highlight), not .tutorial-info-
+ *                    block + .tutorial-notify-yellow directly, despite
+ *                    matching those colors exactly -- see that class's
+ *                    own comment in style.css for why (a real, confirmed
+ *                    padding bug, not a hypothetical risk).
  *   D (obs 10-12) -- RECAP_TEXT_1/RECAP_TEXT_2 "use your memory" warning
- *                    -- RED (.tutorial-notify-red). The KDE figure and
- *                    tracker below it are SEPARATELY hidden behind an
- *                    opaque RED "empty placeholder" overlay
+ *                    -- RED (.tutorial-notify-red). The correct-answer
+ *                    panel and tracker below it are SEPARATELY hidden
+ *                    behind an opaque RED "empty placeholder" overlay
  *                    (.tutorial-hide-wrap/.tutorial-hidden-overlay,
  *                    matching .tutorial-notify-red's own colors -- all
  *                    three right-column boxes read as one consistent red
- *                    phase now, not two different colors) during this
- *                    same phase -- the real elements still render
- *                    underneath, completely unmodified; only visually
- *                    covered.
- *   E (obs 13-15) -- Clock demonstration (chat history, this session) --
- *                    YELLOW (.tutorial-notify-yellow, matching phase C --
- *                    both right-hand boxes get this same styling, chat
- *                    history), text: "You have N seconds to submit your
- *                    response. The countdown clock looks like this."
- *                    (N derived from the real t_obs_ms, not hardcoded --
- *                    see the "prefer no hardcoded literal" convention
- *                    elsewhere in this file). The KDE box's contents are
- *                    REPLACED (not hidden behind an overlay, unlike phase
- *                    D) with a real countdown-clock canvas -- the same
- *                    observation-timeout-clock.js renderer the main
- *                    task's per-observation deadline uses -- and recolored
- *                    yellow (.dist-canvas-yellow) to match the top box.
- *                    The TRACKER, unlike the KDE box, is not replaced with
- *                    anything -- it's covered by an opaque YELLOW overlay
- *                    (.tutorial-hidden-overlay-yellow, same mechanism as
- *                    phase D's red one, matching the other two right-
- *                    column boxes' color during this phase) that
- *                    preserves its layout space without showing its
- *                    content, since this phase has nothing to do with
- *                    sequence history. A SECOND clock,
- *                    visually identical to (and started in sync with) the
- *                    KDE-box one, also renders in the actual fixed
- *                    top-right corner position (.timeout-clock) that real
- *                    trials use -- so this phase shows the clock both
- *                    large/explained AND in its real on-screen position
- *                    at once. Both clocks are PURELY decorative here:
- *                    their onTimeout callback is a no-op, since tutorial
- *                    screens deliberately have no response deadline
- *                    (module docstring, above) -- reaching zero does
- *                    nothing, Submit stays available exactly as in every
- *                    other tutorial phase. Both are explicitly stopped
- *                    (rAF cancelled, visibilitychange listener removed)
- *                    once the participant submits, matching the real
- *                    observation plugins' own cleanup (see plugin-
- *                    observation-numbers.js's `stopClock`), so nothing
- *                    keeps running into subsequent screens.
+ *                    phase now) during this same phase -- the real
+ *                    elements still render underneath, completely
+ *                    unmodified; only visually covered.
+ *   E (obs 13-15) -- Clock demonstration -- YELLOW
+ *                    (.tutorial-notify-yellow, matching phase C -- both
+ *                    right-hand boxes get this same styling), text: "You
+ *                    have N seconds to submit your response. The
+ *                    countdown clock looks like this." (N derived from
+ *                    the real t_obs_ms, not hardcoded). The correct-
+ *                    answer panel's contents are REPLACED (not hidden
+ *                    behind an overlay, unlike phase D) with a real
+ *                    countdown-clock canvas -- the same observation-
+ *                    timeout-clock.js renderer the main task's per-
+ *                    observation deadline uses -- and recolored yellow
+ *                    (.dist-canvas-yellow) to match the top box. The
+ *                    TRACKER, unlike the correct-answer panel, is not
+ *                    replaced with anything -- it's covered by an opaque
+ *                    YELLOW overlay (.tutorial-hidden-overlay-yellow,
+ *                    same mechanism as phase D's red one) that preserves
+ *                    its layout space without showing its content, since
+ *                    this phase has nothing to do with sequence history.
+ *                    A SECOND clock, visually identical to (and started
+ *                    in sync with) the panel one, also renders in the
+ *                    actual fixed top-right corner position
+ *                    (.timeout-clock) that real trials use. Both clocks
+ *                    are PURELY decorative here: their onTimeout callback
+ *                    is a no-op, since tutorial screens deliberately have
+ *                    no response deadline (module docstring, above) --
+ *                    reaching zero does nothing, Submit stays available
+ *                    exactly as in every other tutorial phase. Both are
+ *                    explicitly stopped (rAF cancelled, visibilitychange
+ *                    listener removed) once the participant submits,
+ *                    matching the real observation plugins' own cleanup
+ *                    (see plugin-observation-numbers.js's `stopClock`),
+ *                    so nothing keeps running into subsequent screens.
  *
- * FIXED-HEIGHT TOP BOX (chat history, this session): the top-right box
- * above ALWAYS carries .tutorial-right-top-box (see style.css) regardless
- * of phase, fixing its height so its own (phase-dependent, variable-
- * length) text can no longer grow/shrink the whole right column -- and
- * therefore the slider's vertical position beneath it -- as obs_num moves
- * between phases.
+ * FIXED-HEIGHT TOP BOX: the top-right box above ALWAYS carries
+ * .tutorial-right-top-box (see style.css) regardless of phase, fixing
+ * its height so its own (phase-dependent, variable-length) text can no
+ * longer grow/shrink the whole right column -- and therefore the
+ * slider's vertical position beneath it -- as obs_num moves between
+ * phases.
  */
 
-import { buildDistributionSVG } from './distribution-numbers.js';
 import { buildSliderHTML, initSlider } from './slider-numbers.js';
-import { startNumbersDrawAnimation, FADE_MS as DRAW_FADE_MS } from './numbers-draw-animation.js';
+import { buildCorrectAnswerHTML, renderCorrectAnswer, FADE_MS } from './correct-answer-numbers.js';
 import { startTimeoutClock } from './observation-timeout-clock.js';
 import { buildTrackerHTML } from './tutorial-tracker.js';
 import { BOX0, BOX0B, BOX1, BOX2, SAMPLE_COLOR, RECAP_TEXT_1, RECAP_TEXT_2, SLIDER_REMINDER } from './tutorial-text-numbers.js';
@@ -153,9 +136,8 @@ const info = {
     // config-base.js elsewhere, and every other default here is likewise
     // a plain literal, not threaded from config-base.js).
     t_obs_ms:       { type: 'INT',     default: 7000 },
-    // Tracker/history -- see tutorial-tracker.js and distribution-
-    // numbers.js's own docstrings. Includes the current value at the
-    // last index.
+    // Tracker/history -- see tutorial-tracker.js's own docstring.
+    // Includes the current value at the last index.
     values_so_far:  { type: 'OBJECT',  default: [] },
   },
 };
@@ -194,7 +176,7 @@ class TutorialObservationNumbersPlugin {
       document.activeElement.blur();
     }
 
-    const { value, obs_num, n_obs, true_mean, true_std,
+    const { value, obs_num, n_obs,
             slider_default, init_pos, show_value, values_so_far, t_obs_ms } = trial;
     const resolvedInitPos = typeof init_pos === 'function' ? init_pos() : (init_pos ?? 0);
     const unset = slider_default === 'none';
@@ -205,25 +187,26 @@ class TutorialObservationNumbersPlugin {
     // Tracker's own wrapper/overlay: phase D hides it (opaque red
     // overlay, module docstring); phase E ALSO hides it, but with a
     // YELLOW overlay instead (.tutorial-hidden-overlay-yellow) -- matches
-    // the other two right-column boxes' color during this same phase
-    // (chat history, this session -- an earlier revision used white/gray
-    // here, which read as inconsistent next to the other two). Phase C
-    // instead HIGHLIGHTS the tracker in the same yellow, via a dedicated
-    // .tutorial-tracker-highlight class (NOT .tutorial-info-block +
-    // .tutorial-notify-yellow directly -- that combination's normal
-    // padding broke the tracker's markers, see module docstring) -- a
-    // highlight, not a cover: content stays fully visible inside it,
-    // unlike D/E. Phases A/B get the SAME highlight-box treatment, just
-    // white instead of yellow (.tutorial-tracker-highlight-white, chat
-    // history) -- there's no color reason to highlight them, but leaving
-    // the tracker bare there (vs. C/D/E's boxed look) read as
-    // inconsistent, so every phase now gets some version of this box.
+    // the other two right-column boxes' color during this same phase.
+    // Phase C instead HIGHLIGHTS the tracker in the same yellow, via a
+    // dedicated .tutorial-tracker-highlight class -- a highlight, not a
+    // cover: content stays fully visible inside it, unlike D/E. Phases
+    // A/B get the SAME highlight-box treatment, just white instead of
+    // yellow (.tutorial-tracker-highlight-white).
     const trackerWrapClass = (hideGraphics || showClock) ? 'tutorial-hide-wrap'
       : rightTop.phase === 'C' ? 'tutorial-tracker-highlight'
       : 'tutorial-tracker-highlight-white';
     const trackerOverlay = hideGraphics ? '<div class="tutorial-hidden-overlay"></div>'
       : showClock ? '<div class="tutorial-hidden-overlay-yellow"></div>'
       : '';
+    // Captions only render when each box's OWN real content is genuinely
+    // visible -- not during phase D (both boxes hidden behind an
+    // overlay) or phase E (correct-answer box replaced by the clock
+    // demo, tracker hidden behind its own overlay). A label reading
+    // "Correct answer" over a clock demo, or over an opaque cover with
+    // nothing visible underneath, doesn't make sense -- so both captions
+    // share this same on/off condition (phases A/B/C only).
+    const showCaptions = !hideGraphics && !showClock;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
@@ -236,9 +219,9 @@ class TutorialObservationNumbersPlugin {
 
           <!-- LEFT: goal text -->
           <div class="tutorial-panel">
-            <p class="tutorial-info-block"><span>${BOX0}</span></p>
-            <p class="tutorial-info-block"><span>${BOX1}</span></p>
-            <p class="tutorial-info-block"><span>${BOX2}</span></p>
+            <p class="tutorial-info-block numbers-tutorial-box"><span>${BOX0}</span></p>
+            <p class="tutorial-info-block numbers-tutorial-box"><span>${BOX1}</span></p>
+            <p class="tutorial-info-block numbers-tutorial-box"><span>${BOX2}</span></p>
           </div>
 
           <!-- CENTRE: plain original layout -->
@@ -248,34 +231,26 @@ class TutorialObservationNumbersPlugin {
           </div>
 
           <!-- RIGHT: top box's text/color varies by phase (module docstring).
-               KDE box and tracker box are each INDEPENDENTLY fixed-height
-               (chat history, this session) via .tutorial-right-image-box/
-               -tracker-box (see style.css) -- an earlier revision merged
-               them into one shared-budget wrapper, which fixed cross-phase
-               resizing but squeezed the KDE figure too small to read
-               comfortably; un-merging lets each get its own generous,
-               independently-tunable size while keeping the same
-               anti-resize guarantee (flex:0 0 <clamp> + overflow:hidden on
-               EACH box individually, not on a shared parent). Phase E
-               replaces the KDE box's contents outright (a clock canvas,
-               sized to comfortably fit this box's own floor value, not
-               shrunk to survive a cramped shared budget the way an
-               earlier revision did -- recolored yellow) rather than
-               wrapping/overlaying it, but DOES cover the tracker box
-               (white, not red -- see module docstring). Top box always
-               carries .tutorial-right-top-box for a fixed height across
-               every phase (module docstring). -->
+               Correct-answer box and tracker box are each INDEPENDENTLY
+               fixed-height via .tutorial-right-image-box/-tracker-box (see
+               style.css). Phase E replaces the correct-answer box's
+               contents outright (a clock canvas) rather than
+               wrapping/overlaying it, but DOES cover the tracker box.
+               Top box always carries .tutorial-right-top-box for a fixed
+               height across every phase (module docstring). -->
           <div class="tutorial-panel tutorial-panel-right">
-            <p class="tutorial-info-block tutorial-right-top-box${rightTop.colorClass ? ' ' + rightTop.colorClass : ''}">
+            <p class="tutorial-info-block tutorial-right-top-box numbers-tutorial-box${rightTop.colorClass ? ' ' + rightTop.colorClass : ''}">
               <span>${rightTop.html}</span>
             </p>
-            <div class="tutorial-hide-wrap tutorial-right-image-box">
+            <div class="tutorial-hide-wrap tutorial-right-image-box numbers-tutorial-box">
+              ${showCaptions ? '<div class="tutorial-panel-caption">Correct answer</div>' : ''}
               ${showClock
                 ? '<div class="dist-canvas dist-canvas-yellow" style="display:flex;align-items:center;justify-content:center;"><canvas id="tut-obs-clock" width="120" height="120"></canvas></div>'
-                : '<div id="dist-svg" class="dist-canvas" style="line-height:0;"></div>'}
+                : `<div class="dist-canvas">${buildCorrectAnswerHTML()}</div>`}
               ${kdeOverlay}
             </div>
-            <div class="tutorial-right-tracker-box ${trackerWrapClass}">
+            <div class="tutorial-right-tracker-box numbers-tutorial-box ${trackerWrapClass}">
+              ${showCaptions ? '<div class="tutorial-panel-caption">Sequence history</div>' : ''}
               <div id="tut-tracker"></div>
               ${trackerOverlay}
             </div>
@@ -296,27 +271,30 @@ class TutorialObservationNumbersPlugin {
     let stopCornerClock = null;
     let stopKdeClock    = null;
 
+    // Centre number's own reveal -- a simple fade, uniform across EVERY
+    // phase now (no more bubble-animation-linked timing at all -- see
+    // module docstring). Runs regardless of phase, including E (whose
+    // own clock demo below is independent of this).
+    centerEl.style.opacity = '0';
+    requestAnimationFrame(() => {
+      centerEl.style.transition = `opacity ${FADE_MS}ms ease`;
+      centerEl.style.opacity = '1';
+    });
+
+    const revealTrackerNum = () => {
+      const trackerNum = display_el.querySelector('#tut-tracker-current-num');
+      if (trackerNum) {
+        trackerNum.style.transition = `opacity ${FADE_MS}ms ease`;
+        trackerNum.style.opacity = '1';
+      }
+    };
+
     if (showClock) {
-      // Phase E: no distribution SVG exists to bubble-animate around (see
-      // module docstring), so reveal the centre number/tracker slot with a
-      // simple fade instead -- the same fallback numbers-draw-
-      // animation.js's showFinal() uses for prefers-reduced-motion, just
-      // inlined here rather than routed through that module (which assumes
-      // an svgRoot to query).
       display_el.querySelector('#tut-tracker').innerHTML = buildTrackerHTML({
         nObs: n_obs, obsNum: obs_num, values: values_so_far, color: SAMPLE_COLOR,
         revealCurrent: false,
       });
-      centerEl.style.opacity = '0';
-      requestAnimationFrame(() => {
-        centerEl.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-        centerEl.style.opacity = '1';
-      });
-      const trackerNum = display_el.querySelector('#tut-tracker-current-num');
-      if (trackerNum) {
-        trackerNum.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-        trackerNum.style.opacity = '1';
-      }
+      revealTrackerNum();
 
       // Both clocks are purely decorative -- onTimeout is a no-op, since
       // tutorial screens have no real deadline (module docstring). Both
@@ -327,37 +305,21 @@ class TutorialObservationNumbersPlugin {
       stopCornerClock = startTimeoutClock(cornerCanvas, t_obs_ms, () => {});
       stopKdeClock    = startTimeoutClock(kdeCanvas, t_obs_ms, () => {});
     } else {
-      // Draw distribution — axis/dist/mean fully revealed; the obs marker
-      // always starts hidden regardless (see distribution-numbers.js) and
-      // is revealed by the draw animation below. `history` (all values BEFORE
-      // this one) draws the faded past-observation ticks. Still runs
-      // unconditionally even during phase D (hidden behind the yellow
-      // overlay above) -- deliberately not skipped, see module docstring.
+      // history = all values BEFORE this one; renderCorrectAnswer adds
+      // the new bold tick for `value` itself and SLIDES the thumb from
+      // history's own running mean to history+[value]'s. Still rendered
+      // unconditionally even during phase D (hidden behind the red
+      // overlay above) -- deliberately not skipped, matching the
+      // correct-answer panel's whole point of representing ground truth
+      // regardless of whether the participant can currently see it.
       const history = values_so_far.slice(0, -1);
-      display_el.querySelector('#dist-svg').innerHTML =
-        buildDistributionSVG(true_mean, true_std, value, true, history);
+      renderCorrectAnswer(display_el, { history, currentValue: value });
 
       display_el.querySelector('#tut-tracker').innerHTML = buildTrackerHTML({
         nObs: n_obs, obsNum: obs_num, values: values_so_far, color: SAMPLE_COLOR,
         revealCurrent: false,
       });
-
-      const svgRoot = display_el.querySelector('#dist-svg svg');
-
-      startNumbersDrawAnimation({
-        svgRoot,
-        centerEl,
-        true_mean,
-        true_std,
-        obsNum: obs_num,
-        onReveal: () => {
-          const trackerNum = display_el.querySelector('#tut-tracker-current-num');
-          if (trackerNum) {
-            trackerNum.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-            trackerNum.style.opacity = '1';
-          }
-        },
-      });
+      revealTrackerNum();
     }
 
     // Wire immediately — DOM is synchronously ready right after innerHTML is

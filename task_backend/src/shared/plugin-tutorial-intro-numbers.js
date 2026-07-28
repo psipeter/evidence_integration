@@ -1,19 +1,39 @@
-import { buildDistributionSVG } from './distribution-numbers.js';
+import { buildCorrectAnswerHTML, renderCorrectAnswer, FADE_MS } from './correct-answer-numbers.js';
 import { buildSliderHTML, initSlider } from './slider-numbers.js';
-import { startNumbersDrawAnimation, FADE_MS as DRAW_FADE_MS } from './numbers-draw-animation.js';
 import { buildTrackerHTML } from './tutorial-tracker.js';
 import { BOX0, BOX0B, BOX1, BOX2, SAMPLE_COLOR } from './tutorial-text-numbers.js';
 /**
  * plugin-tutorial-intro-numbers.js
- * Obs 1 of the numbers tutorial — progressive reveal via click.
- * Box 0 (text, left panel) → image box (click to reveal distribution +
- * falling-bubble draw animation + Box 0b's text, which sits above the
- * distribution figure in the right panel and is revealed by THIS click, not
- * its own -- and the sequence-history tracker below the figure) → Box 1
- * (goal text) → Box 2 (slider instructions) → slider.
- * The image reveal is its own step, separate from box 0's text, so
- * participants aren't reading and watching the animation at the same time —
- * mirrors plugin-tutorial-intro-colors.js's structure exactly.
+ * Obs 1 of the numbers tutorial — progressive reveal via click, redesigned
+ * this session to a simpler three-click progression (previously four
+ * clicks, with a separate click just to reveal the correct-answer panel):
+ *
+ *   Click 1 (left box 1, BOX0) -> reveals box 1's own text AND box 0b
+ *     (top-right box) together, plus the centre example number fading in
+ *     -- "you'll see numbers, randomly drawn" (box 1) pairs naturally with
+ *     actually showing one (the number) and where it comes from (box 0b).
+ *   Click 2 (left box 2, BOX1, the goal text) -> reveals box 2's own text
+ *     AND the correct-answer panel (track + ticks + thumb), all at once --
+ *     no separate click-to-reveal step for the panel itself anymore. Tied
+ *     to the goal text specifically: "estimate the mean" pairs with
+ *     actually showing what that mean/answer looks like.
+ *   Click 3 (left box 3, BOX2, the slider instructions) -> reveals box 3's
+ *     own text AND activates the real response slider.
+ *
+ * The "Sequence history" tracker is DELIBERATELY never revealed anywhere
+ * in this file -- it stays at its initial opacity:0 for this entire
+ * observation. It first becomes visible starting at observation 2 (the
+ * OBSERVATION plugin, which shows it unconditionally on every call) --
+ * i.e. showing sequence history only starts making sense once there IS a
+ * sequence longer than one value.
+ *
+ * The right panel's middle box used to show a KDE curve + a bubbling-
+ * then-reveal draw animation (distribution-numbers.js/numbers-draw-
+ * animation.js, both deleted this session -- still under task/ if this
+ * ever needs reverting), then a slider-style track (correct-answer-
+ * numbers.js) revealed via its OWN separate click step -- also removed
+ * this session, per the three-click redesign above.
+ *
  * Box text is imported from tutorial-text-numbers.js, shared with
  * plugin-tutorial-observation-numbers.js -- never hardcode it here again
  * (see that module's own docstring for why).
@@ -33,7 +53,7 @@ const info = {
 };
 
 const makeBox = (id, realHTML, isActive, extraStyle = '', extraClass = '') => `
-  <div id="${id}" class="tutorial-info-block${extraClass ? ' ' + extraClass : ''}" style="position:relative;${extraStyle}${isActive ? 'cursor:pointer;' : ''}">
+  <div id="${id}" class="tutorial-info-block numbers-tutorial-box${extraClass ? ' ' + extraClass : ''}" style="position:relative;${extraStyle}${isActive ? 'cursor:pointer;' : ''}">
     <span id="${id}-placeholder"
           style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
                  font-weight:bold;color:${isActive ? '#555' : '#ccc'};white-space:nowrap;">
@@ -48,7 +68,7 @@ class TutorialIntroNumbersPlugin {
   trial(display_el, trial) {
     const self = this;
     document.body.style.backgroundColor = '#f5f5f5';
-    const { example_value, true_mean, true_std, n_obs, values_so_far } = trial;
+    const { example_value, n_obs, values_so_far } = trial;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
@@ -68,16 +88,27 @@ class TutorialIntroNumbersPlugin {
 
           <div class="tutorial-panel tutorial-panel-right">
             ${makeBox('tut-box-0b', BOX0B, false, '', 'tutorial-right-top-box')}
-            <div id="tut-image-box" class="tutorial-right-image-box" style="position:relative;">
-              <div id="dist-svg" class="dist-canvas" style="line-height:0;"></div>
-              <div id="tut-image-placeholder"
-                   style="position:absolute;inset:0;display:flex;align-items:center;
-                          justify-content:center;background:#fff;border-radius:6px;
-                          cursor:default;color:#ccc;font-weight:bold;">
+            <div class="tutorial-right-image-box numbers-tutorial-box dist-canvas" style="position:relative;">
+              <span id="tut-ca-placeholder"
+                    style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                           font-weight:bold;color:#ccc;white-space:nowrap;">
                 · · ·
+              </span>
+              <div id="tut-ca-content" style="visibility:hidden;height:100%;">
+                <div class="tutorial-panel-caption">Correct answer</div>
+                ${buildCorrectAnswerHTML()}
               </div>
             </div>
-            <div id="tut-tracker" class="tutorial-right-tracker-box tutorial-tracker-highlight-white" style="opacity:0;"></div>
+            <div class="tutorial-right-tracker-box numbers-tutorial-box tutorial-tracker-highlight-white" style="position:relative;">
+              <div id="tut-tracker-content" style="visibility:hidden;">
+                <div class="tutorial-panel-caption">Sequence history</div>
+                <div id="tut-tracker"></div>
+              </div>
+              <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                           font-weight:bold;color:#ccc;white-space:nowrap;">
+                · · ·
+              </span>
+            </div>
           </div>
 
         </div>
@@ -92,23 +123,17 @@ class TutorialIntroNumbersPlugin {
 
       </div>`;
 
-    // ── Draw SVG — scales to fill right panel via viewBox + width/height 100% ──
-    // Obs 1/intro has no PAST observations yet (history=[], the default) --
-    // #tut-svg-history will just render empty, which is correct here.
-    display_el.querySelector('#dist-svg').innerHTML =
-      buildDistributionSVG(true_mean, true_std, example_value, false);
-
-    // Tracker -- rendered now but kept at opacity:0 (see markup above) until
-    // onImageBox reveals it alongside the distribution itself; showing an
-    // all-empty-except-slot-1 tracker before the participant has even seen
-    // the distribution would be showing progress through something they
-    // don't know exists yet.
+    // Tracker is rendered now (values_so_far is just [example_value] at
+    // this point) but its whole wrapper (#tut-tracker-content) stays
+    // visibility:hidden -- see markup above -- for this ENTIRE
+    // observation, behind a permanent "..." placeholder matching the
+    // other locked boxes' own convention. Deliberately never revealed
+    // anywhere in this file, see module docstring.
     display_el.querySelector('#tut-tracker').innerHTML = buildTrackerHTML({
       nObs: n_obs, obsNum: 1, values: values_so_far, color: SAMPLE_COLOR,
       revealCurrent: false,
     });
 
-    const svgRoot    = () => display_el.querySelector('#dist-svg svg');
     const centerEl   = () => display_el.querySelector('#tut-centre-number');
     const sliderWrap = display_el.querySelector('#tut-slider-wrap');
 
@@ -141,75 +166,29 @@ class TutorialIntroNumbersPlugin {
       box.addEventListener('click', onClickFn, { once: true });
     };
 
-    const showDist = () => {
-      const svg = svgRoot();
-      const axis = svg?.querySelector('#tut-svg-axis-labels');
-      const dist = svg?.querySelector('#tut-svg-dist');
-      if (axis) axis.style.opacity = '1';
-      if (dist) dist.style.opacity = '1';
-      // "0"/"100" labels are now HTML siblings of the <svg>, not SVG
-      // <text> inside it (see distribution-numbers.js's module
-      // docstring) -- so they're queried from display_el directly, not
-      // via svgRoot()?.querySelector like the SVG groups above.
-      const label0   = display_el.querySelector('#tut-svg-axis-label-0');
-      const label100 = display_el.querySelector('#tut-svg-axis-label-100');
-      if (label0)   label0.style.opacity = '1';
-      if (label100) label100.style.opacity = '1';
-    };
-
-    // Image box is its own click-to-reveal step, AFTER box 0's text and
-    // BEFORE box 1's goal text — participants aren't reading and watching
-    // the animation at the same moment.
-    const activateImageBox = () => {
-      const ph = display_el.querySelector('#tut-image-placeholder');
-      if (!ph) return;
-      ph.style.cursor = 'pointer';
-      ph.style.color  = '#555';
-      ph.textContent  = 'Click to reveal';
-      ph.addEventListener('click', onImageBox, { once: true });
-    };
-
-    const onImageBox = () => {
-      display_el.querySelector('#tut-image-placeholder')?.remove();
-      showDist();
-      // Box 0b (second sentence, positioned above the distribution figure)
-      // and the tracker (below it) are both revealed by THIS click, at the
-      // same moment the distribution image itself appears -- not by box 0's
-      // click. Neither has its own `activateBox()` call anywhere in this
-      // file.
+    const onBox0 = () => {
+      revealBox('tut-box-0');
       revealBox('tut-box-0b');
-      const tracker = display_el.querySelector('#tut-tracker');
-      if (tracker) tracker.style.opacity = '1';
-      startNumbersDrawAnimation({
-        svgRoot:    svgRoot(),
-        centerEl:   centerEl(),
-        true_mean,
-        true_std,
-        obsNum:     1,
-        onReveal: () => {
-          const trackerNum = display_el.querySelector('#tut-tracker-current-num');
-          if (trackerNum) {
-            trackerNum.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-            trackerNum.style.opacity = '1';
-          }
-        },
+      const el = centerEl();
+      el.style.opacity = '0';
+      requestAnimationFrame(() => {
+        el.style.transition = `opacity ${FADE_MS}ms ease`;
+        el.style.opacity = '1';
       });
       activateBox('tut-box-1', onBox1);
     };
-
-    const onBox0 = () => {
-      revealBox('tut-box-0');
-      activateImageBox();
-    };
     const onBox1 = () => {
       revealBox('tut-box-1');
-      const meanGroup = svgRoot()?.querySelector('#tut-svg-mean');
-      if (meanGroup) meanGroup.style.opacity = '1';
-      // "???" label is now an HTML sibling of the <svg>, not an SVG
-      // <text> inside #tut-svg-mean (see distribution-numbers.js's
-      // module docstring) -- queried from display_el directly.
-      const meanLabel = display_el.querySelector('#tut-svg-mean-label');
-      if (meanLabel) meanLabel.style.opacity = '1';
+      // history=[] (obs 1's only observation) -- fadeIn:true for the
+      // one-time reveal. No separate click step for this panel anymore --
+      // the box's own "..." placeholder (matching the other locked boxes'
+      // convention, added this session per explicit direction: the box
+      // must show nothing but "..." before this click, not the caption
+      // text or an empty track) is removed here, at the same moment the
+      // real content (caption + track/ticks/thumb) becomes visible.
+      display_el.querySelector('#tut-ca-placeholder')?.remove();
+      display_el.querySelector('#tut-ca-content').style.visibility = 'visible';
+      renderCorrectAnswer(display_el, { history: [], currentValue: example_value, fadeIn: true });
       activateBox('tut-box-2', onBox2);
     };
     const onBox2 = () => {

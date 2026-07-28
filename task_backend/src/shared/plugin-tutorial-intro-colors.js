@@ -1,21 +1,53 @@
+import { buildCorrectAnswerColorsHTML, renderCorrectAnswerColors, FADE_MS } from './correct-answer-colors.js';
 import { buildColorsSliderHTMLv2 as buildColorsSliderHTML, initColorsSliderV2 as initColorsSlider } from './slider-colors.js';
-import { buildUrnSVG, SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
-import { startColorsDrawAnimation, FADE_MS as DRAW_FADE_MS } from './colors-draw-animation.js';
+import { SAMPLE_BLUE, SAMPLE_RED } from './urn-colors.js';
 import { buildTrackerHTML } from './tutorial-tracker.js';
 import { BOX0, BOX0B, BOX1, BOX2 } from './tutorial-text-colors.js';
 /**
  * plugin-tutorial-intro-colors.js
- * Obs 1 of the colors tutorial — progressive reveal via click.
- * Box 0 (text) → image box (click to reveal bar + draw animation + BOX0B's
- * text, which sits above the urn figure in the right panel and is
- * revealed by THIS click, not its own -- and the sequence-history tracker
- * below the figure) → Box 1 (goal text) → Box 2 (slider instructions) →
- * slider. The image reveal is its own step, separate from box 0's text, so
- * participants aren't reading and watching the animation at the same time.
- * Mirrors plugin-tutorial-intro-numbers.js's identical structure (chat
- * history) -- the old static yellow URN_CAPTION box below the figure was
- * replaced by BOX0B above it + the tracker below it, same as numbers's
- * DIST_CAPTION → BOX0B/tracker change.
+ * Obs 1 of the colors tutorial — progressive reveal via click, redesigned
+ * this session to a simpler three-click progression (previously four
+ * clicks, with a separate click just to reveal the correct-answer panel)
+ * -- mirrors plugin-tutorial-intro-numbers.js's identical redesign:
+ *
+ *   Click 1 (left box 1, BOX0) -> reveals box 1's own text AND box 0b
+ *     (top-right box) together, plus the centre example circle recoloring
+ *     -- "you'll see balls, randomly drawn" (box 1) pairs naturally with
+ *     actually showing one (the circle) and where it comes from (box 0b).
+ *   Click 2 (left box 2, BOX1, the goal text) -> reveals box 2's own text
+ *     AND the correct-answer panel (bar + dots), all at once -- no
+ *     separate click-to-reveal step for the panel itself anymore. Tied to
+ *     the goal text specifically: "estimate the ratio" pairs with
+ *     actually showing what that ratio/answer looks like.
+ *   Click 3 (left box 3, BOX2, the slider instructions) -> reveals box 3's
+ *     own text AND activates the real response slider.
+ *
+ * The "Sequence history" tracker is DELIBERATELY never revealed anywhere
+ * in this file -- it stays behind its "..." placeholder for this entire
+ * observation. It first becomes visible starting at observation 2 (the
+ * OBSERVATION plugin, which shows it unconditionally on every call) --
+ * i.e. showing sequence history only starts making sense once there IS a
+ * sequence longer than one value.
+ *
+ * The right panel's middle box used to show a blue/red bar + a bubbling-
+ * then-reveal draw animation (urn-colors.js's buildUrnSVG +
+ * colors-draw-animation.js, the latter deleted this session -- still
+ * under task/ if this ever needs reverting), then revealed via its OWN
+ * separate click step -- also removed this session, per the three-click
+ * redesign above.
+ *
+ * Both right-column boxes show a "..." placeholder (matching the left
+ * column's own locked-box convention) until their real content is
+ * revealed -- the correct-answer box's white background/border
+ * (.dist-canvas) is on the OUTER, ALWAYS-VISIBLE element, not inside the
+ * hidden content wrapper (a real bug found and fixed this session in the
+ * numbers version: putting the box's own background/border styling
+ * inside the hidden wrapper made the whole box vanish into the page's
+ * bare background before reveal, not just its content). The hidden
+ * content wrapper also gets an explicit height:100% for the same reason
+ * -- correct-answer-colors.js's own outer wrapper needs a REAL resolved
+ * height to size itself against, not an auto-height ancestor.
+ *
  * Box text is imported from tutorial-text-colors.js, shared with
  * plugin-tutorial-observation-colors.js -- never hardcode it here again
  * (see that module's own docstring for why).
@@ -34,7 +66,7 @@ const info = {
 };
 
 const makeBox = (id, realHTML, isActive, extraStyle = '', extraClass = '') => `
-  <div id="${id}" class="tutorial-info-block${extraClass ? ' ' + extraClass : ''}" style="position:relative;${extraStyle}${isActive ? 'cursor:pointer;' : ''}">
+  <div id="${id}" class="tutorial-info-block colors-tutorial-box${extraClass ? ' ' + extraClass : ''}" style="position:relative;${extraStyle}${isActive ? 'cursor:pointer;' : ''}">
     <span id="${id}-placeholder"
           style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
                  font-weight:bold;color:${isActive ? '#555' : '#ccc'};white-space:nowrap;">
@@ -48,7 +80,7 @@ class TutorialIntroColorsPlugin {
 
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
-    const { example_value, true_p, n_obs, values_so_far } = trial;
+    const { example_value, n_obs, values_so_far } = trial;
 
     display_el.innerHTML = `
       <div class="tutorial-title">Tutorial</div>
@@ -64,16 +96,27 @@ class TutorialIntroColorsPlugin {
           </div>
           <div class="tutorial-panel tutorial-panel-right">
             ${makeBox('tut-box-0b', BOX0B, false, '', 'tutorial-right-top-box')}
-            <div id="tut-image-box" class="tutorial-right-image-box" style="position:relative;">
-              <div id="urn-svg" class="dist-canvas" style="line-height:0;"></div>
-              <div id="tut-image-placeholder"
-                   style="position:absolute;inset:0;display:flex;align-items:center;
-                          justify-content:center;background:#fff;border-radius:6px;
-                          cursor:default;color:#ccc;font-weight:bold;">
+            <div class="tutorial-right-image-box colors-tutorial-box dist-canvas" style="position:relative;">
+              <span id="tut-cac-placeholder"
+                    style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                           font-weight:bold;color:#ccc;white-space:nowrap;">
                 · · ·
+              </span>
+              <div id="tut-cac-content" style="visibility:hidden;height:100%;">
+                <div class="tutorial-panel-caption">Correct answer</div>
+                ${buildCorrectAnswerColorsHTML()}
               </div>
             </div>
-            <div id="tut-tracker" class="tutorial-right-tracker-box tutorial-tracker-highlight-white" style="opacity:0;"></div>
+            <div class="tutorial-right-tracker-box colors-tutorial-box tutorial-tracker-highlight-white" style="position:relative;">
+              <div id="tut-tracker-content" style="visibility:hidden;">
+                <div class="tutorial-panel-caption">Sequence history</div>
+                <div id="tut-tracker"></div>
+              </div>
+              <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                           font-weight:bold;color:#ccc;white-space:nowrap;">
+                · · ·
+              </span>
+            </div>
           </div>
         </div>
         <div id="tut-slider-wrap" style="visibility:hidden;">
@@ -87,22 +130,19 @@ class TutorialIntroColorsPlugin {
         </div>
       </div>`;
 
-    display_el.querySelector('#urn-svg').innerHTML = buildUrnSVG(true_p, false);
-
-    // Tracker -- rendered now but kept at opacity:0 (see markup above)
-    // until onImageBox reveals it alongside the urn figure itself; showing
-    // an all-empty-except-slot-1 tracker before the participant has even
-    // seen the figure would be showing progress through something they
-    // don't know exists yet. Mirrors plugin-tutorial-intro-numbers.js's
-    // identical reasoning.
+    // Tracker is rendered now (values_so_far is just [example_value] at
+    // this point) but its whole wrapper (#tut-tracker-content) stays
+    // visibility:hidden -- see markup above -- for this ENTIRE
+    // observation, behind a permanent "..." placeholder matching the
+    // other locked boxes' own convention. Deliberately never revealed
+    // anywhere in this file, see module docstring.
     display_el.querySelector('#tut-tracker').innerHTML = buildTrackerHTML({
       nObs: n_obs, obsNum: 1, values: values_so_far,
       color: (v) => v === 1 ? SAMPLE_BLUE : SAMPLE_RED,
       revealCurrent: false, renderDot: true,
     });
 
-    const svgRoot   = () => display_el.querySelector('#urn-svg svg');
-    const centerEl  = () => display_el.querySelector('#tut-ball');
+    const centerEl = () => display_el.querySelector('#tut-ball');
     const jsPsych = this.jsPsych;
 
     const activateSlider = () => {
@@ -130,66 +170,30 @@ class TutorialIntroColorsPlugin {
       box.addEventListener('click', fn, { once: true });
     };
 
-    const showBar = () => {
-      const bar = svgRoot()?.querySelector('#tut-urn-bar');
-      const bub = svgRoot()?.querySelector('#tut-urn-bubbles');
-      if (bar) bar.style.opacity = '1';
-      if (bub) bub.style.opacity = '1';
-    };
-
-    // Image box is its own click-to-reveal step, AFTER box 0's text and
-    // BEFORE box 1's goal text — previously the image appeared automatically
-    // alongside box 0, which split attention between reading and watching the
-    // animation at the same moment.
-    const activateImageBox = () => {
-      const ph = display_el.querySelector('#tut-image-placeholder');
-      if (!ph) return;
-      ph.style.cursor = 'pointer';
-      ph.style.color  = '#555';
-      ph.textContent  = 'Click to reveal';
-      ph.addEventListener('click', onImageBox, { once: true });
-    };
-
-    const onImageBox = () => {
-      display_el.querySelector('#tut-image-placeholder')?.remove();
-      showBar();
-      // Box 0b (text above the figure) and the tracker (below it) are both
-      // revealed by THIS click, at the same moment the urn figure itself
-      // appears -- not by box 0's click. Neither has its own
-      // `activateBox()` call anywhere in this file.
+    const onBox0 = () => {
+      revealBox('tut-box-0');
       revealBox('tut-box-0b');
-      const tracker = display_el.querySelector('#tut-tracker');
-      if (tracker) tracker.style.opacity = '1';
-      startColorsDrawAnimation({
-        svgRoot:       svgRoot(),
-        centerEl:      centerEl(),
-        true_p,
-        currentValue:  example_value,
-        obsNum:        1,
-        onReveal: () => {
-          const trackerDot = display_el.querySelector('#tut-tracker-current-num');
-          if (trackerDot) {
-            trackerDot.style.transition = `opacity ${DRAW_FADE_MS}ms ease`;
-            trackerDot.style.opacity = '1';
-          }
-        },
+      const el = centerEl();
+      const finalColor = example_value === 1 ? SAMPLE_BLUE : SAMPLE_RED;
+      el.style.background = '#fff';
+      el.style.border = '2px solid #ccc';
+      el.style.opacity = '1';
+      requestAnimationFrame(() => {
+        el.style.transition = `background ${FADE_MS}ms ease, border-color ${FADE_MS}ms ease`;
+        el.style.background = finalColor;
+        el.style.borderColor = finalColor;
       });
       activateBox('tut-box-1', onBox1);
     };
-
-    const onBox0 = () => {
-      revealBox('tut-box-0');
-      activateImageBox();
-    };
     const onBox1 = () => {
       revealBox('tut-box-1');
-      const qmark = svgRoot()?.querySelector('#tut-urn-qmark');
-      if (qmark) qmark.style.opacity = '1';
-      // "???" label is now an HTML sibling of the <svg>, not an SVG
-      // <text> inside #tut-urn-qmark (see urn-colors.js's module
-      // docstring) -- queried from display_el directly.
-      const qmarkLabel = display_el.querySelector('#tut-urn-qmark-label');
-      if (qmarkLabel) qmarkLabel.style.opacity = '1';
+      // history=[] (obs 1's only observation) -- fadeIn:true for the
+      // one-time reveal. No separate click step for this panel anymore --
+      // the box's own "..." placeholder is removed here, at the same
+      // moment the real content (caption + bar/dots) becomes visible.
+      display_el.querySelector('#tut-cac-placeholder')?.remove();
+      display_el.querySelector('#tut-cac-content').style.visibility = 'visible';
+      renderCorrectAnswerColors(display_el, { history: [], currentValue: example_value, fadeIn: true });
       activateBox('tut-box-2', onBox2);
     };
     const onBox2 = () => {

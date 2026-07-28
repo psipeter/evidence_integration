@@ -158,7 +158,7 @@ export async function clickThroughTutorialIntro(page) {
 }
 
 export async function completeConsent(page) {
-  for (let i = 0; i < 3; i++) { await page.click(`#reveal-box-${i}`); await page.waitForTimeout(150); }
+  for (let i = 0; i < 2; i++) { await page.click(`#reveal-box-${i}`); await page.waitForTimeout(150); }
   await page.check('#consent-checkbox');
   await page.waitForTimeout(150);
   await page.click('#consent-btn');

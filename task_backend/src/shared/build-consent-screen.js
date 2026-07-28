@@ -10,18 +10,24 @@
  * (not side by side) to make the top-to-bottom reading/reveal order visually
  * obvious.
  *
- * Three boxes: a blue payment-motivation box first (NOT a warning --
+ * Two boxes: a blue payment-motivation box first (NOT a warning --
  * distinguished with its own blue background/border, see
- * .consent-info-box-blue in style.css), followed by the two original red
- * warning boxes (data loss, session termination). Those two no longer
- * carry a bolded "Warning:" label (chat history, this session, dropped
- * per explicit direction) -- the red outline/background (.consent-info-
- * box's own default red styling) plus the text itself already signal
- * that these are warnings, without needing to say so directly. An
- * earlier third box repeating Prolific's own timing/compensation listing
- * was removed as redundant -- this NEW third box is a different,
- * deliberate addition (motivational framing, not a redundant repeat of
- * the Prolific listing).
+ * .consent-info-box-blue in style.css), followed by the timeout-
+ * termination warning (red). The old "do not close, refresh, or
+ * navigate away" warning box was removed (this session) -- accurate
+ * under the old JATOS pipeline (a reload really could lose an in-
+ * progress session), but no longer true now that the Supabase backend
+ * resumes correctly from a reload/close-and-reopen (see task_backend/
+ * TODO.md's trial-boundary-resume verification) -- keeping a warning
+ * that's now false would just confuse participants for no reason. That
+ * box no longer carries a bolded "Warning:" label either (chat history,
+ * an earlier session, dropped per explicit direction) -- the red
+ * outline/background (.consent-info-box's own default red styling) plus
+ * the text itself already signal that it's a warning, without needing
+ * to say so directly. An earlier third box repeating Prolific's own
+ * timing/compensation listing was removed as redundant -- the payment
+ * box that remains is a different, deliberate addition (motivational
+ * framing, not a redundant repeat of the Prolific listing).
  *
  * "Begin experiment" is NOT given a native `disabled` attribute. Disabled
  * buttons never dispatch a `click` event at all in any browser, which meant
@@ -44,7 +50,7 @@
  */
 import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
 
-const N_BOXES = 3;
+const N_BOXES = 2;
 
 // Note: jsPsych wraps all trial content in `.jspsych-content { text-align:
 // center; }`, so these boxes are center-aligned by inheritance even without
@@ -69,8 +75,6 @@ const makeBox = (id, realHTML, textAlign, variant = 'red') => `
  */
 export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
   const BOX_PAY_REAL = `You will be paid <strong>$5.00</strong> for finishing and up to <strong>$5.00</strong> based on your performance.`;
-  const BOX0_REAL = `Do not close, refresh, or navigate away during
-            the task.`;
   const BOX1_REAL = `You must respond within the ${tObsMs / 1000}-second
             time limit — if you repeatedly time out, the experiment will terminate.`;
 
@@ -128,8 +132,7 @@ export function buildConsentScreen(tObsMs, maxTimeoutsPerTrial) {
         </div>
         <div class="consent-info-boxes">
           ${makeBox('reveal-box-0', BOX_PAY_REAL, 'center', 'blue')}
-          ${makeBox('reveal-box-1', BOX0_REAL, 'center')}
-          ${makeBox('reveal-box-2', BOX1_REAL, 'center')}
+          ${makeBox('reveal-box-1', BOX1_REAL, 'center')}
         </div>
         <div class="consent-footer" style="margin-top:0.75rem;position:relative;">
           <!-- consent-fields-real is ALWAYS in flow (so this block's height is

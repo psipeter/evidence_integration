@@ -315,6 +315,230 @@ input[type="range"].slider-last::-moz-range-thumb {
   cursor: not-allowed;
 }
 
+/* -- "Correct answer" panel (numbers tutorial) --------------------------
+   Replaces the old KDE-curve + bubbling-animation figure (chat history,
+   this session -- distribution-numbers.js/numbers-draw-animation.js
+   deleted entirely). A non-interactive, slider-styled track: a thumb
+   that SLIDES to the running mean's position each time a new observation
+   arrives, plus a tick per past observation (faded) and one bold tick
+   for the current observation. Colors mirror the existing convention
+   directly (not read from JS constants -- same pattern as
+   .tutorial-notify-red/-blue/-yellow below, which are also hardcoded
+   here rather than threaded from JS): blue (GOAL_COLOR) for the thumb
+   ("this is the answer"), red (SAMPLE_COLOR) for ticks ("these are the
+   observations"), matching each color's existing meaning elsewhere in
+   this file. */
+.correct-answer-outer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0 1.4rem;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+.correct-answer-inner {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  opacity: 0;
+}
+.correct-answer-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #d1d5db;
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.correct-answer-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  background: #ef4444;
+  border-radius: 1px;
+  transform: translateX(-50%) translateY(-50%);
+}
+.correct-answer-tick-history {
+  height: 24px;
+  opacity: 0.35;
+}
+.correct-answer-tick-current {
+  height: 30px;
+  opacity: 1;
+}
+.correct-answer-thumb {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  transform: translateX(-50%) translateY(-50%);
+}
+.correct-answer-value-label {
+  position: absolute;
+  top: -1.7rem;
+  transform: translateX(-50%);
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #2563eb;
+  white-space: nowrap;
+}
+/* 0/100 end-ticks + labels -- ON the bar itself (small tick directly on
+   the line, label immediately below it), replacing an earlier design
+   that floated "0"/"100" in a separate row pinned to the BOTTOM of the
+   whole (much taller) box. That reserved real vertical space the box
+   didn't actually need to spend just for two static end labels --
+   compacting them onto the bar is what let .correct-answer-box-short
+   below shrink the box significantly without losing them. */
+.correct-answer-endtick {
+  position: absolute;
+  top: 50%;
+  width: 1.5px;
+  height: 14px;
+  background: #999;
+  transform: translateX(-50%) translateY(-50%);
+}
+.correct-answer-endlabel {
+  position: absolute;
+  top: 100%;
+  margin-top: 0.25rem;
+  transform: translateX(-50%);
+  font-size: 1.1rem;
+  color: #999;
+}
+
+/* Uniform vh-based height for the numbers tutorial's six boxes (3 left
+   text boxes, 3 right boxes: top-box/correct-answer-box/tracker-box) --
+   deliberately EQUAL on both sides so each left box lines up with its
+   right-column counterpart (chat history, this session: a direct,
+   specific instruction -- not independently tuned/guessed values per
+   box, which is what every earlier version of this session's redesign
+   had done instead). Value has already been retuned once (20vh -> 18vh)
+   -- named value-agnostically on purpose so retuning again doesn't also
+   require a rename. Scoped to numbers only via this dedicated class
+   (compound selector, not modifying the shared base classes directly)
+   since .tutorial-info-block/.tutorial-right-top-box/-image-box/
+   -tracker-box are ALL also used by colors' own tutorial, which keeps
+   its own existing (untouched) sizing. */
+.tutorial-info-block.numbers-tutorial-box,
+.tutorial-right-image-box.numbers-tutorial-box,
+.tutorial-right-tracker-box.numbers-tutorial-box {
+  flex: 0 0 18vh;
+  overflow: hidden;
+}
+
+/* Caption for the "Correct answer" / "Sequence history" boxes -- INSIDE
+   each box, top-center, absolutely positioned (chat history, this
+   session -- moved above-as-a-flow-element in between, reverted per
+   explicit direction once the boxes were tall enough -- 18-20vh, vs. the
+   ~3.5-6rem they were when an in-box caption was last tried and reported
+   as overlapping the box's own content -- to hold a top-center label
+   with real clearance above the vertically-centered content beneath
+   it). No z-index override needed against .tutorial-hidden-overlay/
+   -yellow (an earlier version of this rule had one, specifically to
+   keep the caption visible ABOVE those overlays during phase D/E) --
+   reverted per explicit direction: the caption should NOT be visible at
+   all when its box is hidden/overlaid or its content replaced (phase
+   D/E), so the CALLER now skips rendering the caption's markup entirely
+   during those phases instead (see plugin-tutorial-observation-
+   numbers.js's showCaptions) rather than fighting stacking order to hide
+   something that's still in the DOM. Requires its containing box to
+   have position:relative, already true for .tutorial-right-image-box/
+   -tracker-box (see those rules below); the left column has no captions
+   at all, this class is only ever used for these two. */
+.tutorial-panel-caption {
+  position: absolute;
+  top: 0.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
+/* -- "Correct answer" panel (colors tutorial) ---------------------------
+   Mirrors correct-answer-numbers.js's identical rationale/design, adapted
+   for categorical (not continuous) data: a thin blue/red bar, SPLIT at
+   the running proportion of blue draws so far (slides to its new split
+   point each time a new observation arrives, like the numbers thumb),
+   with dots accumulating ABOVE it -- one per draw, blue packed in from
+   the left, red packed in from the right, so their COUNTS (not a
+   continuous position, unlike numbers' ticks) are what's shown. */
+.correct-answer-colors-outer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0 1.4rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6rem;
+}
+.correct-answer-colors-dots {
+  position: relative;
+  width: 100%;
+  height: 12px;
+}
+.correct-answer-colors-dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.correct-answer-colors-dot-history { opacity: 0.35; }
+.correct-answer-colors-dot-current { opacity: 1; }
+.correct-answer-colors-bar {
+  position: relative;
+  width: 100%;
+  height: 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+}
+.correct-answer-colors-bar-blue {
+  height: 100%;
+  background: #2563eb;
+}
+.correct-answer-colors-bar-red {
+  height: 100%;
+  background: #ef4444;
+}
+.correct-answer-colors-value-label {
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #333;
+}
+
+/* Uniform vh-based height for the colors tutorial's six boxes -- mirrors
+   .numbers-tutorial-box exactly (same value, same rationale: EQUAL on
+   both sides so each left box lines up with its right-column
+   counterpart), kept as its OWN separate class rather than reusing
+   .numbers-tutorial-box directly -- these two tasks' tutorials are
+   otherwise independently designed throughout this codebase (separate
+   box-text sources, separate draw-animation-turned-correct-answer
+   modules, etc.), so coupling their box heights through one shared class
+   would be a new, one-off exception to that pattern for no real benefit;
+   duplicating the two-line rule is cheap and keeps them retunable
+   independently if they ever need to diverge. */
+.tutorial-info-block.colors-tutorial-box,
+.tutorial-right-image-box.colors-tutorial-box,
+.tutorial-right-tracker-box.colors-tutorial-box {
+  flex: 0 0 18vh;
+  overflow: hidden;
+}
+
 /* ── Tutorial layout ────────────────────────────────────────────────────── */
 .tutorial-wrap {
   display: flex;
@@ -440,6 +664,7 @@ input[type="range"].slider-last::-moz-range-thumb {
    sized to match, rather than shrinking the clock to fit an
    under-sized box the way an earlier revision did. */
 .tutorial-right-image-box {
+  position: relative;
   flex: 0 0 clamp(11rem, 18vh, 16rem);
   overflow: hidden;
 }
@@ -463,6 +688,7 @@ input[type="range"].slider-last::-moz-range-thumb {
    align-items:stretch, so nothing about the row's horizontal layout
    changes. */
 .tutorial-right-tracker-box {
+  position: relative;
   flex: 0 0 clamp(3.5rem, 6vh, 4.5rem);
   overflow: hidden;
   display: flex;
