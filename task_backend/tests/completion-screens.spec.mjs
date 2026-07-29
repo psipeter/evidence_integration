@@ -6,7 +6,7 @@
 // participant with no way to know their own code). Seeds a fully-
 // complete trial loop directly via the API rather than driving real UI
 // interactions through Playwright -- resume.spec.mjs and
-// full-session-bonus.spec.mjs already prove the trial loop itself works
+// happy-path.spec.mjs already prove the trial loop itself works
 // end to end; this file only cares about what happens after a session
 // is over. N_TRIALS=2 matches the dev servers' 2-trial sequence variant
 // (see playwright.config.mjs) -- seeding a different trial count than

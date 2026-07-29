@@ -902,10 +902,294 @@ ended, for whoever picks this back up):
    any OTHER file has the same kind of duplicated-canonical-constant
    pattern the color consolidation just fixed (the color case was found
    by deliberately checking; nothing guarantees it's the only instance).
-4. **Nothing has been tested since this whole cleanup/consolidation pass
-   began** -- explicitly deferred; testing happens only when asked for
-   directly, not proactively during this pass. This includes the color
-   consolidation, which touched 9 files and deleted one -- real risk
-   surface that hasn't been exercised in a browser at all yet, despite
-   every individual file syntax-checking clean.
+4. ~~**Nothing has been tested since this whole cleanup/consolidation pass
+   began**~~ -- DONE, see "Test suite verification and consolidation"
+   below for the full account (real bugs found, colors coverage added,
+   and a suite rewrite/consolidation done alongside it).
+
+---
+
+## Test suite verification and consolidation (this session)
+
+Addresses "Outstanding from this pass" item 4 above -- the color
+consolidation and dead-code removal (9 files touched, 1 deleted) had
+never been exercised in a browser at all. Two real bugs were found doing
+this, both in TEST code, not app code; the suite itself was then
+consolidated as a separate, explicitly-requested follow-on.
+
+**Real bug #1, found immediately**: `tests/helpers.mjs`'s
+`clickThroughTutorialIntro` still drove the OLD 4-click tutorial-intro
+flow (`tut-box-0` -> `#tut-image-placeholder` -> `tut-box-1` ->
+`tut-box-2`), from before an earlier session's redesign collapsed the
+image reveal into box-0's own click (see "Tutorial redesign" section
+above, "Intro plugin (obs 1): three-click progression"). `#tut-image-
+placeholder` no longer exists in either intro plugin's markup for either
+task. Every test that calls `completeTutorial()` (which calls this
+function first) hung on Playwright's own actionability wait for a
+selector matching zero elements -- surfacing only as a 3-minute
+test-level timeout on whichever test happened to reach the tutorial
+first in the run order, not as an obvious "element not found" error.
+Fixed to the real 3-click sequence (`tests/helpers.mjs`). This was a
+STALE TEST, not a real app regression -- the app's own tutorial-intro
+plugins were already correct; the test just hadn't been updated to
+match them since that earlier redesign.
+
+**Real bug #2, a genuine but UNREPRODUCED anomaly, not confirmed**: one
+run of an earlier version of the full-session test found only 28/30 real
+trial rows in the database for one of two participants driven through a
+complete real UI session (the browser itself successfully reached the
+genuine "Session complete" screen for both). Immediately re-ran the same
+test 3 more times back to back -- all 3 came back with the full 30/30.
+Most likely explanation: a single fire-and-forget `progress-append` call
+dropped under Playwright's faster-than-human click pace (a much tighter
+request-burst pattern than a real participant's own pacing would ever
+produce), not a systematic bug. Also manually verified via a slow,
+human-paced local session (`npm run dev:numbers`, `PROLIFIC_PID=test8`)
+queried directly against the database afterward: 48/48 rows, fully
+gapless, zero loss. **Left as an open, unresolved data point, not
+dismissed**: if `happy-path.spec.mjs`'s own row-completeness check (see
+below) ever comes back short again, that's a second occurrence worth
+escalating -- e.g. checking whether `backend-client.js`'s consecutive-
+failure warning banner fired, which it may not have even if this WAS
+real loss (2 total dropped rows across a ~60-checkpoint session isn't
+necessarily 2 CONSECUTIVE failures for the same participant, the actual
+threshold that trips the banner).
+
+**Suite consolidated afterward** (separate, explicitly-requested follow-
+on once the above fixes were confirmed working): the pre-existing suite
+had grown to 6 spec files driving 6 full tutorial traversals total
+(`basic-flow.spec.mjs`, `colors-smoke.spec.mjs`, and
+`full-session-bonus.spec.mjs`'s own 2-participant design, each paying for
+a fresh multi-minute traversal to attach what was often just one
+additional assertion). Rewritten down to 4 files / 4 traversals:
+
+- **`basic-flow.spec.mjs`, `colors-smoke.spec.mjs`, and
+  `full-session-bonus.spec.mjs` all DELETED**, replaced by a single new
+  **`tests/happy-path.spec.mjs`** -- ONE canonical full-session traversal
+  per task (numbers, colors), each `test.describe.serial` block split
+  into an explicit two-phase design: test 1 is PURE UI-level (drives the
+  real session end to end, asserts only on what the browser can observe
+  directly -- screens reached, zero console errors, every checkpoint's
+  HTTP status, and a cheap nonzero-reward sanity check guarding against a
+  repeat of this project's own past BONUS_DECAY-miscalibration bug, see
+  the "Tutorial redesign..." section's bonus-formula history elsewhere in
+  this doc); test 2 (database-only, no UI) runs AFTER test 1 and checks
+  the resulting rows are the complete, gapless set. `test.describe.serial`
+  means a failed test 1 skips test 2 automatically -- a genuine pre-test/
+  traversal-then-inspect structure, not just two tests that happen to run
+  in file order.
+- **Simplified from an earlier 2-participant design to 1** (per explicit
+  direction -- "fall back to a single participant, just to confirm the
+  bonus calculation is correct"): the second participant in the old
+  `full-session-bonus.spec.mjs` existed only to prove two response
+  strategies produced two DIFFERENT bonus totals -- a check on the test's
+  OWN design, not something a real app bug would trip. One participant
+  is enough to verify the reward pipeline carries a real number through
+  faithfully end to end.
+- **A dedicated `color-rendering.spec.mjs`** (written this session) had
+  added `getComputedStyle` checks for `palette.js`'s BLUE/RED at the
+  tutorial's correct-answer panel and centre stimulus, plus the first
+  real trial's own stimulus color -- confirming the exact color-
+  consolidation risk "Outstanding" item 4 above was originally worried
+  about. It was DELETED per direction ("the color tests seem
+  unnecessary") before ever being run against the fixed suite. Note for
+  whoever revisits this: while writing it, one real TEST bug (not an app
+  bug) was caught by inspection before deletion -- `#tut-ball`'s (colors
+  task) background/border-color fade is a genuine 1000ms CSS transition
+  (`plugin-tutorial-intro-colors.js`'s `onBox0`), so a computed-style
+  check needs to either wait for the transition to settle
+  (`page.waitForFunction` polling for one of the two real palette
+  colors, not a fixed timeout) or check something that isn't
+  mid-animation -- a fixed-wait version of this check would be flaky by
+  construction, not just occasionally slow. If a dedicated color check
+  is ever reinstated, don't reintroduce this specific race.
+- **`resume.spec.mjs`, `timeout-retry.spec.mjs`, `completion-screens.spec.mjs`
+  all UNCHANGED** -- each tests a genuinely distinct code path
+  (reload/resume; the `attempt`/terminate path; `progress-check`'s
+  branching for already-finished/terminated participants) that can't be
+  folded into the happy-path traversal without losing the ability to
+  tell "this specific path broke" apart from "everything broke."
+  `completion-screens.spec.mjs` got one stale-comment fix (referenced the
+  now-deleted `full-session-bonus.spec.mjs` by name).
+
+**Net result, verified**: 10 tests across 4 files (was 12 across 6),
+4 full traversals (was 6), full suite run in 4.4 minutes. All 10 pass,
+including BOTH tasks' happy-path traversal for the first time ever in
+this suite -- colors previously only ever got driven as far as
+`tutorial_intro` (`colors-smoke.spec.mjs`'s own stated scope), never a
+full tutorial + real trial + database check. This closes that real gap,
+not just the original color-consolidation risk.
+
+**Still open from the original "Outstanding from this pass" list**
+(items 1-3 above) -- all three now investigated; see "Naming-question
+follow-up" below for the full findings and resolution.
+
+---
+
+## Naming-question follow-up (items 1-3 from "Outstanding from this pass")
+
+### 1. `plugin-inter-trial.js` vs `plugin-iti-clock.js` -- RESOLVED (genuinely separate; a real terminology finding, not renamed)
+
+Traced every real usage in `build-trial-timeline.js` to answer this
+definitively rather than guessing from filenames alone:
+
+- `ItiClockPlugin` (`plugin-iti-clock.js`) fires **between every
+  observation WITHIN a trial** (the `if (o > 0)` guard inside the
+  per-observation loop), plus its `timed_out:true` variant as the
+  timeout-retry replay screen (`screen: 'iti_replay'`). It never fires
+  between trials.
+- `InterTrialPlugin` (`plugin-inter-trial.js`) fires **once per trial
+  boundary** -- the "Trial X/N -- generating new sequence..." pacing
+  screen between the trial-summary screen and the next trial's first
+  observation (`screen: 'inter_trial_reset'`).
+
+**Conclusion: NOT the same concept named twice** -- these are genuinely
+different screens serving different roles, so no functional duplication
+exists. But there IS a real terminology inversion worth recording: in
+standard psych-experiment usage, "ITI" specifically means Inter-*Trial*
+Interval. The plugin doing the actual between-*trial* pause is named
+`inter-trial` (spelled out, no abbreviation used at all), while the
+plugin claiming the "ITI" name (`plugin-iti-clock.js`) is doing what's
+actually an inter-*observation* pause -- closer to what the literature
+calls ISI (Inter-Stimulus Interval). The two files have effectively
+swapped which one "deserves" the ITI name. `plugin-iti-clock.js`'s own
+docstring even asserts "circular countdown clock between trials," which
+is factually wrong about its OWN behavior -- confirmed via the real
+usage sites above, not just re-reading the docstring's own claim at
+face value.
+
+A separate, smaller wrinkle in the `screen` tag namespace (not the file-
+naming question, but adjacent, worth knowing about): `TrialSummaryPlugin`
+(a THIRD, unrelated plugin) uses `screen: 'inter_trial'`, while
+`InterTrialPlugin` uses `screen: 'inter_trial_reset'` -- two different
+plugins, two similarly-prefixed tags, easy to conflate when reading test
+code or raw DB rows (the summary/bonus screen is `inter_trial`; the
+"generating new sequence" pacing screen is `inter_trial_reset`).
+
+**Decision: documented, NOT renamed.** This is a documentation/precision
+issue, not a functional bug -- unlike the color-duplication case,
+nothing behaves incorrectly here. A rename would touch
+`build-trial-timeline.js`, `build-tutorial-timeline.js`,
+`timeline-builder.js`'s imports, three Playwright spec files'
+`data-screen` assertions (`iti_replay`, `inter_trial`,
+`inter_trial_reset`), and a fair amount of prose in both CLAUDE.md and
+this doc -- a real, bounded, but nontrivial blast radius purely for
+naming precision. Revisit if this genuinely confuses someone in
+practice; not worth doing speculatively.
+
+### 2. `phases.js` -- RESOLVED, clean
+
+Reviewed in full. `PHASES` (welcome/consent/tutorial/trial/finished/
+terminated) is a small, well-scoped enum, and a grep across the whole
+`src/` tree confirmed nothing else independently redeclares these values
+-- no repeat of the color-consolidation's duplicated-canonical-constant
+pattern here. (The `screen` tag values that happen to share some of the
+same strings, e.g. `screen: 'welcome'` in `build-welcome-screen.js`, are
+a deliberately SEPARATE namespace from `phase` -- confirmed via
+`timeline-builder.js`'s own checkpoint calls, which pass `PHASES.WELCOME`
+independently of whatever `screen` tag the DOM carries; `screen` is a
+UI-only bookkeeping label, never sent to the backend at all, so this is
+not the same risk category as the color case.)
+
+One trivial, safe fix made: the module's own docstring pointed at
+`terminate-session.js (createTerminateSession)`, but the real file is
+`create-terminate-session.js` -- fixed (comment-only, zero behavior
+change).
+
+### 3. Broader naming-consistency pass -- CHECKED, no further action recommended
+
+Verified programmatically (not by eye) across the whole `src/shared/`
+tree: every `build-*.js` file exports a plain builder function with no
+jsPsych-plugin shape; every `plugin-*.js` file exports a real jsPsych
+plugin (`info` + `trial()`). Zero exceptions in either direction across
+all 17 files in each category. `create-terminate-session.js`/
+`finish-session.js`/`timeline-builder.js` are a legitimate third
+category (hand-rolled, non-jsPsych-trial DOM/orchestration code) --
+consistent with the same pattern already established for the old
+`task/` pipeline's `create-early-exit.js`, not a new inconsistency.
+
+Also re-checked specifically for the color-consolidation's own failure
+signature (a value independently redeclared as a "canonical" constant in
+5+ files) against `phase`/`screen` string literals project-wide --
+found no second instance.
+
+**Conclusion: the naming conventions that matter for correctness are
+fully consistent. What's left (the ITI/inter-trial terminology inversion
+above) is cosmetic and already fully documented. Not launching a further
+speculative sweep on this basis.**
+
+---
+
+## Deployment-readiness re-check and cutover status (this session)
+
+Prompted by a direct question -- has anything changed since the
+"Post-buildout review" and "Status note" sections above, and has the
+actual Prolific cutover happened yet? Checked empirically, not by
+re-reading old notes at face value.
+
+**Both the site and the backend are live and healthy right now**:
+`index-numbers.html`/`index-colors.html` on GitHub Pages both return
+`200`; `progress-check` returns `200` (the Supabase project is NOT
+currently auto-paused).
+
+**Confirmed the live bundle actually serves real production content, not
+test data** -- pulled the deployed JS bundle directly (not just trusted
+the build config) and checked: zero occurrences of `test2trial` anywhere
+in it, and exactly 6,400 occurrences of `"true_std":10` -- precisely 200
+pool members x 32 trials, matching the documented current-production pool
+exactly. Traced WHY this is safe by construction, not just lucky this
+time: `sequences_numbers.json`/`sequences_colors.json` (the real
+200-member pools) ARE tracked in git; only the `_*`-suffixed variant
+files are gitignored (see "Small-sequence test variants" section above)
+-- so a fresh CI checkout can never accidentally bundle test data, and
+`deploy-task-backend.yml` never sets `VITE_SEQUENCES_VARIANT` at all.
+
+**The two "accepted, not fixed" risks from "Post-buildout review"**,
+re-checked:
+- 7-day auto-pause: not paused right now (incidental -- this session's
+  own testing kept it warm, not a fix). The original risk-acceptance
+  reasoning assumed real collection would start "within a few days" of
+  that review; **worth confirming directly whether that timeline still
+  holds**, since the cutover below still hasn't happened -- if launch
+  keeps slipping, revisit whether the auto-pause risk is still
+  acceptable as-is.
+- No `events` -> analysis-pipeline path: still nothing built, still fine
+  to defer -- confirmed there's no real data yet to build against (see
+  below).
+
+**Cutover status: CONFIRMED NOT DONE, and here's exactly what's
+blocking it.** Checked `task_backend`'s Edge Functions directly:
+`supabase/functions/_shared/prolific-codes.ts` hands back the EXACT SAME
+completion/early-exit codes as the old JATOS pipeline's `PROLIFIC_CODES`
+(`C1CNSEMJ`/`C1ARJ6LO` for numbers, `C12FEFJU`/`C1L1GGHT` for colors) --
+a deliberate design choice, not an oversight, made specifically so the
+cutover never requires creating new Prolific studies. This means the
+cutover reduces to ONE manual step per task, done entirely in Prolific's
+own dashboard: change each existing study's Study URL field from the
+JATOS/MindProbe link to:
+
+    https://psipeter.github.io/evidence_integration/index-numbers.html?PROLIFIC_PID={{%PROLIFIC_PID%}}
+    https://psipeter.github.io/evidence_integration/index-colors.html?PROLIFIC_PID={{%PROLIFIC_PID%}}
+
+Simpler than the old URL, too -- confirmed via `timeline-builder.js` that
+it only ever reads `?PROLIFIC_PID=` from the query string and has no use
+for JATOS's old `STUDY_ID`/`SESSION_ID` params, so those can be dropped
+entirely rather than carried over.
+
+Confirmed from the data side too, not just the code side: querying the
+live table shows nothing but test-prefixed participant IDs (`test_*`,
+`dev_*`, manual smoke-test pids) -- zero real Prolific traffic has ever
+reached `task_backend`.
+
+**What's left before that flip, as far as code can verify**: nothing
+code-side is blocking it -- backend, hosting, and completion-code
+delivery are all confirmed working end-to-end (this session's
+`happy-path`/`resume`/`timeout-retry` tests exercise the exact same paths
+a real participant would hit). The remaining steps are Prolific-dashboard
+actions, not code: (1) update the Study URL field on both existing
+studies to the URLs above; (2) a final real "preview as participant"
+click-through against the LIVE url (not localhost) before opening to real
+traffic -- the same bar this project has held every deployment claim to
+since the JATOS-era pre-deployment checklist (see CLAUDE.md's own
+checklist, which caught real bugs no amount of local/E2E testing could).
 

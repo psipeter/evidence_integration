@@ -13,7 +13,7 @@
  * separate, explicitly-named phases (not one generic "done" flag) since
  * they mean different things downstream: finished pays the full
  * completion code, terminated pays the partial/early-exit code. See
- * finish-session.js (finishSession) and terminate-session.js
+ * finish-session.js (finishSession) and create-terminate-session.js
  * (createTerminateSession) for where each actually gets used.
  */
 export const PHASES = Object.freeze({

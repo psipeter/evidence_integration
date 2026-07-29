@@ -140,16 +140,31 @@ export async function exactRespond(page, value) {
 }
 
 /**
- * tutorial_intro (obs 0, numbers task) gates the slider behind a 4-step
- * click-through reveal (tut-box-0 -> image box -> tut-box-1 -> tut-box-2)
- * -- the slider/submit button aren't interactive at all until all four
- * are clicked (see plugin-tutorial-intro-numbers.js's activateSlider()).
+ * tutorial_intro (obs 0, either task -- both intro plugins share the same
+ * box ids: tut-box-0/1/2, tut-slider-wrap) gates the slider behind a
+ * 3-step click-through reveal: tut-box-0 (reveals box 0 + box 0b + the
+ * centre example fading in) -> tut-box-1 (reveals box 1 + the
+ * correct-answer panel) -> tut-box-2 (reveals box 2 + activates the real
+ * slider). See plugin-tutorial-intro-numbers.js's / -colors.js's own
+ * module docstrings for the full mechanism.
+ *
+ * UPDATED: this used to be a 4-click flow with a separate
+ * #tut-image-placeholder click between box-0 and box-1, from before the
+ * tutorial redesign that collapsed the image reveal into box-0's own
+ * click. That element no longer exists in either intro plugin's markup
+ * -- clicking it here left every test that calls completeTutorial()
+ * (resume, timeout-retry, and the since-renamed happy-path.spec.mjs)
+ * hanging on an actionability wait for a selector matching zero elements,
+ * surfacing only as a 3-minute timeout on whichever test happened to
+ * reach the tutorial first. Fixed to the real 3-click sequence; the
+ * animation fades themselves (FADE_MS=1000ms) don't gate anything in
+ * the plugin's own JS, so no long waits are needed between clicks --
+ * just enough for each click handler's synchronous DOM update to settle
+ * before the next click.
  */
 export async function clickThroughTutorialIntro(page) {
   await page.click('#tut-box-0');
-  await page.waitForTimeout(1500);
-  await page.click('#tut-image-placeholder');
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(200);
   await page.click('#tut-box-1');
   await page.waitForTimeout(200);
   await page.click('#tut-box-2');
@@ -164,8 +179,16 @@ export async function completeConsent(page) {
   await page.click('#consent-btn');
 }
 
-/** Full tutorial (numbers task): intro (obs 0) through all 15 tutorial
- * observations, the summary, and the "proceed to experiment" transition. */
+/** Full tutorial, either task: intro (obs 0) through all 15 tutorial
+ * observations, the summary, and the "proceed to experiment" transition.
+ * Despite the earlier docstring here claiming numbers-only, this is
+ * actually task-agnostic: build-tutorial-timeline.js (which drives the
+ * observation loop, summary, and tutorial-complete screens) is fully
+ * shared between numbers and colors -- same screen tags
+ * (tutorial_intro/tutorial_observation/tutorial_summary/tutorial_complete)
+ * and the same button ids (proceed-btn, tutorial-complete-btn) regardless
+ * of task -- confirmed directly against both tasks' own plugin files
+ * before relying on this, not assumed from the naming convention alone. */
 export async function completeTutorial(page) {
   await page.waitForSelector('body[data-screen="tutorial_intro"]', { timeout: 10000 });
   await clickThroughTutorialIntro(page);

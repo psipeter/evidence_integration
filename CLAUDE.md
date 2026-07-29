@@ -1577,10 +1577,18 @@ path, and all three session-ending screens. The site itself is now live
 on GitHub Pages (repo made public for this), verified against the real
 deployed URL, not just localhost. The `task/` JATOS pipeline described
 everywhere else in this file remains completely untouched and live as
-the fallback throughout. `task_backend/TODO.md`'s "Status note for
-future sessions" (bottom of that file) has the current, exact list of
-what's still open -- as of the last update: a persistent test suite and
-the weekly backup process, nothing else.**
+the fallback throughout. Since this note was first written, the tutorial
+was also substantially redesigned there (a pilot #3 comprehension finding
+motivated a new "Correct answer" panel replacing the old KDE/urn
+figures), followed by a dead-code/consolidation pass and an end-to-end
+test-suite rewrite that caught and fixed a real bug the consolidation had
+introduced (a stale test helper left over from a tutorial-intro click-flow
+change, unrelated to app code itself). `task_backend/TODO.md`'s "Status
+note for future sessions" (bottom of that file) has the current, exact
+list of what's still open -- deliberately NOT copied here, since specifics
+there have already gone stale in this exact spot more than once; read
+that section directly rather than trusting a summary of it frozen at
+whatever point this note was last edited.**
 
 **Why not the hosted alternatives** (full investigation above; summary
 for quick reference):
