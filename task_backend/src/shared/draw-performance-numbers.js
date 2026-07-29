@@ -21,7 +21,7 @@
  *                               build-trial-timeline.js never compute
  *                               running means two different ways).
  *   Legend:  red thumb "Observations" | black circle "Your estimates"
- *            | blue tick "True mean" or "Running mean" (label follows
+ *            | blue tick "True average" or "Correct answer" (label follows
  *            errorMode). No "Error" or bonus/coin entries (chat history,
  *            REMOVED): the green error line itself is still drawn per row
  *            (still informative at a glance), but bonus is no longer a
@@ -91,7 +91,7 @@ export const buildPerformanceSVG = (mu, sigma, values, responses, errorMode = 't
   const parts = [];
   const muX = xPos(mu);
   const runningMeans = errorMode === 'running_mean' ? computeRunningMeans(vals) : null;
-  const meanLabel = errorMode === 'running_mean' ? 'Running mean' : 'True mean';
+  const meanLabel = errorMode === 'running_mean' ? 'Correct answer' : 'True average';
 
   // ── Rows 1–n: per-observation rows ────────────────────────────────────────
   const obsStartY = PAD_T;

@@ -1144,6 +1144,21 @@ files are gitignored (see "Small-sequence test variants" section above)
 -- so a fresh CI checkout can never accidentally bundle test data, and
 `deploy-task-backend.yml` never sets `VITE_SEQUENCES_VARIANT` at all.
 
+**UPDATE (later session): `"true_std":10` above is now stale as a
+specific number** -- `NUMBERS_STD_FIXED` (generate_sequences.py) was
+deliberately changed 10 -> 15 in a later session (a std=10 pool didn't
+leave enough suffix-variance budget for the fixed tutorial example's
+high-variance prefix, flatlining the rest of that trial -- see
+generate_sequences.py's own comment on NUMBERS_STD_FIXED for the full
+reasoning), and the pool was regenerated accordingly. The VERIFICATION
+METHOD above (pull the live bundle, count occurrences of the current
+true_std value x 6400) is still the right check to re-run after any
+future deploy -- just re-run it against whatever `NUMBERS_STD_FIXED`
+currently is, don't assume it's still 10. This is exactly the kind of
+duplicated-literal drift this project has hit before; avoid re-
+hardcoding the specific number in a future note like this one if
+avoidable.
+
 **The two "accepted, not fixed" risks from "Post-buildout review"**,
 re-checked:
 - 7-day auto-pause: not paused right now (incidental -- this session's

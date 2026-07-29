@@ -41,12 +41,12 @@ export const BOX0 = `In this task, you'll see a <strong>sequence</strong> of bal
   presented <em>one at a time</em>.`;
 
 export const BOX1 = `Your <strong>goal</strong> is to estimate the
-  <span style="color:${DIST_COLOR};font-weight:bold;">ratio</span> of
+  <span style="color:${DIST_COLOR};font-weight:bold;">percentage</span> of
   <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> and
   <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> balls in this sequence.`;
 
 export const BOX2 = `<strong>Move</strong> the slider to show your evolving estimate of the
-  <span style="color:${DIST_COLOR};font-weight:bold;">ratio</span>.`;
+  <span style="color:${DIST_COLOR};font-weight:bold;">percentage</span>.`;
 
 // Default text for the tutorial's top-right box (phase A -- see
 // plugin-tutorial-observation-colors.js's rightTopBoxContent) -- a short
@@ -56,7 +56,7 @@ export const BOX2 = `<strong>Move</strong> the slider to show your evolving esti
 // combined BOX0, moved here once BOX0 itself was trimmed to just its
 // first sentence (chat history) -- "probability" stays the word here
 // (describing the hidden GENERATIVE parameter), even though BOX1/BOX2
-// above now say "ratio" instead (describing what the participant is
+// above now say "percentage" instead (describing what the participant is
 // estimating FROM the observed balls) -- a deliberate distinction, not an
 // inconsistency: the two boxes are talking about different things.
 export const BOX0B = `Each ball is randomly colored
@@ -68,7 +68,7 @@ export const BOX0B = `Each ball is randomly colored
 // rightTopBoxContent) -- mirrors tutorial-text-numbers.js's identical
 // RECAP_TEXT_1/RECAP_TEXT_2 constants (wording simplified this session
 // per explicit direction -- dropped "probability and history"/"of the
-// ratio", now identical task-agnostic wording to numbers's own
+// percentage", now identical task-agnostic wording to numbers's own
 // version: "these graphics"/"your estimate"). "will not see"/"memory"
 // bolded, plain (no color).
 export const RECAP_TEXT_1 = `In the experiment, you

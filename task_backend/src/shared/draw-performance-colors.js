@@ -28,7 +28,7 @@
  *                           scoring.js's computeRunningRatios).
  *   Legend:  Half-blue/half-red circle "Observations" | black circle
  *            "Your estimates" | green tick "True probability" or
- *            "Running ratio" (label follows errorMode) | violet line
+ *            "Correct answer" (label follows errorMode) | violet line
  *            "Error"
  *
  * TWO real bugs found and fixed together here (chat history):
@@ -119,7 +119,7 @@ export const buildSummaryBarSVG = (true_p, values, responses, errorMode = 'true_
   const parts = [];
   const trueX = pctToX(true_p * 100);
   const runningRatios = errorMode === 'running_p' ? computeRunningRatios(vals) : null;
-  const refLabel = errorMode === 'running_p' ? 'Running ratio' : 'True probability';
+  const refLabel = errorMode === 'running_p' ? 'Correct answer' : 'True probability';
 
   // ── Rows 1–n: per-observation bars ────────────────────────────────────────
   const obsStartY = PAD_T;

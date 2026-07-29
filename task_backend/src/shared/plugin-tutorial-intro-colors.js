@@ -16,8 +16,8 @@ import { BOX0, BOX0B, BOX1, BOX2, SAMPLE_BLUE, SAMPLE_RED } from './tutorial-tex
  *   Click 2 (left box 2, BOX1, the goal text) -> reveals box 2's own text
  *     AND the correct-answer panel (bar + dots), all at once -- no
  *     separate click-to-reveal step for the panel itself anymore. Tied to
- *     the goal text specifically: "estimate the ratio" pairs with
- *     actually showing what that ratio/answer looks like.
+ *     the goal text specifically: "estimate the percentage" pairs with
+ *     actually showing what that percentage/answer looks like.
  *   Click 3 (left box 3, BOX2, the slider instructions) -> reveals box 3's
  *     own text AND activates the real response slider.
  *

@@ -40,10 +40,10 @@ export const BOX0B = `Each number is
   distribution.`;
 
 export const BOX1 = `Your <strong>goal</strong> is to estimate the
-  <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span> of all numbers in the sequence.`;
+  <span style="color:${GOAL_COLOR};font-weight:bold;">average</span> of all numbers in the sequence.`;
 
 export const BOX2 = `<strong>Move</strong> the slider to show your evolving estimate of the
-  <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span>.`;
+  <span style="color:${GOAL_COLOR};font-weight:bold;">average</span>.`;
 
 // RECAP_TEXT_1/2 -- originally written for a dedicated post-summary recap
 // screen (plugin-tutorial-recap-numbers.js, since deleted). Now used by

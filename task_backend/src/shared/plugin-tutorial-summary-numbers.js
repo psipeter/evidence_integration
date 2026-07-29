@@ -31,7 +31,7 @@ class TutorialSummaryNumbersPlugin {
     document.body.style.backgroundColor = '#f5f5f5';
 
     const { true_mean, true_std, values, responses, error_mode, total_error, reward } = trial;
-    const meanWord = error_mode === 'running_mean' ? 'running mean' : 'true mean';
+    const meanWord = error_mode === 'running_mean' ? 'correct answer' : 'true average';
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;width:70vw;">
         <div class="info-banner-blue" style="max-width:900px;font-size:1.15rem;white-space:nowrap;">

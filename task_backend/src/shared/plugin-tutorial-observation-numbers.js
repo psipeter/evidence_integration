@@ -50,7 +50,7 @@
  *                    though only 2-3 are actually implemented here.
  *   B (obs 4-6)   -- SLIDER_REMINDER "the slider remembers your last
  *                    position" reminder -- BLUE (.tutorial-notify-blue).
- *   C (obs 7-9)  -- "...mean of all numbers in this sequence" goal
+ *   C (obs 7-9)  -- "...average of all numbers in this sequence" goal
  *                    reminder -- YELLOW (.tutorial-notify-yellow). The
  *                    history tracker below the correct-answer panel is
  *                    ALSO highlighted in that same yellow during this
@@ -157,7 +157,7 @@ function rightTopBoxContent(obsNum, tObsMs) {
     return { html: `${RECAP_TEXT_1} ${RECAP_TEXT_2}`, colorClass: 'tutorial-notify-red', phase: 'D' };
   }
   if (obsNum >= 7 && obsNum <= 9) {
-    return { html: 'Remember that your goal is to estimate the mean of <strong>all</strong> numbers in this sequence', colorClass: 'tutorial-notify-yellow', phase: 'C' };
+    return { html: 'Remember that your goal is to estimate the average of <strong>all</strong> numbers in this sequence', colorClass: 'tutorial-notify-yellow', phase: 'C' };
   }
   if (obsNum >= 4 && obsNum <= 6) {
     return { html: SLIDER_REMINDER, colorClass: 'tutorial-notify-blue', phase: 'B' };

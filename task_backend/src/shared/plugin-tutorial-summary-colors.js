@@ -30,11 +30,11 @@ class TutorialSummaryColorsPlugin {
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
     const { true_p, values, responses, error_mode, total_error, reward } = trial;
-    // 'running_p' mode says "running ratio" here (chat history) --
-    // mirrors numbers's identical meanWord swap, using colors's own
-    // established "ratio" terminology (tutorial-text-colors.js) rather
-    // than "running probability".
-    const refWord = error_mode === 'running_p' ? 'running ratio' : 'true probability';
+    // 'running_p' mode says "correct answer" here (chat history) --
+    // mirrors numbers's identical meanWord swap, unifying with the
+    // tutorial's own live correct-answer panel terminology rather than
+    // "running percentage".
+    const refWord = error_mode === 'running_p' ? 'correct answer' : 'true probability';
 
     display_el.innerHTML = `
       <div class="screen-wrap" style="text-align:center;width:70vw;">
