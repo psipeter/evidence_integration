@@ -22,8 +22,9 @@ quota's construction is acceptable for binary (kept as-is) but "too
 heavy-handed" for continuous specifically, given concern about biasing
 participants toward a specific cognitive strategy (see chat history).
 
-Confirmed empirically before this script was written (see docs/
-sequence_design_open_questions.md, and the chat that led to this file):
+Confirmed empirically before this script was written (see
+docs/HISTORY.md's "Sequence design: open questions" section, and the chat
+that led to this file):
   - Dropping ONLY the seed search (keeping the rescale) does almost
     nothing -- single-shot moment-matched continuous sequences showed
     split-half reliability r=0.995 and a back-half-corrects-front-half

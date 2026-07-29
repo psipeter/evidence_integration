@@ -118,3 +118,59 @@ Archived task pickles live in ``archive/data/``:
 Active datasets remain in ``data/``: ``carrabin.pkl``, ``yoo.pkl``, ``diederen.pkl``.
 
 ---
+
+## Sequence-generation diagnostic scripts (superseded by scripts/plot_sequences.py)
+
+Moved when `scripts/inspect_sequences.py` and `scripts/inspect_iid_sequences.py`
+were consolidated into `scripts/plot_sequences.py` (two branches --
+`across_models` and `across_pids` -- both reading exclusively from
+task_backend's real, deployed sequence pool). That consolidation surfaced
+four more scripts that were entirely in service of the OLD, now-inactive
+pipeline and had no remaining purpose once it was retired:
+
+### archive/scripts/test_sequences.py
+Produced `figures/test_sequences.pdf` (3-row x 7-col cross-task RL_lambda/
+NEF-vs-Human comparison, quartile-split panels). Read
+`task/sequences/{task}_sequences.pkl` -- the OLD task/ pipeline's single
+shared reference file -- via columns (`trial_type`, `std_condition`) that
+don't exist in ANY current schema, task/'s current one or task_backend's;
+this script's own main()/figure pipeline was already stale relative to
+current production sequences before this move, not just redundant.
+Three of its functions (`fit_lambda_mid`, `split_half_lambda`,
+`compute_abs_delta`) were genuine, still-needed utilities with NO
+dependency on that stale schema -- confirmed directly, not assumed --
+and were inlined into `plot_sequences.py` before this file was archived,
+rather than lost.
+
+### archive/scripts/run_nef_sequences.py, submit_nef_sequences.py, collect_nef_sequences.py
+A SLURM job-submission/collection trio that existed purely to feed
+test_sequences.py's own `test_sequences_responses.pkl` pipeline with a
+lambda-swept NEF simulation (one job per lambda value, run on the
+cluster). Reads the same stale `task/sequences/*.pkl` file layout.
+Once test_sequences.py's own figure was retired, this trio had no
+remaining consumer -- `plot_sequences.py`'s own NEF path
+(`simulate_nef_task`/`load_or_simulate_nef`) runs directly and
+synchronously against ONE representative task_backend pool member, with
+no job-submission step needed at all.
+
+### Not moved, but flagged for awareness: scripts/pilot_overview.py
+Still in `scripts/` -- NOT moved here, since it's a different concern
+from sequence-generation diagnostics (it compares REAL collected pilot
+participant data against models, not simulated agents against generated
+sequences) and wasn't redundant with `plot_sequences.py` under the
+criterion this cleanup pass used. It IS, however, likely superseded by
+`scripts/figure_soltani_{performance,temporal,variability}.py`, which
+cover the same real-data-vs-model comparison via the project's normal
+PTN-figure convention (properly Optuna-fitted models, participant-
+filtered `data/task_{continuous,binary}.pkl` inputs) rather than
+pilot_overview.py's fixed/hand-tuned model parameters and ad-hoc trial-
+based join against `task/sequences/*.json`. Left for a separate,
+deliberate decision rather than archived under this pass's criterion.
+
+### How to restore
+Copy the four files back to `scripts/`; `plot_sequences.py`'s own inlined
+copies of `fit_lambda_mid`/`split_half_lambda`/`compute_abs_delta` would
+then be a duplicate of test_sequences.py's originals (harmless, but worth
+de-duplicating back to a single cross-file import at that point).
+
+---

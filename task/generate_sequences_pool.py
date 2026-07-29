@@ -3,8 +3,8 @@ generate_sequences_pool.py
 ============================
 Builds a POOL of N independent HYBRID sequence sets, each saved as its own
 numbered file, for the "serve a unique sequence set to every participant"
-architecture (docs/sequence_design_open_questions.md Section 7, extended
-for the hybrid method after PI discussion -- see chat history).
+architecture (docs/HISTORY.md's "Sequence design: open questions" section,
+Section 7, extended for the hybrid method after PI discussion -- see chat history).
 
 This is a thin wrapper around generate_sequences_hybrid.py's own
 generate_task_sequences_hybrid -- no new generation logic lives here.

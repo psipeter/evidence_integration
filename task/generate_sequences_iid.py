@@ -15,8 +15,8 @@ seeds produced a real prefix collision at n_unique_sequences=10 (only
 binary sequences exist at prefix_length=4, so this was likely, not a fluke).
 This silently affected every binary result computed via
 scripts/inspect_iid_sequences.py before the fix -- see
-docs/sequence_design_open_questions.md for the full investigation this was
-found during. Fixed via _draw_unique_binary_prefix (active dedup, matching
+docs/HISTORY.md's "Sequence design: open questions" section for the full
+investigation this was found during. Fixed via _draw_unique_binary_prefix (active dedup, matching
 in spirit -- though not code, since the generation path differs -- the fix
 already applied to generate_sequences_momentmatch.py's build_binary_prefixes
 for the same underlying reason).
