@@ -65,18 +65,28 @@ VALUE_MIN = 0     # numbers slider range
 VALUE_MAX = 100
 SEQ_LENGTH = 15   # observations per trial, both tasks
 
-# Fixed design parameters -- verified against the real production pool (see
-# module docstring). These are constants, not CLI flags: nothing about this
-# pipeline calls for regenerating the pool with different values, and the
-# one time a value WAS wrong during consolidation (std_fixed defaulted to
-# 15 here, but real production data showed 10) it was only possible
-# because it was an overridable default rather than a single source of
-# truth. Change these here directly if the design itself ever changes.
+# Fixed design parameters -- see module docstring. These are constants, not
+# CLI flags: nothing about this pipeline calls for regenerating the pool
+# with different values casually, and the one time a value drifted
+# unnoticed during the original task/ -> task_backend consolidation
+# (std_fixed defaulted to 15 in the generator script but real deployed
+# production data showed 10) it was only possible because it was an
+# overridable default rather than a single source of truth -- hence
+# keeping it a hardcoded constant here rather than a CLI flag. Deliberately
+# changed back to 15 (from 10): a std=10 numbers pool produces prefixes
+# with enough internal variance that generate_numbers_suffix's analytical
+# variance-correction formula squeezes the SUFFIX down to its 1.0-std
+# floor whenever a high-variance prefix is chosen (e.g. for a tutorial
+# example with large early updates) -- std=15 gives the suffix enough
+# variance budget that a high-variance prefix no longer flatlines the
+# rest of the trial. This is a genuine, deliberate reversal of that
+# earlier std=10 confirmation, not a re-drift -- change here directly (and
+# re-run --tutorial afterward) if this ever needs revisiting again.
 NUMBERS_N_PREFIX = 8
 NUMBERS_N_REPEATS = 4
 NUMBERS_PREFIX_LENGTH = 4
 NUMBERS_MEAN_RANGE = (15.0, 85.0)
-NUMBERS_STD_FIXED = 10.0
+NUMBERS_STD_FIXED = 15.0
 NUMBERS_BOUNDARY_MARGIN = 1.0
 NUMBERS_STD_TOLERANCE_FRAC = 0.25
 
@@ -435,6 +445,155 @@ def build_test_colors_pool(n_pool, pool_dir, name, base_seed=50_000):
 
 
 # ---------------------------------------------------------------------------
+# Tutorial sequences: ONE fixed trial per task, shared by every participant
+# ---------------------------------------------------------------------------
+def _running_mean_deltas(values):
+    """Sum of |consecutive running-mean changes| across `values` -- the
+    same |Δresponse|-style metric this project already uses elsewhere
+    (see scripts/plot_sequences.py) to characterize "how much did each
+    update move", applied here to the RAW STIMULUS stream itself rather
+    than to a model's response -- i.e. how dramatic the running average/
+    ratio's own on-screen updates would look, independent of any agent.
+    Colors' {-1,+1} values work directly: a color SWITCH between adjacent
+    observations drives the single biggest possible running-mean step, so
+    this naturally rewards alternation there with no task-specific casing
+    needed."""
+    running, total = [], 0.0
+    for i, v in enumerate(values, 1):
+        total += v
+        running.append(total / i)
+    return sum(abs(running[i] - running[i - 1]) for i in range(1, len(running)))
+
+
+def _has_repeated_values(values):
+    """True if any value in `values` appears more than once. Used to
+    exclude numbers candidates with a stretch of identical observations
+    (e.g. the 48,48,48... flat run an earlier std=10 pool produced) --
+    even a single exact repeat means the running mean visibly pauses at
+    that step, undercutting the "keep it moving" goal this whole
+    selection function exists for.
+
+    NUMBERS ONLY -- never applied to colors. Colors values are {-1,+1},
+    so by the pigeonhole principle EVERY 15-observation colors trial has
+    repeated values (there are only 2 distinct values to draw from at
+    all) -- applying this filter there would exclude the entire colors
+    pool, not just the flat/boring ones."""
+    return len(set(values)) != len(values)
+
+
+def choose_tutorial_sequences(pool_dir='.', out_dir=None, n_score=5,
+                               prefix_percentile_lo=75, prefix_percentile_hi=95):
+    """Selects ONE fixed trial per task from the real production pool
+    (sequences_numbers.json / sequences_colors.json under pool_dir) to
+    serve as every participant's tutorial example -- the same trial for
+    everyone, rather than a per-load dynamic pick (the client-side
+    pickTutorialExample in src/shared/config-base.js, whose own docstring
+    already argues for deriving the example from real data -- this keeps
+    that principle but fixes WHICH real trial, instead of re-deriving it
+    differently depending on which pool member happens to load first).
+
+    Selection criterion (two stages, deliberately NOT a single global
+    maximum -- see below for why), plus a hard pre-filter for numbers:
+      0. (numbers only) Discard any trial containing a repeated exact
+         value anywhere in its 15 observations (_has_repeated_values) --
+         a repeat means the running mean visibly PAUSES at that step,
+         which undercuts the whole point of this selection. Not applied
+         to colors -- see that function's own docstring for why it
+         can't be (every colors trial has repeats by construction).
+      1. Restrict candidates to trials whose PREFIX score falls between
+         the prefix_percentile_lo and prefix_percentile_hi percentiles of
+         the WHOLE pool's prefix-score distribution -- "high but not
+         maximal": still a big early swing, but excluding the very top
+         tail.
+      2. Among that band, pick the trial with the HIGHEST SUFFIX score --
+         i.e. the one that ALSO keeps the running average/ratio visibly
+         moving after the prefix, not just during it.
+    (PREFIX score = _running_mean_deltas on the first n_score
+    observations; SUFFIX score = the same metric on the remaining ones --
+    both the same |Δresponse|-style measure, applied to the raw stimulus
+    stream rather than a model's response.)
+    This two-stage design exists because taking the single global-max
+    PREFIX score (an earlier version of this function did exactly that)
+    reliably picked a dead-flat suffix for numbers specifically: a
+    maximally spread-out prefix has high internal variance, and
+    generate_numbers_suffix's analytical variance-correction formula
+    squeezes the SUFFIX's variance down (often to its 1.0-std floor) to
+    compensate, so the trial's overall std still lands near std_fixed --
+    confirmed directly, not assumed. Restricting to a percentile BAND
+    rather than the single max, then choosing by suffix score within it,
+    naturally avoids that outlier without needing to special-case it.
+
+    Writes {out_dir}/tutorial_sequence_{numbers,colors}.json -- each a
+    single JSON object: the winning trial dict (same schema as every
+    pool member's own trials -- qid, true_mean, true_std, true_p, values,
+    prefix_length, iti_ms, iti_condition, trial) plus a `pool_index`
+    field recording provenance (which of the pool's members it came
+    from). out_dir defaults to pool_dir.
+
+    NOTE: this reads the ALREADY-BUILT pool files -- it does not
+    regenerate them. If the production pool is ever regenerated with a
+    different design (mean_range, std_fixed, blue_range, etc.), re-run
+    this afterward -- otherwise the tutorial's fixed example could
+    silently drift out of sync with the real task's parameters, exactly
+    the failure mode pickTutorialExample's own docstring describes
+    (see "Sequences" in CLAUDE.md's task_backend section).
+    """
+    pool_dir = pathlib.Path(pool_dir)
+    out_dir = pathlib.Path(out_dir) if out_dir else pool_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    file_for_task = {'numbers': 'sequences_numbers.json', 'colors': 'sequences_colors.json'}
+    chosen = {}
+    for task, fname in file_for_task.items():
+        path = pool_dir / fname
+        with open(path) as f:
+            pool = json.load(f)
+
+        scored = []
+        for pool_idx, member in enumerate(pool):
+            for trial in member:
+                if task == 'numbers' and _has_repeated_values(trial['values']):
+                    continue
+                prefix_score = _running_mean_deltas(trial['values'][:n_score])
+                suffix_score = _running_mean_deltas(trial['values'][n_score:])
+                scored.append((prefix_score, suffix_score, pool_idx, trial))
+
+        prefix_scores = np.array([s[0] for s in scored])
+        lo = float(np.percentile(prefix_scores, prefix_percentile_lo))
+        hi = float(np.percentile(prefix_scores, prefix_percentile_hi))
+        band = [s for s in scored if lo <= s[0] <= hi]
+        assert band, (f"[{task}] no candidates fell inside the prefix-score percentile band "
+                      f"[{prefix_percentile_lo}, {prefix_percentile_hi}] -- widen it")
+
+        best_prefix_score, best_suffix_score, best_pool_idx, best_trial = max(
+            band, key=lambda s: s[1])
+
+        out = dict(best_trial)
+        out['pool_index'] = best_pool_idx
+        chosen[task] = out
+
+        out_path = out_dir / f'tutorial_sequence_{task}.json'
+        with open(out_path, 'w') as f:
+            json.dump(out, f, indent=2)
+
+        print(f"[{task}] chosen from pool_index={best_pool_idx}, trial={best_trial['trial']}, "
+              f"qid={best_trial['qid']}")
+        print(f"  true_mean={best_trial['true_mean']}  true_std={best_trial['true_std']}  "
+              f"true_p={best_trial['true_p']}")
+        print(f"  prefix-score band: [{lo:.3f}, {hi:.3f}] (percentiles "
+              f"{prefix_percentile_lo}-{prefix_percentile_hi} of {len(scored)} trials, "
+              f"{len(band)} candidates in band)")
+        print(f"  first {n_score} observations: {best_trial['values'][:n_score]}  "
+              f"(prefix score={best_prefix_score:.3f})")
+        print(f"  remaining observations: {best_trial['values'][n_score:]}  "
+              f"(suffix score={best_suffix_score:.3f})")
+        print(f"  full {len(best_trial['values'])} observations: {best_trial['values']}")
+        print(f"  Saved: {out_path}")
+
+    return chosen
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def parse_args():
@@ -450,6 +609,11 @@ def parse_args():
                         "to sequences_<task>_<name>.json (e.g. --name test2trial). Omit for the real "
                         "production pool (sequences_<task>.json) -- this flag not being passed at all "
                         "leaves production behavior completely unaffected.")
+    p.add_argument('--tutorial', action='store_true',
+                   help="Instead of building the pool, select and save the fixed tutorial "
+                        "sequences (tutorial_sequence_{numbers,colors}.json) from the ALREADY-BUILT "
+                        "production pool under --pool_dir. See choose_tutorial_sequences' own "
+                        "docstring for the selection criterion.")
     return p.parse_args()
 
 
@@ -457,6 +621,11 @@ def main():
     args = parse_args()
     assert args.n_pool > 0
     tasks = ['numbers', 'colors'] if args.task == 'both' else [args.task]
+
+    if args.tutorial:
+        choose_tutorial_sequences(pool_dir=args.pool_dir)
+        print("\nJOB_COMPLETE")
+        return
 
     if 'numbers' in tasks:
         if args.name:

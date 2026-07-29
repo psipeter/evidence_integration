@@ -1,0 +1,28 @@
+{
+  "qid": 5,
+  "true_mean": null,
+  "true_std": null,
+  "true_p": 0.466667,
+  "values": [
+    1,
+    -1,
+    -1,
+    -1,
+    1,
+    -1,
+    1,
+    -1,
+    1,
+    -1,
+    1,
+    1,
+    -1,
+    1,
+    -1
+  ],
+  "prefix_length": 0,
+  "iti_ms": 1000,
+  "iti_condition": "control",
+  "trial": 7,
+  "pool_index": 7
+}

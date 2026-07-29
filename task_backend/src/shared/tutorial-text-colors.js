@@ -62,7 +62,7 @@ export const BOX2 = `<strong>Move</strong> the slider to show your evolving esti
 export const BOX0B = `Each ball is randomly colored
   <span style="color:${SAMPLE_RED};font-weight:bold;">red</span> or
   <span style="color:${SAMPLE_BLUE};font-weight:bold;">blue</span> according to a
-  hidden <span style="color:${DIST_COLOR};font-weight:bold;">probability</span>.`;
+  hidden probability.`;
 
 // Recap-phase text (phase D -- see plugin-tutorial-observation-colors.js's
 // rightTopBoxContent) -- mirrors tutorial-text-numbers.js's identical

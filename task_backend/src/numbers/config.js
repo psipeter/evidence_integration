@@ -21,7 +21,8 @@
  * Common structure lives in shared/config-base.js — this file supplies only
  * what differs for the numbers task.
  */
-import { buildConfig, pickTutorialExample, DEFAULTS } from '../shared/config-base.js';
+import { buildConfig, DEFAULTS } from '../shared/config-base.js';
+import tutorialSequence from '../../tutorial_sequence_numbers.json';
 
 // Vite requires import.meta.glob's pattern to be a literal string it can
 // statically analyze at THIS call site -- can't factor this into a
@@ -38,20 +39,31 @@ if (!sequenceModules[fileKey]) {
 }
 const sequencesPool = sequenceModules[fileKey].default;
 
-// Tutorial example is derived from a REAL trial in pool member 0 -- an
-// arbitrary but fixed, deterministic choice (the tutorial just needs ONE
-// representative example, not something tied to any participant's actual
-// pool assignment) -- rather than hand-picked literals. See
-// config-base.js's pickTutorialExample for why hand-picked examples are
-// avoided: they silently drift out of sync when the pool is regenerated
-// with different mean_range/std_fixed.
+// Tutorial example: ONE fixed trial, the SAME for every participant
+// regardless of their own pool assignment -- generated (not hand-picked)
+// by task_backend/generate_sequences.py's choose_tutorial_sequences,
+// which searches the whole real production pool for a trial with a
+// genuinely large early swing in the running mean (first 5 observations)
+// while still keeping the rest of the trial visibly moving too (see that
+// function's own docstring for the exact two-stage selection criterion).
+// Regenerate via `python generate_sequences.py --tutorial` if the
+// production pool is ever rebuilt with a different design -- this file
+// is a plain, non-variant JSON snapshot, so it does NOT participate in
+// the VITE_SEQUENCES_VARIANT mechanism above; the tutorial always walks
+// through the same fixed example regardless of which sequences pool
+// variant is loaded.
 //
-// n: DEFAULTS.N_OBS_TO_RUN (not a second hardcoded 15) -- the tutorial
-// walks through a full real trial's worth of observations, so participants
-// see the estimate genuinely accumulate over the same number of
-// observations as a real trial, not a truncated preview of it.
-const { values: tutorialValues, mean: TUTORIAL_MEAN, std: TUTORIAL_STD } =
-  pickTutorialExample(sequencesPool[0], { isColors: false, n: DEFAULTS.N_OBS_TO_RUN });
+// tutorialValues is sliced to DEFAULTS.N_OBS_TO_RUN (not a second
+// hardcoded 15) for the same reason the old pickTutorialExample-based
+// version was: the tutorial walks through a full real trial's worth of
+// observations, so participants see the estimate genuinely accumulate
+// over the same number of observations as a real trial, not a truncated
+// preview of it. true_std is the trial's own recorded value (the
+// generative std_fixed constant, not a re-derived empirical estimate --
+// see generate_numbers_trials, which stores this directly on every trial).
+const tutorialValues = tutorialSequence.values.slice(0, DEFAULTS.N_OBS_TO_RUN);
+const TUTORIAL_MEAN = tutorialSequence.true_mean;
+const TUTORIAL_STD = tutorialSequence.true_std;
 
 export const config = buildConfig({
   taskType:      'numbers',

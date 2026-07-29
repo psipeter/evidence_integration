@@ -49,7 +49,11 @@ export const SHOW_EXACT_VALUE = false;
 // are already-visible-every-time, no fade needed there, just the slide.
 export const FADE_MS = 1000;
 // Thumb slide-to-new-position duration -- the "watch it move" cue itself.
-export const MOVE_MS = 600;
+// Slowed from 600ms (chat history) so the update is unmistakable rather
+// than a quick flick -- deliberately much slower than a typical UI
+// transition, since making the SIZE of each update legible is the whole
+// point of this panel.
+export const MOVE_MS = 2000;
 
 function meanOf(values) {
   return values.reduce((a, b) => a + b, 0) / values.length;

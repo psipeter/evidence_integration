@@ -103,7 +103,7 @@ class TutorialIntroColorsPlugin {
                 · · ·
               </span>
               <div id="tut-cac-content" style="visibility:hidden;height:100%;">
-                <div class="tutorial-panel-caption">Correct answer</div>
+                <div class="tutorial-panel-caption tutorial-panel-caption-correct-answer-colors">Correct answer</div>
                 ${buildCorrectAnswerColorsHTML()}
               </div>
             </div>

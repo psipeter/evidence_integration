@@ -26,11 +26,10 @@
  * in this codebase stay task-specific). SAMPLE_COLOR is also used
  * outside any box text, for the centre number's own color.
  */
-import { BLUE, RED, GREEN } from './palette.js';
+import { BLUE, RED } from './palette.js';
 
 export const GOAL_COLOR    = BLUE;    // the correct answer (running mean)
 export const SAMPLE_COLOR  = RED;     // current observation
-export const DIST_COLOR    = GREEN;   // distribution curve
 
 export const BOX0 = `In this task, you'll see a <strong>sequence</strong> of
   <span style="color:${SAMPLE_COLOR};font-weight:bold;">numbers</span>, presented
@@ -38,7 +37,7 @@ export const BOX0 = `In this task, you'll see a <strong>sequence</strong> of
 
 export const BOX0B = `Each number is
   randomly drawn from a hidden
-  <span style="color:${DIST_COLOR};font-weight:bold;">distribution</span>.`;
+  distribution.`;
 
 export const BOX1 = `Your <strong>goal</strong> is to estimate the
   <span style="color:${GOAL_COLOR};font-weight:bold;">mean</span> of all numbers in the sequence.`;

@@ -198,7 +198,7 @@ class TutorialObservationColorsPlugin {
               <span>${rightTop.html}</span>
             </p>
             <div class="tutorial-hide-wrap tutorial-right-image-box colors-tutorial-box">
-              ${showCaptions ? '<div class="tutorial-panel-caption">Correct answer</div>' : ''}
+              ${showCaptions ? '<div class="tutorial-panel-caption tutorial-panel-caption-correct-answer-colors">Correct answer</div>' : ''}
               ${showClock
                 ? '<div class="dist-canvas dist-canvas-yellow" style="display:flex;align-items:center;justify-content:center;"><canvas id="tut-obs-clock" width="120" height="120"></canvas></div>'
                 : `<div class="dist-canvas">${buildCorrectAnswerColorsHTML()}</div>`}

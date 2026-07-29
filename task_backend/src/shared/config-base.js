@@ -46,84 +46,23 @@ export const DEFAULTS = {
 };
 
 /**
- * pickTutorialExample — derives the tutorial's illustrative sequence from a
- * REAL trial in the main-task sequences, rather than a hand-picked literal
- * array. Hand-picked examples silently drift out of sync whenever
- * sequences.json is regenerated with different mean_range/p_range/std_fixed
- * (this happened once already — see CLAUDE.md's sequence-generation section).
- * Deriving from real data means the tutorial can never mismatch the actual
- * task parameters again.
- *
- * Selection: among all trials, find the one whose true_mean (numbers) or
- * true_p (colors) is closest to the midpoint (50 / 0.5) — i.e. a
- * pedagogically "typical", non-extreme example — subject to two checks on
- * the first `n` values, falling through to the next-closest candidate if
- * the top match fails either:
- *   1. Spread: >=2 above and >=2 below the mean for numbers; >=2 of each
- *      color for colors. Exists because moment-matched generation only
- *      guarantees the FULL ~15-observation sequence hits the target
- *      statistics, not any small window within it — a first-5 slice can
- *      occasionally look one-sided by chance even in a well-behaved full
- *      sequence.
- *   2. Directional consistency: the shown slice's OWN apparent direction
- *      (which color is more frequent, for colors; which side of the
- *      midpoint the slice's sample mean falls on, for numbers) must
- *      match the true parameter's actual direction. Spread alone doesn't
- *      guarantee this — e.g. 3 blue/2 red passes the spread check just
- *      fine even when true_p favors red, which visually teaches the exact
- *      opposite of what the tutorial is trying to demonstrate (confirmed
- *      as a real occurrence, not just a theoretical risk: qid 2 in the
- *      6-level colors design, true_p=0.4, drew a first-5 slice of
- *      3 blue/2 red). Skipped when the true value sits exactly at the
- *      midpoint, since there's no direction to be inconsistent with.
- *
- * For numbers, tutorialStd is the sample std of the FULL chosen trial
- * (not just the shown 5-value slice) — this tracks the true generative
- * std_fixed closely under moment-matched generation (verified: within
- * ~0.5 of nominal even at range edges), avoiding a second hardcoded
- * constant that would need to be kept in sync separately from std_fixed.
+ * Tutorial example (tutorialValues/tutorialMean/tutorialStd, passed into
+ * buildConfig below) is no longer derived here at load time -- it comes
+ * from a plain, pre-generated JSON snapshot instead
+ * (tutorial_sequence_{numbers,colors}.json at the repo root), imported
+ * directly by each task's own config.js. See
+ * task_backend/generate_sequences.py's choose_tutorial_sequences for how
+ * that fixed trial is chosen (a real trial from the production pool with
+ * a genuinely large early swing in the running mean, plus continued
+ * movement afterward -- not a hand-picked literal array, so it still
+ * can't silently drift out of sync the way a truly hand-picked example
+ * would, and not derived dynamically per-load either, so every
+ * participant now sees the exact same tutorial example regardless of
+ * their own pool assignment). Superseded an earlier dynamic
+ * pickTutorialExample() that picked a "typical, near-midpoint" trial from
+ * pool member 0 at load time -- removed entirely once both config.js
+ * files stopped calling it (see git history to restore if ever needed).
  */
-export function pickTutorialExample(sequencesData, { isColors, n = 5 } = {}) {
-  const field  = isColors ? 'true_p' : 'true_mean';
-  const target = isColors ? 0.5 : 50;
-
-  const candidates = [...sequencesData].sort(
-    (a, b) => Math.abs(a[field] - target) - Math.abs(b[field] - target)
-  );
-
-  const passesSpread = (trial) => {
-    const vals     = trial.values.slice(0, n);
-    const trueSide = Math.sign(trial[field] - target);
-
-    if (isColors) {
-      const nBlue = vals.filter(v => v === 1).length;
-      const nRed  = vals.filter(v => v === -1).length;
-      if (!(nBlue >= 2 && nRed >= 2)) return false;
-      if (trueSide === 0) return true;
-      return Math.sign(nBlue - nRed) === trueSide;
-    }
-
-    const m       = trial[field];
-    const nAbove  = vals.filter(v => v > m).length;
-    const nBelow  = vals.filter(v => v < m).length;
-    if (!(nAbove >= 2 && nBelow >= 2)) return false;
-    if (trueSide === 0) return true;
-    const sliceMean = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return Math.sign(sliceMean - target) === trueSide;
-  };
-
-  const chosen = candidates.find(passesSpread) ?? candidates[0];
-
-  const values = chosen.values.slice(0, n);
-  const mean   = chosen[field];
-  let std = 0;
-  if (!isColors) {
-    const full = chosen.values;
-    const m    = full.reduce((a, b) => a + b, 0) / full.length;
-    std        = Math.sqrt(full.reduce((a, b) => a + (b - m) ** 2, 0) / full.length);
-  }
-  return { values, mean, std };
-}
 
 /**
  * buildConfig — assembles a task config object from per-task inputs.

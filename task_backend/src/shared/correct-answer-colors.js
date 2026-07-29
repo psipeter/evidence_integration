@@ -38,7 +38,10 @@ import { SAMPLE_BLUE, SAMPLE_RED } from './tutorial-text-colors.js';
 
 export const SHOW_EXACT_VALUE = false;
 export const FADE_MS = 1000;
-export const MOVE_MS = 600;
+// Slowed from 600ms to 2000ms, mirroring correct-answer-numbers.js's
+// identical change (chat history) -- kept in parity rather than letting
+// the two tasks' pacing diverge.
+export const MOVE_MS = 2000;
 
 // Max observations per trial (config-base.js's shared N_OBS) -- used to
 // pick dot spacing that guarantees blue dots (packed in from the left)

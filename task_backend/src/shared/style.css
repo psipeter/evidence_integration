@@ -464,6 +464,22 @@ input[type="range"].slider-last::-moz-range-thumb {
   pointer-events: none;
 }
 
+/* "Correct answer" caption specifically, in blue -- an ADDITIONAL class
+   applied alongside .tutorial-panel-caption above (not a change to that
+   shared base class, which stays gray and is still used as-is for
+   "Sequence history"). Same blue as the thumb/bar-blue in the panel
+   itself (this app's existing blue="the answer" convention).
+   NUMBERS ONLY -- colors uses its own green variant below (this app's
+   established GREEN, palette.js), since colors' correct-answer panel
+   also gets a green divider line splitting its blue/red bar; blue would
+   have been ambiguous against that same bar's own blue section. */
+.tutorial-panel-caption-correct-answer {
+  color: #2563eb;
+}
+.tutorial-panel-caption-correct-answer-colors {
+  color: #16a34a;
+}
+
 /* -- "Correct answer" panel (colors tutorial) ---------------------------
    Mirrors correct-answer-numbers.js's identical rationale/design, adapted
    for categorical (not continuous) data: a thin blue/red bar, SPLIT at
@@ -509,6 +525,13 @@ input[type="range"].slider-last::-moz-range-thumb {
 .correct-answer-colors-bar-blue {
   height: 100%;
   background: #2563eb;
+  /* Thin green divider marking the exact blue/red split point -- sits on
+     the blue section's own trailing edge, so it tracks the split
+     correctly regardless of the dynamic width JS sets on this element
+     (no separate absolutely-positioned line to keep in sync). Same green
+     as .tutorial-panel-caption-correct-answer-colors above. Widened from
+     2px (chat history) for visibility. */
+  border-right: 4px solid #16a34a;
 }
 .correct-answer-colors-bar-red {
   height: 100%;

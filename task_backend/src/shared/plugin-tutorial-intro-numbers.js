@@ -95,7 +95,7 @@ class TutorialIntroNumbersPlugin {
                 · · ·
               </span>
               <div id="tut-ca-content" style="visibility:hidden;height:100%;">
-                <div class="tutorial-panel-caption">Correct answer</div>
+                <div class="tutorial-panel-caption tutorial-panel-caption-correct-answer">Correct answer</div>
                 ${buildCorrectAnswerHTML()}
               </div>
             </div>
