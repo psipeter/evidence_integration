@@ -93,21 +93,76 @@ export function renderCompletionScreen(contentEl, { title, message, prolificCode
  * @param {number}  [opts.expectedTrialCount]  required when phase is 'finished'
  * @param {Element} [opts.contentEl]  element to update with the completion
  *                                      or error screen
+ * @param {Map}      [opts.checkpointLedger]  timeline-builder.js's own
+ *   Map of every trial-phase checkpoint payload attempted this session,
+ *   keyed by "trialIndex-observationIndex" -- used to resend anything
+ *   progress-finish reports as still missing. Only meaningful when
+ *   phase is 'finished' (progress-finish never computes missingPairs for
+ *   'terminated' -- see that function's own docstring); harmless no-op
+ *   if omitted.
+ * @param {Function} [opts.sendCheckpoint]  timeline-builder.js's own
+ *   sendCheckpoint, reused here to resend missing payloads with the same
+ *   retry/idempotency guarantees an original send gets.
+ * @param {Function} [opts.clearSaveWarning]  timeline-builder.js's own
+ *   hideSaveWarning, called unconditionally right before the completion
+ *   screen renders -- without this, a resend failure late enough to
+ *   trigger the warning banner (backend-client.js's own threshold logic)
+ *   would leave it stuck on screen forever, since there's no LATER
+ *   successful checkpoint left in the session to clear it via the normal
+ *   onRecovered path.
  */
-export async function endSession({ phase, isProlific, prolificPid, task, poolIndex, expectedTrialCount, contentEl }) {
+export async function endSession({
+  phase, isProlific, prolificPid, task, poolIndex, expectedTrialCount, contentEl,
+  checkpointLedger, sendCheckpoint, clearSaveWarning,
+}) {
   try {
-    const { prolificCode, dataComplete } = await finishProgress({
+    const { prolificCode, dataComplete, missingPairs } = await finishProgress({
       prolificPid, task, poolIndex, phase, expectedTrialCount,
     });
 
     if (dataComplete === false) {
-      // Logged, not blocking -- see progress-finish's own docstring and
+      // Logged either way -- see progress-finish's own docstring and
       // TODO.md's "progress-finish mismatch handling" decision: don't
       // hold up a real participant's payment for our own bug, but make
-      // sure it's visible for manual reconciliation.
-      console.warn(`finish-session: dataComplete=false for prolific_pid=${prolificPid}`);
+      // sure it's visible for manual reconciliation regardless of
+      // whether the resend below recovers it.
+      console.warn(
+        `finish-session: dataComplete=false for prolific_pid=${prolificPid}, ` +
+        `attempting to resend ${missingPairs?.length ?? 0} missing observation(s) ` +
+        `from this session's own in-memory ledger before finishing.`,
+      );
+
+      // Catch-up pass: this is the ONE guaranteed moment we still have
+      // every real response sitting in memory, regardless of how long
+      // ago the original checkpoint attempt failed -- unlike
+      // backend-client.js's own short retry (which only covers the first
+      // ~1 second after an original attempt), this covers a gap of any
+      // duration, as long as the session is still open when it ends. The
+      // two are complementary, not redundant: the short retry catches
+      // brief blips immediately so an early problem doesn't compound
+      // over the rest of the session; this catches whatever slips
+      // through by the time the participant actually finishes -- neither
+      // one alone covers what the other does. See chat history for the
+      // real session (11/480 missing observations) that motivated this.
+      if (missingPairs?.length && checkpointLedger && sendCheckpoint) {
+        await Promise.all(missingPairs.map(({ trial_index, observation_index }) => {
+          const payload = checkpointLedger.get(`${trial_index}-${observation_index}`);
+          if (!payload) {
+            // Genuinely never attempted this session (not just failed) --
+            // nothing to resend; log so this is distinguishable later from
+            // a resend that itself failed.
+            console.warn(
+              `finish-session: no ledger entry for missing trial=${trial_index} ` +
+              `observation=${observation_index} -- was never attempted this session.`,
+            );
+            return Promise.resolve();
+          }
+          return sendCheckpoint(payload);
+        }));
+      }
     }
 
+    clearSaveWarning?.();
     renderCompletionScreen(contentEl, {
       title: phase === PHASES.FINISHED ? 'Session complete' : 'Session terminated',
       message: phase === PHASES.FINISHED

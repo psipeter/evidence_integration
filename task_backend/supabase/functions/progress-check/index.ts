@@ -51,6 +51,43 @@ Deno.serve(async (req: Request) => {
     return withCors(jsonResponse({ error: 'task must be numbers or colors' }, 400));
   }
 
+  // Check for an existing finished/terminated marker FIRST, independent
+  // of whether it's the single latest row overall -- NOT the same check
+  // as "latest.phase === finished" below would be. Once a terminal
+  // marker is written, it must stay authoritative no matter what else
+  // gets written afterward (e.g. finish-session.js's own catch-up resend
+  // of missing observations writes trial-phase rows AFTER the finished
+  // marker, which would otherwise get a higher id and make THIS query's
+  // old "just look at the single latest row" logic think the session was
+  // still in progress -- a real bug caught during a review pass, not
+  // hypothetical; see chat history). This check is deliberately
+  // independent of row recency for exactly that reason.
+  const { data: terminal, error: terminalErr } = await supabaseAdmin
+    .from('events')
+    .select('phase, pool_index')
+    .eq('prolific_pid', prolific_pid)
+    .eq('task', task)
+    .in('phase', ['finished', 'terminated'])
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (terminalErr) {
+    console.error('progress-check: terminal-marker query failed', terminalErr);
+    return withCors(jsonResponse({ error: 'database error' }, 500));
+  }
+
+  if (terminal) {
+    const codes = PROLIFIC_CODES[task];
+    return withCors(jsonResponse({
+      status: terminal.phase,
+      phase: terminal.phase,
+      resumeTrialIndex: null,
+      prolificCode: terminal.phase === 'finished' ? codes.completion : codes.earlyExit,
+      poolIndex: terminal.pool_index,
+    }));
+  }
+
   const { data: latest, error } = await supabaseAdmin
     .from('events')
     .select('phase, trial_index, observation_index, pool_index')
@@ -76,17 +113,6 @@ Deno.serve(async (req: Request) => {
       resumeTrialIndex: null,
       prolificCode: null,
       poolIndex: null,
-    }));
-  }
-
-  if (latest.phase === 'finished' || latest.phase === 'terminated') {
-    const codes = PROLIFIC_CODES[task];
-    return withCors(jsonResponse({
-      status: latest.phase,
-      phase: latest.phase,
-      resumeTrialIndex: null,
-      prolificCode: latest.phase === 'finished' ? codes.completion : codes.earlyExit,
-      poolIndex: latest.pool_index,
     }));
   }
 

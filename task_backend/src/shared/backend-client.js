@@ -75,43 +75,71 @@ export function finishProgress({ prolificPid, task, poolIndex, phase, expectedTr
 }
 
 /**
- * createCheckpointSender -- wraps appendProgress with consecutive-failure
- * tracking. Checkpoints are fire-and-forget from the participant's
- * perspective (same as the old JATOS per-trial appends -- callers don't
- * need to await this before letting the timeline continue), but unlike
- * the old pipeline, a RUN of failures becomes visible to the participant
- * via onWarning rather than vanishing silently -- this is the direct fix
- * for the exact incident this whole backend exists to address (see
- * TODO.md's "Pilot #3" history: per-trial saves failing with zero visible
- * symptom for an entire session).
+ * createCheckpointSender -- wraps appendProgress with a short retry loop
+ * plus consecutive-failure tracking. Checkpoints are still fire-and-
+ * forget from the participant's perspective (same as the old JATOS
+ * per-trial appends -- callers don't need to await this before letting
+ * the timeline continue; the retry loop below lives entirely inside this
+ * function and never blocks the caller) -- but unlike the old pipeline,
+ * a RUN of failures becomes visible to the participant via onWarning
+ * rather than vanishing silently, and now each individual checkpoint gets
+ * more than one attempt before being counted as a failure at all -- this
+ * is the direct fix for the exact incident this whole backend exists to
+ * address (see TODO.md's "Pilot #3" history: per-trial saves failing with
+ * zero visible symptom for an entire session), extended after a real
+ * pilot session lost 11/480 observations to single-attempt fire-and-
+ * forget calls that never got a second chance (see chat history).
+ *
+ * Retries are plain network retries of the SAME unconfirmed call, not a
+ * participant-facing timeout-retry (that's a different concept entirely
+ * -- see appendProgress's own docstring on `attempt`). `attempt` is NOT
+ * incremented between retry attempts here, by design: the server-side
+ * upsert already collapses duplicate submissions of the same
+ * (pid, task, phase, trial_index, observation_index, attempt) into one
+ * row, so retrying the identical payload is safe and can never create a
+ * duplicate/extra row.
  *
  * @param {object} opts
- * @param {number} [opts.threshold]     consecutive failures before onWarning fires (default 2)
+ * @param {number} [opts.threshold]     consecutive failures (after retries exhausted) before onWarning fires (default 2)
+ * @param {number} [opts.maxAttempts]   total attempts per checkpoint before giving up (default 3)
+ * @param {number[]} [opts.retryDelaysMs] delay before each retry, ms (default [300, 800] -- one entry per retry, i.e. maxAttempts-1 entries)
  * @param {Function} opts.onWarning     called (no args) once threshold is hit
  * @param {Function} [opts.onRecovered] called once a checkpoint succeeds after a warning fired
  * @returns {Function} sendCheckpoint(payload) -- same payload shape as appendProgress
  */
-export function createCheckpointSender({ threshold = 2, onWarning, onRecovered } = {}) {
+export function createCheckpointSender({
+  threshold = 2, maxAttempts = 3, retryDelaysMs = [300, 800], onWarning, onRecovered,
+} = {}) {
   let consecutiveFailures = 0;
   let warningActive = false;
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
   return async function sendCheckpoint(payload) {
-    try {
-      const result = await appendProgress(payload);
-      consecutiveFailures = 0;
-      if (warningActive) {
-        warningActive = false;
-        onRecovered?.();
+    let lastErr;
+    for (let attemptNum = 1; attemptNum <= maxAttempts; attemptNum++) {
+      try {
+        const result = await appendProgress(payload);
+        consecutiveFailures = 0;
+        if (warningActive) {
+          warningActive = false;
+          onRecovered?.();
+        }
+        return result;
+      } catch (err) {
+        lastErr = err;
+        console.error(`checkpoint append failed (attempt ${attemptNum}/${maxAttempts})`, err);
+        if (attemptNum < maxAttempts) {
+          await sleep(retryDelaysMs[attemptNum - 1] ?? retryDelaysMs[retryDelaysMs.length - 1]);
+        }
       }
-      return result;
-    } catch (err) {
-      consecutiveFailures++;
-      console.error('checkpoint append failed', err);
-      if (consecutiveFailures >= threshold && !warningActive) {
-        warningActive = true;
-        onWarning?.();
-      }
-      throw err;
     }
+    // Every attempt failed -- NOW it counts as one real failure.
+    consecutiveFailures++;
+    if (consecutiveFailures >= threshold && !warningActive) {
+      warningActive = true;
+      onWarning?.();
+    }
+    throw lastErr;
   };
 }

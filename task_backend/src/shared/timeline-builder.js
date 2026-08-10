@@ -182,9 +182,26 @@ export async function buildAndRun(cfg) {
   window.addEventListener('beforeunload', beforeUnloadHandler);
 
   const checkpointer = createCheckpointSender({ onWarning: showSaveWarning, onRecovered: hideSaveWarning });
-  const sendCheckpoint = (partial) => checkpointer({
-    prolificPid: participantId, task: taskType, poolIndex, ...partial,
-  }).catch(() => {}); // fire-and-forget from the timeline's perspective; failure handling/warning already lives in the sender itself
+  // checkpointLedger: every TRIAL-phase checkpoint payload ever attempted
+  // this session, keyed by "trialIndex-observationIndex" -- stored
+  // regardless of whether the send below actually succeeded. Exists so
+  // endSession (finish-session.js) can resend the EXACT original payload
+  // for whatever progress-finish reports as still missing at session end,
+  // without needing to re-derive it from the sequence data (which would
+  // duplicate build-trial-timeline.js's own error/reward computation).
+  // Only trial-phase entries are kept -- welcome/consent/tutorial
+  // checkpoints aren't part of progress-finish's completeness check.
+  // ~480 small objects for a full session; not cleared until the tab
+  // closes, which is fine at this size.
+  const checkpointLedger = new Map();
+  const sendCheckpoint = (partial) => {
+    if (partial.phase === PHASES.TRIAL) {
+      checkpointLedger.set(`${partial.trialIndex}-${partial.observationIndex}`, partial);
+    }
+    return checkpointer({
+      prolificPid: participantId, task: taskType, poolIndex, ...partial,
+    }).catch(() => {}); // fire-and-forget from the timeline's perspective; failure handling/warning already lives in the sender itself
+  };
 
   let isExited = () => false;
 
@@ -210,6 +227,7 @@ export async function buildAndRun(cfg) {
         isProlific, prolificPid: participantId, task: taskType, poolIndex,
         expectedTrialCount: sequences.length,
         contentEl: document.querySelector('#jspsych-content'),
+        checkpointLedger, sendCheckpoint, clearSaveWarning: hideSaveWarning,
       });
     },
   });

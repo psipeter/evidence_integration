@@ -20,7 +20,13 @@
 //   phase: 'finished' | 'terminated',
 //   expectedTrialCount?: number   // required when phase === 'finished'
 // }
-// Response body: { prolificCode: string, dataComplete: boolean | null } | { error: string }
+// Response body: { prolificCode: string, dataComplete: boolean | null,
+//                   missingPairs: {trial_index:number, observation_index:number}[] | null }
+//                 | { error: string }
+// missingPairs is only ever non-null when dataComplete is false -- the
+// client uses it to resend exactly those observations from its own
+// in-memory session ledger before showing the completion screen (see
+// timeline-builder.js/finish-session.js).
 
 import { handleOptions, withCors } from '../_shared/cors.ts';
 import { checkApiKey } from '../_shared/auth-check.ts';
@@ -64,6 +70,7 @@ Deno.serve(async (req: Request) => {
   }
 
   let dataComplete: boolean | null = null;
+  let missingPairs: { trial_index: number; observation_index: number }[] | null = null;
 
   if (phase === 'finished') {
     if (typeof expectedTrialCount !== 'number' || !Number.isInteger(expectedTrialCount)) {
@@ -93,9 +100,25 @@ Deno.serve(async (req: Request) => {
     dataComplete = actualCount === expectedCount;
 
     if (!dataComplete) {
+      // Not just a count mismatch -- the SPECIFIC missing pairs, so the
+      // client can resend exactly those (and only those) from its own
+      // in-memory session ledger before this response reaches it. See
+      // timeline-builder.js's checkpointLedger / finish-session.js's
+      // endSession for the client-side half of this (added after a real
+      // pilot session silently lost 11/480 observations to single-
+      // attempt fire-and-forget calls -- see chat history).
+      missingPairs = [];
+      for (let t = 0; t < expectedTrialCount; t++) {
+        for (let o = 0; o < OBSERVATIONS_PER_TRIAL; o++) {
+          if (!distinctPairs.has(`${t}-${o}`)) {
+            missingPairs.push({ trial_index: t, observation_index: o });
+          }
+        }
+      }
       console.warn(
         `progress-finish: row-count mismatch for prolific_pid=${prolific_pid} task=${task}: ` +
-        `expected ${expectedCount} trial-observation rows (${expectedTrialCount} trials x ${OBSERVATIONS_PER_TRIAL}), found ${actualCount}.`,
+        `expected ${expectedCount} trial-observation rows (${expectedTrialCount} trials x ${OBSERVATIONS_PER_TRIAL}), found ${actualCount}. ` +
+        `Missing: ${JSON.stringify(missingPairs)}`,
       );
     }
   }
@@ -123,5 +146,5 @@ Deno.serve(async (req: Request) => {
   const codes = PROLIFIC_CODES[task];
   const prolificCode = phase === 'finished' ? codes.completion : codes.earlyExit;
 
-  return withCors(jsonResponse({ prolificCode, dataComplete }));
+  return withCors(jsonResponse({ prolificCode, dataComplete, missingPairs }));
 });
