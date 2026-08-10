@@ -295,6 +295,23 @@ def _plot_panel_variance_growth(ax, human: pd.DataFrame) -> None:
 
 def _plot_panel_autocorr(ax, human: pd.DataFrame) -> None:
     df2 = _add_resid_prefix(human)
+    # A qid with only 1 repeat produces a trivially-zero residual (its
+    # "mean" is just itself), not a genuine signal to autocorrelate --
+    # the same degenerate case _plot_panel_variance_growth already guards
+    # against via its own `len(x) >= MIN` check. Apply the identical guard
+    # here before computing anything, rather than relying on df2 being
+    # empty (it never is in this case -- it's full of meaningless zeros,
+    # which is what produced scipy's "constant input" warning here for
+    # task-binary before this fix: colors' current design gives every
+    # qid exactly one repeat per participant, confirmed directly this
+    # session -- see chat history). This is a correctness/honesty fix
+    # only, NOT the qid-repeat redefinition itself (deliberately deferred
+    # -- see module docstring).
+    repeat_counts = df2.groupby(["pid", "observation", "qid"]).size()
+    if not (repeat_counts >= 2).any():
+        ax.text(0.5, 0.5, "Insufficient data\n(no qid repeats for this task)",
+                ha="center", va="center", transform=ax.transAxes, color="0.5", style="italic")
+        return
     lags = [1, 2, 3]
     pid_rs: dict[int, list[float]] = {lag: [] for lag in lags}
 
@@ -308,6 +325,21 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame) -> None:
             if len(pairs) < 3:
                 continue
             arr = np.array(pairs)
+            # Guard against a single pid/lag combination happening to have
+            # zero variance on one side (e.g. lag=3 with PREFIX_LENGTH=4
+            # pairs exactly ONE point per trial -- observation 0 vs
+            # observation 3 -- and a real participant who never moves the
+            # slider away from its fixed per-trial starting position on
+            # their very first observation would have an exactly-zero
+            # residual there for EVERY trial. This is a genuine, real
+            # behavioral pattern, not a bug -- but pearsonr silently
+            # returns NaN for it rather than raising, which would
+            # otherwise poison this pid's contribution to the whole
+            # lag's cross-pid mean below via plain np.mean). Skip this
+            # one (pid, lag) point rather than let one participant's edge
+            # case NaN out an entire lag's aggregate.
+            if arr[:, 0].std() <= 1e-9 or arr[:, 1].std() <= 1e-9:
+                continue
             rv, _ = pearsonr(arr[:, 0], arr[:, 1])
             pid_rs[lag].append(rv)
 

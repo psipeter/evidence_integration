@@ -62,8 +62,19 @@ def _rescale_0_100_to_neg1_1(x: pd.Series) -> pd.Series:
     return x / 50.0 - 1.0
 
 
-def build(results_file: str) -> None:
-    df = pd.read_pickle(data_path(results_file))
+def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="task_binary"):
+    """Core logic, extracted from build() so a different raw-data SOURCE
+    (e.g. scripts/build_task_backend_inputs.py, pulling from Supabase
+    instead of a parsed JATOS-era task_results pilot file) can reuse this
+    exact filter+rescale+anonymize+save pipeline without duplicating it --
+    the only thing that differs between sources is how `df` itself gets
+    built; everything from here on is source-agnostic as long as `df` has
+    the columns this function expects (see module docstring: prolific_pid,
+    task ('continuous'/'binary'), trial, observation, value, response,
+    timed_out, qid, true_p, true_mean -- value/response on their NATIVE
+    [0,100] (continuous) / already-{-1,+1} (binary) scale, i.e. BEFORE any
+    rescaling -- that happens in here, not before calling this).
+    """
     df = filter_participants(df, verbose=True)
 
     # One pid mapping shared across both tasks, so a participant who did
@@ -94,7 +105,7 @@ def build(results_file: str) -> None:
         binr[col] = binr[col].astype("int64")
     binr = binr.sort_values(["pid", "trial", "observation"]).reset_index(drop=True)
 
-    for name, out in [("task_continuous", cont), ("task_binary", binr)]:
+    for name, out in [(out_name_continuous, cont), (out_name_binary, binr)]:
         path = data_path(f"{name}.pkl")
         out.to_pickle(path)
         print(f"\n{name}: {len(out)} rows, {out['pid'].nunique()} pids "
@@ -102,6 +113,11 @@ def build(results_file: str) -> None:
         print(f"  value range:    [{out['value'].min():.3f}, {out['value'].max():.3f}]")
         print(f"  response range: [{out['response'].min():.3f}, {out['response'].max():.3f}]")
         print(out.head(3).to_string(index=False))
+
+
+def build(results_file: str) -> None:
+    df = pd.read_pickle(data_path(results_file))
+    build_from_df(df)
 
 
 if __name__ == "__main__":
