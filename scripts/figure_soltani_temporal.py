@@ -6,8 +6,10 @@ Layout: 2x5
   Row 1 = task-binary, Row 2 = task-continuous (standing row-order
   convention for soltani figures — see figure_soltani_performance.py)
   Col 1 (~carrabin temporal panel A / T1): Performance error (RMSE to
-    ground truth) vs observation. Human always shown; pass --plot_models
-    to add all 4 fitted models (Mean, LeakyIntegrator, PrimacyRecency,
+    the RUNNING MEAN of the observed stimulus stream, NOT the fixed
+    generative true_mean/true_p -- see _add_running_mean_ground_truth's
+    own docstring for why) vs observation. Human always shown; pass
+    --plot_models to add all 4 fitted models (Mean, LeakyIntegrator, PrimacyRecency,
     RL_lambda): mean +/- SEM across pids (per-pid RMSE computed first,
     collapsing over that pid's own trials, then mean/SEM across pids) --
     SAME hierarchy for every line, so they're directly comparable. Only
@@ -26,11 +28,20 @@ Layout: 2x5
     decay-rate lambda fitted to |Delta response| vs observation, with
     scatter=True. Human only.
 
-Cols 3-5 stay Human-only in this pass -- extending them to the fitted
-models wasn't requested and isn't a simple copy of the col 1/2 pattern
-(col 3/4 need per-model residuals against a qid-conditional mean, col 5
-needs re-running the lambda power-law fit on each model's own response
-curve), so left for a follow-up if wanted.
+Cols 3-5 stay Human-only with respect to fitted models in this pass --
+extending them to the fitted models wasn't requested and isn't a simple
+copy of the col 1/2 pattern (col 3/4 need per-model residuals against a
+qid-conditional mean, col 5 needs re-running the lambda power-law fit on
+each model's own response curve), so left for a follow-up if wanted.
+
+Cols 3-4 DO now use quasi-qids for colors (task-binary)'s human data --
+colors' own literal `qid` column never repeats, so a DIFFERENT repeat
+structure is empirically derived instead: see utils/colors_quasi_qids.py's
+own module docstring for the full definition and the empirical sweep
+that settled its PREFIX_LENGTH=4/MIN_REPEATS=3 defaults. Numbers
+(task-continuous) uses its real, designed qid repeats unchanged. Col 5
+doesn't use qid at all (it's a lambda power-law fit on the |delta
+response| curve alone), so it's unaffected either way.
 
 DATA SOURCE
 -----------
@@ -77,13 +88,13 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
-from scipy.optimize import curve_fit as scipy_curve_fit
-from scipy.stats import pearsonr
+from scipy.stats import linregress, pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, pvalue_to_stars
+from utils.colors_quasi_qids import add_quasi_qids
 
 TASK_ROWS        = ["binary", "continuous"]  # standing row-order convention
 DATASET_FOR_TASK = {"binary": "task_binary", "continuous": "task_continuous"}
@@ -102,14 +113,33 @@ def _to_pct(x: pd.Series, task: str) -> pd.Series:
 
 def _load_human(task: str) -> pd.DataFrame:
     """Human data for one task, on the [0,100] percent scale. Columns:
-    [pid, trial, observation, qid, response, ground_truth]."""
+    [pid, trial, observation, qid, value, response, ground_truth].
+    ground_truth is the RUNNING mean of `value` (see
+    _add_running_mean_ground_truth below), NOT the fixed true_mean/
+    true_p -- see that function's own docstring for why."""
     dataset = DATASET_FOR_TASK[task]
     df = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    out = df[["pid", "trial", "observation", "qid"]].copy()
+    out = df[["pid", "trial", "observation", "qid", "value"]].copy()
     out["response"] = _to_pct(df["response"], task)
-    out["ground_truth"] = (df["true_p"] * 100.0 if task == "binary"
-                           else _to_pct(df["true_mean"], task))
+    out = _add_running_mean_ground_truth(out, task)
     return out
+
+
+def _add_running_mean_ground_truth(df: pd.DataFrame, task: str) -> pd.DataFrame:
+    """Ground truth = the RUNNING mean/ratio of the observed stimulus
+    stream itself, per (pid, trial) -- i.e. what a perfect 'just average
+    what you've seen so far' agent would report at each observation --
+    NOT the fixed generative true_mean/true_p. Matches the same
+    running_mean/running_p convention already established elsewhere in
+    this project (scripts/plot_sequences.py's own gt_mode='running_mean';
+    task_backend's own live 'correct answer' panel shows real
+    participants exactly this quantity during the actual task, never the
+    fixed target). Requires `value` (raw stimulus, native pkl scale --
+    NOT yet through _to_pct) already present in df."""
+    df = df.sort_values(["pid", "trial", "observation"]).copy()
+    running = df.groupby(["pid", "trial"])["value"].transform(lambda s: s.expanding().mean())
+    df["ground_truth"] = _to_pct(running, task)
+    return df
 
 
 def _load_model(task: str, model_type: str, run_dir: Path) -> pd.DataFrame | None:
@@ -180,7 +210,7 @@ def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFr
     obs_ticks = sorted(set(human["observation"]) | {o for m in models.values()
                                                     for o in m["observation"]})
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Performance error vs ground truth (RMSE)")
+    ax.set_ylabel("Performance error vs running mean (RMSE)")
     ax.set_xticks(obs_ticks)
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, ncol=1)
@@ -368,8 +398,23 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame) -> None:
 # Human only in this pass -- see module docstring.
 
 def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
-    def power_law(n, A, lam):
-        return A * np.power(np.asarray(n, dtype=float), -lam)
+    """Fits the power-law decay A*n^(-lambda) to each pid's own mean
+    |delta response| vs observation curve -- in LOG-LOG SPACE (a plain
+    linear regression of log(delta) on log(observation), lambda = -slope)
+    rather than scipy.optimize.curve_fit's bounded nonlinear least squares
+    directly on the raw curve. This is a real fix, not a style choice:
+    with only ~32 trials per pid to average over 14 observation steps,
+    these curves are noisy and often close to flat (confirmed directly
+    against real task_backend data -- see chat history), and the bounded
+    nonlinear optimizer was reliably getting stuck exactly at its own
+    lam=0 lower bound for data like this (returning lambda~1e-11 to
+    1e-21 -- a degenerate floor artifact, not a genuine near-zero
+    estimate), rather than genuinely fitting anything. Log-log linear
+    regression has no bounds to stick to and handles a flat or even
+    slightly INCREASING curve (a real, honest possibility for noisy human
+    data, unlike the old [0,2]-bounded fit, which couldn't express
+    'no decay' as anything other than exactly 0) by simply returning a
+    small or negative lambda instead of degenerating."""
     out: dict = {}
     for pid, grp in df.groupby("pid"):
         pieces = []
@@ -386,23 +431,37 @@ def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
         y = curve.values.astype(float)
         if not (np.all(np.isfinite(n)) and np.all(np.isfinite(y))):
             continue
+        # A delta of exactly 0 is possible (identical consecutive
+        # responses) but undefined in log-space -- clip to a small floor
+        # rather than drop the observation entirely, since dropping would
+        # bias the fit toward whichever observations happened to have
+        # nonzero movement.
+        y = np.clip(y, 1e-6, None)
         try:
-            popt, _ = scipy_curve_fit(power_law, n, y, p0=[0.1, 0.5],
-                                      bounds=([0.0, 0.0], [2.0, 2.0]), maxfev=2000)
-            out[pid] = float(popt[1])
+            slope, intercept, _, _, _ = linregress(np.log(n), np.log(y))
+            out[pid] = -float(slope)
         except Exception:
             pass
     return pd.Series(out, name="lambda_")
 
 
 def _fit_lambda_split_half(df: pd.DataFrame) -> pd.DataFrame:
+    """Split-half by ODD/EVEN trial index, not first-half/second-half --
+    a strict chronological split confounds genuine estimation noise (what
+    split-half reliability is meant to measure) with any systematic
+    drift in behavior over the session (learning, fatigue, boredom): a
+    real drift would show up as LOWER reliability even if the
+    moment-to-moment estimate itself is perfectly stable. Interleaving
+    odd/even trials samples both halves from the same span of session-
+    time, isolating noise from drift -- the standard recommendation in
+    psychometrics over a strict first/second split (see chat history)."""
     rows = []
     for pid, grp in df.groupby("pid"):
         trials = sorted(grp["trial"].unique())
-        mid = len(trials) // 2
-        if mid < 3:
+        halves = {"first": trials[0::2], "second": trials[1::2]}
+        if min(len(halves["first"]), len(halves["second"])) < 3:
             continue
-        for half_label, trial_set in [("first", trials[:mid]), ("second", trials[mid:])]:
+        for half_label, trial_set in halves.items():
             sub = grp[grp["trial"].isin(trial_set)].copy()
             lam = _fit_lambda_curve_fit(sub.assign(pid=pid))
             if pid in lam.index:
@@ -440,8 +499,8 @@ def _plot_panel_splithalf_lambda(ax, human: pd.DataFrame) -> None:
                 ha="left", va="top", transform=ax.transAxes,
                 fontsize=7, style="italic", color="0.5")
 
-    ax.set_xlabel("\u03bb (first half of trials)")
-    ax.set_ylabel("\u03bb (second half of trials)")
+    ax.set_xlabel("\u03bb (odd-indexed trials)")
+    ax.set_ylabel("\u03bb (even-indexed trials)")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -489,8 +548,9 @@ def main() -> None:
 
         _plot_panel_performance(axes[row, 0], human, models, args.show_individual, palette)
         _plot_panel_delta(axes[row, 1], human, models, args.show_individual, palette)
-        _plot_panel_variance_growth(axes[row, 2], human)
-        _plot_panel_autocorr(axes[row, 3], human)
+        human_for_repeats = add_quasi_qids(human) if task == "binary" else human
+        _plot_panel_variance_growth(axes[row, 2], human_for_repeats)
+        _plot_panel_autocorr(axes[row, 3], human_for_repeats)
         _plot_panel_splithalf_lambda(axes[row, 4], human)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
 

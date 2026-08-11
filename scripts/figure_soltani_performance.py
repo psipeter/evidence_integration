@@ -5,7 +5,9 @@ pilot (task-continuous + task-binary, "Human Mixed Task" / Soltani lab).
 Layout: 2x2
   Row 1 = task-binary, Row 2 = task-continuous
   Col 1 : Task schematic (placeholder -- no schematic PDF exists yet)
-  Col 2 (P1): Estimation error -- RMSE to ground truth, per pid
+  Col 2 (P1): Estimation error -- RMSE to the RUNNING MEAN of the
+    observed stimulus stream (NOT the fixed generative true_mean/true_p
+    -- see _add_running_mean_ground_truth's own docstring for why), per pid
 
 HUMAN DATA ONLY, DELIBERATELY -- no model fitting or model-fit panel here
 right now (see chat history). The old version of this file sourced fitted
@@ -44,9 +46,10 @@ native [0,1] probability scale (see build_model_inputs.py's own module
 docstring for the exact rescaling). Converted back to the original
 [0,100] percent scale here purely for readability:
   continuous : pct = (x + 1) * 50
-  binary     : pct = (x + 1) / 2 * 100   (ground truth true_p is *100 with
-               no +1 shift, since it's a genuine [0,1] probability, never
-               put through the [-1,1] rescale)
+  binary     : pct = (x + 1) / 2 * 100
+Ground truth is NOT true_mean/true_p at all (see
+_add_running_mean_ground_truth's own docstring) -- it's the running mean
+of `value` itself, put through the same pct conversion.
 
 Run:
     python scripts/figure_soltani_performance.py
@@ -125,36 +128,54 @@ def _to_pct(x: pd.Series, task: str) -> pd.Series:
 
 def _load_human(task: str) -> pd.DataFrame:
     """Human data + ground truth for one task, on the [0,100] percent scale.
-    Columns: [pid, trial, observation, response, ground_truth]. Kept as
-    its own small function (not inlined into the panel below) because
-    the FUTURE model-loading function this file will eventually get is
-    meant to mirror this exact shape -- see module docstring."""
+    Columns: [pid, trial, observation, value, response, ground_truth].
+    ground_truth is the RUNNING mean of `value` (see
+    _add_running_mean_ground_truth below), NOT the fixed true_mean/
+    true_p -- see that function's own docstring for why. Kept as its own
+    small function (not inlined into the panel below) because the FUTURE
+    model-loading function this file will eventually get is meant to
+    mirror this exact shape -- see module docstring."""
     dataset = DATASET_FOR_TASK[task]
     df = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    out = df[["pid", "trial", "observation"]].copy()
+    out = df[["pid", "trial", "observation", "value"]].copy()
     out["response"] = _to_pct(df["response"], task)
-    out["ground_truth"] = (df["true_p"] * 100.0 if task == "binary"
-                           else _to_pct(df["true_mean"], task))
+    out = _add_running_mean_ground_truth(out, task)
     return out
+
+
+def _add_running_mean_ground_truth(df: pd.DataFrame, task: str) -> pd.DataFrame:
+    """Ground truth = the RUNNING mean/ratio of the observed stimulus
+    stream itself, per (pid, trial) -- i.e. what a perfect 'just average
+    what you've seen so far' agent would report at each observation --
+    NOT the fixed generative true_mean/true_p. Matches the same
+    running_mean/running_p convention already established elsewhere in
+    this project (scripts/plot_sequences.py's own gt_mode='running_mean';
+    task_backend's own live 'correct answer' panel shows real
+    participants exactly this quantity during the actual task, never the
+    fixed target). Requires `value` (raw stimulus, native pkl scale --
+    NOT yet through _to_pct) already present in df."""
+    df = df.sort_values(["pid", "trial", "observation"]).copy()
+    running = df.groupby(["pid", "trial"])["value"].transform(lambda s: s.expanding().mean())
+    df["ground_truth"] = _to_pct(running, task)
+    return df
 
 
 # ── Panel P1 — Estimation error ─────────────────────────────────────────────
 
 def _plot_panel_p1(ax, human: pd.DataFrame) -> None:
-    """RMSE to ground truth, per pid. Human only for now -- see module
-    docstring for how a model column would slot in here later (same
-    groupby-by-source boxplot, just with more rows in plot_df)."""
+    """RMSE to the running-mean ground truth, per pid, shown as a violin
+    plot. See module docstring for how a model column would slot in here
+    later (another violin, one per source)."""
     mean_sq_err = (human.assign(sq_err=(human["response"] - human["ground_truth"]) ** 2)
                    .groupby("pid")["sq_err"].mean())
     human_rmse = np.sqrt(mean_sq_err).reset_index(name="rmse")
     human_rmse["source"] = "Human"
 
-    sns.boxplot(data=human_rmse, x="source", y="rmse", order=["Human"],
-                hue="source", palette={"Human": HUMAN_COLOR}, legend=False, ax=ax)
-    sns.stripplot(data=human_rmse, x="source", y="rmse", order=["Human"],
-                 color="black", size=5, alpha=0.6, jitter=0.15, ax=ax)
+    sns.violinplot(data=human_rmse, x="source", y="rmse", order=["Human"],
+                  hue="source", palette={"Human": HUMAN_COLOR}, legend=False, ax=ax)
+
     ax.set_xlabel("")
-    ax.set_ylabel("Performance error vs ground truth (RMSE)")
+    ax.set_ylabel("Performance error vs running mean (RMSE)")
     ax.tick_params(axis="x", rotation=30)
     sns.despine(ax=ax, top=True, right=True)
 

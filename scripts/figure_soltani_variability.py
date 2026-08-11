@@ -13,18 +13,18 @@ Layout: 2x3
   Col 3: cross-task comparison (pids who did both tasks) -- binary prefix
     variability on x, continuous on y.
 
-ROW 1 (binary/colors) AND COL 3 ARE DEFERRED, NOT COMPUTED, THIS PASS
+ROW 1 (binary/colors) AND COL 3 NOW USE QUASI-QIDS
 ------------------------------------------------------------------------
 "Prefix response variability" is inherently about repeated exposure to an
-IDENTICAL prefix across a qid's repeats -- colors' current design gives
-every qid exactly ONE occurrence per participant (confirmed directly this
-session, see chat history), so there is no "prefix" repeat structure to
-measure variability across at all right now. This is the same open
-question figure_soltani_temporal.py's columns 3-4 were left for (what
-"repeated qid" even means for colors post-redesign) -- not solved here
-either. Row 1 and the cross-task panel (which needs both tasks) show an
-explicit "deferred" placeholder rather than a number computed from a
-concept that may not apply.
+IDENTICAL prefix across a qid's repeats -- colors' own literal `qid`
+column never repeats (confirmed directly this session), so a DIFFERENT,
+empirically-derived repeat structure is used instead: see
+utils/colors_quasi_qids.py's own module docstring for the full
+definition (group a participant's trials by their own literal first-4
+raw stimulus values, keep only groups with >=3 repeats) and the
+empirical sweep that settled its defaults. This is the same mechanism
+figure_soltani_temporal.py's columns 3-4 now use for colors -- not a
+separate, independently-invented one.
 
 WHY "PREFIX" VARIABILITY, NOT "QID" VARIABILITY (numbers/continuous)
 ------------------------------------------------------------------------
@@ -84,30 +84,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style, label_panels, pvalue_to_stars
+from utils.colors_quasi_qids import add_quasi_qids
 
 PREFIX_LENGTH = 4
 HUMAN_COLOR   = "0.3"
 MIN_CORR_N    = 3  # matches figure_soltani_temporal.py's cross-task correlation threshold
 
-DEFERRED_MSG = "Deferred\n(colors has no qid-repeat\nprefix structure right now\n-- see chat history)"
 
-
-def _deferred_panel(ax) -> None:
-    ax.text(0.5, 0.5, DEFERRED_MSG, ha="center", va="center",
-            transform=ax.transAxes, color="0.5", style="italic", fontsize=8)
-    ax.set_xticks([]); ax.set_yticks([])
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-
-# ── metric helpers (numbers/continuous only, this pass) ─────────────────────
+# ── metric helpers (both tasks -- colors' df must be pre-processed via
+# utils.colors_quasi_qids.add_quasi_qids first, see module docstring) ────
 
 def _prefix_response_std(df: pd.DataFrame) -> pd.DataFrame:
     """Mean std(response | qid, observation) within the prefix region,
     per pid. One row per pid; columns [pid, resp_std]. No timed_out/dedup
-    filtering here -- data/task_continuous.pkl is already deduped to
-    successful attempts only (see build_model_inputs.py's build_from_df),
-    unlike this file's own earlier version, which read a raw,
+    filtering here -- both data/task_continuous.pkl and data/task_binary.pkl
+    are already deduped to successful attempts only (see
+    build_model_inputs.py's build_from_df), unlike this file's own earlier
+    version, which read a raw,
     not-yet-deduped pilot file."""
     sub = df[df["observation"] < PREFIX_LENGTH]
     grp = (sub.groupby(["pid", "qid", "observation"])["response"]
@@ -116,13 +109,20 @@ def _prefix_response_std(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _prefix_response_std_split(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-pid prefix response std computed separately on the first vs
-    second half of that pid's own trial list. Columns [pid, first, second]."""
+    """Per-pid prefix response std computed separately on ODD vs EVEN
+    trial indices, not first-half/second-half -- a strict chronological
+    split confounds genuine estimation noise (what split-half reliability
+    is meant to measure) with any systematic drift in behavior over the
+    session (learning, fatigue, boredom); interleaving odd/even trials
+    samples both halves from the same span of session-time, isolating
+    noise from drift (see chat history). Columns [pid, first, second]
+    (labels kept for column-naming consistency with the rest of this
+    file/figure_soltani_temporal.py -- 'first'=odd-indexed, 'second'=
+    even-indexed trials)."""
     rows = []
     for pid, g in df.groupby("pid"):
         trials = sorted(g["trial"].unique())
-        mid = len(trials) // 2
-        halves = {"first": trials[:mid], "second": trials[mid:]}
+        halves = {"first": trials[0::2], "second": trials[1::2]}
         vals = {}
         for half, tset in halves.items():
             gg = g[(g["trial"].isin(tset)) & (g["observation"] < PREFIX_LENGTH)]
@@ -188,8 +188,51 @@ def _plot_panel_splithalf(ax, split_df: pd.DataFrame) -> None:
                 ha="left", va="top", transform=ax.transAxes,
                 fontsize=7, style="italic", color="0.5")
 
-    ax.set_xlabel("Prefix response variability\n(first half of trials)")
-    ax.set_ylabel("Prefix response variability\n(second half of trials)")
+    ax.set_xlabel("Prefix response variability\n(odd-indexed trials)")
+    ax.set_ylabel("Prefix response variability\n(even-indexed trials)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+# ── Col 3 — Cross-task comparison ──────────────────────────
+
+def _plot_panel_crosstask(ax, bin_std: pd.DataFrame, cont_std: pd.DataFrame) -> None:
+    """bin_std/cont_std: each [pid, resp_std] (bin_std computed on
+    colors' quasi-qid-restricted data, cont_std on numbers' real qid --
+    see module docstring). Merges on the real integer `pid`, which is
+    valid either way -- the quasi-qid relabeling only ever touches which
+    ROWS/trials qualify and what to call the derived group, never the
+    underlying participant identity itself."""
+    b = bin_std.set_index("pid")["resp_std"]
+    c = cont_std.set_index("pid")["resp_std"]
+    both = b.index.intersection(c.index)
+    wide = pd.DataFrame({"binary": b[both], "continuous": c[both]})
+
+    if len(wide) < 2:
+        msg = ("No pids completed both tasks" if len(wide) == 0
+              else f"Only {len(wide)} pid completed both tasks (need >=2 to plot)")
+        ax.text(0.5, 0.5, msg,
+                ha="center", va="center", transform=ax.transAxes,
+                color="0.5", style="italic")
+        return
+
+    ax.scatter(wide["binary"], wide["continuous"],
+              color=HUMAN_COLOR, s=30, alpha=0.8, zorder=3)
+
+    if len(wide) >= MIN_CORR_N:
+        sns.regplot(data=wide, x="binary", y="continuous", ax=ax,
+                    color=HUMAN_COLOR, ci=95, scatter=False,
+                    line_kws={"lw": 1.5})
+        r, p = pearsonr(wide["binary"], wide["continuous"])
+        ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)],
+                  labels=[f"Human r={r:.2f}{pvalue_to_stars(p)}"],
+                  fontsize=8, frameon=True, framealpha=0.9)
+    else:
+        ax.text(0.02, 0.98, f"n={len(wide)} (too few for r)",
+                ha="left", va="top", transform=ax.transAxes,
+                fontsize=7, style="italic", color="0.5")
+
+    ax.set_xlabel("Prefix response variability (binary)")
+    ax.set_ylabel("Prefix response variability (continuous)")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -204,30 +247,45 @@ def main() -> None:
         constrained_layout=True,
     )
 
-    # Row 0 = binary/colors -- deferred entirely this pass.
-    for col in range(3):
-        _deferred_panel(axes[0, col])
+    prefix_std: dict[str, pd.DataFrame] = {}
+
+    # Row 0 = binary/colors -- via quasi-qids (see module docstring).
+    df_binary = pd.read_pickle(data_path("task_binary.pkl"))
+    df_binary_qq = add_quasi_qids(df_binary)
+    print(f"task-binary: {len(df_binary)} rows, {df_binary['pid'].nunique()} pids "
+          f"-> {len(df_binary_qq)} rows in a qualifying quasi-qid group")
+    prefix_std["binary"] = _prefix_response_std(df_binary_qq)
+    split_df_binary = _prefix_response_std_split(df_binary_qq)
+
+    _plot_panel_kde(axes[0, 0], prefix_std["binary"])
+    _plot_panel_splithalf(axes[0, 1], split_df_binary)
     axes[0, 0].set_title("task-binary", loc="left", fontsize=9, style="italic")
 
-    # Row 1 = continuous/numbers -- real data.
-    df = pd.read_pickle(data_path("task_continuous.pkl"))
-    print(f"task-continuous: {len(df)} rows, {df['pid'].nunique()} pids")
-    prefix_std = _prefix_response_std(df)
-    split_df = _prefix_response_std_split(df)
+    # Row 1 = continuous/numbers -- real qid, unchanged.
+    df_continuous = pd.read_pickle(data_path("task_continuous.pkl"))
+    print(f"task-continuous: {len(df_continuous)} rows, {df_continuous['pid'].nunique()} pids")
+    prefix_std["continuous"] = _prefix_response_std(df_continuous)
+    split_df_continuous = _prefix_response_std_split(df_continuous)
 
-    _plot_panel_kde(axes[1, 0], prefix_std)
-    _plot_panel_splithalf(axes[1, 1], split_df)
-    _deferred_panel(axes[1, 2])
+    _plot_panel_kde(axes[1, 0], prefix_std["continuous"])
+    _plot_panel_splithalf(axes[1, 1], split_df_continuous)
     axes[1, 0].set_title("task-continuous", loc="left", fontsize=9, style="italic")
+
+    # Col 3: cross-task comparison, now possible for both rows since both
+    # tasks have a valid prefix-variability metric -- but colors' pid
+    # values are quasi-qid-restricted-trial-derived, computed on the SAME
+    # underlying pid identifiers either way, so the merge in
+    # _plot_panel_crosstask (on real integer pid) is still valid.
+    axes[0, 2].axis("off")
+    _plot_panel_crosstask(axes[1, 2], prefix_std["binary"], prefix_std["continuous"])
 
     label_panels(axes)
 
     fig.text(0.5, -0.02,
-              "Human only (no models fit yet). task-binary row and the cross-task "
-              "panel (col 3) deferred -- see this script's own module docstring. "
-              "task-continuous variability restricted to observation < "
-              "prefix_length=4, the only region guaranteed identical across a "
-              "qid's repeats in this task's design.",
+              "Human only (no models fit yet). task-binary uses an empirically-derived "
+              "quasi-qid repeat structure (see this script's own module docstring); "
+              "task-continuous uses its real, designed qid repeats. Both restricted to "
+              "observation < prefix_length=4.",
               ha="center", va="top", fontsize=7, style="italic", color="0.4")
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

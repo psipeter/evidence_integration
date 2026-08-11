@@ -142,14 +142,20 @@ def compute_abs_delta(df):
 
 
 def split_half_lambda(df):
-    """Split-half fitted lambda per model_id -> (first, second)."""
+    """Split-half fitted lambda per model_id -> (first, second). Splits
+    by ODD/EVEN trial index, not first-half/second-half -- a strict
+    chronological split confounds genuine estimation noise (what split-
+    half reliability is meant to measure) with any systematic drift over
+    the sequence (e.g. simulated-agent behavior that itself depends on
+    trial order); interleaving odd/even trials samples both halves from
+    the same span, isolating noise from drift (see chat history)."""
     rows = []
     for mid, g in df.groupby("model_id"):
         trials = sorted(g["trial"].unique())
-        mid_t = len(trials) // 2
-        if mid_t < 3:
+        halves = {"first": trials[0::2], "second": trials[1::2]}
+        if min(len(halves["first"]), len(halves["second"])) < 3:
             continue
-        for half, tset in [("first", trials[:mid_t]), ("second", trials[mid_t:])]:
+        for half, tset in halves.items():
             lam, _ = fit_lambda_mid(g[g["trial"].isin(tset)])
             if np.isfinite(lam):
                 rows.append({"model_id": mid, "model_type": g["model_type"].iloc[0],
@@ -573,8 +579,8 @@ def _plot_reliability_panel(ax, rel, r, p, title, color):
     ax.text(0.05, 0.95, note, transform=ax.transAxes, ha="left", va="top", fontsize=7,
            bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.85))
     ax.set_title(title, fontsize=9, fontweight="bold")
-    ax.set_xlabel("First-half fitted \u03bb", fontsize=8)
-    ax.set_ylabel("Second-half fitted \u03bb", fontsize=8)
+    ax.set_xlabel("Odd-trial fitted \u03bb", fontsize=8)
+    ax.set_ylabel("Even-trial fitted \u03bb", fontsize=8)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.tick_params(labelsize=7)
