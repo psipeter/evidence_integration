@@ -5,7 +5,8 @@
  * plain fetch, not supabase-js -- the client only ever needs to POST JSON
  * to three fixed endpoints, and supabase-js's default header behavior is
  * exactly what tripped up the new publishable-key format during backend
- * testing (see task_backend/TODO.md's "Env vars / key format" note):
+ * testing (see docs/HISTORY.md's task_backend section, "Env vars / key
+ * format" note):
  * sending the key as `Authorization: Bearer` gets rejected as an invalid
  * JWT by the platform's verify_jwt gateway check. Plain fetch sends ONLY
  * the `apikey` header (matching what the Edge Functions themselves check
@@ -15,7 +16,8 @@
  * VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY are embedded at build
  * time (Vite's import.meta.env) -- safe to ship in the client bundle, same
  * as any Supabase publishable key; RLS (deny-all for anon/authenticated,
- * see TODO.md decision #1) plus this file only ever hitting the three
+ * see docs/HISTORY.md's task_backend section, decision #1) plus this file
+ * only ever hitting the three
  * Edge Function endpoints is what keeps the browser from touching the
  * database directly.
  */
@@ -85,7 +87,8 @@ export function finishProgress({ prolificPid, task, poolIndex, phase, expectedTr
  * rather than vanishing silently, and now each individual checkpoint gets
  * more than one attempt before being counted as a failure at all -- this
  * is the direct fix for the exact incident this whole backend exists to
- * address (see TODO.md's "Pilot #3" history: per-trial saves failing with
+ * address (see docs/HISTORY.md's task_backend section, "Pilot #3" history:
+ * per-trial saves failing with
  * zero visible symptom for an entire session), extended after a real
  * pilot session lost 11/480 observations to single-attempt fire-and-
  * forget calls that never got a second chance (see chat history).

@@ -6,6 +6,13 @@
  * manual "Repeat" button — deliberately does NOT auto-advance. See the
  * timed_out branch below for why (closes a tab-visibility exploit/failure
  * mode together with observation-timeout-clock.js).
+ *
+ * Used to also support a "popup distractor" mode (spawning random obs
+ * popups during the ITI) plus an iti_condition-driven longer-ITI mode --
+ * removed entirely (chat history): this study has no distractor
+ * manipulation, so distractor_type/iti_condition/is_colors were all
+ * dead weight once that mode could never actually fire. See git history
+ * to restore if a future study needs it again.
  */
 
 const info = {
@@ -16,9 +23,6 @@ const info = {
     radius:      { type: 'INT',     default: 60 },
     timed_out:          { type: 'BOOLEAN', default: false },
     timeouts_remaining: { type: 'INT',     default: 3 },
-    iti_condition:      { type: 'STRING',  default: 'control'    }, // 'control' | 'distract'
-    distractor_type:    { type: 'STRING',  default: 'none'       }, // 'none' | 'iti_length' | 'popup'
-    is_colors:          { type: 'BOOLEAN', default: false        },
   },
 };
 
@@ -30,8 +34,7 @@ class ItiClockPlugin {
   trial(display_el, trial) {
     document.body.style.backgroundColor = '#f5f5f5';
 
-    const { duration_ms, color, radius, timed_out, timeouts_remaining,
-            iti_condition, distractor_type, is_colors } = trial;
+    const { duration_ms, color, radius, timed_out, timeouts_remaining } = trial;
     const strokeWidth = 5;
     const size = (radius + strokeWidth) * 2;
     const cx   = size / 2;
@@ -42,102 +45,11 @@ class ItiClockPlugin {
     let rafId  = null;
     let timeoutId = null;
 
-
-    // ── Popup distractor ──────────────────────────────────────────────────────
-    // Spawns random obs popups in fixed positions while the clock runs.
-    // Cleaned up on finish().
-    const POPUP_INTERVAL_MS = duration_ms * 0.1;  // new popup every 10% of ITI
-    const POPUP_MAX         = 30;    // cap to avoid overflow
-    const POPUP_FADE_MS     = 200;
-    const popups            = [];
-    let   popupTimer        = null;
-
-    const _circleSize = () => {
-      const vw = window.innerWidth;
-      return Math.min(Math.max(60, vw * 0.11), 160);  // clamp(60px,11vw,160px)
-    };
-
-    const _numFontPx = () => {
-      const vw = window.innerWidth;
-      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-      return Math.min(Math.max(3 * rem, vw * 0.10), 8 * rem);
-    };
-
-    const _placeNoOverlap = (w, h, existing, maxTries = 60) => {
-      const margin  = 20;
-      const vw      = window.innerWidth;
-      const vh      = window.innerHeight;
-      // Exclude the ITI clock which is centered; add generous padding
-      const clkPad  = size / 2 + margin * 3;
-      const clkRect = { x: vw/2 - clkPad, y: vh/2 - clkPad,
-                        w: clkPad * 2,     h: clkPad * 2 };
-      const maxX = vw - w - margin;
-      const maxY = vh - h - margin;
-      if (maxX <= margin || maxY <= margin) return null;
-      for (let i = 0; i < maxTries; i++) {
-        const x = margin + Math.random() * (maxX - margin);
-        const y = margin + Math.random() * (maxY - margin);
-        const blocked = [clkRect, ...existing].some(r =>
-          x < r.x + r.w + margin && x + w > r.x - margin &&
-          y < r.y + r.h + margin && y + h > r.y - margin
-        );
-        if (!blocked) return { x, y };
-      }
-      return null;
-    };
-
-    const _spawnPopup = () => {
-      if (!active || popups.length >= POPUP_MAX) return;
-      const el = document.createElement('div');
-      // No CSS transition — remove instantly on cleanup to avoid bleed-through
-      el.style.cssText = 'position:fixed;z-index:500;pointer-events:none;opacity:1;';
-
-      let rect;
-      if (is_colors) {
-        const isBlue = Math.random() < 0.5;
-        const sz     = _circleSize();
-        el.style.cssText += `width:${sz}px;height:${sz}px;border-radius:50%;`
-                          + `background:${isBlue ? '#2563eb' : '#ef4444'};`
-                          + 'box-shadow:0 2px 8px rgba(0,0,0,0.2);';
-        const pos = _placeNoOverlap(sz, sz, popups);
-        if (!pos) return;
-        el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
-        rect = { x: pos.x, y: pos.y, w: sz, h: sz };
-      } else {
-        const val    = Math.floor(Math.random() * 101);
-        const fontPx = _numFontPx();
-        const w = fontPx * 2.5, h = fontPx * 1.2;
-        el.style.cssText += `font-size:${fontPx}px;font-weight:bold;color:#ef4444;`
-                          + 'line-height:1;white-space:nowrap;';
-        el.textContent = String(val);
-        const pos = _placeNoOverlap(w, h, popups);
-        if (!pos) return;
-        el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
-        rect = { x: pos.x, y: pos.y, w, h };
-      }
-
-      document.body.appendChild(el);
-      popups.push({ x: rect.x, y: rect.y, w: rect.w, h: rect.h, el });
-    };
-
-    const _startPopups = () => {
-      _spawnPopup();
-      popupTimer = setInterval(_spawnPopup, POPUP_INTERVAL_MS);
-    };
-
-    const _stopPopups = () => {
-      if (popupTimer !== null) { clearInterval(popupTimer); popupTimer = null; }
-      // Remove immediately — no fade, prevents bleed-through to next screen
-      popups.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
-      popups.length = 0;
-    };
-
     const finish = () => {
       if (!active) return;
       active = false;
       if (rafId)     { cancelAnimationFrame(rafId); rafId = null; }
       if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
-      _stopPopups();
       this.jsPsych.finishTrial({ screen: 'iti', duration_ms, timed_out });
     };
 
@@ -147,9 +59,6 @@ class ItiClockPlugin {
         <div class="iti-wrap">
           <canvas id="iti-canvas" width="${size}" height="${size}"></canvas>
         </div>`;
-      if (iti_condition === 'distract' && distractor_type === 'popup') {
-        _startPopups();
-      }
 
       const canvas = display_el.querySelector('#iti-canvas');
       const ctx    = canvas.getContext('2d');

@@ -22,7 +22,6 @@ export const DEFAULTS = {
   ITI_SHORT_MS:           1000,
   T_OBS_MS:               7000,
   SHOW_TRIAL_PERFORMANCE: true,
-  DISTRACTOR_TYPE:        'none',  // 'none' | 'iti_length' | 'popup'
   // Bonus-payment parameters (chat history) -- deliberately kept here
   // alongside the other governing constants, not hardcoded in
   // scoring.js, since these are exactly the "decide iteratively"
@@ -36,13 +35,18 @@ export const DEFAULTS = {
   // since it's specific to that one formula, not a general task-timing/
   // UI parameter this object otherwise holds.
   BASE_PAYMENT_DOLLARS:   10,
-  // ERROR_MODE (chat history) -- 'true_mean': error is |response -
-  // trueMean| for every response. 'running_mean' (set for testing, chat
-  // history): error is |response - runningMean| where runningMean is the
-  // cumulative mean of raw observed values up to that point -- also
-  // changes the summary chart's per-row blue tick and the "true mean"/
-  // "running mean" wording in its legend and the tutorial-summary blue
-  // banner. See scoring.js's own docstring for the full math.
+  // ERROR_MODE -- CONFIRMED PRODUCTION DEFAULT (chat history): 'running_mean'.
+  // 'true_mean': error is |response - trueMean| for every response --
+  // fixed target, never changes within a trial. 'running_mean' (the
+  // actual production setting): error is |response - runningMean| where
+  // runningMean is the cumulative mean of raw observed values up to that
+  // point -- also changes the summary chart's per-row blue tick and the
+  // "true mean"/"correct answer" wording in its legend and the
+  // tutorial-summary blue banner. This was originally introduced for
+  // testing before task_backend had real participants -- since
+  // confirmed as the intended production choice, not a leftover test
+  // setting; kept here rather than reverted. See scoring.js's own
+  // docstring for the full math.
   ERROR_MODE:             'running_mean',
 };
 
@@ -114,7 +118,6 @@ export function buildConfig({
     itiShortMs:           P.ITI_SHORT_MS,
     tObsMs:               P.T_OBS_MS,
     showTrialPerformance: P.SHOW_TRIAL_PERFORMANCE,
-    distractorType:       P.DISTRACTOR_TYPE,
     basePaymentDollars:   P.BASE_PAYMENT_DOLLARS,
     errorMode:            P.ERROR_MODE,
   };

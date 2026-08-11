@@ -25,17 +25,13 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, send
   const {
     sequences, sliderDefault, defaultValue, btiMs, tObsMs,
     showSliderValue, showTrialPerformance, MAX_TIMEOUTS_PER_TRIAL = 3,
-    distractorType = 'iti_length', errorMode = 'true_mean', startTrialIndex = 0,
+    errorMode = 'true_mean', startTrialIndex = 0,
   } = cfg;
 
   const { ItiClockPlugin, TrialObsPlugin, TrialSummaryPlugin,
           InterTrialPlugin, isColors } = plugins;
 
   const bonusDecay = isColors ? COLORS_BONUS_DECAY : NUMBERS_BONUS_DECAY;
-
-  // ITI duration for distract condition -- only 'iti_length' extends the
-  // ITI; other types ('popup', etc.) use the default.
-  const ITI_DISTRACT_MS = distractorType === 'iti_length' ? 5000 : null;
 
   let lastResponse = defaultValue, timedOut = false, trialTimeouts = 0;
   let exitFlag = false, lastTrialResponses = [];
@@ -55,11 +51,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, send
       if (o > 0) {
         trialTimeline.push({
           timeline: [{ type: ItiClockPlugin,
-            duration_ms: (seq.iti_condition === 'distract' && ITI_DISTRACT_MS !== null)
-              ? ITI_DISTRACT_MS : (seq.iti_ms ?? 1000),
-            iti_condition:   seq.iti_condition ?? 'control',
-            distractor_type: distractorType,
-            is_colors:       isColors,
+            duration_ms: seq.iti_ms ?? 1000,
             data: { screen: 'iti', trial: t, observation: _o } }],
           conditional_function: () => !exitFlag,
         });

@@ -45,8 +45,8 @@ theory that the NEF realises biophysically, not a point of direct comparison.
 |------|---|-------------|--------|
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
-| numbers | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 8x4=32 trials, per-participant pool of 200 | **Piloting** (task_backend; not yet cut over from JATOS -- see "task_backend" section below) |
-| colors | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 32 trials/participant, per-participant pool of 200 | **Piloting** (task_backend; not yet cut over from JATOS -- see "task_backend" section below) |
+| numbers | TBD | Continuous inputs; 15 obs/trial; Normal(mean, std); 8x4=32 trials, per-participant pool of 200 | **Piloting** (task_backend, cut over from JATOS -- two real Prolific pilot rounds run so far; see "task_backend" section below) |
+| colors | TBD | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 32 trials/participant, per-participant pool of 200 | **Piloting** (task_backend, cut over from JATOS -- one real Prolific pilot round run so far; see "task_backend" section below) |
 
 numbers and colors are designed to be completed within-subject
 (same participants recruited via Prolific allowlist). Together they unlock all
@@ -153,10 +153,11 @@ deterministic hash of their Prolific ID -- same pool index in both tasks.
 
 Live at `https://psipeter.github.io/evidence_integration/index-{numbers,colors}.html`.
 Full design rationale, the pilot #3 JATOS incident investigation that
-motivated building this at all, and every real bug found along the way:
-**`docs/HISTORY.md`**. Current build status and open items:
-**`task_backend/TODO.md`**. This section only covers current, stable
-facts.
+motivated building this at all, and the entire build-out/pilot history
+since: **`docs/HISTORY.md`**'s own "task_backend: build history and
+settled decisions" section (folded in from the now-retired
+`task_backend/TODO.md` once the initial build-out settled). This section
+only covers current, stable facts.
 
 ### Backend
 
@@ -184,17 +185,21 @@ facts.
 `verify_colors_trials` asserts run at generation time. Output:
 `sequences_numbers.json`/`sequences_colors.json`, each a plain JSON array
 of 200 pool members (no `.pkl`). Small test variants via `--name
-<suffix>` + `VITE_SEQUENCES_VARIANT` client-side (see
-`task_backend/TODO.md`'s "Small-sequence test variants" section).
+<suffix>` + `VITE_SEQUENCES_VARIANT` client-side (see `docs/HISTORY.md`'s
+task_backend section, "Small-sequence test variants").
 
 ### Scoring
 
 `scoring.js` (shared by both tasks): per-observation reward =
-`max(0, MAX_REWARD * (1 - BONUS_DECAY * normError))`, summed per trial.
-Current: `MAX_REWARD = 2` cents, `BONUS_DECAY = 15`. `ERROR_MODE` scores
+`max(0, MAX_REWARD * (1 - bonusDecay * normError))`, summed per trial.
+Current: `MAX_REWARD = 2` cents; `bonusDecay` split per task since a
+single shared value stopped being comparable once numbers' own
+`std_fixed` changed pilot-to-pilot -- `NUMBERS_BONUS_DECAY = 25`,
+`COLORS_BONUS_DECAY = 15` (colors unchanged). `ERROR_MODE` scores
 against the RUNNING mean/ratio of observed values (`'running_mean'`
 numbers / `'running_p'` colors), not the fixed generative parameter -- a
-deliberate methodological choice (see `docs/HISTORY.md`).
+confirmed, deliberate methodological choice for production, not a
+leftover test setting (see `docs/HISTORY.md`).
 
 ### Commands
 
@@ -228,21 +233,27 @@ npx playwright test
 ### Deployment / Prolific cutover
 
 Deployed via `.github/workflows/deploy-task-backend.yml` (GitHub Actions,
-path-filtered to `task_backend/**`). **Prolific cutover status: NOT done
-as of the last check** -- the backend's completion/early-exit codes
-deliberately mirror the OLD JATOS pipeline's exact codes, so cutover
-reduces to updating each existing Prolific study's Study URL field to
-point at the GitHub Pages URL above (no new studies needed, no
-`STUDY_ID`/`SESSION_ID` params needed unlike the old JATOS URL -- only
-`?PROLIFIC_PID={{%PROLIFIC_PID%}}`). Confirmed via the live database that
-zero real participant traffic has reached task_backend yet.
+path-filtered to `task_backend/**`). **Prolific cutover: done.** Real
+Prolific traffic has run against task_backend directly (not JATOS) --
+two pilot rounds for numbers (5 participants at `std_fixed=15`, then 8+
+at `std_fixed=10`) and one for colors (the same 5 participants from
+numbers' first round, both tasks). The backend's completion/early-exit
+codes deliberately mirror the OLD JATOS pipeline's exact codes, so the
+cutover itself was just updating each existing Prolific study's Study URL
+field to point at the GitHub Pages URL above.
 
 ### Data pipeline
 
-No path yet from the `events` table back into the `fitting/`/`models/`
-analysis pipeline -- deliberately deferred until real data exists (even
-test data) to build against. See `task_backend/TODO.md`'s "Post-buildout
-review" section.
+`scripts/build_task_backend_inputs.py` pulls real, finished participants
+directly from Supabase for an explicit pid list per pilot round (not
+"everyone finished so far" -- different pilots are different people with
+different generative parameters) into `data/task_continuous_<name>.pkl`/
+`task_binary_<name>.pkl`, via the same shared filter/rescale/anonymize/
+save pipeline (`build_model_inputs.py`'s `build_from_df()`) carrabin/yoo
+already use. `figure_soltani_*.py` take a `--datafile <name>` argument
+pointing at these. Human-data-only for now -- model fitting against real
+task_backend data hasn't been run yet. See `CLAUDE.md`'s own "Data
+pipeline" section for the full detail.
 
 ---
 

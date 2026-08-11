@@ -188,11 +188,13 @@ failures during pilot #3, and a follow-up empirical test confirmed a
 third, worse gap: per-trial saves could fail silently for an entire
 session with zero participant-visible symptom. Gorilla, Cognition.run,
 and Labvanced were all evaluated as hosted alternatives and rejected.
-**Full incident investigation and platform evaluation: `docs/HISTORY.md`**
-("Pilot #3 real-participant incidents..." and "Own-backend decision
-(Supabase)" sections). **Current build status and open items:
-`task_backend/TODO.md`** -- that file is the actively-maintained build
-log; this section only documents what's true right now.
+**Full incident investigation and platform evaluation, and the entire
+build-out/pilot history since: `docs/HISTORY.md`** ("Pilot #3
+real-participant incidents...", "Own-backend decision (Supabase)", and
+its own "task_backend: build history and settled decisions" section,
+folded in from the now-retired `task_backend/TODO.md` once the initial
+build-out and first two real pilot rounds settled). This section only
+documents what's true right now.
 
 ### Terminology
 
@@ -261,6 +263,40 @@ single method per task, plus its own `verify_numbers_trials`/
 exact-quota correctness) -- downstream tools (`scripts/plot_sequences.py`)
 deliberately trust these rather than re-auditing.
 
+**`NUMBERS_STD_FIXED = 10`** (current value, reverted from 15 -- see the
+constant's own comment for the full 10 -> 15 -> 10 history: the first
+change fixed a tutorial-example flat-suffix bug, the second reverted it
+after a real pilot at std=15 showed weak |delta response| decay signal,
+testing whether std=15 was simply too noisy a task). If a real trial's
+achieved std still misses the tolerance band even after
+`build_numbers_suffix`'s own retries, `generate_numbers_trials` now
+regenerates that qid's WHOLE PREFIX from scratch and rebuilds all 4
+repeats against their already-assigned targets (up to 30 attempts) --
+this replaced an earlier, more complex two-mechanism repair (a pairwise
+target-swap step immediately after Hungarian matching, PLUS this same
+prefix regeneration), removed once confirmed empirically redundant
+(6/6400 vs 5/6400 outliers on a real 200-member pool testing prefix
+regeneration alone). One direct question asked repeatedly (does the
+achieved std land in tolerance?) rather than two separate repair
+strategies reasoning about the problem from different ends.
+
+**Fixed tutorial sequences**: `choose_tutorial_sequences` (also in
+`generate_sequences.py`, run via `--tutorial`) selects ONE trial per task
+from the real production pool to serve as every participant's tutorial
+example -- the same trial for everyone, not derived dynamically per-load.
+Numbers: a two-stage selection (percentile-band on early prefix-response
+variability, then best suffix-response variability within that band) plus
+a hard filter excluding any candidate with a repeated raw value anywhere
+in its 15 observations. Colors: since colors' own literal `qid` never
+repeats at all (every trial gets its own, by design -- confirmed
+empirically against real data), an empirically-derived "quasi-qid"
+repeat structure (`utils/colors_quasi_qids.py`) is reused for the SAME
+selection logic.
+Written to `tutorial_sequence_{numbers,colors}.json` at the repo root,
+imported directly by each task's own `config.js` -- superseded an earlier
+dynamic `pickTutorialExample()` (removed entirely, see git history to
+restore).
+
 **Files**: `sequences_numbers.json`/`sequences_colors.json`, each a plain
 JSON array of 200 independent pool members (no `.pkl` at all). Each member
 is a list of 32 trial dicts: `qid, true_mean, true_std, true_p, values,
@@ -281,18 +317,29 @@ production files are git-tracked while only `_*`-suffixed variants are
 gitignored, so a fresh CI checkout can never bundle test data by
 accident).
 
-**`iti_condition`/distractor system**: still generated (`'control'`/
-`'distract'`) and still present in the plugin code
-(`plugin-iti-clock.js`'s popup-spawning logic), but currently **inert**
--- `config-base.js`'s `DISTRACTOR_TYPE` defaults to `'none'` in both
-tasks' configs.
+**`iti_condition`/distractor system**: REMOVED entirely (chat history) --
+this study has no distractor manipulation, so `config-base.js`'s
+`DISTRACTOR_TYPE`, `plugin-iti-clock.js`'s popup-spawning logic, and every
+prop/param that only existed to support them (`distractor_type`,
+`is_colors` inside that plugin specifically) were all dead weight once
+that mode could never actually fire, and were deleted rather than left
+inert. `iti_condition` (`'control'`/`'distract'`) is still generated into
+every sequence (`generate_sequences.py`'s own balanced-repeat design is
+unchanged, untouched by this) but is no longer consumed anywhere on the
+client at all -- it's inert DATA now, not inert CODE.
 
 ### Scoring
 
 `scoring.js` (shared by both tasks): `normError = rawError / MAX_POSSIBLE_ERROR;
-reward = max(0, MAX_REWARD * (1 - BONUS_DECAY * normError))`, computed per
+reward = max(0, MAX_REWARD * (1 - bonusDecay * normError))`, computed per
 observation and summed for the trial/tutorial total. Current parameters:
-`MAX_REWARD = 2` cents, `BONUS_DECAY = 15`, `MAX_POSSIBLE_ERROR = 100`.
+`MAX_REWARD = 2` cents, `MAX_POSSIBLE_ERROR = 100`, and -- split per task
+(chat history: numbers' std_fixed changed 15 -> 10, which made a single
+shared decay value give inflated rewards on numbers relative to colors
+for the same relative precision) -- `NUMBERS_BONUS_DECAY = 25`,
+`COLORS_BONUS_DECAY = 15` (colors unchanged). `bonusDecay` is a REQUIRED
+parameter to `computeResponseReward`/`computeTrialReward` (no default),
+so a call site can never silently fall back to the wrong task's value.
 `ERROR_MODE` (config-base.js) is `'running_mean'` for numbers / `'running_p'`
 for colors -- scores against the running statistic of observed values, not
 the fixed generative parameter (a deliberate methodological choice, not a
@@ -362,23 +409,61 @@ built together via plain `npm run build`), deployed to GitHub Pages via
 `task_backend/**`, so unrelated commits don't trigger a rebuild). Live at
 `https://psipeter.github.io/evidence_integration/index-{numbers,colors}.html`.
 
-**Prolific cutover status: NOT done as of the last check.** `supabase/
-functions/_shared/prolific-codes.ts` deliberately mirrors the OLD JATOS
-pipeline's exact completion/early-exit codes, meaning the cutover reduces
-to a single manual step per task in Prolific's own dashboard (updating
-the Study URL field to `https://psipeter.github.io/evidence_integration/
-index-{numbers,colors}.html?PROLIFIC_PID={{%PROLIFIC_PID%}}` -- no
-`STUDY_ID`/`SESSION_ID` needed, unlike the old JATOS URL) -- no new
-Prolific studies required. Confirmed via the live database that zero real
-participant traffic has reached task_backend yet.
+**Prolific cutover: DONE.** Two real pilot rounds have run against
+task_backend directly (not JATOS) since the state described in an
+earlier version of this section: pilot 4 (5 real participants, both
+tasks, `NUMBERS_STD_FIXED=15`) and pilot 5 (numbers only, std=10,
+ongoing as of the last check -- see `docs/HISTORY.md`'s task_backend
+section for the count as of when that history was folded in, or query
+Supabase directly via `build_task_backend_inputs.py --list_candidates`
+for the current live count). Both used Prolific's own Study URL field pointed
+directly at `https://psipeter.github.io/evidence_integration/
+index-{numbers,colors}.html?PROLIFIC_PID={{%PROLIFIC_PID%}}`, exactly
+the mechanism this section used to describe as a not-yet-taken step.
+`supabase/functions/_shared/prolific-codes.ts` mirroring the old JATOS
+completion/early-exit codes (`C1CNSEMJ`/`C1ARJ6LO` numbers,
+`C12FEFJU`/`C1L1GGHT` colors) has been confirmed working end-to-end
+against real Prolific submissions, not just in tests.
 
-### Data pipeline (deferred on purpose)
+### Data pipeline: Supabase -> analysis (built, explicit-pid-list based)
 
-No path yet from the `events` table back into the `fitting/`/`models/`
-analysis pipeline -- deliberately deferred until real data actually
-exists (even test data) to build against, at which point participant-
-data anonymization should be built as part of that same export step. See
-`task_backend/TODO.md`'s "Post-buildout review" section.
+`scripts/build_task_backend_inputs.py` pulls real, finished participant
+data directly from Supabase's `events` table for an EXPLICIT list of
+`prolific_pid`s (not "everyone finished so far" -- different pilot
+rounds are different people with different generative parameters, e.g.
+numbers' `std_fixed` changing between pilot 4 and pilot 5, so silently
+merging them would make cross-pilot comparison impossible). `--pilot
+<name> --numbers_pids ... --colors_pids ...` builds that pilot's own
+`data/task_continuous_<name>.pkl`/`task_binary_<name>.pkl` via
+`build_model_inputs.py`'s shared `build_from_df()` (the same filter/
+rescale/anonymize/save pipeline carrabin/yoo already use -- refactored
+out of the old JATOS-pilot-file-only `build()` so both sources share one
+implementation). `--list_candidates <task>` probes current real-
+participant status (finished/terminated/in-progress, plus `true_std`)
+directly from Supabase without building anything, for constructing an
+accurate pid list rather than guessing from memory.
+
+`figure_soltani_{performance,temporal,variability}.py` all take a
+general `--datafile <name>` argument (a plain filename suffix, not a
+pilot-specific concept -- works the same way for a future non-pilot
+experiment dataset) pointing at these files; omit it for the canonical
+unsuffixed `data/task_continuous.pkl`/`task_binary.pkl`. Each figure
+degrades to an explicit placeholder (not a crash) when a task has no
+file for a given datafile (e.g. pilot 5 has no colors data at all).
+
+Currently human-data-only in all three figures -- model fitting against
+real task_backend data hasn't been run yet (a real, separate Optuna k-fold-
+CV pass, deliberately not attempted as a side effect of building the data
+pipeline). See each figure's own module docstring for exactly how a future
+model-loading function would slot back in.
+
+Anonymization: `build_from_df()` maps `prolific_pid` (string) -> a small
+sequential int `pid`, computed fresh per pilot (no persistent mapping
+across pilots -- different pilots are different people, so there's no
+need for `pid=3` to mean the same person in two different pilots' files,
+unlike the cross-TASK consistency within one pilot that this same
+mapping does guarantee). The real `prolific_pid` never appears in the
+saved pkl.
 
 ---
 
@@ -637,6 +722,12 @@ evidence_integration/
     slurm.py
     carrabin_transform.py
     save_responses.py
+    participant_filters.py  — exclusion criteria (no_integration/noncontingent_sign/
+                              noncontingent_magnitude); build_from_df's one deliberate
+                              departure from carrabin/yoo's own pipeline
+    colors_quasi_qids.py     — empirically-derived repeat structure for colors (real `qid`
+                              never repeats there); shared by figure_soltani_temporal.py
+                              (cols 3-4) and figure_soltani_variability.py
   scripts/
     figure_carrabin_performance.py   — P group (1×3)
     figure_carrabin_variability.py   — V group (1×4)
@@ -647,10 +738,17 @@ evidence_integration/
     figure_yoo_neural.py             — N group (1×4)
     figure_carrabin.py               — legacy combined figure
     figure_yoo.py                    — legacy combined figure
-    figure_soltani_performance.py    — task_backend pilot data vs. models (P group)
-    figure_soltani_temporal.py       — task_backend pilot data vs. models (T group)
-    figure_soltani_variability.py    — task_backend pilot data vs. models (V group)
-    build_model_inputs.py            — builds data/task_{continuous,binary}.pkl for figure_soltani_*.py
+    figure_soltani_performance.py    — task_backend real pilot data (human only for now); P group
+    figure_soltani_temporal.py       — task_backend real pilot data (human only for now); T group
+    figure_soltani_variability.py    — task_backend real pilot data (human only for now); V group
+    build_model_inputs.py            — shared build_from_df() filter/rescale/anonymize/save pipeline;
+                                        build() wraps it for the old JATOS-pilot-file path
+    build_task_backend_inputs.py     — Supabase -> build_from_df(), explicit pid lists per pilot
+                                        round (--pilot/--numbers_pids/--colors_pids/--list_candidates)
+    inspect_participant.py           — one real finished participant's raw responses vs 2 untuned
+                                        reference agents (Bayes/RL), pulled directly from Supabase
+    inspect_participant_temporal.py  — figure_soltani_temporal.py's own 5-panel layout, scoped to
+                                        one real participant
     pilot_overview.py                — real pilot data vs. fixed-param models; likely
                                         superseded by figure_soltani_*.py's properly-
                                         fitted equivalent (see archive/archive_readme.md)
@@ -736,6 +834,49 @@ Default: --run_folder yoo --nef_folder refit
 
 Weight-on neurons: enc_dim_0 > 0.5 in error ensemble encoders.
 Default: --nef_folder refit
+
+### figure_soltani_performance.py (P group, 2x2)
+| Panel | Content |
+|-------|---------|
+| Col 1 | Task schematic (placeholder -- no schematic PDF exists yet) |
+| Col 2 | Estimation error vs the RUNNING MEAN (not the fixed generative
+         parameter), per pid, shown as a violin -- see the file's own
+         module docstring for why a violin over a boxplot/rugplot at
+         this sample size |
+
+Row 1 = task-binary, row 2 = task-continuous. Human only -- model fitting
+against real task_backend data deliberately not attempted yet.
+`--datafile <name>` selects which pilot's data to load (see "Data
+pipeline" above).
+
+### figure_soltani_temporal.py (T group, 2x5)
+| Panel | Content |
+|-------|---------|
+| Col 1 | Performance error vs observation (RMSE to running mean) |
+| Col 2 | Mean \|Δresponse\| vs observation |
+| Col 3 | Residual variance growth (prefix only, observation < 4) |
+| Col 4 | Within-trial residual autocorrelation, lag 1-3 (prefix only) |
+| Col 5 | Split-half reliability of fitted λ -- ODD/EVEN trial split, not
+         first/second half (see `_fit_lambda_split_half`'s own docstring) |
+
+Cols 3-4 use colors' empirically-derived quasi-qid repeat structure
+(`utils/colors_quasi_qids.py`); numbers uses its real, designed qid
+repeats. λ fitted via log-log linear regression (lambda = -slope of
+log(delta) vs log(observation)), NOT `scipy.optimize.curve_fit`'s bounded
+nonlinear fit -- that reliably degenerated to a ~0 floor artifact on real,
+noisy human data (confirmed directly). `--plot_models` (off by default)
+overlays fitted Mean/LeakyIntegrator/PrimacyRecency/RL_lambda in cols 1-2
+only. `--datafile <name>` as above.
+
+### figure_soltani_variability.py (V group, 2x3)
+| Panel | Content |
+|-------|---------|
+| Col 1 | KDE of prefix response variability, human only |
+| Col 2 | Split-half reliability (odd/even trials, not first/second half) |
+| Col 3 | Cross-task comparison (pids who did both tasks) |
+
+Same row convention and colors quasi-qid usage as the temporal figure
+above. `--datafile <name>` as above.
 
 ---
 

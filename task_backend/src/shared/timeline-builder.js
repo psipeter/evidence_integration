@@ -2,8 +2,8 @@
  * timeline-builder.js
  * Builds and runs a jsPsych timeline from a task config object, resuming
  * from wherever the participant's Supabase progress record says they left
- * off (see supabase/functions/progress-check and task_backend/TODO.md's
- * four-way resume branch).
+ * off (see supabase/functions/progress-check and docs/HISTORY.md's
+ * task_backend section for the four-way resume branch's full rationale).
  *
  * This file is the orchestrator only — consent, tutorial, terminate, and
  * end-screen logic each live in their own module. Trial-loop logic lives
@@ -126,7 +126,6 @@ export async function buildAndRun(cfg) {
     itiShortMs = 1000,
     tObsMs,
     showTrialPerformance,
-    distractorType = 'iti_length',
     errorMode = 'true_mean',
   } = cfg;
 
@@ -257,8 +256,9 @@ export async function buildAndRun(cfg) {
   }
 
   if (!skipToTrials) {
-    // ── Tutorial (always restarts from the top on resume -- see TODO.md
-    //    decision #3: trial-boundary resume, tutorial is cheap to redo) ──
+    // ── Tutorial (always restarts from the top on resume -- see
+    //    docs/HISTORY.md's task_backend section, decision #3:
+    //    trial-boundary resume, tutorial is cheap to redo) ──
     const tutorialTimeline = buildTutorialTimeline(
       {
         isColors, tutorialValues, tutorialMean, tutorialStd,
@@ -286,7 +286,8 @@ export async function buildAndRun(cfg) {
     // Transition screen -- ALWAYS shown right before the trial loop
     // begins, whether this is a fresh start (trial 1) or a resume
     // (restarting the first incomplete trial from scratch, per the
-    // trial-boundary-resume design -- see TODO.md decision #3). A
+    // trial-boundary-resume design -- see docs/HISTORY.md's task_backend
+    // section, decision #3). A
     // resuming participant lands back at observation 0 of that trial,
     // same as a normal between-trial transition -- this screen makes
     // that explicit ("Trial X/32, generating new sequence…") rather than
@@ -307,7 +308,7 @@ export async function buildAndRun(cfg) {
         sequences, sliderDefault, defaultValue,
         btiMs, tObsMs, startTrialIndex,
         showSliderValue, showTrialPerformance,
-        MAX_TIMEOUTS_PER_TRIAL, distractorType, errorMode,
+        MAX_TIMEOUTS_PER_TRIAL, errorMode,
       },
       {
         ItiClockPlugin, TrialObsPlugin,

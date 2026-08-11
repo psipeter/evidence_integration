@@ -11,7 +11,7 @@
  * deliberately NOT redirected and sees an error screen instead -- the
  * whole point of this backend is to never tell a participant "you're
  * done" without confirming their data actually landed first (see
- * task_backend/TODO.md's incident history).
+ * docs/HISTORY.md's task_backend section, incident history).
  *
  * THE CODE IS ALWAYS SHOWN AS VISIBLE TEXT, never just embedded silently
  * in a redirect URL. A previous version redirected immediately on success
@@ -122,7 +122,8 @@ export async function endSession({
 
     if (dataComplete === false) {
       // Logged either way -- see progress-finish's own docstring and
-      // TODO.md's "progress-finish mismatch handling" decision: don't
+      // docs/HISTORY.md's task_backend section, "progress-finish mismatch
+      // handling" decision: don't
       // hold up a real participant's payment for our own bug, but make
       // sure it's visible for manual reconciliation regardless of
       // whether the resend below recovers it.
