@@ -18,7 +18,7 @@
  */
 import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
 import ItiClockPlugin      from './plugin-iti-clock.js';
-import { computeTrialReward, computeResponseReward, computeErrorRefs, refForObservation, computeResponseError } from './scoring.js';
+import { computeTrialReward, computeResponseReward, computeErrorRefs, refForObservation, computeResponseError, NUMBERS_BONUS_DECAY, COLORS_BONUS_DECAY } from './scoring.js';
 import { PHASES } from './phases.js';
 
 /**
@@ -46,6 +46,7 @@ export function buildTutorialTimeline(cfg, plugins, sendCheckpoint) {
     tObsMs, itiShortMs = 1000, errorMode = 'true_mean',
   } = cfg;
   const { TutorialIntroPlugin, TutorialObsPlugin, TutorialSummaryPlugin } = plugins;
+  const bonusDecay = isColors ? COLORS_BONUS_DECAY : NUMBERS_BONUS_DECAY;
 
   // tutorialMean holds true_p (0-1 scale) for colors and true_mean for
   // numbers -- same dual role it plays a few lines below.
@@ -83,7 +84,7 @@ export function buildTutorialTimeline(cfg, plugins, sendCheckpoint) {
       tutorialLastResponse = data.response;
       const error = computeResponseError(data.response, refForObservation(_refs, 0));
       data.error = error;
-      data.reward = computeResponseReward(error);
+      data.reward = computeResponseReward(error, bonusDecay);
       tutorialResponses.push({ value: tutorialValues[0], response: data.response, error });
     }
     sendCheckpoint?.({
@@ -126,7 +127,7 @@ export function buildTutorialTimeline(cfg, plugins, sendCheckpoint) {
               tutorialLastResponse = data.response;
               const error = computeResponseError(data.response, refForObservation(_refs, _o));
               data.error = error;
-              data.reward = computeResponseReward(error);
+              data.reward = computeResponseReward(error, bonusDecay);
               tutorialResponses.push({ value: _value, response: data.response, error });
             }
             sendCheckpoint?.({
@@ -151,7 +152,7 @@ export function buildTutorialTimeline(cfg, plugins, sendCheckpoint) {
     responses:  () => tutorialResponses.map(r => r.response),
     error_mode: errorMode,
     total_error: () => tutorialResponses.reduce((sum, r) => sum + (r.error ?? 0), 0),
-    reward:      () => computeTrialReward(tutorialResponses.map(r => r.error)),
+    reward:      () => computeTrialReward(tutorialResponses.map(r => r.error), bonusDecay),
     data: { screen: 'tutorial_summary' },
   });
 

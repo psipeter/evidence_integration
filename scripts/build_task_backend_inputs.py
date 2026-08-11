@@ -2,42 +2,35 @@
 """scripts/build_task_backend_inputs.py
 =========================================
 Downloads real, finished task_backend participant data directly from
-Supabase's `events` table, reformats it to match exactly what
-scripts/build_model_inputs.py's build_from_df() expects (same columns,
-same native scale), then calls that SAME shared filter+rescale+anonymize+
-save pipeline carrabin/yoo/the old JATOS-pilot data all already go
-through -- see build_model_inputs.py's own build_from_df docstring for
-why this is reused rather than reimplemented.
+Supabase's `events` table for an EXPLICIT list of prolific_pids, reformats
+it to match exactly what scripts/build_model_inputs.py's build_from_df()
+expects, then calls that SAME shared filter+rescale+anonymize+save
+pipeline carrabin/yoo/the old JATOS-pilot data all already go through --
+see build_model_inputs.py's own build_from_df docstring for why this is
+reused rather than reimplemented.
 
-Writes to the CANONICAL data/task_continuous.pkl / data/task_binary.pkl
-paths -- NOT a separate task_backend-specific filename -- because
-fitting.submit's job resolution (and MODEL_PARAMS' own keys) are hardcoded
-to exactly those two filenames; using a different name would require
-deeper changes throughout the fitting pipeline for no real benefit. This
-DELIBERATELY OVERWRITES whatever was there before (the old, much smaller
-JATOS-era pilot data -- a different population under a retired pipeline,
-not meant to be merged with this). Back up first if that old data still
-matters to you (not tracked in git -- data/ is gitignored, see chat
-history for how this session verified that before overwriting).
-
-ANONYMIZATION: this script never itself maps prolific_pid -> int pid --
-build_from_df already does that (sorted prolific_pid -> 1, 2, 3, ...) and
-DROPS the real prolific_pid entirely from what gets saved to the pkl. The
-only anonymization work THIS script does is filtering down to real
-Prolific-format IDs in the first place (see REAL_PID_PATTERN below) --
-excluding every test/dev/student/PI id we've used this session, so none
-of that non-Prolific traffic (which was never meant to be real data
-anyway) ends up in the analysis pipeline at all.
-
-COMPLETENESS: only (prolific_pid, task) pairs with an actual 'finished'
-phase row are included -- an abandoned or in-progress session has no
-guaranteed trial-count to speak of and shouldn't silently become partial
-rows in a pkl carrabin/yoo/the fitting pipeline all assume is complete
-per participant.
+WHY AN EXPLICIT PID LIST, NOT "everyone finished so far"
+-----------------------------------------------------------
+An earlier version of this script grabbed every finished real participant
+it could find and wrote them all into ONE pair of files. That breaks the
+moment there's more than one pilot round with different generative
+parameters (e.g. numbers' std_fixed=15 vs std_fixed=10) -- there's no way
+to compare pilot 4 against pilot 5 if they're silently merged into the
+same file every time this runs. Different pilots are different PEOPLE
+(no participant did both), so there's no need for cross-pilot pid-number
+consistency the way cross-TASK consistency matters within one pilot
+(build_from_df's own pid mapping already handles that correctly, is
+unchanged, and is computed fresh -- and independently -- for each call
+this script makes).
 
 Usage:
-    python scripts/build_task_backend_inputs.py
-    python scripts/build_task_backend_inputs.py --pool_root task_backend
+    # Probe which real, finished pids exist right now (for building a list):
+    python scripts/build_task_backend_inputs.py --list_candidates numbers
+
+    # Build one pilot's files from an explicit pid list:
+    python scripts/build_task_backend_inputs.py --pilot pilot4 \\
+        --numbers_pids 670bd903349d5d24bc92dcb0,69163607e65df2b5dbe294fa,... \\
+        --colors_pids 670bd903349d5d24bc92dcb0,69163607e65df2b5dbe294fa,...
 """
 from __future__ import annotations
 
@@ -56,13 +49,9 @@ from build_model_inputs import build_from_df
 TASK_BACKEND_DIR = Path(__file__).resolve().parents[1] / "task_backend"
 TASK_INTERNAL = {"numbers": "continuous", "colors": "binary"}
 
-# Real Prolific IDs are 24-character lowercase hex strings. Every test/dev/
-# student/PI id used against this backend this session (f00xxxx student
-# ids, f007qzn -- the PI's own test, dev_<timestamp>, test*/testabc/
-# testpid, dethiers*, check*/debug*/verify_*) fails this pattern -- a
-# POSITIVE filter rather than a maintained exclusion list, so a NEW kind
-# of test id invented later still gets excluded automatically rather than
-# needing this list updated every time.
+# Real Prolific IDs are 24-character lowercase hex strings -- used only by
+# --list_candidates (a probing aid), never to silently decide who's
+# "real" for an actual build (that's what the explicit pid list is for).
 REAL_PID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
 
 
@@ -107,24 +96,11 @@ def _fetch_all_events(task_backend_dir: Path, task: str) -> list[dict]:
     return all_rows
 
 
-def _finished_real_pids(rows: list[dict]) -> set[str]:
-    """Real-Prolific-format pids with an actual 'finished' phase row."""
-    return {
-        r["prolific_pid"] for r in rows
-        if r["phase"] == "finished" and REAL_PID_PATTERN.match(r["prolific_pid"])
-    }
-
-
 def _trial_rows_to_df(rows: list[dict], finished_pids: set[str], task_internal: str) -> pd.DataFrame:
     """Dedup to the highest `attempt` per (prolific_pid, trial_index,
     observation_index) -- same 'latest state wins' convention used
-    throughout this project -- keep only finished real participants and
-    phase='trial' rows, then rename to build_from_df's expected schema.
-    Native scale preserved exactly as task_backend stores it: numbers
-    value/response already [0,100]; colors value already {-1,+1},
-    response already [0,100] -- build_from_df does its own [0,100]->[-1,1]
-    rescale AFTER filter_participants runs, so nothing here should
-    pre-rescale anything (see that function's own docstring)."""
+    throughout this project -- keep only the requested finished pids and
+    phase='trial' rows, then rename to build_from_df's expected schema."""
     trial_rows = [r for r in rows if r["phase"] == "trial" and r["prolific_pid"] in finished_pids]
     if not trial_rows:
         return pd.DataFrame()
@@ -134,16 +110,10 @@ def _trial_rows_to_df(rows: list[dict], finished_pids: set[str], task_internal: 
           .last())
     df = df.rename(columns={"trial_index": "trial", "observation_index": "observation"})
     df["task"] = task_internal
-    # Explicit numeric casts -- values arrived via json.loads() (real
-    # Supabase JSON), which deserializes numbers to plain Python
-    # int/float, not numpy dtypes. Without this, true_p/true_mean/value/
-    # response can silently end up as dtype=object (holding Python floats)
-    # rather than float64 -- harmless-looking until something downstream
-    # calls a numpy ufunc on them directly (np.sqrt(series) fails on
-    # object-dtype with "float has no callable sqrt method", since numpy
-    # tries to call .sqrt() as a METHOD on each element rather than
-    # applying the ufunc elementwise) -- caught by actually running
-    # figure_soltani_performance.py against this data, not by inspection.
+    # Explicit numeric casts -- see chat history: values arrive via
+    # json.loads(), which can leave true_p/true_mean/value/response as
+    # dtype=object (plain Python floats) rather than float64, invisible
+    # until a numpy ufunc call on them crashes downstream.
     for col in ("value", "response", "true_p", "true_mean"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -152,38 +122,89 @@ def _trial_rows_to_df(rows: list[dict], finished_pids: set[str], task_internal: 
     return df[cols]
 
 
-def download_and_reformat(pool_root) -> pd.DataFrame:
-    """Full pipeline: download both tasks, filter to finished real
-    participants, dedup, reformat -- returns ONE combined DataFrame (both
-    tasks) ready to pass to build_model_inputs.py's build_from_df."""
+def list_candidates(pool_root: Path, task: str) -> None:
+    """Probing aid: shows every real-Prolific-format pid for `task`, its
+    current status (finished/terminated/in progress), and (for numbers)
+    the true_std its session used -- so you can build an explicit pid
+    list without guessing who's actually done yet."""
+    rows = _fetch_all_events(pool_root, task)
+    by_pid: dict[str, list[dict]] = {}
+    for r in rows:
+        if REAL_PID_PATTERN.match(r["prolific_pid"]):
+            by_pid.setdefault(r["prolific_pid"], []).append(r)
+
+    print(f"{'PID':<28} {'status':<12} {'trials':<8} {'true_std'}")
+    for pid, prows in sorted(by_pid.items(), key=lambda kv: kv[1][0]["created_at"]):
+        phases = {r["phase"] for r in prows}
+        status = "FINISHED" if "finished" in phases else ("TERMINATED" if "terminated" in phases else "in progress")
+        trial_rows = [r for r in prows if r["phase"] == "trial"]
+        n_trials = len({r["trial_index"] for r in trial_rows})
+        stds = {r["true_std"] for r in trial_rows if r.get("true_std") is not None}
+        print(f"{pid:<28} {status:<12} {n_trials:<8} {stds or ''}")
+
+
+def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[str]]) -> None:
+    """pids_by_task: {'numbers': [...], 'colors': [...]} -- either list can
+    be empty/omitted if this pilot didn't touch that task. Requires every
+    listed pid to actually have a 'finished' row for that task -- reports
+    (does not silently drop) any that don't, since an explicit list means
+    you expected them to be ready."""
     frames = []
-    for task_backend_task, task_internal in TASK_INTERNAL.items():
-        print(f"Fetching {task_backend_task} from Supabase...")
+    for task_backend_task, requested_pids in pids_by_task.items():
+        if not requested_pids:
+            continue
+        task_internal = TASK_INTERNAL[task_backend_task]
+        print(f"Fetching {task_backend_task} for {len(requested_pids)} requested pid(s)...")
         rows = _fetch_all_events(pool_root, task_backend_task)
-        finished = _finished_real_pids(rows)
-        print(f"  {len(finished)} finished real-Prolific participant(s): {sorted(finished)}")
-        df = _trial_rows_to_df(rows, finished, task_internal)
-        print(f"  {len(df)} trial-observation rows after dedup")
+
+        finished_here = {r["prolific_pid"] for r in rows if r["phase"] == "finished"}
+        requested = set(requested_pids)
+        not_finished = requested - finished_here
+        if not_finished:
+            print(f"  WARNING: {len(not_finished)} requested pid(s) do NOT have a "
+                  f"'finished' row for {task_backend_task} -- excluded: {sorted(not_finished)}")
+
+        df = _trial_rows_to_df(rows, requested & finished_here, task_internal)
+        print(f"  {df['prolific_pid'].nunique() if not df.empty else 0} pid(s) included, "
+              f"{len(df)} trial-observation rows after dedup")
         frames.append(df)
+
+    if not frames or all(f.empty for f in frames):
+        print("Nothing to build -- no requested pids were both listed and finished.")
+        return
+
     combined = pd.concat(frames, ignore_index=True)
-    return combined
+    build_from_df(combined, out_name_continuous=f"task_continuous_{out_prefix}",
+                 out_name_binary=f"task_binary_{out_prefix}")
+    print("\nJOB_COMPLETE")
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--pool_root", default=str(TASK_BACKEND_DIR),
-                   help="Directory containing task_backend's .env/.env.test (default: task_backend/)")
+    p.add_argument("--pool_root", default=str(TASK_BACKEND_DIR))
+    p.add_argument("--list_candidates", choices=["numbers", "colors"], default=None,
+                   help="Probe current real-pid status for one task, then exit -- doesn't build anything.")
+    p.add_argument("--pilot", default=None,
+                   help="Output name suffix, e.g. 'pilot4' -> task_continuous_pilot4.pkl / task_binary_pilot4.pkl")
+    p.add_argument("--numbers_pids", default="", help="Comma-separated real prolific_pids for the numbers task")
+    p.add_argument("--colors_pids", default="", help="Comma-separated real prolific_pids for the colors task")
     args = p.parse_args()
 
-    combined = download_and_reformat(Path(args.pool_root))
-    if combined.empty:
-        print("No finished real-Prolific data found -- nothing to build.")
+    pool_root = Path(args.pool_root)
+
+    if args.list_candidates:
+        list_candidates(pool_root, args.list_candidates)
         return
 
-    print(f"\nCombined: {len(combined)} rows across "
-          f"{combined.groupby('task')['prolific_pid'].nunique().to_dict()}")
-    build_from_df(combined)
-    print("\nJOB_COMPLETE")
+    if not args.pilot:
+        print("Need --pilot <name> (or --list_candidates <task> to probe first).")
+        return
+
+    pids_by_task = {
+        "numbers": [p.strip() for p in args.numbers_pids.split(",") if p.strip()],
+        "colors": [p.strip() for p in args.colors_pids.split(",") if p.strip()],
+    }
+    build_pilot(pool_root, args.pilot, pids_by_task)
 
 
 if __name__ == "__main__":

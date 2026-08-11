@@ -111,14 +111,27 @@ def _to_pct(x: pd.Series, task: str) -> pd.Series:
     return (x + 1.0) * 50.0
 
 
-def _load_human(task: str) -> pd.DataFrame:
+def _load_human(task: str, datafile: str | None = None) -> pd.DataFrame | None:
     """Human data for one task, on the [0,100] percent scale. Columns:
     [pid, trial, observation, qid, value, response, ground_truth].
     ground_truth is the RUNNING mean of `value` (see
     _add_running_mean_ground_truth below), NOT the fixed true_mean/
-    true_p -- see that function's own docstring for why."""
+    true_p -- see that function's own docstring for why.
+
+    datafile: optional suffix (e.g. 'pilot4', 'pilot5') appended to the
+    dataset stem -- see figure_soltani_performance.py's own _load_human
+    docstring for the full rationale (this file's own convention, kept
+    consistent rather than reinvented). Returns None if that task has no
+    file at all for this datafile (e.g. a numbers-only pilot has no
+    binary file yet) -- caller's job to handle gracefully, not this
+    function's."""
     dataset = DATASET_FOR_TASK[task]
-    df = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    if datafile:
+        dataset = f"{dataset}_{datafile}"
+    path = data_path(f"{dataset}.pkl")
+    if not path.exists():
+        return None
+    df = pd.read_pickle(path)
     out = df[["pid", "trial", "observation", "qid", "value"]].copy()
     out["response"] = _to_pct(df["response"], task)
     out = _add_running_mean_ground_truth(out, task)
@@ -349,9 +362,18 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame) -> None:
         for lag in lags:
             pairs = []
             for (_, _), g in pid_df.groupby(["pid", "trial"]):
-                r = g.sort_values("observation")["resid"].values
-                if len(r) > lag:
-                    pairs.extend(zip(r[:-lag], r[lag:]))
+                # Pair by ACTUAL observation index, not array position --
+                # a missing checkpoint can leave gaps (e.g. observations
+                # [1,3] logged, 0 and 2 missing), and pairing by position
+                # (old: r[:-lag], r[lag:]) would wrongly treat obs=1 and
+                # obs=3 as a "lag=1" pair when they're actually 2 apart.
+                # Confirmed as a real, if rare, issue against pilot 4's
+                # data directly (2/160 prefix-trials affected) before
+                # fixing this -- see chat history.
+                obs_to_resid = dict(zip(g["observation"], g["resid"]))
+                for o, resid_o in obs_to_resid.items():
+                    if (o + lag) in obs_to_resid:
+                        pairs.append((resid_o, obs_to_resid[o + lag]))
             if len(pairs) < 3:
                 continue
             arr = np.array(pairs)
@@ -523,6 +545,11 @@ def main() -> None:
                              "(default off, to keep pilot-stage human data most "
                              "visible; pass this flag to add Mean/LeakyIntegrator/"
                              "PrimacyRecency/RL_lambda)")
+    parser.add_argument("--datafile", default=None,
+                       help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
+                            "data/task_continuous_pilot4.pkl / task_binary_pilot4.pkl. "
+                            "Omit to use the canonical data/task_continuous.pkl / "
+                            "task_binary.pkl.")
     args = parser.parse_args()
 
     run_dir = resolve_run_folder(args.run_folder)
@@ -538,7 +565,16 @@ def main() -> None:
 
     for row, task in enumerate(TASK_ROWS):
         print(f"task-{task}:")
-        human = _load_human(task)
+        human = _load_human(task, args.datafile)
+        if human is None:
+            print(f"  no data file found for this task/datafile combination -- skipping row")
+            for col in range(5):
+                axes[row, col].axis("off")
+            axes[row, 0].text(0.5, 0.5, f"No {task} data\nfor this dataset",
+                             ha="center", va="center", transform=axes[row, 0].transAxes,
+                             color="0.5", style="italic")
+            axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
+            continue
         models = {}
         if args.plot_models:
             for model_type in MODEL_ORDER:
@@ -574,6 +610,8 @@ def main() -> None:
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     stem = "figure_soltani_temporal"
+    if args.datafile:
+        stem = f"{stem}_{args.datafile}"
     plt.savefig(FIGURES_DIR / f"{stem}.pdf")
     print(f"Saved figures/{stem}.pdf")
 

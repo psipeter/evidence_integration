@@ -29,8 +29,9 @@ export const DEFAULTS = {
   // knobs this object already exists for. BASE_PAYMENT_DOLLARS is fixed,
   // paid-regardless-of-performance. The per-response BONUS scheme itself
   // is computed PER OBSERVATION from a simple two-scalar formula
-  // (MAX_REWARD, BONUS_DECAY -- see scoring.js's own "REWARD
-  // FORMULA" docstring for the exact math and current values), not a
+  // (MAX_REWARD, NUMBERS_BONUS_DECAY/COLORS_BONUS_DECAY -- see scoring.js's
+  // own "REWARD FORMULA" docstring for the exact math and current
+  // values, and for why the decay is split per-task now), not a
   // lookup table -- kept in scoring.js itself rather than here,
   // since it's specific to that one formula, not a general task-timing/
   // UI parameter this object otherwise holds.

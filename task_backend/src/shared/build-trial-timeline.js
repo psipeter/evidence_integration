@@ -18,7 +18,7 @@
  * across that observation's own loop_function re-runs (same JS closure),
  * resetting to 0 for the next observation.
  */
-import { computeTrialReward, computeResponseReward, computeErrorRefs, refForObservation, computeResponseError } from './scoring.js';
+import { computeTrialReward, computeResponseReward, computeErrorRefs, refForObservation, computeResponseError, NUMBERS_BONUS_DECAY, COLORS_BONUS_DECAY } from './scoring.js';
 import { PHASES } from './phases.js';
 
 export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, sendCheckpoint) {
@@ -30,6 +30,8 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, send
 
   const { ItiClockPlugin, TrialObsPlugin, TrialSummaryPlugin,
           InterTrialPlugin, isColors } = plugins;
+
+  const bonusDecay = isColors ? COLORS_BONUS_DECAY : NUMBERS_BONUS_DECAY;
 
   // ITI duration for distract condition -- only 'iti_length' extends the
   // ITI; other types ('popup', etc.) use the default.
@@ -100,7 +102,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, send
                 if (data.response !== null) lastResponse = data.response;
                 const ref = refForObservation(_refs, _o);
                 data.error = computeResponseError(data.response, ref);
-                data.reward = computeResponseReward(data.error);
+                data.reward = computeResponseReward(data.error, bonusDecay);
                 trialResponses.push({ observation: _o, value: _val, response: data.response, error: data.error });
                 sendCheckpoint?.({
                   phase: PHASES.TRIAL, trialIndex: t, observationIndex: _o, attempt: thisAttempt,
@@ -141,7 +143,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, send
           true_p: seq.true_p ?? null, values: _values, responses: () => _resp.map(r => r.response),
           error_mode: errorMode,
           total_error: () => _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
-          reward:      () => computeTrialReward(_resp.map(r => r.error)),
+          reward:      () => computeTrialReward(_resp.map(r => r.error), bonusDecay),
           show_performance: showTrialPerformance, is_last: false,
           data: { screen: 'inter_trial', trial: _t } }],
         conditional_function: () => !exitFlag,
@@ -162,7 +164,7 @@ export function buildTrialTimeline(cfg, plugins, jsPsych, terminateSession, send
       true_p: _seq.true_p ?? null, values: [..._seq.values], responses: () => _resp.map(r => r.response),
       error_mode: errorMode,
       total_error: () => _resp.reduce((sum, r) => sum + (r.error ?? 0), 0),
-      reward:      () => computeTrialReward(_resp.map(r => r.error)),
+      reward:      () => computeTrialReward(_resp.map(r => r.error), bonusDecay),
       show_performance: showTrialPerformance, is_last: true,
       data: { screen: 'inter_trial', trial: sequences.length - 1 } }],
     conditional_function: () => !exitFlag,

@@ -70,6 +70,7 @@ Run:
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -239,6 +240,14 @@ def _plot_panel_crosstask(ax, bin_std: pd.DataFrame, cont_std: pd.DataFrame) -> 
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--datafile", default=None,
+                       help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
+                            "data/task_continuous_pilot4.pkl / task_binary_pilot4.pkl. "
+                            "Omit to use the canonical data/task_continuous.pkl / "
+                            "task_binary.pkl.")
+    args = parser.parse_args()
+
     apply_style()
 
     fig, axes = plt.subplots(
@@ -249,35 +258,62 @@ def main() -> None:
 
     prefix_std: dict[str, pd.DataFrame] = {}
 
-    # Row 0 = binary/colors -- via quasi-qids (see module docstring).
-    df_binary = pd.read_pickle(data_path("task_binary.pkl"))
-    df_binary_qq = add_quasi_qids(df_binary)
-    print(f"task-binary: {len(df_binary)} rows, {df_binary['pid'].nunique()} pids "
-          f"-> {len(df_binary_qq)} rows in a qualifying quasi-qid group")
-    prefix_std["binary"] = _prefix_response_std(df_binary_qq)
-    split_df_binary = _prefix_response_std_split(df_binary_qq)
+    def _dataset_path(stem: str) -> Path:
+        name = f"{stem}_{args.datafile}" if args.datafile else stem
+        return data_path(f"{name}.pkl")
 
-    _plot_panel_kde(axes[0, 0], prefix_std["binary"])
-    _plot_panel_splithalf(axes[0, 1], split_df_binary)
-    axes[0, 0].set_title("task-binary", loc="left", fontsize=9, style="italic")
+    def _missing_row(row: int, task: str) -> None:
+        print(f"task-{task}: no data file found for this datafile -- skipping row")
+        for col in range(3):
+            axes[row, col].axis("off")
+        axes[row, 0].text(0.5, 0.5, f"No {task} data\nfor this dataset",
+                         ha="center", va="center", transform=axes[row, 0].transAxes,
+                         color="0.5", style="italic")
+        axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
+
+    # Row 0 = binary/colors -- via quasi-qids (see module docstring).
+    binary_path = _dataset_path("task_binary")
+    if not binary_path.exists():
+        _missing_row(0, "binary")
+        prefix_std["binary"] = pd.DataFrame(columns=["pid", "resp_std"])
+    else:
+        df_binary = pd.read_pickle(binary_path)
+        df_binary_qq = add_quasi_qids(df_binary)
+        print(f"task-binary: {len(df_binary)} rows, {df_binary['pid'].nunique()} pids "
+              f"-> {len(df_binary_qq)} rows in a qualifying quasi-qid group")
+        prefix_std["binary"] = _prefix_response_std(df_binary_qq)
+        split_df_binary = _prefix_response_std_split(df_binary_qq)
+
+        _plot_panel_kde(axes[0, 0], prefix_std["binary"])
+        _plot_panel_splithalf(axes[0, 1], split_df_binary)
+        axes[0, 0].set_title("task-binary", loc="left", fontsize=9, style="italic")
 
     # Row 1 = continuous/numbers -- real qid, unchanged.
-    df_continuous = pd.read_pickle(data_path("task_continuous.pkl"))
-    print(f"task-continuous: {len(df_continuous)} rows, {df_continuous['pid'].nunique()} pids")
-    prefix_std["continuous"] = _prefix_response_std(df_continuous)
-    split_df_continuous = _prefix_response_std_split(df_continuous)
+    continuous_path = _dataset_path("task_continuous")
+    if not continuous_path.exists():
+        _missing_row(1, "continuous")
+        prefix_std["continuous"] = pd.DataFrame(columns=["pid", "resp_std"])
+    else:
+        df_continuous = pd.read_pickle(continuous_path)
+        print(f"task-continuous: {len(df_continuous)} rows, {df_continuous['pid'].nunique()} pids")
+        prefix_std["continuous"] = _prefix_response_std(df_continuous)
+        split_df_continuous = _prefix_response_std_split(df_continuous)
 
-    _plot_panel_kde(axes[1, 0], prefix_std["continuous"])
-    _plot_panel_splithalf(axes[1, 1], split_df_continuous)
-    axes[1, 0].set_title("task-continuous", loc="left", fontsize=9, style="italic")
+        _plot_panel_kde(axes[1, 0], prefix_std["continuous"])
+        _plot_panel_splithalf(axes[1, 1], split_df_continuous)
+        axes[1, 0].set_title("task-continuous", loc="left", fontsize=9, style="italic")
 
-    # Col 3: cross-task comparison, now possible for both rows since both
-    # tasks have a valid prefix-variability metric -- but colors' pid
-    # values are quasi-qid-restricted-trial-derived, computed on the SAME
-    # underlying pid identifiers either way, so the merge in
-    # _plot_panel_crosstask (on real integer pid) is still valid.
+    # Col 3: cross-task comparison -- only meaningful if BOTH tasks' files
+    # exist for this datafile (e.g. a numbers-only pilot has nothing to
+    # cross with).
     axes[0, 2].axis("off")
-    _plot_panel_crosstask(axes[1, 2], prefix_std["binary"], prefix_std["continuous"])
+    if binary_path.exists() and continuous_path.exists():
+        _plot_panel_crosstask(axes[1, 2], prefix_std["binary"], prefix_std["continuous"])
+    else:
+        axes[1, 2].axis("off")
+        axes[1, 2].text(0.5, 0.5, "Cross-task comparison needs\nboth tasks' data",
+                       ha="center", va="center", transform=axes[1, 2].transAxes,
+                       color="0.5", style="italic")
 
     label_panels(axes)
 
@@ -290,6 +326,8 @@ def main() -> None:
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     stem = "figure_soltani_variability"
+    if args.datafile:
+        stem = f"{stem}_{args.datafile}"
     plt.savefig(FIGURES_DIR / f"{stem}.pdf")
     print(f"Saved figures/{stem}.pdf")
 

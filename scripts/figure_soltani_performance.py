@@ -56,6 +56,7 @@ Run:
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 import tempfile
@@ -126,7 +127,7 @@ def _to_pct(x: pd.Series, task: str) -> pd.Series:
 
 # ── data loading ─────────────────────────────────────────────────────────────
 
-def _load_human(task: str) -> pd.DataFrame:
+def _load_human(task: str, datafile: str | None) -> pd.DataFrame:
     """Human data + ground truth for one task, on the [0,100] percent scale.
     Columns: [pid, trial, observation, value, response, ground_truth].
     ground_truth is the RUNNING mean of `value` (see
@@ -134,9 +135,23 @@ def _load_human(task: str) -> pd.DataFrame:
     true_p -- see that function's own docstring for why. Kept as its own
     small function (not inlined into the panel below) because the FUTURE
     model-loading function this file will eventually get is meant to
-    mirror this exact shape -- see module docstring."""
+    mirror this exact shape -- see module docstring.
+
+    datafile: optional suffix (e.g. 'pilot4', 'pilot5') appended to the
+    dataset stem -- data/task_{continuous,binary}_{datafile}.pkl instead
+    of the canonical data/task_{continuous,binary}.pkl. Lets this figure
+    point at any pilot round's own files (built by
+    scripts/build_task_backend_inputs.py's --pilot flag) without needing
+    a pilot-specific concept baked into this script -- it's just a
+    filename suffix, so it works the same way once there's a real
+    (non-pilot) experiment dataset to point at too."""
     dataset = DATASET_FOR_TASK[task]
-    df = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    if datafile:
+        dataset = f"{dataset}_{datafile}"
+    path = data_path(f"{dataset}.pkl")
+    if not path.exists():
+        return None
+    df = pd.read_pickle(path)
     out = df[["pid", "trial", "observation", "value"]].copy()
     out["response"] = _to_pct(df["response"], task)
     out = _add_running_mean_ground_truth(out, task)
@@ -183,6 +198,14 @@ def _plot_panel_p1(ax, human: pd.DataFrame) -> None:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--datafile", default=None,
+                       help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
+                            "data/task_continuous_pilot4.pkl / task_binary_pilot4.pkl. "
+                            "Omit to use the canonical data/task_continuous.pkl / "
+                            "task_binary.pkl.")
+    args = parser.parse_args()
+
     apply_style()
 
     fig, axes = plt.subplots(
@@ -193,7 +216,16 @@ def main() -> None:
 
     for row, task in enumerate(TASK_ROWS):
         print(f"task-{task}:")
-        human = _load_human(task)
+        human = _load_human(task, args.datafile)
+        if human is None:
+            print(f"  no data file found for this task/datafile combination -- skipping")
+            axes[row, 0].axis("off")
+            axes[row, 1].axis("off")
+            axes[row, 1].text(0.5, 0.5, f"No {task} data\nfor this dataset",
+                             ha="center", va="center", transform=axes[row, 1].transAxes,
+                             color="0.5", style="italic")
+            axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
+            continue
         print(f"  {len(human)} rows, {human['pid'].nunique()} pids")
 
         _plot_schematic(axes[row, 0], task)
@@ -209,6 +241,8 @@ def main() -> None:
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     stem = "figure_soltani_performance"
+    if args.datafile:
+        stem = f"{stem}_{args.datafile}"
     plt.savefig(FIGURES_DIR / f"{stem}.pdf")
     print(f"Saved figures/{stem}.pdf")
 

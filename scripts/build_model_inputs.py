@@ -106,6 +106,13 @@ def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="ta
     binr = binr.sort_values(["pid", "trial", "observation"]).reset_index(drop=True)
 
     for name, out in [(out_name_continuous, cont), (out_name_binary, binr)]:
+        if out.empty:
+            # E.g. a pilot that only touched one task -- writing an empty
+            # file for the other is pure junk output, not a real result,
+            # and could be mistaken for "this pilot had zero binary data"
+            # rather than "this pilot never ran that task at all".
+            print(f"\n{name}: 0 rows -- SKIPPED (this call's input had no rows for this task)")
+            continue
         path = data_path(f"{name}.pkl")
         out.to_pickle(path)
         print(f"\n{name}: {len(out)} rows, {out['pid'].nunique()} pids "

@@ -17,7 +17,7 @@
  * REWARD FORMULA:
  *
  *     normError = rawError / MAX_POSSIBLE_ERROR        (scaled to 0-1)
- *     reward    = max(0, MAX_REWARD * (1 - BONUS_DECAY * normError))
+ *     reward    = max(0, MAX_REWARD * (1 - bonusDecay * normError))
  *
  * computed PER OBSERVATION, not once per trial from a SUMMED error -- the
  * trial's own total reward is just the SUM of these per-observation
@@ -27,10 +27,30 @@
  * live on the same bounded 0-100 scale (numbers's slider, colors's
  * percentage) -- the worst possible single response (0 vs a reference of
  * 100, or vice versa) is exactly 100 error, so dividing by 100 always
- * lands normError in [0,1] regardless of task. MAX_REWARD=2 (cents),
- * BONUS_DECAY=15 -- reward hits exactly 0 once normError >= 1/BONUS_DECAY
- * ~= 0.067, i.e. once a single response is off by ~6.7+ (on the 0-100
- * scale).
+ * lands normError in [0,1] regardless of task. MAX_REWARD=2 (cents).
+ *
+ * bonusDecay is a REQUIRED parameter to computeResponseReward/
+ * computeTrialReward below (no default) -- NUMBERS_BONUS_DECAY and
+ * COLORS_BONUS_DECAY are deliberately SEPARATE constants, not one shared
+ * value, and every call site must say explicitly which one it means
+ * rather than silently falling back to a default that might be wrong for
+ * that task. This split exists because a single shared decay value
+ * doesn't stay comparable once the two tasks' underlying noise levels
+ * differ: numbers' own std_fixed changed (15 -> 10, see
+ * generate_sequences.py's own comment on that constant) while colors'
+ * did not, and a fixed absolute error tolerance (originally ~6.7 points
+ * on the 0-100 scale, from decay=15) becomes easier to stay inside on a
+ * LOWER-noise numbers task even with no real change in skill -- confirmed
+ * directly against real pilot data before this split existed (pilot 5,
+ * std=10, showed RMSE/std_fixed ≈ 0.60 vs pilot 4's ≈ 0.68 at std=15 --
+ * genuinely comparable RELATIVE precision, even though pilot 5's absolute
+ * RMSE was much lower -- see chat history for the full analysis, including
+ * a decay sweep (15/22/30/40/50/60) against real pilot 5 responses that
+ * settled on 25 as a reasonable middle ground: fewer people hit the $5
+ * manual-payment cap than at decay=15, without crushing lower performers'
+ * pay as hard as decay=50 (needed to eliminate cap-hitting entirely)
+ * would have). Colors' own decay is UNCHANGED at 15 -- nothing about
+ * colors' task design has changed, so there was no reason to touch it.
  *
  * ACTUAL PAYMENT -- real bonus payments are given MANUALLY (outside this
  * codebase entirely) and clipped to a $5 ceiling, regardless of what this
@@ -55,7 +75,8 @@
 // DEFAULTS, since they're specific to this one formula, not a general
 // task-timing/UI parameter.
 export const MAX_REWARD  = 2;   // cents, per observation, at normError=0
-export const BONUS_DECAY = 15;
+export const NUMBERS_BONUS_DECAY = 25;  // changed from 15 -- see module docstring's "REWARD FORMULA" note
+export const COLORS_BONUS_DECAY  = 15;  // unchanged -- colors' task design hasn't changed
 
 // Both tasks' responses/refs live on a 0-100 scale (numbers's slider,
 // colors's percentage) -- see module docstring's "REWARD FORMULA" note.
@@ -121,12 +142,14 @@ export function computeResponseError(response, ref) {
  * @param {number|null} error  from computeResponseError() above. null
  *   (timed-out/unresolved) yields 0 reward, not a formula result -- there
  *   was no response to reward.
+ * @param {number} bonusDecay  NUMBERS_BONUS_DECAY or COLORS_BONUS_DECAY --
+ *   REQUIRED, no default (see module docstring for why).
  * @returns {number} reward for this ONE observation, in cents, never negative
  */
-export function computeResponseReward(error) {
+export function computeResponseReward(error, bonusDecay) {
   if (error == null) return 0;
   const normError = error / MAX_POSSIBLE_ERROR;
-  return Math.max(0, MAX_REWARD * (1 - BONUS_DECAY * normError));
+  return Math.max(0, MAX_REWARD * (1 - bonusDecay * normError));
 }
 
 /**
@@ -137,10 +160,12 @@ export function computeResponseReward(error) {
  *   errors, in order (each from computeResponseError() above -- may
  *   include nulls for timed-out observations, handled by
  *   computeResponseReward()).
+ * @param {number} bonusDecay  NUMBERS_BONUS_DECAY or COLORS_BONUS_DECAY --
+ *   REQUIRED, no default (see module docstring for why).
  * @returns {number} total reward for the trial, in cents, never negative
  */
-export function computeTrialReward(errors) {
-  return (errors || []).reduce((sum, error) => sum + computeResponseReward(error), 0);
+export function computeTrialReward(errors, bonusDecay) {
+  return (errors || []).reduce((sum, error) => sum + computeResponseReward(error, bonusDecay), 0);
 }
 
 /**
