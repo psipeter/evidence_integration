@@ -1,0 +1,28 @@
+{
+  "qid": 2,
+  "true_mean": 35.3226,
+  "true_std": 15.0,
+  "true_p": null,
+  "values": [
+    65,
+    37,
+    25,
+    38,
+    41,
+    46,
+    1,
+    31,
+    53,
+    61,
+    22,
+    56,
+    68,
+    28,
+    52
+  ],
+  "prefix_length": 4,
+  "iti_ms": 1000,
+  "iti_condition": "distract",
+  "trial": 26,
+  "pool_index": 113
+}

@@ -174,3 +174,28 @@ then be a duplicate of test_sequences.py's originals (harmless, but worth
 de-duplicating back to a single cross-file import at that point).
 
 ---
+
+## archive/task_backend/ -- production sequence snapshots
+
+### sequences_numbers_std15.json, tutorial_sequence_numbers_std15.json
+Backed up when `task_backend/generate_sequences.py`'s `NUMBERS_STD_FIXED`
+was reverted 15 -> 10 (a real pilot with std=15 showed little to no clear
+|delta response| decay signal in real participants -- see
+figure_soltani_temporal.py and chat history -- so the PI wanted to test
+whether std=15 was simply too noisy a task). This is the SECOND
+reversal of this constant (10 -> 15 -> 10, see generate_sequences.py's
+own comment on `NUMBERS_STD_FIXED` for the full history of both). These
+two files are exactly what was live in production immediately before the
+second reversal: the full 200-member std=15 numbers pool, and the fixed
+tutorial example chosen from it. Also recoverable via git history
+(commit `443fe1e`), but kept here too as an explicit, easy-to-find
+snapshot rather than relying solely on git log.
+
+### How to restore
+Copy both files back to `task_backend/` (dropping the `_std15` suffix),
+set `NUMBERS_STD_FIXED = 15.0` back in `generate_sequences.py`, and
+rebuild the frontend (`npm run build`) to confirm. No need to re-run
+`--tutorial` if restoring these exact files -- they already ARE that
+selection's output.
+
+---

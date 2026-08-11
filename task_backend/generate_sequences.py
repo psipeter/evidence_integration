@@ -72,21 +72,38 @@ SEQ_LENGTH = 15   # observations per trial, both tasks
 # (std_fixed defaulted to 15 in the generator script but real deployed
 # production data showed 10) it was only possible because it was an
 # overridable default rather than a single source of truth -- hence
-# keeping it a hardcoded constant here rather than a CLI flag. Deliberately
-# changed back to 15 (from 10): a std=10 numbers pool produces prefixes
-# with enough internal variance that generate_numbers_suffix's analytical
-# variance-correction formula squeezes the SUFFIX down to its 1.0-std
-# floor whenever a high-variance prefix is chosen (e.g. for a tutorial
-# example with large early updates) -- std=15 gives the suffix enough
-# variance budget that a high-variance prefix no longer flatlines the
-# rest of the trial. This is a genuine, deliberate reversal of that
-# earlier std=10 confirmation, not a re-drift -- change here directly (and
-# re-run --tutorial afterward) if this ever needs revisiting again.
+# keeping it a hardcoded constant here rather than a CLI flag.
+#
+# NUMBERS_STD_FIXED history (two reversals so far, both deliberate --
+# see chat history for full detail on each):
+#   10 (original) -> 15: a std=10 pool didn't give
+#     generate_numbers_suffix's analytical variance-correction formula
+#     enough budget to keep the SUFFIX visibly moving once a high-
+#     variance prefix was chosen for the fixed tutorial example --
+#     confirmed directly, not assumed -- so std=15 gave that formula more
+#     room to work with.
+#   15 -> 10 (current): after a real pilot with std=15, real participants'
+#     |delta response| curves showed little to no clear decay signal (see
+#     figure_soltani_temporal.py's own column 2/5) -- hypothesis: std=15
+#     may simply be too noisy a task for genuine evidence-accumulation
+#     behavior to show up clearly, worth testing directly with a lower-
+#     noise pilot rather than assumed. KNOWN TRADEOFF reintroduced by this
+#     reversal: the tutorial's own fixed example (chosen by
+#     choose_tutorial_sequences below, which explicitly selects for a
+#     high-variance prefix) may again land on a flatter suffix than it
+#     did under std=15, simply because std=10 offers less suffix-variance
+#     budget pool-wide to select from -- re-run --tutorial after
+#     regenerating and look at what it actually picked before assuming
+#     this reversal is free.
+# The std=15 pool + its own tutorial_sequence_numbers.json are backed up
+# at archive/task_backend/{sequences_numbers,tutorial_sequence_numbers}_std15.json
+# (also recoverable via git history -- see commit 443fe1e) if this ever
+# needs reverting again.
 NUMBERS_N_PREFIX = 8
 NUMBERS_N_REPEATS = 4
 NUMBERS_PREFIX_LENGTH = 4
 NUMBERS_MEAN_RANGE = (15.0, 85.0)
-NUMBERS_STD_FIXED = 15.0
+NUMBERS_STD_FIXED = 10.0
 NUMBERS_BOUNDARY_MARGIN = 1.0
 NUMBERS_STD_TOLERANCE_FRAC = 0.25
 
@@ -157,7 +174,22 @@ def match_prefixes_to_targets(prefix_values, target_values):
     minimizes total |prefix_value - target_value| mismatch across ALL pairs
     jointly -- not a greedy nearest-neighbor pass, which can leave an
     arbitrarily bad single pair once a popular region runs out of supply.
-    Returns target_values reordered to align 1:1 with prefix_values."""
+    Returns target_values reordered to align 1:1 with prefix_values.
+
+    NOTE: minimizing the SUM of mismatches does not bound any single
+    pair's mismatch -- a few individually-bad pairs can still occur even
+    at the global optimum. Not repaired here -- generate_numbers_trials's
+    own qid-level prefix regeneration loop handles this downstream, by
+    checking the ACTUAL achieved std directly rather than trying to
+    predict trouble analytically beforehand. An earlier version of this
+    file also tried a pairwise target-swap repair at this exact point
+    (before any prefix regeneration existed); removed once regenerating
+    a qid's prefix directly was confirmed to catch just as much on its
+    own (6/6400 vs 5/6400 outliers on a real 200-member pool -- see chat
+    history), at a fraction of the code and conceptual complexity: one
+    direct outcome check instead of two separate repair mechanisms
+    reasoning about the problem from different ends.
+    """
     pv = np.asarray(prefix_values, dtype=float)
     tv = np.asarray(target_values, dtype=float)
     cost = np.abs(pv[:, None] - tv[None, :])
@@ -169,7 +201,7 @@ def match_prefixes_to_targets(prefix_values, target_values):
 
 
 def build_numbers_suffix(rng, prefix_values, target_mean, std_fixed, suffix_length,
-                            value_min, value_max, std_tolerance_frac, max_attempts=20):
+                            value_min, value_max, std_tolerance_frac, max_attempts=100):
     """Draws the suffix as a genuine, unrescaled random sample, centered so
     the FULL prefix+suffix trial's sample mean lands on target_mean in
     EXPECTATION (algebraic residual centering) -- never forced there
@@ -253,17 +285,35 @@ def shuffle_avoiding_consecutive_repeats(trials, rng, ground_truth_key):
 
 def generate_numbers_trials(rng, n_prefix, n_repeats, prefix_length, seq_length,
                                mean_range, std_fixed, boundary_margin, std_tolerance_frac,
-                               verbose=True):
+                               verbose=True, max_qid_regenerate_attempts=30):
     """Full numbers pool member: n_prefix x n_repeats trials, each a
     prefix + steered-but-noisy suffix. Returns a list of trial dicts -- the
     schema every consumer (client bundle, verify_numbers_trials,
-    tutorial-example selection) expects."""
+    tutorial-example selection) expects.
+
+    max_qid_regenerate_attempts: for a qid where even build_numbers_suffix's
+    own per-trial retries can't land EVERY repeat within tolerance,
+    regenerate that qid's WHOLE PREFIX from scratch (a fresh draw, same
+    center point, all 4 repeats rebuilt against their EXISTING assigned
+    targets) and try again. A DIRECT outcome check (does the achieved std
+    land in tolerance?) rather than an analytical pre-check trying to
+    predict trouble before it happens -- an earlier version of this file
+    also had a separate pairwise target-swap repair immediately after
+    Hungarian matching (see match_prefixes_to_targets's own docstring for
+    why it was removed: confirmed empirically to be almost entirely
+    redundant once this qid-level regeneration existed, catching
+    6/6400 outliers on a real 200-member pool vs this alone's 5/6400 --
+    not worth the extra mechanism and the conceptual overhead of
+    reasoning about two different repair strategies from two different
+    ends of the pipeline).
+    """
     suffix_length = seq_length - prefix_length
     n_trials = n_prefix * n_repeats
     value_min, value_max = VALUE_MIN + boundary_margin, VALUE_MAX - boundary_margin
 
     prefixes = build_numbers_prefixes(rng, n_prefix, prefix_length, mean_range, std_fixed,
                                          value_min, value_max)
+    prefix_centers = np.linspace(mean_range[0], mean_range[1], n_prefix)
     target_means = spread_numbers_targets(n_trials, mean_range)
 
     prefix_slot_idx = [i for i in range(n_prefix) for _ in range(n_repeats)]
@@ -272,15 +322,47 @@ def generate_numbers_trials(rng, n_prefix, n_repeats, prefix_length, seq_length,
     matched_targets = match_prefixes_to_targets(
         [prefix_means[i] for i in prefix_slot_idx], target_means)
 
+    # Group each qid's own assigned targets together (repeat SLOTS for a
+    # given qid, in slot order) -- needed to rebuild ALL of a qid's
+    # repeats together against a regenerated prefix.
+    slots_by_qid = {}
+    for slot_i, pfx_idx in enumerate(prefix_slot_idx):
+        slots_by_qid.setdefault(pfx_idx, []).append(slot_i)
+
+    std_lo = std_fixed * (1.0 - std_tolerance_frac)
+    std_hi = std_fixed * (1.0 + std_tolerance_frac)
+
+    qid_prefix = dict(enumerate(prefixes))
+    qid_suffixes = {}
+    n_regenerated = 0
+    for pfx_idx, slots in slots_by_qid.items():
+        qid_targets = [matched_targets[s] for s in slots]
+        for attempt in range(max_qid_regenerate_attempts):
+            prefix_vals = qid_prefix[pfx_idx]
+            suffixes = [build_numbers_suffix(rng, prefix_vals, t, std_fixed, suffix_length,
+                                             value_min, value_max, std_tolerance_frac)
+                       for t in qid_targets]
+            stds = [float(np.std(prefix_vals + s)) for s in suffixes]
+            if all(std_lo <= s <= std_hi for s in stds):
+                break
+            raw = rng.normal(prefix_centers[pfx_idx], std_fixed, size=prefix_length)
+            qid_prefix[pfx_idx] = np.clip(np.round(raw), value_min, value_max).astype(int).tolist()
+            n_regenerated += 1
+        else:
+            if verbose:
+                print(f"[numbers] qid={pfx_idx}: still outside std tolerance after "
+                      f"{max_qid_regenerate_attempts} prefix regenerations -- "
+                      f"keeping best-effort result (stds={[round(s, 1) for s in stds]})")
+        qid_suffixes[pfx_idx] = suffixes
+
     iti_schedule = build_iti_schedule(rng, n_prefix, n_repeats)
     rep_count = {}
     trials = []
-    for pfx_idx, target_mean in zip(prefix_slot_idx, matched_targets):
-        prefix_vals = prefixes[pfx_idx]
+    for slot_i, (pfx_idx, target_mean) in enumerate(zip(prefix_slot_idx, matched_targets)):
+        prefix_vals = qid_prefix[pfx_idx]
         rep = rep_count.get(pfx_idx, 0)
         rep_count[pfx_idx] = rep + 1
-        suffix = build_numbers_suffix(rng, prefix_vals, target_mean, std_fixed,
-                                         suffix_length, value_min, value_max, std_tolerance_frac)
+        suffix = qid_suffixes[pfx_idx][slots_by_qid[pfx_idx].index(slot_i)]
         trials.append({
             'qid': pfx_idx, 'true_mean': target_mean, 'true_std': std_fixed, 'true_p': None,
             'values': prefix_vals + suffix, 'prefix_length': prefix_length,
@@ -293,7 +375,8 @@ def generate_numbers_trials(rng, n_prefix, n_repeats, prefix_length, seq_length,
 
     if verbose:
         print(f"[numbers] {n_trials} trials ({n_prefix} prefixes x {n_repeats} reps), "
-              f"mean_range={mean_range}, std_fixed={std_fixed}")
+              f"mean_range={mean_range}, std_fixed={std_fixed}, "
+              f"{n_regenerated} qid-prefix regeneration(s) triggered")
     return trials
 
 
@@ -482,7 +565,8 @@ def _has_repeated_values(values):
 
 
 def choose_tutorial_sequences(pool_dir='.', out_dir=None, n_score=5,
-                               prefix_percentile_lo=75, prefix_percentile_hi=95):
+                               prefix_percentile_lo=75, prefix_percentile_hi=95,
+                               exclude=None):
     """Selects ONE fixed trial per task from the real production pool
     (sequences_numbers.json / sequences_colors.json under pool_dir) to
     serve as every participant's tutorial example -- the same trial for
@@ -537,10 +621,21 @@ def choose_tutorial_sequences(pool_dir='.', out_dir=None, n_score=5,
     silently drift out of sync with the real task's parameters, exactly
     the failure mode pickTutorialExample's own docstring describes
     (see "Sequences" in CLAUDE.md's task_backend section).
+
+    `exclude`: optional {task: {(pool_index, trial), ...}} -- candidates
+    matching an excluded (pool_index, trial) pair are dropped BEFORE the
+    percentile band is computed (not just skipped when picking the max),
+    so excluding the current pick reliably surfaces a genuinely different
+    one rather than risking landing back on the same trial via a
+    differently-shaped band. Exists because this selection is otherwise
+    fully deterministic -- re-running with identical inputs always
+    returns the identical trial -- so "try a different one" needs an
+    explicit way to say which trial(s) to rule out, not just a re-run.
     """
     pool_dir = pathlib.Path(pool_dir)
     out_dir = pathlib.Path(out_dir) if out_dir else pool_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+    exclude = exclude or {}
 
     file_for_task = {'numbers': 'sequences_numbers.json', 'colors': 'sequences_colors.json'}
     chosen = {}
@@ -548,10 +643,13 @@ def choose_tutorial_sequences(pool_dir='.', out_dir=None, n_score=5,
         path = pool_dir / fname
         with open(path) as f:
             pool = json.load(f)
+        excluded_pairs = exclude.get(task, set())
 
         scored = []
         for pool_idx, member in enumerate(pool):
             for trial in member:
+                if (pool_idx, trial['trial']) in excluded_pairs:
+                    continue
                 if task == 'numbers' and _has_repeated_values(trial['values']):
                     continue
                 prefix_score = _running_mean_deltas(trial['values'][:n_score])
@@ -614,6 +712,12 @@ def parse_args():
                         "sequences (tutorial_sequence_{numbers,colors}.json) from the ALREADY-BUILT "
                         "production pool under --pool_dir. See choose_tutorial_sequences' own "
                         "docstring for the selection criterion.")
+    p.add_argument('--exclude_current', action='store_true',
+                   help="Only with --tutorial: exclude whatever tutorial_sequence_{numbers,colors}.json "
+                        "under --pool_dir currently point to (read BEFORE overwriting), so the new "
+                        "selection is guaranteed to land on a genuinely different trial for any task "
+                        "whose file already exists, instead of deterministically re-picking the same "
+                        "one. Tasks with no existing file are unaffected.")
     return p.parse_args()
 
 
@@ -623,7 +727,18 @@ def main():
     tasks = ['numbers', 'colors'] if args.task == 'both' else [args.task]
 
     if args.tutorial:
-        choose_tutorial_sequences(pool_dir=args.pool_dir)
+        exclude = None
+        if args.exclude_current:
+            exclude = {}
+            for task in ('numbers', 'colors'):
+                existing_path = pathlib.Path(args.pool_dir) / f'tutorial_sequence_{task}.json'
+                if existing_path.exists():
+                    with open(existing_path) as f:
+                        current = json.load(f)
+                    exclude[task] = {(current['pool_index'], current['trial'])}
+                    print(f"[{task}] excluding current pick: "
+                          f"pool_index={current['pool_index']}, trial={current['trial']}")
+        choose_tutorial_sequences(pool_dir=args.pool_dir, exclude=exclude)
         print("\nJOB_COMPLETE")
         return
 
