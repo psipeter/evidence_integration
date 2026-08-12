@@ -486,6 +486,61 @@ unlike the cross-TASK consistency within one pilot that this same
 mapping does guarantee). The real `prolific_pid` never appears in the
 saved pkl.
 
+### Participant exclusion criteria (`utils/participant_filters.py`)
+
+Three criteria, combined with OR, identify participants who show no
+evidence of genuinely attempting the task (as opposed to attempting it
+but updating sub-optimally, which is explicitly NOT excluded): recency-
+only updating, non-contingent-sign updating, non-contingent-magnitude
+updating. All three ask the SAME kind of question, the same way: does
+adding one specific piece of task-relevant information to a regression
+explain a non-trivial amount of additional variance, measured by Cohen's
+f² (the standard effect size for an added predictor's incremental
+contribution) against Cohen's own conventional f²=0.02 "small effect"
+boundary -- one established, citable convention, applied consistently,
+rather than a different ad hoc statistical construction per criterion.
+
+- **recency_only**: f² of adding `prior_mean` (mean of all strictly-
+  prior values in the trial) to a regression that already has
+  `current_value`, predicting `response`. Someone whose response is
+  explained by the single most recent observation, with prior history
+  adding nothing beyond that, is flagged; someone genuinely trying to
+  integrate but doing so poorly or noisily (a real, if weak, incremental
+  contribution from history) is not.
+- **noncontingent_sign**: f² of adding `sign(discrepancy)` to an
+  intercept-only model, predicting `update` (the participant's own
+  response change). Near-zero means the DIRECTION of their updates
+  carries no information about the stimulus.
+- **noncontingent_magnitude**: f² of adding `|discrepancy|` to an
+  intercept-only model, predicting `|update|`. Near-zero means the SIZE
+  of their updates carries no information about how surprising the
+  evidence was, even if direction sometimes happens to line up.
+
+**Deliberately an effect-size threshold, not a significance test**:
+checked directly against two real batches (~448 updates/pid each) before
+settling on this -- at that sample size, a plain significance test
+declares virtually any nonzero effect significant, making it uselessly
+lenient, AND makes the flagging decision depend on how much data a
+participant happens to have (more timeouts -> less power -> easier to
+"pass" with the same underlying behavior) rather than on how large the
+effect actually is.
+
+**Superseded an earlier three-different-statistical-tools version**
+(a tolerance-based literal-copy check, a binomial test, a raw Pearson
+correlation, and a partial-correlation-with-a-hand-picked-r=0.10-cutoff)
+that was defensible criterion-by-criterion but read as an ad hoc
+patchwork as a COLLECTION -- hard to answer "why these specific tests,
+with these specific cutoffs, and how do you know you've covered every
+way someone could be inattentive?" The current recency_only criterion
+SUBSUMES the old literal-copy check empirically (every case the old
+check flagged shows an even more extreme version of the same signature)
+and, as a side effect of using Cohen's regression-specific f²=0.02
+convention (~r=0.14 equivalent) rather than his bivariate-correlation
+r=0.10 convention, catches 2 real participants the r=0.10 version had
+missed. Archived at `archive/utils/archive_participant_filters_legacy.py`
+-- not deleted, since it's genuine prior methodology worth pointing to,
+just no longer live.
+
 ---
 
 ## Legacy: task/ (retired)
@@ -787,9 +842,12 @@ evidence_integration/
     slurm.py
     carrabin_transform.py
     save_responses.py
-    participant_filters.py  — exclusion criteria (no_integration/noncontingent_sign/
-                              noncontingent_magnitude); build_from_df's one deliberate
-                              departure from carrabin/yoo's own pipeline
+    participant_filters.py  — exclusion criteria (recency_only/noncontingent_sign/
+                              noncontingent_magnitude), all via nested-regression
+                              + Cohen's f² -- see "Participant exclusion criteria"
+                              under "Online task: task_backend" below.
+                              build_from_df's one deliberate departure from
+                              carrabin/yoo's own pipeline
     colors_quasi_qids.py     — empirically-derived repeat structure for colors (real `qid`
                               never repeats there); shared by figure_soltani_temporal.py
                               (cols 3-4) and figure_soltani_variability.py
@@ -900,29 +958,54 @@ Default: --run_folder yoo --nef_folder refit
 Weight-on neurons: enc_dim_0 > 0.5 in error ensemble encoders.
 Default: --nef_folder refit
 
-### figure_soltani_performance.py (P group, 2x2)
+### figure_soltani_performance.py (P group, 2x3)
 | Panel | Content |
 |-------|---------|
 | Col 1 | Task schematic (placeholder -- no schematic PDF exists yet) |
-| Col 2 | Estimation error vs the RUNNING MEAN (not the fixed generative
-         parameter), per pid, shown as a violin -- see the file's own
-         module docstring for why a violin over a boxplot/rugplot at
-         this sample size |
+| Col 2 (P1) | Estimation error vs the RUNNING MEAN (not the fixed generative
+         parameter), per pid, as a violin -- Human AND each fitted model.
+         See the file's own module docstring for why a violin over a
+         boxplot/rugplot at this sample size |
+| Col 3 (P2) | Model fit: cross-validated RMSE to HUMAN responses, per pid,
+         one violin per model; significance bars from SIG_REFERENCE outward |
 
-Row 1 = task-colors, row 2 = task-numbers. Human only -- model fitting
-against real task_backend data deliberately not attempted yet.
-`--datafile <name>` selects which pilot's data to load (see "Data
-pipeline" above).
+Row 1 = task-colors, row 2 = task-numbers. `--datafile <name>` selects which
+round's data to load AND which fits to pair with it (see "dataset vs
+--datafile" above); `--run_folder` defaults to `soltani`.
+
+**Mean scores exactly 0 in P1 by construction** -- Mean *is* the running mean
+and the ground truth *is* the running mean. This is a settled, deliberate
+choice, not an oversight: it doubles as a live check that math_models' Mean
+and `_add_running_mean_ground_truth` still agree, so a non-zero Mean violin
+means one of them has drifted. Do not "fix" it by dropping Mean from the panel
+or changing the panel's ground truth. Differs from
+figure_carrabin_performance.py's P1, whose ground truth is the fixed true_p,
+where Mean is NOT degenerate.
+
+P2 reads each model's fitted k-fold CV loss from
+`{model}_{stem}_performance.pkl` via `_get_loss` -- NOT a recomputed RMSE from
+`_responses.pkl`, which would be in-sample and would flatter the 2-parameter
+models over parameter-free Mean. Both panels are in percentage points:
+`LOSS_TO_PCT = 50` converts the [-1,1]-scale loss, and 50 is correct for BOTH
+tasks (numbers `pct = (x+1)*50`, colors `pct = (x+1)/2*100 = 50x+50` -- same
+slope, and an RMSE is a difference so the intercept drops out).
+
+`SIG_REFERENCE = "RL_lambda"` because NEF isn't fit for these datasets yet;
+`annotate_nef_comparisons` takes the reference as a parameter despite its name,
+so switching to `"NEF"` later is a one-line change.
 
 ### figure_soltani_temporal.py (T group, 2x5)
 | Panel | Content |
 |-------|---------|
 | Col 1 | Performance error vs observation (RMSE to running mean) |
 | Col 2 | Mean \|Δresponse\| vs observation |
-| Col 3 | Residual variance growth (prefix only, observation < 4) |
-| Col 4 | Within-trial residual autocorrelation, lag 1-3 (prefix only) |
+| Col 3 | Residual variance growth (prefix only, observation < 4) -- HUMAN ONLY,
+         permanently; see below |
+| Col 4 | Within-trial residual autocorrelation, lag 1-3 (prefix only) --
+         HUMAN ONLY, permanently; see below |
 | Col 5 | Split-half reliability of fitted λ -- ODD/EVEN trial split, not
-         first/second half (see `_fit_lambda_split_half`'s own docstring) |
+         first/second half (see `_fit_lambda_split_half`'s own docstring);
+         Human AND each fitted model, one regplot per source |
 
 Cols 3-4 use colors' empirically-derived quasi-qid repeat structure
 (`utils/colors_quasi_qids.py`); numbers uses its real, designed qid
@@ -931,7 +1014,24 @@ log(delta) vs log(observation)), NOT `scipy.optimize.curve_fit`'s bounded
 nonlinear fit -- that reliably degenerated to a ~0 floor artifact on real,
 noisy human data (confirmed directly). `--plot_models` (off by default)
 overlays fitted Mean/LeakyIntegrator/PrimacyRecency/RL_lambda in cols 1-2
-only. `--datafile <name>` as above.
+AND col 5. `--datafile <name>` as above.
+
+**Cols 3-4 must stay human-only until a STOCHASTIC model is fit** -- a settled
+decision, empirically checked, not an unfinished follow-up. Both panels use
+residuals against a qid-conditional mean, and all four current models are
+deterministic; since a qid's repeats share an identical prefix by design, a
+deterministic model gives the identical response every repeat and its residual
+is EXACTLY zero (verified on pilot 5: max|resid| = 0.000e+00 for all four
+models across 1152 prefix rows, vs 0.68 for Human). Adding them draws four flat
+lines at zero. These are carrabin's T5/T6 -- metrics whose whole purpose is
+state-persistent response variability, which only a noisy generative process
+has. Extend them when NEF (spiking noise) or NoisyCounting is fit, not before.
+Col 5 has no such problem: λ is fitted to each source's own |Δresponse| curve,
+which differs between odd and even trials because the STIMULUS sequences
+differ, so no response noise is needed for the split to be informative. Models
+are expected to be MORE reliable than Human there (pilot 5: Human r=0.96,
+RL_lambda 0.98, PrimacyRecency 0.95, LeakyIntegrator 0.87, Mean 0.80) -- that
+gap is a result, not an artefact.
 
 ### figure_soltani_variability.py (V group, 2x3)
 | Panel | Content |

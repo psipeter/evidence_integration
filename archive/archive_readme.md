@@ -199,3 +199,40 @@ rebuild the frontend (`npm run build`) to confirm. No need to re-run
 selection's output.
 
 ---
+
+## archive/utils/archive_participant_filters_legacy.py
+
+The original (pre-Cohen's-f²-reframe) version of `utils/participant_
+filters.py`'s exclusion criteria. Archived when the PI raised a direct
+concern about defensibility: the original version used three different
+statistical objects (a tolerance-based literal-copy fraction, a binomial
+test, a raw Pearson correlation, and a partial-correlation-with-a-hand-
+picked-r=0.10-cutoff), each individually defensible but collectively
+reading as an ad hoc patchwork rather than one principled measurement.
+The replacement applies ONE consistent statistical framework (nested
+regression + Cohen's f² effect size, f²=0.02 "small effect" convention)
+to the same three underlying questions.
+
+The archived `flag_recency_only` (r=0.10 partial-correlation version) has
+a real, if narrow, blind spot the current f²-based version doesn't: it
+missed 2 real participants that the ORIGINAL `flag_no_integration`
+(literal-copy check, also archived here) had caught, because Cohen's
+f²=0.02 convention for a regression's added-predictor effect size
+corresponds to roughly r=0.14, not r=0.10 -- confirmed directly against
+real data, not assumed. Nothing here still runs as part of the active
+pipeline -- see `utils/participant_filters.py`'s own module docstring and
+`CLAUDE.md`'s "Participant exclusion criteria" section for the current,
+settled account.
+
+### How to restore
+Copy `flag_no_integration`, `_direction_and_magnitude_stats`,
+`flag_noncontingent_sign`, `flag_noncontingent_magnitude`,
+`flag_recency_only`, and `compute_exclusion_report` from this file back
+into `utils/participant_filters.py` (renaming the current f²-based
+`compute_exclusion_report` to something else first, e.g.
+`compute_exclusion_report_f2`, to avoid a name collision). The shared
+helpers this file imports from the active module
+(`_compute_updates`/`_compute_recency_features`) would need copying back
+in too if the active module's own versions of them ever diverge.
+
+---

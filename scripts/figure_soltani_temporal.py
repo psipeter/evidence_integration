@@ -2,7 +2,7 @@
 """figure_soltani_temporal.py — T group figure for the soltani task/ pilot
 (task-numbers + task-colors).
 
-Layout: 2x5
+Layout: 2x6
   Row 1 = task-colors, Row 2 = task-numbers (standing row-order
   convention for soltani figures — see figure_soltani_performance.py)
   Col 1 (~carrabin temporal panel A / T1): Performance error (RMSE to
@@ -21,18 +21,40 @@ Layout: 2x5
     hierarchy and same Human-only individual-pid overlay as col 1; same
     --plot_models gate for the 4 fitted models.
   Col 3 (~carrabin temporal's RENDERED panel C / T3): Residual variance
-    growth -- std(resid | obs, qid) vs observation. Human only (see below).
+    growth -- std(resid | obs, qid) vs observation. Human only, permanently
+    (see below).
   Col 4 (~carrabin temporal's RENDERED panel D / T4): Within-trial lag-k
-    residual autocorrelation (lag 1-3). Human only.
-  Col 5 (~yoo temporal panel C / T3): Split-half reliability of the
-    decay-rate lambda fitted to |Delta response| vs observation, with
-    scatter=True. Human only.
+    residual autocorrelation (lag 1-3). Human only, permanently (see below).
+  Col 5 (~yoo temporal panel C / T3): Split-half reliability (ODD/EVEN
+    trials) of the decay-rate lambda fitted to |Delta response| vs
+    observation, with scatter=True. Human AND each fitted model, one
+    regplot per source -- matching figure_yoo_temporal.py's own T3.
+  Col 6 (~yoo temporal panel D / T4): lambda_model vs lambda_human per pid,
+    one regplot per model plus an identity line -- does a model reproduce
+    each INDIVIDUAL's discounting rate, not just the group average? Both
+    axes use the same model-free estimator. Mean is retained as a null
+    control (no free parameters, so it cannot track individual differences);
+    see _plot_panel_lambda_model_vs_human's own docstring, which also notes
+    where this deliberately diverges from yoo's T4.
 
-Cols 3-5 stay Human-only with respect to fitted models in this pass --
-extending them to the fitted models wasn't requested and isn't a simple
-copy of the col 1/2 pattern (col 3/4 need per-model residuals against a
-qid-conditional mean, col 5 needs re-running the lambda power-law fit on
-each model's own response curve), so left for a follow-up if wanted.
+COLS 3-4 ARE PERMANENTLY HUMAN-ONLY (until a STOCHASTIC model exists)
+-----------------------------------------------------------------------
+This is a settled decision backed by a direct check, not an unfinished
+follow-up. Both panels are built on residuals against a qid-conditional mean:
+resid = response - mean(response | pid, observation, qid). Every model
+currently fit here (Mean, LeakyIntegrator, PrimacyRecency, RL_lambda) is
+DETERMINISTIC, and a qid's repeats share an identical prefix by design, so a
+deterministic model returns the identical response on every repeat and its
+residual is EXACTLY ZERO. Verified against real pilot 5 data: max|resid| was
+0.000e+00 for all four models over 1152 qualifying prefix rows, versus 0.68 for
+Human. Adding them would draw four flat lines at zero.
+
+These two metrics (carrabin's T5/T6) exist precisely to measure
+state-persistent response variability, which is a property only a noisy
+generative process has. They become meaningful for NEF (spiking noise) or
+NoisyCounting, and should be extended when NEF is fit for these datasets --
+not before. Col 5 does NOT have this problem and DOES include models; see
+_plot_panel_splithalf_lambda's own docstring for why.
 
 Cols 3-4 DO now use quasi-qids for colors (task-colors)'s human data --
 colors' own literal `qid` column never repeats, so a DIFFERENT repeat
@@ -123,7 +145,7 @@ def _load_human(task: str, datafile: str | None = None) -> pd.DataFrame | None:
     docstring for the full rationale (this file's own convention, kept
     consistent rather than reinvented). Returns None if that task has no
     file at all for this datafile (e.g. a numbers-only pilot has no
-    binary file yet) -- caller's job to handle gracefully, not this
+    colors file yet) -- caller's job to handle gracefully, not this
     function's."""
     dataset = DATASET_FOR_TASK[task]
     if datafile:
@@ -508,31 +530,122 @@ def _fit_lambda_split_half(df: pd.DataFrame) -> pd.DataFrame:
     return wide.reset_index()
 
 
-def _plot_panel_splithalf_lambda(ax, human: pd.DataFrame) -> None:
-    wide = _fit_lambda_split_half(human)
+def _plot_panel_splithalf_lambda(ax, human: pd.DataFrame,
+                                 models: dict[str, pd.DataFrame],
+                                 palette: dict) -> None:
+    """Split-half (odd/even trial) reliability of the fitted decay rate lambda,
+    one regplot per source. Mirrors figure_yoo_temporal.py's own T3 panel,
+    which likewise shows Human plus every model rather than Human alone.
 
-    if len(wide) < 2:
+    Unlike cols 3-4 (see their own note in the module docstring), this panel IS
+    meaningful for the deterministic math models: lambda is fitted to each
+    source's own mean |delta response| curve, and that curve differs between
+    odd and even trials because the underlying STIMULUS sequences differ -- no
+    response noise is needed for the split to be informative. Models are
+    therefore expected to be MORE reliable than Human here (having no response
+    noise, only sequence sampling separates their halves); that gap is a
+    result, not an artefact.
+    """
+    sources: list[tuple[str, pd.DataFrame, str]] = [("Human", human, HUMAN_COLOR)]
+    for model_type in MODEL_ORDER:
+        mdf = models.get(model_type)
+        if mdf is not None:
+            sources.append((model_type, mdf, palette.get(model_type, "0.5")))
+
+    handles, labels = [], []
+    for label, df, color in sources:
+        wide = _fit_lambda_split_half(df)
+        if len(wide) < 2:
+            continue
+        sns.regplot(data=wide, x="first", y="second", ax=ax, color=color,
+                   ci=95 if len(wide) >= MIN_CORR_N else None,
+                   scatter=True, line_kws={"lw": 1.5},
+                   scatter_kws={"s": 20, "alpha": 0.7})
+        handles.append(Line2D([0], [0], color=color, lw=1.5))
+        if len(wide) >= MIN_CORR_N:
+            r, p = pearsonr(wide["first"], wide["second"])
+            labels.append(f"{label} r={r:.2f}{pvalue_to_stars(p)}")
+        else:
+            labels.append(f"{label} n={len(wide)}")
+
+    if not handles:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
 
-    sns.regplot(data=wide, x="first", y="second", ax=ax, color=HUMAN_COLOR,
-               ci=95 if len(wide) >= MIN_CORR_N else None,
-               scatter=True, line_kws={"lw": 1.5},
-               scatter_kws={"s": 20, "alpha": 0.7})
-
-    if len(wide) >= MIN_CORR_N:
-        r, p = pearsonr(wide["first"], wide["second"])
-        ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)],
-                  labels=[f"Human r={r:.2f}{pvalue_to_stars(p)}"],
-                  fontsize=8, frameon=True, framealpha=0.9)
-    else:
-        ax.text(0.02, 0.98, f"n={len(wide)} (too few for r)",
-                ha="left", va="top", transform=ax.transAxes,
-                fontsize=7, style="italic", color="0.5")
+    ax.legend(handles=handles, labels=labels, fontsize=7,
+              frameon=True, framealpha=0.9)
 
     ax.set_xlabel("\u03bb (odd-indexed trials)")
     ax.set_ylabel("\u03bb (even-indexed trials)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_panel_lambda_model_vs_human(ax, human: pd.DataFrame,
+                                      models: dict[str, pd.DataFrame],
+                                      palette: dict) -> None:
+    """Col 6 (~yoo temporal panel D / T4): lambda_model vs lambda_human per pid,
+    one regplot per model, with an identity line.
+
+    Both axes use the SAME model-free estimator (_fit_lambda_curve_fit, log-log
+    regression on that source's own mean |delta response| curve) -- so this asks
+    whether a model reproduces each individual's discounting RATE, not just the
+    group average. It is the individual-differences counterpart to col 5's
+    reliability check: col 5 establishes that lambda is measurable at all
+    (Human r=0.96 on pilot 5), and only then is a cross-source correlation
+    interpretable rather than noise-on-noise.
+
+    DIFFERS FROM figure_yoo_temporal.py's own T4, which EXCLUDES Mean and
+    LeakyIntegrator. All four are kept here, and Mean specifically earns its
+    place as a NULL CONTROL: Mean has no free parameters, so its per-pid lambda
+    varies only because the stimulus sequences differ, and it therefore CANNOT
+    track genuine individual differences. A near-zero Mean correlation
+    alongside a strong one for the parameterised models is direct evidence that
+    those correlations reflect fitted individual variation rather than an
+    artefact of the lambda-fitting procedure itself. If Mean ever correlates as
+    strongly as the fitted models, something is wrong with the estimator.
+    """
+    lam_h = _fit_lambda_curve_fit(human)
+    if lam_h.empty:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    handles, labels = [], []
+    for model_type in MODEL_ORDER:
+        mdf = models.get(model_type)
+        if mdf is None:
+            continue
+        lam_m = _fit_lambda_curve_fit(mdf)
+        merged = pd.DataFrame({"human": lam_h, "model": lam_m}).dropna()
+        if len(merged) < MIN_CORR_N:
+            continue
+        color = palette.get(model_type, "0.5")
+        sns.regplot(data=merged, x="human", y="model", ax=ax, color=color,
+                   ci=95, scatter=True, line_kws={"lw": 1.5},
+                   scatter_kws={"s": 18, "alpha": 0.7})
+        r, p = pearsonr(merged["human"], merged["model"])
+        handles.append(Line2D([0], [0], color=color, lw=1.5))
+        labels.append(f"{model_type} r={r:.2f}{pvalue_to_stars(p)}")
+
+    if not handles:
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.text(0.5, 0.5, "No fitted models\n(pass --plot_models)",
+                ha="center", va="center", transform=ax.transAxes,
+                color="0.5", style="italic")
+        sns.despine(ax=ax, top=True, right=True)
+        return
+
+    # Identity line: a model on this line reproduces each individual's decay
+    # rate exactly. Drawn from the union of both axis ranges so it always spans
+    # the visible area, and computed AFTER the regplots so those set the limits.
+    lo = min(ax.get_xlim()[0], ax.get_ylim()[0])
+    hi = max(ax.get_xlim()[1], ax.get_ylim()[1])
+    ax.plot([lo, hi], [lo, hi], color="0.7", lw=0.8, ls="--", zorder=0)
+
+    ax.set_xlabel("\u03bb (human)")
+    ax.set_ylabel("\u03bb (model)")
+    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -553,10 +666,12 @@ def main() -> None:
                         action="store_false")
     parser.add_argument("--plot_models", dest="plot_models",
                         action="store_true", default=False,
-                        help="Overlay fitted model mean/CI lines in cols 1-2 "
-                             "(default off, to keep pilot-stage human data most "
-                             "visible; pass this flag to add Mean/LeakyIntegrator/"
-                             "PrimacyRecency/RL_lambda)")
+                        help="Overlay fitted models in cols 1-2 (mean/CI lines) "
+                             "and cols 5-6 (one regplot per source/model). Default off, to "
+                             "keep pilot-stage human data most visible; pass this "
+                             "flag to add Mean/LeakyIntegrator/PrimacyRecency/"
+                             "RL_lambda. Cols 3-4 are human-only by necessity -- "
+                             "see the module docstring.")
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
                             "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
@@ -570,8 +685,8 @@ def main() -> None:
     palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
 
     fig, axes = plt.subplots(
-        2, 5,
-        figsize=(FIGURE_SIZE[0] * 1.25, FIGURE_SIZE[1]),
+        2, 6,
+        figsize=(FIGURE_SIZE[0] * 1.5, FIGURE_SIZE[1]),
         constrained_layout=True,
     )
 
@@ -580,7 +695,7 @@ def main() -> None:
         human = _load_human(task, args.datafile)
         if human is None:
             print(f"  no data file found for this task/datafile combination -- skipping row")
-            for col in range(5):
+            for col in range(6):
                 axes[row, col].axis("off")
             axes[row, 0].text(0.5, 0.5, f"No {task} data\nfor this dataset",
                              ha="center", va="center", transform=axes[row, 0].transAxes,
@@ -599,22 +714,24 @@ def main() -> None:
         human_for_repeats = add_quasi_qids(human) if task == "colors" else human
         _plot_panel_variance_growth(axes[row, 2], human_for_repeats)
         _plot_panel_autocorr(axes[row, 3], human_for_repeats)
-        _plot_panel_splithalf_lambda(axes[row, 4], human)
+        _plot_panel_splithalf_lambda(axes[row, 4], human, models, palette)
+        _plot_panel_lambda_model_vs_human(axes[row, 5], human, models, palette)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
 
     label_panels(axes)
 
     if args.plot_models:
-        footer = (f"Cols 1-2 model fits: {', '.join(MODEL_ORDER)} from run "
-                 f"'{args.run_folder}'. Cols 3-5 remain human-only (not part of "
-                 "this pass) and restricted to observation < prefix_length=4 "
-                 "where relevant, the only region guaranteed identical across "
-                 "a qid's repeats in this task's design.")
+        footer = (f"Cols 1-2, 5-6 model fits: {', '.join(MODEL_ORDER)} from run "
+                 f"'{args.run_folder}'. Cols 3-4 are human-only by necessity: "
+                 "these models are deterministic, so their residual against a "
+                 "qid-conditional mean is exactly zero. Cols 3-4 restricted to "
+                 "observation < prefix_length=4, the only region guaranteed "
+                 "identical across a qid's repeats in this task's design.")
     else:
         footer = ("Human data only (--plot_models off by default, to keep "
                  "pilot-stage human data most visible; pass --plot_models to "
                  "add fitted Mean/LeakyIntegrator/PrimacyRecency/RL_lambda "
-                 "lines to cols 1-2). Cols 3-4 restricted to observation < "
+                 "to cols 1-2 and 5-6). Cols 3-4 restricted to observation < "
                  "prefix_length=4, the only region guaranteed identical across "
                  "a qid's repeats in this task's design.")
     fig.text(0.5, -0.02, footer,
