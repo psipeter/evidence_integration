@@ -2,7 +2,7 @@
 Loss computation for model fitting.
 
 compute_loss(params, model, human): RMSE between model and human responses.
-Supports datasets: carrabin, yoo, task_binary, task_continuous.
+Supports datasets: carrabin, yoo, soltani_colors, soltani_numbers.
 """
 
 import numpy as np
@@ -39,19 +39,19 @@ def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame
 def compute_loss(
     params: dict, model: pd.DataFrame, human: pd.DataFrame
 ) -> float:
-    """RMSE between model and human responses (carrabin, yoo, task_binary,
-    task_continuous).
+    """RMSE between model and human responses (carrabin, yoo, soltani_colors,
+    soltani_numbers).
 
-    For carrabin and task_binary, model responses are expected to already
+    For carrabin and soltani_colors, model responses are expected to already
     have the Laplace smoothing transform applied (response = response_raw
     * t / (t+2)), as produced by
     utils.carrabin_transform.apply_carrabin_transform() (a thin wrapper
     around utils.binary_transform.apply_binary_transform()). The
     `response` column is used directly; `response_raw` is ignored here.
-    task_continuous and yoo use raw (untransformed) responses.
+    soltani_numbers and yoo use raw (untransformed) responses.
     """
     dataset = params["dataset"]
-    _SUPPORTED = ("carrabin", "yoo", "task_binary", "task_continuous")
+    _SUPPORTED = ("carrabin", "yoo", "soltani_colors", "soltani_numbers")
     if dataset not in _SUPPORTED:
         raise ValueError(f"params['dataset'] must be one of {_SUPPORTED}")
 

@@ -163,10 +163,31 @@ implements the same equation explicitly) but arises from biophysical dynamics.
 |------|---|------|
 | carrabin | 21 | Binary inputs; slider after each of 5 obs; sequences repeat (qid); true_p known |
 | yoo | 38 | Continuous inputs; slider; 30 obs × 30 trials; no sequence repetition |
+| soltani_numbers | live | Our own task_backend `numbers` task; 32 trials × 15 obs |
+| soltani_colors | live | Our own task_backend `colors` task; 32 trials × 15 obs |
 
-Pickles: data/carrabin.pkl, data/yoo.pkl.
+Pickles: data/carrabin.pkl, data/yoo.pkl, data/soltani_{numbers,colors}[_<datafile>].pkl.
 Required columns: pid, trial, observation, value, response.
 Carrabin adds: qid, true_p (from carrabin_original.csv).
+soltani_* add: qid, plus true_mean (numbers) / true_p (colors).
+
+**soltani naming (renamed; do not reintroduce the old names)**: these two
+datasets were `task_continuous`/`task_binary` until they were renamed to
+`soltani_numbers`/`soltani_colors` — matching task_backend's own
+numbers/colors terminology (see "Terminology" above) and the
+`figure_soltani_*` scripts. `continuous`/`binary` is the RETIRED `task/`
+pipeline's naming and must not be used for these datasets. Note the one
+deliberate exception: `utils/binary_transform.py`'s module name,
+`apply_binary_transform`, and `normalise_binary`/`normalise_continuous`
+keep their names — that module's "binary" refers to binary-valued
+observations generally and it is applied to **carrabin**, not only to
+soltani_colors.
+
+**soltani_* are 0-INDEXED on both trial (0-31) and observation (0-14)**,
+unlike carrabin/yoo (both 1-indexed). Anything that assumes a 1-indexed
+observation (a log(observation) fit, a `t/(t+2)` count, an activity map
+keyed 1..n) needs an explicit guard. See the NEF caveat comment in
+`models/NEF.py`'s `run()`.
 
 Archived (do not reactivate): diederen, jiang, usher.
 
@@ -434,7 +455,7 @@ rounds are different people with different generative parameters, e.g.
 numbers' `std_fixed` changing between pilot 4 and pilot 5, so silently
 merging them would make cross-pilot comparison impossible). `--pilot
 <name> --numbers_pids ... --colors_pids ...` builds that pilot's own
-`data/task_continuous_<name>.pkl`/`task_binary_<name>.pkl` via
+`data/soltani_numbers_<name>.pkl`/`soltani_colors_<name>.pkl` via
 `build_model_inputs.py`'s shared `build_from_df()` (the same filter/
 rescale/anonymize/save pipeline carrabin/yoo already use -- refactored
 out of the old JATOS-pilot-file-only `build()` so both sources share one
@@ -447,7 +468,7 @@ accurate pid list rather than guessing from memory.
 general `--datafile <name>` argument (a plain filename suffix, not a
 pilot-specific concept -- works the same way for a future non-pilot
 experiment dataset) pointing at these files; omit it for the canonical
-unsuffixed `data/task_continuous.pkl`/`task_binary.pkl`. Each figure
+unsuffixed `data/soltani_numbers.pkl`/`soltani_colors.pkl`. Each figure
 degrades to an explicit placeholder (not a crash) when a task has no
 file for a given datafile (e.g. pilot 5 has no colors data at all).
 
@@ -553,9 +574,53 @@ Submit and collect per-dataset per-model:
     # Collect activities (after responses; needed for neural figures)
     venv/bin/python -m fitting.collect yoo --type activities --ensembles error --timing once_per_obs
 
-Run folders: data/runs/carrabin/, data/runs/yoo/, data/runs/refit/
+Run folders: data/runs/carrabin/, data/runs/yoo/, data/runs/refit/,
+data/runs/soltani/
 The --nef_folder flag in figure scripts redirects NEF data to a separate folder
 (e.g. --run_folder yoo --nef_folder refit uses yoo for other models, refit for NEF).
+
+### dataset vs --datafile (the decoupling)
+
+`dataset` is the model-FAMILY key: it indexes MODEL_PARAMS, selects the
+branch in math_models, keys the transforms in binary_transform, and names
+the NEF counting-activity files. `--datafile` is a plain filename suffix
+selecting WHICH BUILD of that family's human data to fit:
+
+    data/{dataset}_{datafile}.pkl        # input
+    {model_type}_{dataset}_{datafile}_{pid}_*.pkl   # every output
+
+`utils.paths.dataset_stem(dataset, datafile)` is the single source of truth
+for that combination — always use it rather than formatting the name
+locally. Consequence: a new round of data needs NO new model plumbing (no
+MODEL_PARAMS entry, no math_models branch, no 340 MB activity-file
+regeneration), just a new pkl. `--datafile` matches the figure scripts'
+existing flag of the same name, deliberately.
+
+Why this exists: `data/runs/soltani_math_v1` (now in `_trash/`) held fits
+made against JATOS-era data under the same unsuffixed dataset name as a
+later, different pkl, with non-corresponding pids — and the figures merged
+them on `pid`, plotting one set of people's fits against another's data.
+The suffix in the filename makes that class of mismatch impossible.
+
+### soltani math-model fits
+
+Both tasks share ONE run folder (`data/runs/soltani/`); each filename
+carries its own dataset stem, so they cannot collide. Four math models
+(Mean, LeakyIntegrator, PrimacyRecency, RL_lambda) — NEF is NOT yet wired
+up for these datasets (see models/NEF.py's caveat comment):
+
+    venv/bin/python -m fitting.submit soltani_numbers all --datafile pilot5 \
+        --run_folder soltani --n_trials 100 --k 5
+    venv/bin/python -m fitting.collect soltani --type params
+    venv/bin/python -m fitting.collect soltani --type responses
+
+Omit `--datafile` once the real production data is built to the canonical
+unsuffixed `data/soltani_{numbers,colors}.pkl`.
+
+`fitting.fit`'s CLI is argparse-based (positional `dataset model_type pid`,
+then `--n_trials/--k/--run_folder/--optuna_seed/--datafile`) — it used to
+take up to 7 POSITIONAL args, so any old job script or muscle-memory
+invocation of that form will now fail.
 
 ---
 
@@ -844,7 +909,7 @@ Default: --nef_folder refit
          module docstring for why a violin over a boxplot/rugplot at
          this sample size |
 
-Row 1 = task-binary, row 2 = task-continuous. Human only -- model fitting
+Row 1 = task-colors, row 2 = task-numbers. Human only -- model fitting
 against real task_backend data deliberately not attempted yet.
 `--datafile <name>` selects which pilot's data to load (see "Data
 pipeline" above).
@@ -972,6 +1037,30 @@ change (e.g. "change X to Y", "add Z", "remove W").
   /home/psipeter/evidence_integration/ — they write to Claude's local sandbox,
   not this remote host, and fail silently (see compaction-reminder note at top)
 - Do not add diederen, jiang, or usher back without explicit plan
+- Do not reintroduce `task_continuous`/`task_binary` as dataset names, or
+  `continuous`/`binary` as soltani task labels — the datasets are
+  `soltani_numbers`/`soltani_colors` and the task labels are
+  `numbers`/`colors` (see "Active datasets"). The one intended exception is
+  `utils/binary_transform.py`'s own module/function names, which describe
+  binary-valued observations generally and serve carrabin
+- Do not build a `{dataset}_{datafile}` name by hand — call
+  `utils.paths.dataset_stem()`. Formatting it locally is how the input pkl
+  and the output filenames drift apart, which is the exact failure the
+  suffix exists to prevent
+- Do not add a `*`-globbed pid to a filename pattern that could see two
+  dataset stems — `{model}_soltani_numbers_*_responses.pkl` also matches
+  `{model}_soltani_numbers_pilot5_3_responses.pkl`. `fitting.collect`'s
+  `_collect_responses` drives off the explicit pid list for this reason;
+  `_collect_activities` still has the glob and its own caveat comment
+- Do not run NEF against soltani_numbers/soltani_colors yet — two known
+  blockers are documented in `models/NEF.py`'s `run()` (a double-rescale in
+  `utils/binary_transform.nef_obs_values`, and the 0-indexed trial missing
+  the counting-activity map). Fix those deliberately as part of the NEF
+  integration pass, not incidentally
+- Do not read soltani human data from `task/sequences/` — that branch was
+  removed from `models/NEF.py` and the only source of human data is
+  `data/soltani_*[_datafile].pkl`, built by
+  `scripts/build_task_backend_inputs.py`
 - Do not add loss_type, shape_loss, joint_loss, beta hooks
 - Do not use trial_seed / base_seed for NEF — seed = int(trial) directly
 - Do not read cv_loss_mean directly — use _get_loss

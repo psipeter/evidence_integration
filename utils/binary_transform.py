@@ -57,14 +57,14 @@ def apply_binary_transform(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
     df      : DataFrame with columns including `response`, `observation`,
               and `model_type`
     dataset : dataset name string — transform applied for
-              'carrabin', 'task_continuous', 'task_binary'
+              'carrabin', 'soltani_numbers', 'soltani_colors'
 
     Returns
     -------
     DataFrame with `response_raw` added and `response` transformed where
     appropriate.
     """
-    _TRANSFORM_DATASETS = frozenset({'carrabin', 'task_binary'})  # task_continuous uses raw responses like yoo
+    _TRANSFORM_DATASETS = frozenset({'carrabin', 'soltani_colors'})  # soltani_numbers uses raw responses like yoo
 
     df = df.copy()
     df["response_raw"] = df["response"]
@@ -114,14 +114,14 @@ def denormalise_continuous(r_norm):
 def nef_obs_values(values: np.ndarray, dataset: str) -> np.ndarray:
     """Observation values in the scale expected by the NEF network."""
     vals = np.asarray(values, dtype=float)
-    if dataset == "task_continuous":
+    if dataset == "soltani_numbers":
         return np.array([normalise_continuous(v) for v in vals], dtype=float)
     return vals
 
 
 def nef_response_to_model_scale(response: float, dataset: str) -> float:
     """Map raw NEF readout to the response scale used by other task models."""
-    if dataset == "task_continuous":
+    if dataset == "soltani_numbers":
         return denormalise_continuous_response(response)
     return float(response)
 

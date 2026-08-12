@@ -1,8 +1,14 @@
 """
 Submit, resubmit, or locally run model fitting jobs.
 
-Jobs are enumerated from ``MODEL_PARAMS`` (datasets: carrabin, yoo); NEF models
-use the same SLURM templates as other datasets.
+Jobs are enumerated from ``MODEL_PARAMS`` (datasets: carrabin, yoo,
+soltani_numbers, soltani_colors); NEF models use the same SLURM templates as
+other datasets.
+
+``--datafile`` selects which build of a dataset's human data to fit against
+(``data/{dataset}_{datafile}.pkl``) and is recorded in each job dict, so
+``run_config.json`` -- and therefore ``fitting.collect`` -- knows which data
+version a run folder's outputs belong to.
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ import pandas as pd
 
 from fitting.fit import fit
 from fitting.model_params import MODEL_PARAMS
-from utils.paths import DATA_DIR, RUNS_DIR, data_path
+from utils.paths import DATA_DIR, RUNS_DIR, data_path, dataset_stem
 from utils.slurm import (
     DEFAULT_MEM_LIMITS,
     DEFAULT_TIME_LIMITS,
@@ -56,12 +62,14 @@ def _write_run_config(run_folder: Path, jobs: list[dict]) -> None:
         existing = json.loads(config_path.read_text())
         prev_jobs = list(existing.get("jobs", []))
         existing_keys = {
-            (j["dataset"], j["model_type"], j["pid"]) for j in prev_jobs
+            (j["dataset"], j.get("datafile"), j["model_type"], j["pid"])
+            for j in prev_jobs
         }
         new_jobs = [
             j
             for j in jobs
-            if (j["dataset"], j["model_type"], j["pid"]) not in existing_keys
+            if (j["dataset"], j.get("datafile"), j["model_type"], j["pid"])
+            not in existing_keys
         ]
         prev_jobs.extend(new_jobs)
         existing["jobs"] = prev_jobs
@@ -83,6 +91,7 @@ def _resolve_jobs(
     n_trials: int,
     k: int,
     optuna_seed: int,
+    datafile: str | None = None,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -95,7 +104,8 @@ def _resolve_jobs(
             else [model_type]
         )
         for mt in models:
-            pids_all = pd.read_pickle(data_path(f"{ds}.pkl"))["pid"].unique()
+            stem = dataset_stem(ds, datafile)
+            pids_all = pd.read_pickle(data_path(f"{stem}.pkl"))["pid"].unique()
             pids = [int(pid)] if pid is not None else [int(p) for p in pids_all]
             model_spec = MODEL_PARAMS[ds].get(mt, {})
             has_params = any(k_ != "fixed" for k_ in model_spec)
@@ -104,6 +114,7 @@ def _resolve_jobs(
                 jobs.append(
                     {
                         "dataset": ds,
+                        "datafile": datafile,
                         "model_type": mt,
                         "pid": p,
                         "n_trials": effective_n_trials,
@@ -149,12 +160,16 @@ def _submit_job(
     n_trials = job["n_trials"]
     k = int(job.get("k", 5))
     seed = job.get("optuna_seed", 42)
+    datafile = job.get("datafile")
+    stem = dataset_stem(ds, datafile)
     cmd = (
-        f"python -m fitting.fit {ds} {mt} {pid} {n_trials} "
-        f"{k} {run_folder} {seed}"
+        f"python -m fitting.fit {ds} {mt} {pid} --n_trials {n_trials} "
+        f"--k {k} --run_folder {run_folder} --optuna_seed {seed}"
     )
+    if datafile:
+        cmd += f" --datafile {datafile}"
     _submit_command(
-        script_name=f"{mt}_{ds}_{pid}.sh",
+        script_name=f"{mt}_{stem}_{pid}.sh",
         command=cmd,
         time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
         mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
@@ -171,12 +186,14 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     pid = job["pid"]
     n_trials = job["n_trials"]
     k = int(job.get("k", 5))
+    datafile = job.get("datafile")
+    stem = dataset_stem(ds, datafile)
 
     if dry_run:
-        print(f"[dry_run] would run locally: {mt} {ds} pid={pid}")
+        print(f"[dry_run] would run locally: {mt} {stem} pid={pid}")
         return
 
-    print(f"Running {mt} {ds} pid={pid}...")
+    print(f"Running {mt} {stem} pid={pid}...")
     fit(
         ds,
         mt,
@@ -185,6 +202,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         k=k,
         run_folder=run_folder,
         optuna_seed=job.get("optuna_seed", 42),
+        datafile=datafile,
     )
 
 
@@ -221,13 +239,14 @@ def _resubmit(
         ds = job["dataset"]
         mt = job["model_type"]
         pid = int(job["pid"])
-        params_path = run_folder / f"{mt}_{ds}_{pid}_params.pkl"
+        stem = dataset_stem(ds, job.get("datafile"))
+        params_path = run_folder / f"{mt}_{stem}_{pid}_params.pkl"
 
         if resubmit_type == "params":
             if not params_path.exists():
                 missing.append(job)
         elif resubmit_type == "responses":
-            responses_path = run_folder / f"{mt}_{ds}_{pid}_responses.pkl"
+            responses_path = run_folder / f"{mt}_{stem}_{pid}_responses.pkl"
             if params_path.exists() and not responses_path.exists():
                 missing.append(job)
         elif resubmit_type == "activities":
@@ -241,9 +260,9 @@ def _resubmit(
             ens_missing = False
             for ens in ensembles:
                 if timing == "once_per_dt":
-                    p = out_dir / f"activities_windowed_{ens}_{ds}_{pid}.npz"
+                    p = out_dir / f"activities_windowed_{ens}_{stem}_{pid}.npz"
                 else:
-                    p = out_dir / f"activities_{ens}_{ds}_{pid}.pkl"
+                    p = out_dir / f"activities_{ens}_{stem}_{pid}.pkl"
                 if not p.exists():
                     ens_missing = True
                     break
@@ -256,12 +275,15 @@ def _resubmit(
 
     print(f"Found {len(missing)} missing jobs for type={resubmit_type}:")
     for job in missing:
-        print(f"  {job['model_type']} {job['dataset']} pid={job['pid']}")
+        print(f"  {job['model_type']} "
+              f"{dataset_stem(job['dataset'], job.get('datafile'))} "
+              f"pid={job['pid']}")
 
     for job in missing:
         ds = job["dataset"]
         mt = job["model_type"]
         pid = int(job["pid"])
+        stem = dataset_stem(ds, job.get("datafile"))
         if resubmit_type == "params":
             if local:
                 _run_local(job, run_folder, dry_run=dry_run)
@@ -276,7 +298,7 @@ def _resubmit(
             else:
                 cmd = f"python -m utils.save_responses {ds} {mt} {pid} {run_folder}"
                 _submit_command(
-                    script_name=f"responses_{mt}_{ds}_{pid}.sh",
+                    script_name=f"responses_{mt}_{stem}_{pid}.sh",
                     command=cmd,
                     time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
                     mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
@@ -321,6 +343,13 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--optuna_seed", type=int, default=42)
     parser.add_argument("--run_folder", type=str, default=None)
+    parser.add_argument(
+        "--datafile",
+        type=str,
+        default=None,
+        help="Data-version suffix: fit against data/{dataset}_{datafile}.pkl "
+             "and tag every output with it. Omit for data/{dataset}.pkl.",
+    )
     parser.add_argument("--ensembles", nargs="+", default=["error"])
     parser.add_argument("--timing", type=str, default="once_per_obs")
     parser.add_argument("--dt_sample", type=float, default=0.01)
@@ -352,6 +381,7 @@ def main() -> None:
         args.n_trials,
         args.k,
         args.optuna_seed,
+        datafile=args.datafile,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder

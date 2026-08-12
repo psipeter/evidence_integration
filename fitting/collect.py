@@ -13,10 +13,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from utils.paths import RUNS_DIR, data_path
+from utils.paths import RUNS_DIR, data_path, dataset_stem
 
 
 def _load_groups(run_folder: Path) -> dict[tuple[str, str], list[int]]:
+    """Map (dataset_stem, model_type) -> pids, read from run_config.json.
+
+    Keyed on the STEM (dataset family + optional --datafile suffix, see
+    utils.paths.dataset_stem) rather than the bare dataset name, because that is
+    what every output filename actually uses. This lets one run folder hold fits
+    against several builds of the same dataset without them colliding.
+    """
     config_path = run_folder / "run_config.json"
     if not config_path.exists():
         print(f"No run_config.json found in {run_folder}", file=sys.stderr)
@@ -24,13 +31,15 @@ def _load_groups(run_folder: Path) -> dict[tuple[str, str], list[int]]:
     config = json.loads(config_path.read_text())
     groups: dict[tuple[str, str], list[int]] = defaultdict(list)
     for job in config.get("jobs", []):
-        groups[(job["dataset"], job["model_type"])].append(int(job["pid"]))
+        stem = dataset_stem(job["dataset"], job.get("datafile"))
+        groups[(stem, job["model_type"])].append(int(job["pid"]))
     return groups
 
 
 def _collect_params(run_folder: Path) -> None:
     groups = _load_groups(run_folder)
-    for (dataset, model_type), pids in groups.items():
+    for (stem, model_type), pids in groups.items():
+        dataset = stem  # filenames are stem-based; see _load_groups
         params_dfs: list[pd.DataFrame] = []
         perf_dfs: list[pd.DataFrame] = []
         folds_dfs: list[pd.DataFrame] = []
@@ -63,24 +72,41 @@ def _collect_params(run_folder: Path) -> None:
 
 
 def _collect_responses(run_folder: Path) -> None:
+    """Concatenate per-pid response files into one file per (stem, model_type).
+
+    Driven by the explicit pid list from run_config.json rather than a
+    `{model_type}_{stem}_*_responses.pkl` glob: with an UNSUFFIXED stem the `*`
+    (meant to match only a pid) also matches a suffixed stem's files, so
+    `Mean_soltani_numbers_*_responses.pkl` would swallow
+    `Mean_soltani_numbers_pilot5_3_responses.pkl` and silently merge two
+    different data versions into one output.
+    """
     groups = _load_groups(run_folder)
-    available_datasets = sorted({dataset for dataset, _ in groups.keys()})
-    available_model_types = sorted({model_type for _, model_type in groups.keys()})
-    for dataset in available_datasets:
-        for model_type in available_model_types:
-            files = sorted(run_folder.glob(f"{model_type}_{dataset}_*_responses.pkl"))
-            if files:
-                df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
-                out = run_folder / f"{model_type}_{dataset}_responses.pkl"
-                df.to_pickle(out)
-                print(f"Collected {len(files)} -> {out} ({df.shape})")
+    for (stem, model_type), pids in sorted(groups.items()):
+        files = [
+            p for p in (
+                run_folder / f"{model_type}_{stem}_{pid}_responses.pkl"
+                for pid in sorted(set(pids))
+            )
+            if p.exists()
+        ]
+        if files:
+            df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
+            out = run_folder / f"{model_type}_{stem}_responses.pkl"
+            df.to_pickle(out)
+            print(f"Collected {len(files)} -> {out} ({df.shape})")
 
 
 def _collect_activities(run_folder: Path, ensembles: list[str], timing: str) -> None:
+    # NOTE: the globs below still use `*` for the pid, so an unsuffixed stem can
+    # match a suffixed one's files (the collision _collect_responses avoids by
+    # driving off the explicit pid list). Left as-is: activities are NEF-only and
+    # NEF is not yet wired up for the soltani datasets, so no run folder can
+    # currently contain two activity stems. Fix alongside the NEF integration.
     out_dir = run_folder
     out_dir.mkdir(parents=True, exist_ok=True)
-    datasets = sorted({dataset for dataset, _ in _load_groups(run_folder).keys()})
-    for dataset in datasets:
+    stems = sorted({stem for stem, _ in _load_groups(run_folder).keys()})
+    for dataset in stems:
         for ens_name in ensembles:
             if timing == "once_per_dt":
                 npz_files = sorted(

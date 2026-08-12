@@ -101,8 +101,8 @@ task/sequences_pool/
 task/sequences_pool_binary_prefix_backup/
 
 # Task sequence data files (superseded by task/sequences/*.pkl)
-data/task_continuous.pkl
-data/task_binary.pkl
+data/soltani_numbers.pkl
+data/soltani_colors.pkl
 
 # Vite build output and npm dependencies
 task/node_modules/

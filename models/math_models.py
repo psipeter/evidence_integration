@@ -9,7 +9,7 @@ and collected into a single tabular format with model ``response`` values.
 
 - **carrabin:** ``Mean`` (optimal), ``NoisyCounting`` (human-matching), ``RL`` (naive), ``PrimacyRecency`` (flexible temporal weighting)
 - **yoo:** ``Mean`` (optimal), ``PrimacyRecency`` (flexible temporal weighting), ``RL`` (naive)
-- **task_binary, task_continuous:** ``Mean``, ``LeakyIntegrator``, ``PrimacyRecency``, ``RL_lambda`` --
+- **soltani_colors, soltani_numbers:** ``Mean``, ``LeakyIntegrator``, ``PrimacyRecency``, ``RL_lambda`` --
   together intended to capture recency-biased (non-shrinking-learning-rate)
   behavior. Human data for these two comes from
   ``scripts/build_model_inputs.py``, which rescales this task's native
@@ -24,7 +24,7 @@ Every model is run via ``run(params, save=False, trials=None)``. Required keys i
 ``params`` for all models:
 
 - ``"model_type"`` (``str``): one of the strings above for the chosen dataset
-- ``"dataset"`` (``str``): ``"carrabin"``, ``"yoo"``, ``"task_binary"``, or ``"task_continuous"``
+- ``"dataset"`` (``str``): ``"carrabin"``, ``"yoo"``, ``"soltani_colors"``, or ``"soltani_numbers"``
 - ``"pid"`` (``int``): participant id
 
 Additional keys are model-specific (learning rates, noise scales, etc.). The
@@ -34,7 +34,7 @@ optional ``trials`` argument restricts execution to a subset of trial ids.
 import numpy as np
 import pandas as pd
 
-from utils.paths import data_path
+from utils.paths import data_path, dataset_stem
 from utils.carrabin_transform import apply_carrabin_transform
 from utils.run_params import trial_seed as _trial_seed
 
@@ -49,8 +49,8 @@ _YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_
 # motivated this integration) -- no NoisyCounting (carrabin-specific) or
 # plain fixed-alpha RL (superseded by RL_lambda, which subsumes it at
 # lambda_->0) for either task dataset.
-_TASK_BINARY_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
-_TASK_CONTINUOUS_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
+_SOLTANI_COLORS_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
+_SOLTANI_NUMBERS_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
@@ -64,7 +64,10 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
 
     _validate_model_dataset(model_type, dataset)
 
-    human = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    # `dataset` is the model-family key; the optional `datafile` selects which
+    # build of that family's human data to read (see utils.paths.dataset_stem).
+    stem = dataset_stem(dataset, params.get("datafile"))
+    human = pd.read_pickle(data_path(f"{stem}.pkl"))
     human_pid = human.query("pid == @pid")
     if human_pid.empty:
         raise ValueError(f"No rows for pid={pid} in dataset {dataset!r}")
@@ -95,7 +98,7 @@ def run(params: dict, save: bool = False, trials: list | None = None) -> pd.Data
 
     out = apply_carrabin_transform(pd.DataFrame(rows), dataset)
     if save:
-        fname = f"{model_type}_{dataset}_{pid}_responses.pkl"
+        fname = f"{model_type}_{stem}_{pid}_responses.pkl"
         out.to_pickle(data_path(fname))
     return out
 
@@ -105,14 +108,14 @@ def _validate_model_dataset(model_type: str, dataset: str) -> None:
         allowed = _CARRABIN_MODELS
     elif dataset == "yoo":
         allowed = _YOO_MODELS
-    elif dataset == "task_binary":
-        allowed = _TASK_BINARY_MODELS
-    elif dataset == "task_continuous":
-        allowed = _TASK_CONTINUOUS_MODELS
+    elif dataset == "soltani_colors":
+        allowed = _SOLTANI_COLORS_MODELS
+    elif dataset == "soltani_numbers":
+        allowed = _SOLTANI_NUMBERS_MODELS
     else:
         raise ValueError(
             f"Unknown dataset {dataset!r}; expected one of "
-            f"'carrabin', 'yoo', 'task_binary', 'task_continuous'"
+            f"'carrabin', 'yoo', 'soltani_colors', 'soltani_numbers'"
         )
     if model_type not in allowed:
         raise ValueError(
@@ -128,10 +131,10 @@ def _run(params: dict, human_pid: pd.DataFrame, trial: int, step: int) -> float:
         return _run_carrabin(params, human_pid, trial, step)
     if dataset == "yoo":
         return _run_yoo(params, human_pid, trial, step)
-    if dataset == "task_binary":
-        return _run_task_binary(params, human_pid, trial, step)
-    if dataset == "task_continuous":
-        return _run_task_continuous(params, human_pid, trial, step)
+    if dataset == "soltani_colors":
+        return _run_soltani_colors(params, human_pid, trial, step)
+    if dataset == "soltani_numbers":
+        return _run_soltani_numbers(params, human_pid, trial, step)
     raise AssertionError("unreachable")
 
 
@@ -263,22 +266,22 @@ def _run_yoo(
     raise AssertionError("unreachable")
 
 
-def _run_task_common(
+def _run_soltani_common(
     params: dict, human_pid: pd.DataFrame, trial: int, observation: int
 ) -> float:
-    """Shared implementation for task_binary and task_continuous.
+    """Shared implementation for soltani_colors and soltani_numbers.
 
     Both datasets are rescaled to the same [-1, 1] scale carrabin/yoo use
     (see scripts/build_model_inputs.py) and both only support the same
-    four model types (_TASK_BINARY_MODELS == _TASK_CONTINUOUS_MODELS), so
+    four model types (_SOLTANI_COLORS_MODELS == _SOLTANI_NUMBERS_MODELS), so
     there is no dataset-specific branching needed here -- unlike
     _run_carrabin vs _run_yoo (which differ in which extra models they
     support: NoisyCounting for carrabin, plain RL for both but not these
-    two), task_binary and task_continuous are identical at this level.
-    _run_task_binary/_run_task_continuous below are kept as separate named
+    two), soltani_colors and soltani_numbers are identical at this level.
+    _run_soltani_colors/_run_soltani_numbers below are kept as separate named
     entry points (rather than calling this directly from _run()) so the
     two datasets can diverge later without disturbing the dispatch in
-    _run() -- e.g. if a task_binary-specific or task_continuous-specific
+    _run() -- e.g. if a soltani_colors-specific or soltani_numbers-specific
     model is ever added.
     """
     model_type = params["model_type"]
@@ -308,15 +311,15 @@ def _run_task_common(
     raise AssertionError("unreachable")
 
 
-def _run_task_binary(
+def _run_soltani_colors(
     params: dict, human_pid: pd.DataFrame, trial: int, observation: int
 ) -> float:
-    return _run_task_common(params, human_pid, trial, observation)
+    return _run_soltani_common(params, human_pid, trial, observation)
 
 
-def _run_task_continuous(
+def _run_soltani_numbers(
     params: dict, human_pid: pd.DataFrame, trial: int, observation: int
 ) -> float:
-    return _run_task_common(params, human_pid, trial, observation)
+    return _run_soltani_common(params, human_pid, trial, observation)
 
 

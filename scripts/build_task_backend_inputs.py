@@ -47,7 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build_model_inputs import build_from_df
 
 TASK_BACKEND_DIR = Path(__file__).resolve().parents[1] / "task_backend"
-TASK_INTERNAL = {"numbers": "continuous", "colors": "binary"}
+TASK_INTERNAL = {"numbers": "numbers", "colors": "colors"}
 
 # Real Prolific IDs are 24-character lowercase hex strings -- used only by
 # --list_candidates (a probing aid), never to silently decide who's
@@ -174,8 +174,8 @@ def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[s
         return
 
     combined = pd.concat(frames, ignore_index=True)
-    build_from_df(combined, out_name_continuous=f"task_continuous_{out_prefix}",
-                 out_name_binary=f"task_binary_{out_prefix}")
+    build_from_df(combined, out_name_numbers=f"soltani_numbers_{out_prefix}",
+                 out_name_colors=f"soltani_colors_{out_prefix}")
     print("\nJOB_COMPLETE")
 
 
@@ -185,7 +185,7 @@ def main():
     p.add_argument("--list_candidates", choices=["numbers", "colors"], default=None,
                    help="Probe current real-pid status for one task, then exit -- doesn't build anything.")
     p.add_argument("--pilot", default=None,
-                   help="Output name suffix, e.g. 'pilot4' -> task_continuous_pilot4.pkl / task_binary_pilot4.pkl")
+                   help="Output name suffix, e.g. 'pilot4' -> soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl")
     p.add_argument("--numbers_pids", default="", help="Comma-separated real prolific_pids for the numbers task")
     p.add_argument("--colors_pids", default="", help="Comma-separated real prolific_pids for the colors task")
     args = p.parse_args()

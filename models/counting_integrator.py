@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fitting.model_params import _NEF_FIXED
 
 # Number of trials per dataset — precompute one activity set per trial seed
-_DATASET_N_TRIALS = {"carrabin": 200, "yoo": 30, "task_continuous": 40, "task_binary": 40}
+_DATASET_N_TRIALS = {"carrabin": 200, "yoo": 30, "soltani_numbers": 40, "soltani_colors": 40}
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -371,7 +371,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--plot_activities", action="store_true",
                    help="Load saved activities, decode, and plot ideal vs decoded")
     p.add_argument("--dataset", type=str, default=None,
-                   choices=("carrabin", "yoo", "task_continuous", "task_binary"),
+                   choices=("carrabin", "yoo", "soltani_numbers", "soltani_colors"),
                    help="Task dataset — sets radius_c automatically "
                         "(carrabin=5, yoo=30). Overrides _NEF_FIXED default.")
     p.add_argument("--base_seed", type=int, default=0,
@@ -776,7 +776,7 @@ def plot_from_activities(
 
 
 # Map dataset name to radius_c
-_DATASET_RADIUS_C = {"carrabin": 5, "yoo": 30, "task_continuous": 15, "task_binary": 15}
+_DATASET_RADIUS_C = {"carrabin": 5, "yoo": 30, "soltani_numbers": 15, "soltani_colors": 15}
 
 
 if __name__ == "__main__":

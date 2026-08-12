@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""scripts/build_model_inputs.py — build data/task_continuous.pkl and
-data/task_binary.pkl from a parsed task_results pilot file, in the same
+"""scripts/build_model_inputs.py — build data/soltani_numbers.pkl and
+data/soltani_colors.pkl from a parsed task_results pilot file, in the same
 tidy, per-dataset-pkl shape carrabin.pkl/yoo.pkl already use, so the
 existing fitting/models/* pipeline can be pointed at this task with no
 further schema-specific changes.
@@ -22,13 +22,13 @@ Steps (see the conversation that produced this script for full rationale):
   4. Rescale value/response from this task's native [0, 100] scale to the
      canonical [-1, 1] scale carrabin.pkl and yoo.pkl both already use
      (verified directly: both files' value/response columns range exactly
-     -1..1). Continuous: value and response both go through x' = x/50 - 1.
-     Binary: `value` is already +-1 (blue/red), so only `response` gets
+     -1..1). Numbers: value and response both go through x' = x/50 - 1.
+     Colors: `value` is already +-1 (blue/red), so only `response` gets
      rescaled the same way. Doing this means models/math_models.py's
      EXISTING _run_carrabin/_run_yoo model code (including clip bounds)
      can be reused verbatim for this task's data -- no scale-specific
      branching needed anywhere downstream.
-  5. Keep qid (both tasks) and true_p (binary)/true_mean (continuous) as
+  5. Keep qid (both tasks) and true_p (colors)/true_mean (numbers) as
      supplementary columns beyond carrabin/yoo's own minimal schemas --
      harmless extras, not read by any existing dispatch code, but useful
      for later validation. true_p is left on its native [0,1] probability
@@ -62,7 +62,7 @@ def _rescale_0_100_to_neg1_1(x: pd.Series) -> pd.Series:
     return x / 50.0 - 1.0
 
 
-def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="task_binary"):
+def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="soltani_colors"):
     """Core logic, extracted from build() so a different raw-data SOURCE
     (e.g. scripts/build_task_backend_inputs.py, pulling from Supabase
     instead of a parsed JATOS-era task_results pilot file) can reuse this
@@ -70,9 +70,9 @@ def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="ta
     the only thing that differs between sources is how `df` itself gets
     built; everything from here on is source-agnostic as long as `df` has
     the columns this function expects (see module docstring: prolific_pid,
-    task ('continuous'/'binary'), trial, observation, value, response,
+    task ('numbers'/'colors'), trial, observation, value, response,
     timed_out, qid, true_p, true_mean -- value/response on their NATIVE
-    [0,100] (continuous) / already-{-1,+1} (binary) scale, i.e. BEFORE any
+    [0,100] (numbers) / already-{-1,+1} (colors) scale, i.e. BEFORE any
     rescaling -- that happens in here, not before calling this).
     """
     df = filter_participants(df, verbose=True)
@@ -84,8 +84,8 @@ def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="ta
     print(f"\nBuilt pid mapping for {len(pid_map)} prolific_pids "
           f"(1..{len(pid_map)})")
 
-    # ── continuous -> data/task_continuous.pkl ──────────────────────────
-    cont = _dedup_successful(df, "continuous").copy()
+    # ── numbers -> data/soltani_numbers.pkl ──────────────────────────
+    cont = _dedup_successful(df, "numbers").copy()
     cont["pid"] = cont["prolific_pid"].map(pid_map).astype("int64")
     cont["value"] = _rescale_0_100_to_neg1_1(cont["value"])
     cont["response"] = _rescale_0_100_to_neg1_1(cont["response"])
@@ -95,8 +95,8 @@ def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="ta
         cont[col] = cont[col].astype("int64")
     cont = cont.sort_values(["pid", "trial", "observation"]).reset_index(drop=True)
 
-    # ── binary -> data/task_binary.pkl ──────────────────────────────────
-    binr = _dedup_successful(df, "binary").copy()
+    # ── colors -> data/soltani_colors.pkl ──────────────────────────────────
+    binr = _dedup_successful(df, "colors").copy()
     binr["pid"] = binr["prolific_pid"].map(pid_map).astype("int64")
     binr["response"] = _rescale_0_100_to_neg1_1(binr["response"])
     # value is already +-1 (blue/red) -- no rescale needed
@@ -105,11 +105,11 @@ def build_from_df(df, out_name_continuous="task_continuous", out_name_binary="ta
         binr[col] = binr[col].astype("int64")
     binr = binr.sort_values(["pid", "trial", "observation"]).reset_index(drop=True)
 
-    for name, out in [(out_name_continuous, cont), (out_name_binary, binr)]:
+    for name, out in [(out_name_numbers, cont), (out_name_colors, binr)]:
         if out.empty:
             # E.g. a pilot that only touched one task -- writing an empty
             # file for the other is pure junk output, not a real result,
-            # and could be mistaken for "this pilot had zero binary data"
+            # and could be mistaken for "this pilot had zero colors data"
             # rather than "this pilot never ran that task at all".
             print(f"\n{name}: 0 rows -- SKIPPED (this call's input had no rows for this task)")
             continue

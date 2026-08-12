@@ -2,7 +2,7 @@
 utils/participant_filters.py
 
 Quantifiable, adjustable exclusion criteria for identifying participants who
-show no evidence of genuinely attempting the task/continuous or task/binary
+show no evidence of genuinely attempting the soltani numbers or colors
 estimation task, as opposed to participants who attempt the task but update
 sub-optimally (whom we explicitly do NOT want to exclude).
 
@@ -14,8 +14,8 @@ CRITERION 1 — NO_INTEGRATION
 Response is (nearly) identical to the just-observed stimulus on almost
 every trial, i.e. they are reporting the raw stimulus value rather than
 any running estimate. Found by direct inspection in this pilot: one
-continuous participant matched the displayed value on 98.75% of rows
-(e.g. value=63 -> response=62, value=73 -> response=72). Binary values are
+numbers participant matched the displayed value on 98.75% of rows
+(e.g. value=63 -> response=62, value=73 -> response=72). Colors values are
 mapped onto the response's [0,100] percent scale (100 for blue/+1, 0 for
 red/-1) so the same tolerance-based check applies to both tasks.
 
@@ -38,7 +38,7 @@ Two independent, separately-flaggable sub-patterns:
 These are deliberately kept as two SEPARATE filters (each can exclude on
 its own) rather than bundled into one "both must fail" criterion, so each
 failure mode is independently visible and independently adjustable. In
-this pilot the one clear case (one binary-task participant) happened to
+this pilot the one clear case (one colors-task participant) happened to
 fail both simultaneously (p_direction=0.96, p_magnitude=0.56), so the
 distinction doesn't change who gets excluded yet — but it will matter as
 more pilot data comes in and these can diverge.
@@ -101,11 +101,11 @@ def _dedup(df_task: pd.DataFrame) -> pd.DataFrame:
 
 def _value_on_response_scale(df_task: pd.DataFrame, task: str) -> pd.Series:
     """Map the raw stimulus `value` onto the same [0,100] scale as `response`.
-    continuous: value is already on that scale. binary: value in {-1,+1}
+    numbers: value is already on that scale. colors: value in {-1,+1}
     (red/blue) -> {0, 100} (this treats a single binary draw like an
     "extreme" observation on the percent-blue scale, consistent with how
     figure_soltani_temporal.py's direction/magnitude diagnostics defined it)."""
-    if task == "binary":
+    if task == "colors":
         return np.where(df_task["value"] == 1, 100.0, 0.0)
     return df_task["value"].astype(float)
 
@@ -223,7 +223,7 @@ def flag_noncontingent_magnitude(df_task: pd.DataFrame, task: str,
 
 # ── Combined report + filtering ─────────────────────────────────────────────
 
-def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("binary", "continuous"),
+def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors", "numbers"),
                              copy_tolerance: float = DEFAULT_COPY_TOLERANCE,
                              copy_frac_threshold: float = DEFAULT_COPY_FRAC_THRESHOLD,
                              alpha: float = DEFAULT_ALPHA,

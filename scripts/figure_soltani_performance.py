@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """figure_soltani_performance.py — P group figure for the soltani task/
-pilot (task-continuous + task-binary, "Human Mixed Task" / Soltani lab).
+pilot (task-numbers + task-colors, "Human Mixed Task" / Soltani lab).
 
 Layout: 2x2
-  Row 1 = task-binary, Row 2 = task-continuous
+  Row 1 = task-colors, Row 2 = task-numbers
   Col 1 : Task schematic (placeholder -- no schematic PDF exists yet)
   Col 2 (P1): Estimation error -- RMSE to the RUNNING MEAN of the
     observed stimulus stream (NOT the fixed generative true_mean/true_p
@@ -31,8 +31,8 @@ need to change.
 
 DATA SOURCE AND SCALE
 ----------------------
-Human data comes directly from data/task_continuous.pkl / data/
-task_binary.pkl -- built by scripts/build_task_backend_inputs.py (pulls
+Human data comes directly from data/soltani_numbers.pkl / data/
+soltani_colors.pkl -- built by scripts/build_task_backend_inputs.py (pulls
 real, finished participants directly from task_backend's Supabase
 `events` table) via scripts/build_model_inputs.py's own build_from_df()
 (shared filter+rescale+anonymize+save pipeline -- participant filtering
@@ -73,10 +73,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style, label_panels
 
-TASK_ROWS   = ["binary", "continuous"]  # row order convention: binary on top,
-                                          # continuous on bottom
+TASK_ROWS   = ["colors", "numbers"]  # row order convention: colors on top,
+                                          # numbers on bottom
 HUMAN_COLOR = "0.3"
-DATASET_FOR_TASK = {"binary": "task_binary", "continuous": "task_continuous"}
+DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
 
 
 # ── schematic placeholders (col 1) ──────────────────────────────────────────
@@ -120,7 +120,7 @@ def _plot_schematic(ax, task: str) -> None:
 # ── scale conversion back to [0,100] for readability ────────────────────────
 
 def _to_pct(x: pd.Series, task: str) -> pd.Series:
-    if task == "binary":
+    if task == "colors":
         return (x + 1.0) / 2.0 * 100.0
     return (x + 1.0) * 50.0
 
@@ -201,9 +201,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
-                            "data/task_continuous_pilot4.pkl / task_binary_pilot4.pkl. "
-                            "Omit to use the canonical data/task_continuous.pkl / "
-                            "task_binary.pkl.")
+                            "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
+                            "Omit to use the canonical data/soltani_numbers.pkl / "
+                            "soltani_colors.pkl.")
     args = parser.parse_args()
 
     apply_style()

@@ -247,8 +247,8 @@ field to point at the GitHub Pages URL above.
 `scripts/build_task_backend_inputs.py` pulls real, finished participants
 directly from Supabase for an explicit pid list per pilot round (not
 "everyone finished so far" -- different pilots are different people with
-different generative parameters) into `data/task_continuous_<name>.pkl`/
-`task_binary_<name>.pkl`, via the same shared filter/rescale/anonymize/
+different generative parameters) into `data/soltani_numbers_<name>.pkl`/
+`soltani_colors_<name>.pkl`, via the same shared filter/rescale/anonymize/
 save pipeline (`build_model_inputs.py`'s `build_from_df()`) carrabin/yoo
 already use. `figure_soltani_*.py` take a `--datafile <name>` argument
 pointing at these. Human-data-only for now -- model fitting against real

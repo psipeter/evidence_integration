@@ -5,14 +5,21 @@ Objective: RMSE from ``fitting.losses.compute_loss``.
 
 Entry point::
 
-    python -m fitting.fit {dataset} {model_type} {pid} [n_trials] [k] [run_folder] [optuna_seed]
+    python -m fitting.fit {dataset} {model_type} {pid} [--n_trials N] [--k K]
+        [--run_folder F] [--optuna_seed S] [--datafile SUFFIX]
 
-Writes ``{model_type}_{dataset}_{pid}_params.pkl``, ``_performance.pkl``, and
-``_folds.pkl`` under ``run_folder``. SLURM jobs are submitted via ``fitting.submit``.
+Writes ``{model_type}_{stem}_{pid}_params.pkl``, ``_performance.pkl``, and
+``_folds.pkl`` under ``run_folder``, where ``stem`` is
+``utils.paths.dataset_stem(dataset, datafile)`` -- i.e. the dataset family name
+plus the optional data-version suffix, so fits against different builds of the
+same dataset can coexist in one run folder without overwriting or being
+silently mistaken for one another.
+
+SLURM jobs are submitted via ``fitting.submit``.
 """
 
+import argparse
 import logging
-import sys
 import time
 from pathlib import Path
 
@@ -24,7 +31,7 @@ import fitting.losses as losses
 import models.math_models as math_models
 from models import NEF
 from fitting.model_params import MODEL_PARAMS
-from utils.paths import RUNS_DIR, data_path, resolve_run_folder
+from utils.paths import RUNS_DIR, data_path, dataset_stem, resolve_run_folder
 from utils.save_responses import save as save_responses
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -48,9 +55,15 @@ def _suggest_params(
     model_type: str,
     dataset: str,
     pid: int,
+    datafile: str | None = None,
 ) -> dict:
     """Sample model parameters for one Optuna trial."""
-    params = {"model_type": model_type, "dataset": dataset, "pid": int(pid)}
+    params = {
+        "model_type": model_type,
+        "dataset": dataset,
+        "pid": int(pid),
+        "datafile": datafile,
+    }
     if dataset not in MODEL_PARAMS:
         raise ValueError(f"Unsupported dataset: {dataset!r}")
     if model_type not in MODEL_PARAMS[dataset]:
@@ -111,15 +124,17 @@ def fit(
     storage: str | None = None,
     run_folder: Path | str | None = None,
     optuna_seed: int = 42,
+    datafile: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs."""
     if run_folder is None:
         run_folder = RUNS_DIR / "default"
     run_folder = resolve_run_folder(run_folder)
-    human = pd.read_pickle(data_path(f"{dataset}.pkl"))
+    stem = dataset_stem(dataset, datafile)
+    human = pd.read_pickle(data_path(f"{stem}.pkl"))
     human = human.query("pid == @pid")
     if human.empty:
-        raise ValueError(f"No rows for pid={pid} in dataset={dataset!r}")
+        raise ValueError(f"No rows for pid={pid} in data/{stem}.pkl")
 
     if not MODEL_PARAMS[dataset][model_type]:
         n_trials = 1
@@ -129,7 +144,7 @@ def fit(
 
     study = optuna.create_study(
         direction="minimize",
-        study_name=f"{model_type}_{dataset}_{pid}",
+        study_name=f"{model_type}_{stem}_{pid}",
         storage=storage,
         load_if_exists=True,
         sampler=optuna.samplers.TPESampler(seed=optuna_seed),
@@ -138,7 +153,7 @@ def fit(
     trial_records: list[dict] = []
 
     def objective(trial: optuna.trial.Trial) -> float:
-        params = _suggest_params(trial, model_type, dataset, pid)
+        params = _suggest_params(trial, model_type, dataset, pid, datafile)
         trial_wall_start = time.time()
         if model_type == "NEF":
             model_responses_full = NEF.run(params)
@@ -168,6 +183,9 @@ def fit(
                     "model_type",
                     "dataset",
                     "pid",
+                    # a str data-version tag, not a fitted parameter -- would
+                    # otherwise become a spurious object column in _folds.pkl
+                    "datafile",
                 ):
                     if param_name not in record:
                         record[param_name] = (
@@ -186,6 +204,7 @@ def fit(
             "model_type": model_type,
             "dataset": dataset,
             "pid": int(pid),
+            "datafile": datafile,
         }
     )
 
@@ -204,11 +223,11 @@ def fit(
         ]
     )
     folds_df = pd.DataFrame(trial_records)
-    folds_df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_folds.pkl")
+    folds_df.to_pickle(run_folder / f"{model_type}_{stem}_{pid}_folds.pkl")
 
-    params_df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_params.pkl")
+    params_df.to_pickle(run_folder / f"{model_type}_{stem}_{pid}_params.pkl")
     performance_df.to_pickle(
-        run_folder / f"{model_type}_{dataset}_{pid}_performance.pkl"
+        run_folder / f"{model_type}_{stem}_{pid}_performance.pkl"
     )
 
     if model_type == "NEF":
@@ -216,38 +235,44 @@ def fit(
     else:
         best_params_full = {**best_params}
         df = math_models.run(best_params_full)
-        df.to_pickle(run_folder / f"{model_type}_{dataset}_{pid}_responses.pkl")
+        df.to_pickle(run_folder / f"{model_type}_{stem}_{pid}_responses.pkl")
 
     return params_df, performance_df
 
 
 if __name__ == "__main__":
-    dataset = sys.argv[1]
-    model_type = sys.argv[2]
-    pid = int(sys.argv[3])
-    n_trials = int(sys.argv[4]) if len(sys.argv) > 4 else 100
-    if len(sys.argv) >= 8:
-        k = int(sys.argv[5])
-        run_folder = sys.argv[6]
-        optuna_seed = int(sys.argv[7])
-    elif len(sys.argv) == 7:
-        k = int(sys.argv[5])
-        run_folder = sys.argv[6]
-        optuna_seed = 42
-    else:
-        k = 5
-        run_folder = sys.argv[5] if len(sys.argv) > 5 else None
-        optuna_seed = int(sys.argv[6]) if len(sys.argv) > 6 else 42
+    # argparse rather than positional parsing: this used to read up to 7
+    # positional args via a three-branch len(sys.argv) check, which had no room
+    # for another optional arg without becoming genuinely ambiguous. Commands
+    # are generated by fitting.submit, and jobs/*.sh is gitignored/regenerated,
+    # so nothing tracked depends on the old form.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("dataset")
+    parser.add_argument("model_type")
+    parser.add_argument("pid", type=int)
+    parser.add_argument("--n_trials", type=int, default=100)
+    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--run_folder", default=None)
+    parser.add_argument("--optuna_seed", type=int, default=42)
+    parser.add_argument(
+        "--datafile",
+        default=None,
+        help="Data-version suffix selecting data/{dataset}_{datafile}.pkl and "
+             "appearing in every output filename. Omit for the canonical "
+             "data/{dataset}.pkl.",
+    )
+    args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
     params_df, performance_df = fit(
-        dataset,
-        model_type,
-        pid,
-        n_trials=n_trials,
-        k=k,
-        run_folder=run_folder,
-        optuna_seed=optuna_seed,
+        args.dataset,
+        args.model_type,
+        args.pid,
+        n_trials=args.n_trials,
+        k=args.k,
+        run_folder=args.run_folder,
+        optuna_seed=args.optuna_seed,
+        datafile=args.datafile,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")

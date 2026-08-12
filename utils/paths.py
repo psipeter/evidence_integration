@@ -42,3 +42,34 @@ def resolve_run_folder(run_folder: Path | str) -> Path:
 def data_path(filename: str) -> Path:
     """Return ``DATA_DIR / filename``."""
     return DATA_DIR / filename
+
+
+def dataset_stem(dataset: str, datafile: str | None = None) -> str:
+    """Combine a dataset FAMILY name with an optional data-version suffix.
+
+    ``dataset`` is the family key that selects model behaviour -- it indexes
+    ``fitting.model_params.MODEL_PARAMS``, picks the branch in
+    ``models.math_models``, keys the response transforms in
+    ``utils.binary_transform``, and names the NEF counting-activity files.
+    ``datafile`` selects WHICH BUILD of that family's human data to use.
+
+    Keeping them separate means a new round of data needs no new model
+    plumbing (no MODEL_PARAMS entry, no math_models branch, no regenerated
+    counting-activity file) -- only a new pkl:
+
+        dataset_stem("soltani_numbers")           -> "soltani_numbers"
+        dataset_stem("soltani_numbers", "pilot5") -> "soltani_numbers_pilot5"
+
+    Used for BOTH the input pkl (``data/{stem}.pkl``) and every fit output
+    (``{model_type}_{stem}_{pid}_*.pkl``), so a fit can never be silently
+    paired with human data it wasn't fit against. That pairing failure was
+    real, not hypothetical: ``data/runs/soltani_math_v1`` held fits made
+    against JATOS-era data under the same unsuffixed dataset name as a later,
+    different pkl, with non-corresponding pids -- the figures merged them on
+    ``pid`` and plotted different people's fits against each other's data.
+
+    Mirrors the ``--datafile`` suffix convention the figure scripts already
+    use, deliberately: it is a plain filename suffix, not a pilot-specific
+    concept, so it works unchanged for a production dataset.
+    """
+    return f"{dataset}_{datafile}" if datafile else dataset

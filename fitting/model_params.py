@@ -91,7 +91,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons": 200, "n_neurons_counting": 1000},  # 30 obs/trial
         },
     },
-    "task_continuous": {
+    "soltani_numbers": {
         "Mean": {},
         "LeakyIntegrator": {
             "gamma": (0.001, 0.999, 0.001),
@@ -109,7 +109,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
         },
     },
-    "task_binary": {
+    "soltani_colors": {
         "Mean": {},
         "LeakyIntegrator": {
             "gamma": (0.001, 0.999, 0.001),

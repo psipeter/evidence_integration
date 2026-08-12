@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """figure_soltani_temporal.py — T group figure for the soltani task/ pilot
-(task-continuous + task-binary).
+(task-numbers + task-colors).
 
 Layout: 2x5
-  Row 1 = task-binary, Row 2 = task-continuous (standing row-order
+  Row 1 = task-colors, Row 2 = task-numbers (standing row-order
   convention for soltani figures — see figure_soltani_performance.py)
   Col 1 (~carrabin temporal panel A / T1): Performance error (RMSE to
     the RUNNING MEAN of the observed stimulus stream, NOT the fixed
@@ -34,19 +34,19 @@ copy of the col 1/2 pattern (col 3/4 need per-model residuals against a
 qid-conditional mean, col 5 needs re-running the lambda power-law fit on
 each model's own response curve), so left for a follow-up if wanted.
 
-Cols 3-4 DO now use quasi-qids for colors (task-binary)'s human data --
+Cols 3-4 DO now use quasi-qids for colors (task-colors)'s human data --
 colors' own literal `qid` column never repeats, so a DIFFERENT repeat
 structure is empirically derived instead: see utils/colors_quasi_qids.py's
 own module docstring for the full definition and the empirical sweep
 that settled its PREFIX_LENGTH=4/MIN_REPEATS=3 defaults. Numbers
-(task-continuous) uses its real, designed qid repeats unchanged. Col 5
+(task-numbers) uses its real, designed qid repeats unchanged. Col 5
 doesn't use qid at all (it's a lambda power-law fit on the |delta
 response| curve alone), so it's unaffected either way.
 
 DATA SOURCE
 -----------
-Both human and model data come from data/task_continuous.pkl / data/
-task_binary.pkl and data/runs/{run_folder}/{model_type}_{dataset}_
+Both human and model data come from data/soltani_numbers.pkl / data/
+soltani_colors.pkl and data/runs/{run_folder}/{model_type}_{dataset}_
 responses.pkl -- NOT from a raw task_results_pilot*.pkl. Participant
 filtering and the prolific_pid -> int pid mapping already happened when
 those files were built (scripts/build_model_inputs.py), and model
@@ -74,7 +74,7 @@ holds here within the prefix.
 Run:
     python scripts/figure_soltani_temporal.py
     python scripts/figure_soltani_temporal.py --plot_models
-    python scripts/figure_soltani_temporal.py --plot_models --run_folder soltani_math_v1
+    python scripts/figure_soltani_temporal.py --plot_models --datafile pilot5
     python scripts/figure_soltani_temporal.py --hide_individual
 """
 from __future__ import annotations
@@ -92,12 +92,12 @@ from scipy.stats import linregress, pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import FIGURES_DIR, data_path, resolve_run_folder
+from utils.paths import FIGURES_DIR, data_path, dataset_stem, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, pvalue_to_stars
 from utils.colors_quasi_qids import add_quasi_qids
 
-TASK_ROWS        = ["binary", "continuous"]  # standing row-order convention
-DATASET_FOR_TASK = {"binary": "task_binary", "continuous": "task_continuous"}
+TASK_ROWS        = ["colors", "numbers"]  # standing row-order convention
+DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
 MODEL_ORDER       = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]
 PREFIX_LENGTH     = 4
 HUMAN_COLOR       = "0.3"
@@ -106,7 +106,7 @@ MIN_CORR_N        = 3  # matches the threshold used in figure_soltani_variabilit
 
 
 def _to_pct(x: pd.Series, task: str) -> pd.Series:
-    if task == "binary":
+    if task == "colors":
         return (x + 1.0) / 2.0 * 100.0
     return (x + 1.0) * 50.0
 
@@ -155,11 +155,21 @@ def _add_running_mean_ground_truth(df: pd.DataFrame, task: str) -> pd.DataFrame:
     return df
 
 
-def _load_model(task: str, model_type: str, run_dir: Path) -> pd.DataFrame | None:
+def _load_model(task: str, model_type: str, run_dir: Path,
+                datafile: str | None = None) -> pd.DataFrame | None:
     """Fitted model responses for one (task, model_type), on the [0,100]
     percent scale. Returns None if not yet fit/collected. Columns:
-    [pid, trial, observation, response]."""
-    dataset = DATASET_FOR_TASK[task]
+    [pid, trial, observation, response].
+
+    `datafile` MUST be the same suffix _load_human was given: fits are named
+    after the dataset STEM (family + data-version suffix, see
+    utils.paths.dataset_stem), so passing it is what guarantees the model
+    responses were actually fit against the human data plotted beside them.
+    Omitting it here was a real defect: human data came from
+    data/{dataset}_{datafile}.pkl while models came from the unsuffixed
+    {model}_{dataset}_responses.pkl, and the two were then merged on `pid`
+    even when they described different participants entirely."""
+    dataset = dataset_stem(DATASET_FOR_TASK[task], datafile)
     resp_path = run_dir / f"{model_type}_{dataset}_responses.pkl"
     if not resp_path.exists():
         print(f"  (missing {resp_path.name} -- skipping {model_type} for {task})")
@@ -345,7 +355,7 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame) -> None:
     # here before computing anything, rather than relying on df2 being
     # empty (it never is in this case -- it's full of meaningless zeros,
     # which is what produced scipy's "constant input" warning here for
-    # task-binary before this fix: colors' current design gives every
+    # task-colors before this fix: colors' current design gives every
     # qid exactly one repeat per participant, confirmed directly this
     # session -- see chat history). This is a correctness/honesty fix
     # only, NOT the qid-repeat redefinition itself (deliberately deferred
@@ -530,9 +540,11 @@ def _plot_panel_splithalf_lambda(ax, human: pd.DataFrame) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run_folder", type=str, default="soltani_math_v1",
+    parser.add_argument("--run_folder", type=str, default="soltani",
                         help="Folder under data/runs/ with fitting.submit + "
-                             "fitting.collect output")
+                             "fitting.collect output. Holds BOTH tasks: each "
+                             "filename carries its own dataset stem, so "
+                             "soltani_numbers and soltani_colors coexist.")
     parser.add_argument("--show_individual", dest="show_individual",
                         action="store_true", default=True,
                         help="Overlay each pid as a thin grey line in cols 1-2 "
@@ -547,9 +559,9 @@ def main() -> None:
                              "PrimacyRecency/RL_lambda)")
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
-                            "data/task_continuous_pilot4.pkl / task_binary_pilot4.pkl. "
-                            "Omit to use the canonical data/task_continuous.pkl / "
-                            "task_binary.pkl.")
+                            "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
+                            "Omit to use the canonical data/soltani_numbers.pkl / "
+                            "soltani_colors.pkl.")
     args = parser.parse_args()
 
     run_dir = resolve_run_folder(args.run_folder)
@@ -578,13 +590,13 @@ def main() -> None:
         models = {}
         if args.plot_models:
             for model_type in MODEL_ORDER:
-                mdf = _load_model(task, model_type, run_dir)
+                mdf = _load_model(task, model_type, run_dir, args.datafile)
                 if mdf is not None:
                     models[model_type] = mdf
 
         _plot_panel_performance(axes[row, 0], human, models, args.show_individual, palette)
         _plot_panel_delta(axes[row, 1], human, models, args.show_individual, palette)
-        human_for_repeats = add_quasi_qids(human) if task == "binary" else human
+        human_for_repeats = add_quasi_qids(human) if task == "colors" else human
         _plot_panel_variance_growth(axes[row, 2], human_for_repeats)
         _plot_panel_autocorr(axes[row, 3], human_for_repeats)
         _plot_panel_splithalf_lambda(axes[row, 4], human)

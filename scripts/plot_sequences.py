@@ -21,7 +21,7 @@ HOW each figure was built, not WHAT question it answers).
 Internal `task` argument values remain "continuous"/"binary" (NOT renamed
 to "numbers"/"colors") deliberately -- MODEL_PARAMS, NEF.py, and
 counting_integrator.py's activity-file naming all still key on
-task_continuous/task_binary throughout the fitting pipeline; renaming that
+soltani_numbers/soltani_colors throughout the fitting pipeline; renaming that
 deeper vocabulary is a separate decision this file does not make. Only the
 FILE name used to find task_backend's sequences maps through TASK_FILE.
 

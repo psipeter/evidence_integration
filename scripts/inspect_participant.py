@@ -73,7 +73,7 @@ TASK_BACKEND_DIR = Path(__file__).resolve().parents[1] / "task_backend"
 # task_backend's own naming ('numbers'/'colors') -> the internal
 # 'continuous'/'binary' vocabulary the tiny local model functions below
 # use (matching plot_sequences.py's own internal convention).
-TASK_INTERNAL = {"numbers": "continuous", "colors": "binary"}
+TASK_INTERNAL = {"numbers": "numbers", "colors": "colors"}
 
 
 def _load_env(path: Path) -> dict:

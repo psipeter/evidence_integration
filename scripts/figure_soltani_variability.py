@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """figure_soltani_variability.py — V group figure for the soltani task/
-pilot (task-continuous + task-binary).
+pilot (task-numbers + task-colors).
 
 Layout: 2x3
-  Row 1 = task-binary, Row 2 = task-continuous (standing row-order
+  Row 1 = task-colors, Row 2 = task-numbers (standing row-order
   convention for soltani figures -- see figure_soltani_performance.py)
   Col 1 (~carrabin V-fig panel A): group-level (within-task) KDE of
     prefix response variability, human only
   Col 2 (~carrabin V-fig panel C): test-retest reliability -- one point
     per pid, x/y = prefix response variability in the 1st/2nd half of
     trials.
-  Col 3: cross-task comparison (pids who did both tasks) -- binary prefix
-    variability on x, continuous on y.
+  Col 3: cross-task comparison (pids who did both tasks) -- colors prefix
+    variability on x, numbers on y.
 
-ROW 1 (binary/colors) AND COL 3 NOW USE QUASI-QIDS
+ROW 1 (colors) AND COL 3 NOW USE QUASI-QIDS
 ------------------------------------------------------------------------
 "Prefix response variability" is inherently about repeated exposure to an
 IDENTICAL prefix across a qid's repeats -- colors' own literal `qid`
@@ -26,7 +26,7 @@ empirical sweep that settled its defaults. This is the same mechanism
 figure_soltani_temporal.py's columns 3-4 now use for colors -- not a
 separate, independently-invented one.
 
-WHY "PREFIX" VARIABILITY, NOT "QID" VARIABILITY (numbers/continuous)
+WHY "PREFIX" VARIABILITY, NOT "QID" VARIABILITY (numbers)
 ------------------------------------------------------------------------
 carrabin's qid repeats show an IDENTICAL sequence every time, so response
 variability can be computed at any observation index. Numbers' qid
@@ -43,7 +43,7 @@ hardcoding it here, same as this file's own earlier pass already did).
 
 DATA SOURCE
 -----------
-data/task_continuous.pkl -- built by scripts/build_task_backend_inputs.py
+data/soltani_numbers.pkl -- built by scripts/build_task_backend_inputs.py
 (pulls real, finished participants directly from task_backend's Supabase
 `events` table) via scripts/build_model_inputs.py's own build_from_df().
 Participant filtering and the prolific_pid -> int pid mapping already
@@ -98,7 +98,7 @@ MIN_CORR_N    = 3  # matches figure_soltani_temporal.py's cross-task correlation
 def _prefix_response_std(df: pd.DataFrame) -> pd.DataFrame:
     """Mean std(response | qid, observation) within the prefix region,
     per pid. One row per pid; columns [pid, resp_std]. No timed_out/dedup
-    filtering here -- both data/task_continuous.pkl and data/task_binary.pkl
+    filtering here -- both data/soltani_numbers.pkl and data/soltani_colors.pkl
     are already deduped to successful attempts only (see
     build_model_inputs.py's build_from_df), unlike this file's own earlier
     version, which read a raw,
@@ -196,17 +196,17 @@ def _plot_panel_splithalf(ax, split_df: pd.DataFrame) -> None:
 
 # ── Col 3 — Cross-task comparison ──────────────────────────
 
-def _plot_panel_crosstask(ax, bin_std: pd.DataFrame, cont_std: pd.DataFrame) -> None:
-    """bin_std/cont_std: each [pid, resp_std] (bin_std computed on
-    colors' quasi-qid-restricted data, cont_std on numbers' real qid --
+def _plot_panel_crosstask(ax, colors_std: pd.DataFrame, numbers_std: pd.DataFrame) -> None:
+    """colors_std/numbers_std: each [pid, resp_std] (colors_std computed on
+    colors' quasi-qid-restricted data, numbers_std on numbers' real qid --
     see module docstring). Merges on the real integer `pid`, which is
     valid either way -- the quasi-qid relabeling only ever touches which
     ROWS/trials qualify and what to call the derived group, never the
     underlying participant identity itself."""
-    b = bin_std.set_index("pid")["resp_std"]
-    c = cont_std.set_index("pid")["resp_std"]
+    b = colors_std.set_index("pid")["resp_std"]
+    c = numbers_std.set_index("pid")["resp_std"]
     both = b.index.intersection(c.index)
-    wide = pd.DataFrame({"binary": b[both], "continuous": c[both]})
+    wide = pd.DataFrame({"colors": b[both], "numbers": c[both]})
 
     if len(wide) < 2:
         msg = ("No pids completed both tasks" if len(wide) == 0
@@ -216,14 +216,14 @@ def _plot_panel_crosstask(ax, bin_std: pd.DataFrame, cont_std: pd.DataFrame) -> 
                 color="0.5", style="italic")
         return
 
-    ax.scatter(wide["binary"], wide["continuous"],
+    ax.scatter(wide["colors"], wide["numbers"],
               color=HUMAN_COLOR, s=30, alpha=0.8, zorder=3)
 
     if len(wide) >= MIN_CORR_N:
-        sns.regplot(data=wide, x="binary", y="continuous", ax=ax,
+        sns.regplot(data=wide, x="colors", y="numbers", ax=ax,
                     color=HUMAN_COLOR, ci=95, scatter=False,
                     line_kws={"lw": 1.5})
-        r, p = pearsonr(wide["binary"], wide["continuous"])
+        r, p = pearsonr(wide["colors"], wide["numbers"])
         ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)],
                   labels=[f"Human r={r:.2f}{pvalue_to_stars(p)}"],
                   fontsize=8, frameon=True, framealpha=0.9)
@@ -232,8 +232,8 @@ def _plot_panel_crosstask(ax, bin_std: pd.DataFrame, cont_std: pd.DataFrame) -> 
                 ha="left", va="top", transform=ax.transAxes,
                 fontsize=7, style="italic", color="0.5")
 
-    ax.set_xlabel("Prefix response variability (binary)")
-    ax.set_ylabel("Prefix response variability (continuous)")
+    ax.set_xlabel("Prefix response variability (colors)")
+    ax.set_ylabel("Prefix response variability (numbers)")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -243,9 +243,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
-                            "data/task_continuous_pilot4.pkl / task_binary_pilot4.pkl. "
-                            "Omit to use the canonical data/task_continuous.pkl / "
-                            "task_binary.pkl.")
+                            "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
+                            "Omit to use the canonical data/soltani_numbers.pkl / "
+                            "soltani_colors.pkl.")
     args = parser.parse_args()
 
     apply_style()
@@ -271,44 +271,44 @@ def main() -> None:
                          color="0.5", style="italic")
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
 
-    # Row 0 = binary/colors -- via quasi-qids (see module docstring).
-    binary_path = _dataset_path("task_binary")
-    if not binary_path.exists():
-        _missing_row(0, "binary")
-        prefix_std["binary"] = pd.DataFrame(columns=["pid", "resp_std"])
+    # Row 0 = colors -- via quasi-qids (see module docstring).
+    colors_path = _dataset_path("soltani_colors")
+    if not colors_path.exists():
+        _missing_row(0, "colors")
+        prefix_std["colors"] = pd.DataFrame(columns=["pid", "resp_std"])
     else:
-        df_binary = pd.read_pickle(binary_path)
-        df_binary_qq = add_quasi_qids(df_binary)
-        print(f"task-binary: {len(df_binary)} rows, {df_binary['pid'].nunique()} pids "
-              f"-> {len(df_binary_qq)} rows in a qualifying quasi-qid group")
-        prefix_std["binary"] = _prefix_response_std(df_binary_qq)
-        split_df_binary = _prefix_response_std_split(df_binary_qq)
+        df_colors = pd.read_pickle(colors_path)
+        df_colors_qq = add_quasi_qids(df_colors)
+        print(f"task-colors: {len(df_colors)} rows, {df_colors['pid'].nunique()} pids "
+              f"-> {len(df_colors_qq)} rows in a qualifying quasi-qid group")
+        prefix_std["colors"] = _prefix_response_std(df_colors_qq)
+        split_df_colors = _prefix_response_std_split(df_colors_qq)
 
-        _plot_panel_kde(axes[0, 0], prefix_std["binary"])
-        _plot_panel_splithalf(axes[0, 1], split_df_binary)
-        axes[0, 0].set_title("task-binary", loc="left", fontsize=9, style="italic")
+        _plot_panel_kde(axes[0, 0], prefix_std["colors"])
+        _plot_panel_splithalf(axes[0, 1], split_df_colors)
+        axes[0, 0].set_title("task-colors", loc="left", fontsize=9, style="italic")
 
-    # Row 1 = continuous/numbers -- real qid, unchanged.
-    continuous_path = _dataset_path("task_continuous")
-    if not continuous_path.exists():
-        _missing_row(1, "continuous")
-        prefix_std["continuous"] = pd.DataFrame(columns=["pid", "resp_std"])
+    # Row 1 = numbers -- real qid, unchanged.
+    numbers_path = _dataset_path("soltani_numbers")
+    if not numbers_path.exists():
+        _missing_row(1, "numbers")
+        prefix_std["numbers"] = pd.DataFrame(columns=["pid", "resp_std"])
     else:
-        df_continuous = pd.read_pickle(continuous_path)
-        print(f"task-continuous: {len(df_continuous)} rows, {df_continuous['pid'].nunique()} pids")
-        prefix_std["continuous"] = _prefix_response_std(df_continuous)
-        split_df_continuous = _prefix_response_std_split(df_continuous)
+        df_numbers = pd.read_pickle(numbers_path)
+        print(f"task-numbers: {len(df_numbers)} rows, {df_numbers['pid'].nunique()} pids")
+        prefix_std["numbers"] = _prefix_response_std(df_numbers)
+        split_df_numbers = _prefix_response_std_split(df_numbers)
 
-        _plot_panel_kde(axes[1, 0], prefix_std["continuous"])
-        _plot_panel_splithalf(axes[1, 1], split_df_continuous)
-        axes[1, 0].set_title("task-continuous", loc="left", fontsize=9, style="italic")
+        _plot_panel_kde(axes[1, 0], prefix_std["numbers"])
+        _plot_panel_splithalf(axes[1, 1], split_df_numbers)
+        axes[1, 0].set_title("task-numbers", loc="left", fontsize=9, style="italic")
 
     # Col 3: cross-task comparison -- only meaningful if BOTH tasks' files
     # exist for this datafile (e.g. a numbers-only pilot has nothing to
     # cross with).
     axes[0, 2].axis("off")
-    if binary_path.exists() and continuous_path.exists():
-        _plot_panel_crosstask(axes[1, 2], prefix_std["binary"], prefix_std["continuous"])
+    if colors_path.exists() and numbers_path.exists():
+        _plot_panel_crosstask(axes[1, 2], prefix_std["colors"], prefix_std["numbers"])
     else:
         axes[1, 2].axis("off")
         axes[1, 2].text(0.5, 0.5, "Cross-task comparison needs\nboth tasks' data",
@@ -318,9 +318,9 @@ def main() -> None:
     label_panels(axes)
 
     fig.text(0.5, -0.02,
-              "Human only (no models fit yet). task-binary uses an empirically-derived "
+              "Human only (no models fit yet). task-colors uses an empirically-derived "
               "quasi-qid repeat structure (see this script's own module docstring); "
-              "task-continuous uses its real, designed qid repeats. Both restricted to "
+              "task-numbers uses its real, designed qid repeats. Both restricted to "
               "observation < prefix_length=4.",
               ha="center", va="top", fontsize=7, style="italic", color="0.4")
 

@@ -320,23 +320,28 @@ def run(
     dataset = pfull["dataset"]
     pid = int(pfull["pid"])
 
-    # For new task datasets, load from sequence pkl (no real human data yet).
-    # The sequence pkl has the same trial/observation/value structure as
-    # carrabin/yoo but with a dummy pid column added here.
-    _TASK_DATASETS = frozenset({"task_continuous", "task_binary"})
-    if dataset in _TASK_DATASETS:
-        # Load directly from task/sequences/ — no separate data file needed.
-        # The sequence pkl is the canonical input for these datasets.
-        _seq_path = (Path(__file__).resolve().parents[1]
-                     / "task" / "sequences"
-                     / f"{dataset.replace('task_', '')}_sequences.pkl")
-        human_pid = pd.read_pickle(_seq_path)
-        if "pid" not in human_pid.columns:
-            human_pid = human_pid.copy()
-            human_pid["pid"] = 0  # dummy pid
-        human_pid = human_pid[human_pid["pid"] == min(human_pid["pid"].unique())]
-    else:
-        human_pid = pd.read_pickle(data_path(f"{dataset}.pkl")).query("pid == @pid")
+    # Every dataset -- carrabin, yoo, soltani_numbers, soltani_colors -- loads
+    # real per-participant human data from its own pkl. An earlier version of
+    # this function special-cased the soltani datasets to read the RETIRED
+    # task/sequences/{continuous,binary}_sequences.pkl files with a dummy pid,
+    # from back when no real human data existed for them; that branch is gone.
+    # It silently discarded the `pid` argument, so an NEF fit would have
+    # simulated old task/ sequences while fitting.losses scored the result
+    # against real participant responses.
+    #
+    # NOT YET SAFE FOR THE SOLTANI DATASETS -- two known issues, deliberately
+    # left for the NEF integration pass rather than fixed blind here:
+    #   1. utils/binary_transform.nef_obs_values / nef_response_to_model_scale
+    #      still assume soltani_numbers `value`/`response` are on the NATIVE
+    #      [0,100] scale, but scripts/build_model_inputs.build_from_df already
+    #      rescales them to [-1,1]. Running as-is double-rescales observations
+    #      (collapsing the stimulus range to ~[-1.02,-0.98]) and returns
+    #      responses on [0,1] against human responses on [-1,1].
+    #   2. soltani trials/observations are 0-indexed (trial 0-31, obs 0-14),
+    #      unlike carrabin/yoo (1-indexed). The counting-activity map below is
+    #      keyed 1..n_trials, so trial 0 MISSES and falls through to the slow
+    #      _pretrain path (which also passes base_seed, itself deprecated).
+    human_pid = pd.read_pickle(data_path(f"{dataset}.pkl")).query("pid == @pid")
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
@@ -411,7 +416,7 @@ def parse_args() -> argparse.Namespace:
         "--dataset",
         type=str,
         default="carrabin",
-        choices=("carrabin", "yoo", "task_continuous", "task_binary"),
+        choices=("carrabin", "yoo", "soltani_numbers", "soltani_colors"),
     )
     p.add_argument("--pid", type=int, default=1)
     p.add_argument("--model_type", type=str, default="NEF")
