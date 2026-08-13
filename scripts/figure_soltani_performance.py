@@ -54,12 +54,12 @@ SIGNIFICANCE BARS
 -----------------
 `annotate_nef_comparisons` (utils/plot_style.py) is generic despite its name --
 it draws paired-Wilcoxon bars from ONE reference model outward to the others,
-taking the reference as a parameter. In the carrabin/yoo figures that reference
-is NEF. NEF is not yet fit for the soltani datasets (see models/NEF.py's own
-caveat comment), so SIG_REFERENCE is RL_lambda for now -- the explicit
-power-law delta rule that the NEF is the spiking analogue of, making it the
-closest standing proxy. Set SIG_REFERENCE = "NEF" once NEF is fit; nothing else
-in this file needs to change.
+taking the reference as a parameter. SIG_REFERENCE is NEF, matching the
+carrabin/yoo figures. (It was RL_lambda while NEF was unwired for these
+datasets -- the explicit power-law delta rule the NEF is the spiking analogue
+of, and the closest standing proxy. Switching it back is a one-line change if
+NEF fits are unavailable, since a missing reference simply suppresses the bars
+rather than erroring.)
 
 DATA SOURCE AND SCALE
 ----------------------
@@ -126,10 +126,12 @@ DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
 
 # Same four models, in the same order, as figure_soltani_temporal.py -- so a
 # model keeps one colour across the whole soltani figure set.
-MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]
+MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]
 
-# Reference model for P2's significance bars; see module docstring.
-SIG_REFERENCE = "RL_lambda"
+# Reference model for P2's significance bars; see module docstring. NEF now that
+# it is fit for these datasets -- matching the carrabin/yoo figures, where the
+# spiking model is always the reference the others are compared against.
+SIG_REFERENCE = "NEF"
 
 # [-1,1]-scale RMSE -> percentage points. Exactly 50 for both tasks; see
 # module docstring for why that holds despite their different response scales.

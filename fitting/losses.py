@@ -42,13 +42,21 @@ def compute_loss(
     """RMSE between model and human responses (carrabin, yoo, soltani_colors,
     soltani_numbers).
 
-    For carrabin and soltani_colors, model responses are expected to already
-    have the Laplace smoothing transform applied (response = response_raw
-    * t / (t+2)), as produced by
-    utils.carrabin_transform.apply_carrabin_transform() (a thin wrapper
-    around utils.binary_transform.apply_binary_transform()). The
+    All four datasets store `response` on the canonical [-1,1] scale, and this
+    function compares model to human on that scale directly -- so a model must
+    emit [-1,1] to be scored correctly.
+
+    For carrabin ONLY, model responses are expected to already have the Laplace
+    smoothing transform applied (response = response_raw * t / (t+2)), as
+    produced by utils.carrabin_transform.apply_carrabin_transform() (a thin
+    wrapper around utils.binary_transform.apply_binary_transform()). The
     `response` column is used directly; `response_raw` is ignored here.
-    soltani_numbers and yoo use raw (untransformed) responses.
+
+    yoo, soltani_numbers AND soltani_colors use raw (untransformed) responses.
+    Note that soltani_colors is untransformed despite having {-1,+1}
+    observations like carrabin: both soltani tasks ask for the MEAN of all
+    observations rather than a probability, so no shrinkage toward 0 applies.
+    See utils/binary_transform.py's own module docstring.
     """
     dataset = params["dataset"]
     _SUPPORTED = ("carrabin", "yoo", "soltani_colors", "soltani_numbers")

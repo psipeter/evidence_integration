@@ -8,6 +8,7 @@ and ``value`` columns (active: carrabin, yoo).
 
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -17,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from models.NEF import PARAM_DEFAULTS, _pretrain, build_network
-from utils.paths import data_path, resolve_run_folder
+from utils.paths import data_path, dataset_stem, resolve_run_folder
 
 READOUT_OFFSET = 0.5  # seconds into observation window for once-per-obs readout
 
@@ -39,7 +40,12 @@ def simulate_and_save(
     dt_sample: float = 0.01,
 ) -> None:
     decoders = _pretrain(params)
-    human_pid = pd.read_pickle(data_path(f"{params['dataset']}.pkl")).query("pid == @pid")
+    # `dataset` is the model-family key; `datafile` selects which build of that
+    # family's human data to read, and is embedded in every output filename
+    # below so activities from different data versions cannot collide. Must
+    # match what fitting.collect / fitting.submit look for (both stem-based).
+    stem = dataset_stem(params["dataset"], params.get("datafile"))
+    human_pid = pd.read_pickle(data_path(f"{stem}.pkl")).query("pid == @pid")
 
     activities_rows: dict[str, list[dict]] = {ens_name: [] for ens_name in ensembles}
     encoders_by_ens: dict[str, np.ndarray | None] = {ens_name: None for ens_name in ensembles}
@@ -121,7 +127,7 @@ def simulate_and_save(
     if timing == "once_per_obs":
         for ens_name in ensembles:
             activities_df = pd.DataFrame(activities_rows[ens_name])
-            activities_path = out_dir / f"activities_{ens_name}_{params['dataset']}_{pid}.pkl"
+            activities_path = out_dir / f"activities_{ens_name}_{stem}_{pid}.pkl"
             activities_df.to_pickle(activities_path)
             print(f"Saved {activities_path}")
 
@@ -139,7 +145,7 @@ def simulate_and_save(
                     row[f"enc_dim_{d}"] = float(enc[neuron_idx, d])
                 enc_rows.append(row)
             enc_df = pd.DataFrame(enc_rows)
-            encoders_path = out_dir / f"encoders_{ens_name}_{params['dataset']}_{pid}.pkl"
+            encoders_path = out_dir / f"encoders_{ens_name}_{stem}_{pid}.pkl"
             enc_df.to_pickle(encoders_path)
             print(f"Saved {encoders_path}")
     elif timing == "once_per_dt":
@@ -160,7 +166,7 @@ def simulate_and_save(
             if enc is None:
                 raise RuntimeError(f"No encoders captured for ensemble {ens_name!r}")
             out_path = (
-                out_dir / f"activities_windowed_{ens_name}_{params['dataset']}_{pid}.npz"
+                out_dir / f"activities_windowed_{ens_name}_{stem}_{pid}.npz"
             )
             np.savez_compressed(
                 out_path,
@@ -181,7 +187,7 @@ def simulate_and_save(
                     row[f"enc_dim_{d}"] = float(enc[neuron_idx, d])
                 enc_rows.append(row)
             enc_df = pd.DataFrame(enc_rows)
-            encoders_path = out_dir / f"encoders_{ens_name}_{params['dataset']}_{pid}.pkl"
+            encoders_path = out_dir / f"encoders_{ens_name}_{stem}_{pid}.pkl"
             enc_df.to_pickle(encoders_path)
             print(f"Saved {encoders_path}")
     else:
@@ -196,10 +202,19 @@ def run(
     timing: str,
     dt_sample: float = 0.01,
     model_type: str = "NEF",
+    datafile: str | None = None,
 ) -> None:
+    """Simulate one pid from its best-fit params and save per-ensemble activities.
+
+    `datafile` is the data-version suffix (see utils.paths.dataset_stem). It is
+    required to LOCATE the fitted params at all -- they live in
+    {model_type}_{stem}_{pid}_params.pkl -- so it cannot be recovered from
+    inside the pkl the way load_run_params can for its other callers.
+    Defaults to None for the unsuffixed carrabin/yoo behaviour.
+    """
     from utils.run_params import load_run_params
 
-    params = load_run_params(pid, dataset, model_type, run_folder)
+    params = load_run_params(pid, dataset, model_type, run_folder, datafile)
 
     out_dir = resolve_run_folder(run_folder)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -207,12 +222,23 @@ def run(
 
 
 if __name__ == "__main__":
-    dataset = sys.argv[1]
-    model_type = sys.argv[2]
-    pid = int(sys.argv[3])
-    run_folder = sys.argv[4]
-    ensembles = sys.argv[5].split(",")
-    timing = sys.argv[6] if len(sys.argv) > 6 else "once_per_obs"
-    dt_sample = float(sys.argv[7]) if len(sys.argv) > 7 else 0.01
-    run(pid, dataset, ensembles, run_folder, timing, dt_sample, model_type)
+    # argparse, keeping the previous positional ORDER so existing invocations
+    # still work, plus an optional --datafile. fitting.submit builds this as a
+    # command string for SLURM.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("dataset")
+    parser.add_argument("model_type")
+    parser.add_argument("pid", type=int)
+    parser.add_argument("run_folder")
+    parser.add_argument("ensembles", help="Comma-separated ensemble names")
+    parser.add_argument("timing", nargs="?", default="once_per_obs")
+    parser.add_argument("dt_sample", nargs="?", type=float, default=0.01)
+    parser.add_argument(
+        "--datafile",
+        default=None,
+        help="Data-version suffix; omit for the canonical unsuffixed dataset.",
+    )
+    args = parser.parse_args()
+    run(args.pid, args.dataset, args.ensembles.split(","), args.run_folder,
+        args.timing, args.dt_sample, args.model_type, args.datafile)
     print("JOB_COMPLETE")

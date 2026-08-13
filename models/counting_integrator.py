@@ -19,6 +19,39 @@ from fitting.model_params import _NEF_FIXED
 
 # Number of trials per dataset — precompute one activity set per trial seed
 _DATASET_N_TRIALS = {"carrabin": 200, "yoo": 30, "soltani_numbers": 40, "soltani_colors": 40}
+
+# Datasets whose `trial` column is 0-indexed. carrabin and yoo are 1-indexed
+# (trial 1..N); the soltani datasets are 0-indexed (trial 0..31), inherited from
+# task_backend's own 0-based trial_index. Everything else about the activity
+# pipeline assumes 1-based keys, so this set is what reconciles the two -- see
+# activity_key_for_trial below.
+_ZERO_INDEXED_DATASETS = frozenset({"soltani_numbers", "soltani_colors"})
+
+
+def activity_key_for_trial(dataset: str, trial: int) -> int:
+    """Map a dataset's `trial` value to its counting-activity key AND seed.
+
+    precompute_activities() above builds entry `k` by simulating a network with
+    ``seed = k``, for k in 1..n_trials. So an activity key is not an arbitrary
+    index -- it IDENTIFIES A SEED. Its stored MtM is the Gram matrix of that
+    network's filtered memory activity, and decoders solved from it via
+    fast_decode() are valid ONLY for a network built with the same seed.
+
+    That makes this function the single source of truth for both halves of the
+    pairing: callers must use the returned value as the activity-map key AND as
+    the `seed` passed to the simulation network. Using it for only one of the two
+    silently mismatches the decoders against different tuning curves, which
+    produces plausible-looking but meaningless output rather than an error.
+
+    For 1-indexed datasets (carrabin, yoo) this is the identity. For 0-indexed
+    datasets (soltani_*) it returns trial+1, so trials 0..31 use keys/seeds
+    1..32 -- all within the 40 precomputed entries. The alternative, leaving
+    trial 0 to miss the map, sends it down the ~300x slower _pretrain path and
+    gives that one trial decoders derived by a different procedure than its 31
+    siblings.
+    """
+    t = int(trial)
+    return t + 1 if str(dataset) in _ZERO_INDEXED_DATASETS else t
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 

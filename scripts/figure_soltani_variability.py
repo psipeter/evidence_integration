@@ -318,7 +318,7 @@ def main() -> None:
     label_panels(axes)
 
     fig.text(0.5, -0.02,
-              "Human only (no models fit yet). task-colors uses an empirically-derived "
+              "Human only (this figure loads no model fits). task-colors uses an empirically-derived "
               "quasi-qid repeat structure (see this script's own module docstring); "
               "task-numbers uses its real, designed qid repeats. Both restricted to "
               "observation < prefix_length=4.",

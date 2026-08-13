@@ -252,7 +252,13 @@ def _resubmit(
         elif resubmit_type == "activities":
             if not params_path.exists():
                 continue
-            if mt not in ("NEF", "NEF"):
+            # Activities come from models.NEF's own build_network/_pretrain, so
+            # only NEF and its variants (NEF_recurrent, NEF_synaptic -- passed
+            # via --extra_models; see utils.run_params' nef_type branch) can
+            # produce them. startswith rather than an explicit tuple: the tuple
+            # here read ("NEF", "NEF") -- a duplicated element, so it only ever
+            # matched plain "NEF" and silently skipped every variant.
+            if not mt.startswith("NEF"):
                 continue
             if timing == "once_per_dt" and ds != "carrabin":
                 continue  # windowed once_per_dt activities only implemented for carrabin
@@ -294,9 +300,12 @@ def _resubmit(
                 if not dry_run:
                     from utils.save_responses import save as save_responses
 
-                    save_responses(int(pid), ds, run_folder, mt)
+                    save_responses(int(pid), ds, run_folder, mt,
+                                   job.get("datafile"))
             else:
                 cmd = f"python -m utils.save_responses {ds} {mt} {pid} {run_folder}"
+                if job.get("datafile"):
+                    cmd += f" --datafile {job['datafile']}"
                 _submit_command(
                     script_name=f"responses_{mt}_{stem}_{pid}.sh",
                     command=cmd,
@@ -310,7 +319,8 @@ def _resubmit(
                     from utils.save_activities import run as run_activities
 
                     run_activities(
-                        int(pid), ds, ensembles, str(run_folder), timing, dt_sample, mt
+                        int(pid), ds, ensembles, str(run_folder), timing,
+                        dt_sample, mt, job.get("datafile")
                     )
             else:
                 ensembles_str = ",".join(ensembles)
@@ -318,8 +328,10 @@ def _resubmit(
                     f"python -m utils.save_activities {ds} {mt} {pid} {run_folder} "
                     f"{ensembles_str} {timing} {dt_sample}"
                 )
+                if job.get("datafile"):
+                    cmd += f" --datafile {job['datafile']}"
                 _submit_command(
-                    script_name=f"activities_{mt}_{ds}_{pid}.sh",
+                    script_name=f"activities_{mt}_{stem}_{pid}.sh",
                     command=cmd,
                     time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
                     mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),

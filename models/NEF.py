@@ -47,6 +47,7 @@ for _logger_name in (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models.counting_integrator import (
+    activity_key_for_trial,
     build_network as build_counting_integrator,
     decode_outputs as decode_counting_integrator,
     fast_decode as fast_decode_counting,
@@ -54,7 +55,7 @@ from models.counting_integrator import (
     load_decoders as load_counting_decoders,
     simulate_network as simulate_counting_integrator,
 )
-from utils.paths import data_path
+from utils.paths import data_path, dataset_stem
 
 from fitting.model_params import _NEF_FIXED
 from utils.binary_transform import (
@@ -329,19 +330,29 @@ def run(
     # simulated old task/ sequences while fitting.losses scored the result
     # against real participant responses.
     #
-    # NOT YET SAFE FOR THE SOLTANI DATASETS -- two known issues, deliberately
-    # left for the NEF integration pass rather than fixed blind here:
-    #   1. utils/binary_transform.nef_obs_values / nef_response_to_model_scale
-    #      still assume soltani_numbers `value`/`response` are on the NATIVE
-    #      [0,100] scale, but scripts/build_model_inputs.build_from_df already
-    #      rescales them to [-1,1]. Running as-is double-rescales observations
-    #      (collapsing the stimulus range to ~[-1.02,-0.98]) and returns
-    #      responses on [0,1] against human responses on [-1,1].
-    #   2. soltani trials/observations are 0-indexed (trial 0-31, obs 0-14),
-    #      unlike carrabin/yoo (1-indexed). The counting-activity map below is
-    #      keyed 1..n_trials, so trial 0 MISSES and falls through to the slow
-    #      _pretrain path (which also passes base_seed, itself deprecated).
-    human_pid = pd.read_pickle(data_path(f"{dataset}.pkl")).query("pid == @pid")
+    # The soltani datasets are now fully supported. Two issues that used to be
+    # listed here are resolved:
+    #
+    # 1. 0-INDEXING. soltani trials/observations are 0-indexed (trial 0-31,
+    #    obs 0-14) unlike carrabin/yoo (1-indexed), and the counting-activity
+    #    map is keyed 1..n_trials, so a bare .get(trial) left trial 0 missing.
+    #    activity_key_for_trial() now supplies the key AND the seed together
+    #    (they must never diverge -- see its docstring), and a miss now raises
+    #    instead of silently falling through to the ~300x slower _pretrain
+    #    path with a different decoder-solve procedure.
+    #
+    # 2. RESPONSE SCALE. Both
+    # soltani tasks ask for the MEAN of all observations, so neither the
+    # Laplace transform nor any [0,100]<->[-1,1] rescale applies; value and
+    # response are already on the canonical [-1,1] scale in the pkl, verified
+    # against data/soltani_{numbers,colors}_complete_pairs.pkl. nef_obs_values
+    # and nef_response_to_model_scale are now identity, and
+    # apply_binary_transform is carrabin-only. See utils/binary_transform.py's
+    # own module docstring for the audited scales.
+    # dataset is the model-FAMILY key; datafile selects which build of that
+    # family's human data to read (see utils.paths.dataset_stem).
+    stem = dataset_stem(dataset, pfull.get("datafile"))
+    human_pid = pd.read_pickle(data_path(f"{stem}.pkl")).query("pid == @pid")
     if trials is not None:
         human_pid = human_pid[human_pid["trial"].isin(trials)]
 
@@ -367,10 +378,16 @@ def run(
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
         obs_values = nef_obs_values(obs_values, dataset)
-        # seed = trial number directly
-        p = {**pfull, "seed": int(trial)}
+        # The activity key and the simulation seed MUST be the same number:
+        # activity entry k was precomputed from a network built with seed=k, so
+        # decoders solved from it are only valid for a network with those tuning
+        # curves. activity_key_for_trial() supplies both, handling the fact that
+        # soltani trials are 0-indexed while activity keys start at 1 (a bare
+        # _activity_map.get(trial) left trial 0 to miss the map entirely).
+        akey = activity_key_for_trial(dataset, trial)
+        p = {**pfull, "seed": akey}
         if _activity_map is not None:
-            activity = _activity_map.get(int(trial))
+            activity = _activity_map.get(akey)
             if activity is not None:
                 decoders = fast_decode_counting(
                     activity,
@@ -378,7 +395,19 @@ def run(
                     lambda_=float(pfull["lambda_"]),
                 )
             else:
-                decoders = _pretrain({**p, "base_seed": int(trial)})
+                # Fail loudly rather than silently degrading: this path is
+                # ~300x slower per trial AND derives decoders by a different
+                # procedure than fast_decode, so a single trial slipping through
+                # here skews a whole fit while looking fine. Note base_seed is
+                # deliberately NOT passed (CLAUDE.md: seed = int(trial)
+                # directly); _pretrain reads params["seed"], which p already has.
+                raise KeyError(
+                    f"No precomputed counting activity for key {akey} "
+                    f"(dataset={dataset!r}, trial={int(trial)}). The activity "
+                    f"file has keys 1..n_trials; check _DATASET_N_TRIALS and "
+                    f"_ZERO_INDEXED_DATASETS in models/counting_integrator.py, "
+                    f"or regenerate with --precompute_activities."
+                )
         if save_probes:
             responses, probe_data = _simulate_trial(
                 obs_values, p, decoders, return_probes=True
@@ -402,11 +431,11 @@ def run(
 
     out = apply_binary_transform(pd.DataFrame(rows), dataset)
     if save_probes and all_probe_data:
-        fname = f"probe_{pfull['model_type']}_{dataset}_{pid}.pkl"
+        fname = f"probe_{pfull['model_type']}_{stem}_{pid}.pkl"
         pd.to_pickle(all_probe_data, data_path(fname))
         print(f"  Saved probe data ({len(all_probe_data)} trials) to data/{fname}")
     if save:
-        out.to_pickle(data_path(f"{pfull['model_type']}_{dataset}_{pid}.pkl"))
+        out.to_pickle(data_path(f"{pfull['model_type']}_{stem}_{pid}.pkl"))
     return out
 
 

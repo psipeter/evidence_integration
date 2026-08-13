@@ -231,7 +231,7 @@ def fit(
     )
 
     if model_type == "NEF":
-        save_responses(pid, dataset, run_folder, model_type)
+        save_responses(pid, dataset, run_folder, model_type, datafile)
     else:
         best_params_full = {**best_params}
         df = math_models.run(best_params_full)

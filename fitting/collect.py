@@ -98,23 +98,43 @@ def _collect_responses(run_folder: Path) -> None:
 
 
 def _collect_activities(run_folder: Path, ensembles: list[str], timing: str) -> None:
-    # NOTE: the globs below still use `*` for the pid, so an unsuffixed stem can
-    # match a suffixed one's files (the collision _collect_responses avoids by
-    # driving off the explicit pid list). Left as-is: activities are NEF-only and
-    # NEF is not yet wired up for the soltani datasets, so no run folder can
-    # currently contain two activity stems. Fix alongside the NEF integration.
+    """Concatenate per-pid NEF activity files into one file per (stem, ensemble).
+
+    Driven by the explicit pid list from run_config.json rather than a
+    `activities_{ens}_{stem}_*` glob, for the same reason as
+    _collect_responses: with an UNSUFFIXED stem the `*` (meant to match only a
+    pid) also matches a suffixed stem's files, so
+    `activities_windowed_error_soltani_numbers_*.npz` would swallow
+    `activities_windowed_error_soltani_numbers_complete_pairs_3.npz` and merge
+    two different data versions into one output. That was unreachable while NEF
+    was unwired for the soltani datasets; it is reachable now.
+    """
     out_dir = run_folder
     out_dir.mkdir(parents=True, exist_ok=True)
-    stems = sorted({stem for stem, _ in _load_groups(run_folder).keys()})
-    for dataset in stems:
+    groups = _load_groups(run_folder)
+    # Activity filenames carry no model_type, so take the union of pids across
+    # every model_type for a stem and let the existence check below filter to
+    # the ones that actually produced activities (NEF-only in practice).
+    pids_by_stem: dict[str, set[int]] = defaultdict(set)
+    for (stem, _model_type), pids in groups.items():
+        pids_by_stem[stem].update(int(p) for p in pids)
+    for dataset in sorted(pids_by_stem):
+        stem_pids = sorted(pids_by_stem[dataset])
         for ens_name in ensembles:
             if timing == "once_per_dt":
-                npz_files = sorted(
-                    out_dir.glob(f"activities_windowed_{ens_name}_{dataset}_*.npz")
-                )
+                pid_paths = [
+                    (pid, out_dir / f"activities_windowed_{ens_name}_{dataset}_{pid}.npz")
+                    for pid in stem_pids
+                ]
+                pid_paths = [(pid, f) for pid, f in pid_paths if f.exists()]
+                npz_files = [f for _, f in pid_paths]
                 if npz_files:
                     arrays = [np.load(f)["activities"] for f in npz_files]
-                    pid_ids = np.array([int(f.stem.split("_")[-1]) for f in npz_files])
+                    # pid_ids comes from run_config.json, not from parsing the
+                    # filename tail -- a suffixed stem puts extra underscored
+                    # tokens before the pid, so split("_")[-1] was only correct
+                    # for unsuffixed names.
+                    pid_ids = np.array([pid for pid, _ in pid_paths])
                     max_trials = max(a.shape[0] for a in arrays)
                     padded = []
                     for a in arrays:
@@ -131,9 +151,13 @@ def _collect_activities(run_folder: Path, ensembles: list[str], timing: str) -> 
                         f"Collected {len(npz_files)} -> {out_path} shape {combined.shape}"
                     )
             else:
-                activity_files = sorted(
-                    out_dir.glob(f"activities_{ens_name}_{dataset}_*.pkl")
-                )
+                activity_files = [
+                    f for f in (
+                        out_dir / f"activities_{ens_name}_{dataset}_{pid}.pkl"
+                        for pid in stem_pids
+                    )
+                    if f.exists()
+                ]
                 if activity_files:
                     activities_df = pd.concat(
                         [pd.read_pickle(f) for f in activity_files], ignore_index=True
