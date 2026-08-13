@@ -140,39 +140,90 @@ LOSS_TO_PCT = 50.0
 
 # ── schematic placeholders (col 1) ──────────────────────────────────────────
 
+# Candidate basenames for a task schematic, in priority order. Both are
+# supported because the two naming conventions in figures/ disagree: the
+# carrabin/yoo figures use "{dataset}_task", which for soltani would be
+# "soltani_numbers_task", but the hand-built schematics were saved as
+# "{task}_task" (numbers_task, colors_task).
+def _schematic_candidates(task: str) -> list[Path]:
+    stems = [f"soltani_{task}_task", f"{task}_task"]
+    # .pdf first (vector, re-rasterised at high DPI below), then raster formats.
+    exts = [".pdf", ".png", ".svg"]
+    return [FIGURES_DIR / f"{stem}{ext}" for stem in stems for ext in exts]
+
+
+# DPI used when rasterising a vector schematic. matplotlib's imshow needs an
+# array, so a PDF/SVG has to be flattened at SOME resolution -- pdftoppm's
+# default is 150, which visibly softens text at the size this panel is printed.
+SCHEMATIC_DPI = 300
+
+
+def _load_schematic_image(path: Path):
+    """Read a schematic into an array for imshow, or None on failure.
+
+    Sniffs the MAGIC BYTES rather than trusting the extension: the hand-built
+    schematics were exported from Inkscape as PNG but saved with a .pdf
+    extension, so extension-based dispatch sent them to pdftoppm and they
+    silently failed to render. Content wins over filename here.
+    """
+    head = path.open("rb").read(8)
+    is_png = head.startswith(b"\x89PNG")
+    is_pdf = head.startswith(b"%PDF")
+
+    if is_png:
+        return mpimg.imread(path)
+
+    if is_pdf or path.suffix.lower() in (".pdf", ".svg"):
+        tool = "pdftocairo" if (not is_pdf and path.suffix.lower() == ".svg") else "pdftoppm"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_prefix = Path(tmpdir) / path.stem
+            cmd = [tool, "-png", "-r", str(SCHEMATIC_DPI), "-singlefile",
+                   str(path), str(out_prefix)]
+            try:
+                subprocess.run(cmd, check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                return None
+            img_path = out_prefix.with_suffix(".png")
+            if not img_path.exists():
+                return None
+            return mpimg.imread(img_path)
+
+    # Unknown magic bytes and no usable suffix -- try imread and let it decide.
+    try:
+        return mpimg.imread(path)
+    except Exception:
+        return None
+
+
 def _plot_schematic(ax, task: str) -> None:
-    """Render figures/soltani_{task}_task.pdf if it exists; otherwise a
-    text placeholder. No such schematic exists yet for either task."""
-    pdf_path = FIGURES_DIR / f"soltani_{task}_task.pdf"
-    if not pdf_path.exists():
-        ax.set_xticks([]); ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.text(0.5, 0.5, f"soltani_{task}_task.pdf\nnot found",
+    """Render this task's schematic into ax, or leave a text placeholder.
+
+    Looks for figures/soltani_{task}_task.* then figures/{task}_task.* in
+    .pdf/.png/.svg -- see _schematic_candidates.
+    """
+    ax.set_xticks([]); ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    candidates = _schematic_candidates(task)
+    path = next((c for c in candidates if c.exists()), None)
+    if path is None:
+        ax.text(0.5, 0.5, f"{task}_task.[pdf|png]\nnot found in figures/",
                 ha="center", va="center", transform=ax.transAxes,
                 color="0.5", style="italic", fontsize=8)
         return
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        out_prefix = Path(tmpdir) / f"soltani_{task}_task"
-        cmd = ["pdftoppm", "-png", "-singlefile", str(pdf_path), str(out_prefix)]
-        try:
-            subprocess.run(cmd, check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
-        img_path = out_prefix.with_suffix(".png")
-        if not img_path.exists():
-            ax.set_xticks([]); ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-            return
-        img = mpimg.imread(img_path)
+    img = _load_schematic_image(path)
+    if img is None:
+        print(f"  WARNING: found {path.name} but could not render it")
+        ax.text(0.5, 0.5, f"{path.name}\ncould not be rendered",
+                ha="center", va="center", transform=ax.transAxes,
+                color="0.5", style="italic", fontsize=8)
+        return
 
-    ax.imshow(img, interpolation="nearest")
-    ax.set_xticks([]); ax.set_yticks([])
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    print(f"  schematic: {path.name} ({img.shape[1]}x{img.shape[0]}px)")
+    ax.imshow(img, interpolation="antialiased")
     ax.set_aspect("equal"); ax.set_anchor("C")
 
 

@@ -225,6 +225,7 @@ def _resubmit(
     dataset: str | None = None,
     model_type: str | None = None,
     pid: int | None = None,
+    datafile: str | None = None,
 ) -> None:
     jobs = _jobs_from_config(run_folder)
     # apply filters
@@ -234,6 +235,14 @@ def _resubmit(
         jobs = [j for j in jobs if j["model_type"] == model_type]
     if pid is not None:
         jobs = [j for j in jobs if int(j["pid"]) == int(pid)]
+    # Filter on the data version too. run_config.json ACCUMULATES across every
+    # submit into this run folder, so one folder legitimately holds jobs for
+    # several datafiles (e.g. pilot5 and complete_pairs); without this filter a
+    # resubmit scoped to one of them also picks up the others, which is at best
+    # redundant work and at worst refits a data version you did not ask about.
+    # As with the other filters, omitting --datafile means "do not filter".
+    if datafile is not None:
+        jobs = [j for j in jobs if j.get("datafile") == datafile]
     missing: list[dict] = []
     for job in jobs:
         ds = job["dataset"]
@@ -383,6 +392,7 @@ def main() -> None:
             dataset=args.target if args.target != "all" else None,
             model_type=args.model_type,
             pid=args.pid,
+            datafile=args.datafile,
         )
         return
 

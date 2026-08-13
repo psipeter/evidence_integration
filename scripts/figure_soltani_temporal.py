@@ -7,8 +7,9 @@ Layout: 2x6
   convention for soltani figures — see figure_soltani_performance.py)
   Col 1 (~carrabin temporal panel A / T1): Performance error (RMSE to
     the RUNNING MEAN of the observed stimulus stream, NOT the fixed
-    generative true_mean/true_p -- see _add_running_mean_ground_truth's
-    own docstring for why) vs observation. Human always shown; pass
+    generative true_mean/true_p BY DEFAULT -- pass --gt_mode true to switch;
+    see _add_ground_truth's own docstring for how the two differ and for the
+    true_mean/true_p scale mismatch it handles) vs observation. Human always shown; pass
     --plot_models to add all 4 fitted models (Mean, LeakyIntegrator, PrimacyRecency,
     RL_lambda): mean +/- SEM across pids (per-pid RMSE computed first,
     collapsing over that pid's own trials, then mean/SEM across pids) --
@@ -151,7 +152,8 @@ def _to_pct(x: pd.Series, task: str) -> pd.Series:
     return (x + 1.0) * 50.0
 
 
-def _load_human(task: str, datafile: str | None = None) -> pd.DataFrame | None:
+def _load_human(task: str, datafile: str | None = None,
+                gt_mode: str = "running_mean") -> pd.DataFrame | None:
     """Human data for one task, on the [0,100] percent scale. Columns:
     [pid, trial, observation, qid, value, response, ground_truth].
     ground_truth is the RUNNING mean of `value` (see
@@ -174,25 +176,81 @@ def _load_human(task: str, datafile: str | None = None) -> pd.DataFrame | None:
     df = pd.read_pickle(path)
     out = df[["pid", "trial", "observation", "qid", "value"]].copy()
     out["response"] = _to_pct(df["response"], task)
-    out = _add_running_mean_ground_truth(out, task)
+    # Carry through whichever generative-truth column this task has, so
+    # gt_mode='true' can use it. numbers -> true_mean, colors -> true_p; they
+    # are on DIFFERENT scales, which _add_ground_truth handles.
+    for col in ("true_mean", "true_p"):
+        if col in df.columns:
+            out[col] = df[col]
+    out = _add_ground_truth(out, task, gt_mode=gt_mode)
     return out
 
 
-def _add_running_mean_ground_truth(df: pd.DataFrame, task: str) -> pd.DataFrame:
-    """Ground truth = the RUNNING mean/ratio of the observed stimulus
-    stream itself, per (pid, trial) -- i.e. what a perfect 'just average
-    what you've seen so far' agent would report at each observation --
-    NOT the fixed generative true_mean/true_p. Matches the same
-    running_mean/running_p convention already established elsewhere in
-    this project (scripts/plot_sequences.py's own gt_mode='running_mean';
-    task_backend's own live 'correct answer' panel shows real
-    participants exactly this quantity during the actual task, never the
-    fixed target). Requires `value` (raw stimulus, native pkl scale --
-    NOT yet through _to_pct) already present in df."""
+# Ground-truth conventions for col 1, mirroring scripts/plot_sequences.py's own
+# GT_MODES / --gt_mode toggle rather than inventing a second vocabulary.
+GT_MODES = ("running_mean", "true")
+
+# Axis-label wording per mode. "true mean/ratio" rather than naming a column,
+# since the underlying column differs by task (true_mean vs true_p).
+GT_LABEL = {"running_mean": "running mean", "true": "true mean/ratio"}
+
+
+def _add_ground_truth(df: pd.DataFrame, task: str,
+                      gt_mode: str = "running_mean") -> pd.DataFrame:
+    """Add a `ground_truth` column on the [0,100] percent scale.
+
+    gt_mode='running_mean' (default): the RUNNING mean/ratio of the observed
+      stimulus stream itself, per (pid, trial) -- what a perfect "average what
+      you've seen so far" agent would report at each observation. This is the
+      quantity task_backend's own live "correct answer" panel shows real
+      participants during the actual task; they are never shown the fixed
+      generative target. Error DECAYS toward 0 as the estimate converges.
+
+    gt_mode='true': the FIXED generative true_mean (numbers) / true_p (colors),
+      constant within a trial (verified: nunique==1 per (pid,trial) for both
+      tasks). Error PLATEAUS rather than decaying, at the sampling error between
+      that trial's actual drawn values and the mean they were drawn from -- so
+      the two modes answer different questions and are not rescalings of each
+      other. Matches plot_sequences.py's own historical default.
+
+    SCALE WARNING for gt_mode='true': build_from_df does NOT put these two
+    columns on the same scale. true_mean is rescaled to [-1,1] like
+    value/response (verified [-0.700, 0.700]), so it goes through _to_pct like
+    everything else. true_p is deliberately LEFT on its native [0,1]
+    probability scale (verified [0.133, 0.867]) even though colors' `response`
+    is on [-1,1] -- so it must be scaled by *100, NOT through _to_pct. Passing
+    true_p through _to_pct would silently map [0.133,0.867] to 57-93% instead of
+    13-87%. See utils/binary_transform.py's own module docstring, which flags
+    this same mismatch.
+
+    Requires `value` (raw stimulus, native pkl scale -- NOT yet through
+    _to_pct) already present in df for the running_mean mode.
+    """
+    if gt_mode not in GT_MODES:
+        raise ValueError(f"gt_mode must be one of {GT_MODES}, got {gt_mode!r}")
+
     df = df.sort_values(["pid", "trial", "observation"]).copy()
-    running = df.groupby(["pid", "trial"])["value"].transform(lambda s: s.expanding().mean())
-    df["ground_truth"] = _to_pct(running, task)
+
+    if gt_mode == "running_mean":
+        running = df.groupby(["pid", "trial"])["value"].transform(
+            lambda s: s.expanding().mean())
+        df["ground_truth"] = _to_pct(running, task)
+        return df
+
+    if task == "colors":
+        if "true_p" not in df.columns:
+            raise KeyError("gt_mode='true' needs a true_p column for colors")
+        df["ground_truth"] = df["true_p"] * 100.0      # native [0,1] -- see above
+    else:
+        if "true_mean" not in df.columns:
+            raise KeyError("gt_mode='true' needs a true_mean column for numbers")
+        df["ground_truth"] = _to_pct(df["true_mean"], task)
     return df
+
+
+# Back-compat alias: this was the only ground-truth function before the toggle.
+def _add_running_mean_ground_truth(df: pd.DataFrame, task: str) -> pd.DataFrame:
+    return _add_ground_truth(df, task, gt_mode="running_mean")
 
 
 def _load_model(task: str, model_type: str, run_dir: Path,
@@ -246,7 +304,8 @@ def _plot_hierarchical_line(ax, per_pid_df: pd.DataFrame, value_col: str,
 
 
 def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
-                            show_individual: bool, palette: dict) -> None:
+                            show_individual: bool, palette: dict,
+                            gt_mode: str = "running_mean") -> None:
     rmse_df = _rmse_per_pid_obs(human[["pid", "trial", "observation", "response"]], human)
 
     handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=1.8)]
@@ -273,7 +332,7 @@ def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFr
     obs_ticks = sorted(set(human["observation"]) | {o for m in models.values()
                                                     for o in m["observation"]})
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Performance error vs running mean (RMSE)")
+    ax.set_ylabel(f"Performance error vs {GT_LABEL[gt_mode]} (RMSE)")
     ax.set_xticks(obs_ticks)
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, ncol=1)
@@ -390,39 +449,73 @@ def _add_resid_prefix(human: pd.DataFrame) -> pd.DataFrame:
 
 # ── Col 3 — Residual variance growth (prefix only) ──────────────────────────
 
-def _variance_growth_stats(df: pd.DataFrame) -> pd.DataFrame | None:
+def _variance_growth_stats(df: pd.DataFrame, return_per_pid: bool = False):
     """Per-observation mean/SE of within-qid residual SD. Same hierarchy for
-    Human and every model, so their curves are directly comparable."""
+    Human and every model, so their curves are directly comparable.
+
+    return_per_pid=True also returns the intermediate per-(pid, observation)
+    frame, for the thin individual-pid overlay. That overlay matters more here
+    than it looks: the cross-pid SEM band is a BETWEEN-subject interval, while
+    the trend it sits on is a WITHIN-subject one, and absolute variability level
+    differs enormously across participants (numbers 0.5-10.0, colors 0.03-24.05
+    on complete_pairs). So a visually ambiguous band can coexist with a strong
+    per-pid trend -- for numbers, 23/27 pids have a positive slope, Wilcoxon
+    p=0.0004, against a band that looks marginal. Showing the individual lines
+    is what makes that heterogeneity legible rather than hiding it inside the
+    band. NOTE the aggregation itself is deliberately identical to
+    figure_carrabin_temporal.py's own panel D (std within (pid, obs, qid) ->
+    mean over qid within (pid, obs) -> mean/SD across pids, SE = SD/sqrt(n_pid))
+    and to cols 1-2 of this figure; do not switch these two columns to a
+    different error convention in isolation.
+    """
     df2 = _add_resid_prefix(df)
     MIN = 2
     grp = (df2.groupby(["pid", "observation", "qid"])["resid"]
            .apply(lambda x: x.std() if len(x) >= MIN else np.nan)
            .dropna().reset_index(name="std"))
     if grp.empty:
-        return None
+        return (None, None) if return_per_pid else None
     by_pid_obs = grp.groupby(["pid", "observation"])["std"].mean().reset_index()
     stats = by_pid_obs.groupby("observation")["std"].agg(["mean", "std"]).reset_index()
     n_pid = by_pid_obs["pid"].nunique()
     stats["se"] = stats["std"] / np.sqrt(n_pid)
+    if return_per_pid:
+        return stats, by_pid_obs
     return stats
 
 
 def _plot_panel_variance_growth(ax, human: pd.DataFrame,
                                 models: dict[str, pd.DataFrame] | None = None,
-                                palette: dict | None = None) -> None:
+                                palette: dict | None = None,
+                                show_individual: bool = True) -> None:
     palette = palette or {}
-    stats = _variance_growth_stats(human)
+    stats, per_pid = _variance_growth_stats(human, return_per_pid=True)
     if stats is None:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
 
     handles, labels = [], []
-    ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR, lw=1.8, ms=5)
+
+    # Human individual pids, same convention as cols 1-2 (Human only; models
+    # show mean/CI only) and gated by the same --show_individual/
+    # --hide_individual flag.
+    if show_individual:
+        for _, g in per_pid.groupby("pid"):
+            g = g.sort_values("observation")
+            ax.plot(g["observation"], g["std"], color=INDIV_COLOR,
+                    lw=0.6, alpha=0.5, zorder=2)
+
+    ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR,
+            lw=1.8, ms=5, zorder=5)
     ax.fill_between(stats["observation"], stats["mean"] - stats["se"],
-                    stats["mean"] + stats["se"], color=HUMAN_COLOR, alpha=0.25)
+                    stats["mean"] + stats["se"], color=HUMAN_COLOR, alpha=0.25,
+                    zorder=3)
     handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5))
     labels.append("Human")
+    if show_individual:
+        handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
+        labels.append("Individual pids")
 
     for i, (model_type, mdf) in enumerate(_stochastic_models(models or {}, human)):
         mstats = _variance_growth_stats(mdf)
@@ -447,12 +540,24 @@ def _plot_panel_variance_growth(ax, human: pd.DataFrame,
 
 # ── Col 4 — Within-trial residual autocorrelation (prefix only) ────────────
 
-def _autocorr_stats(df: pd.DataFrame):
+def _autocorr_stats(df: pd.DataFrame, return_per_pid: bool = False):
     """Cross-pid mean/SEM of within-trial residual autocorrelation at lags 1-3.
 
     Returns (lags, means, sems), or the string "no_repeats" / "insufficient"
     when it cannot be computed -- the caller renders the message, so this stays
-    reusable for Human and for each stochastic model.
+    reusable for Human and for each stochastic model. With return_per_pid=True,
+    appends the per-pid {lag: r} mapping for the thin individual-pid overlay.
+
+    As in col 3, the SEM band here is BETWEEN-subject while the lag-decay claim
+    is WITHIN-subject: for numbers, 13/14 pids have r(lag1) > r(lag3), Wilcoxon
+    p=0.0002, which a between-pid band understates. Individual lines make that
+    visible without changing the error convention cols 1-2 use.
+
+    Note lag 3 is much weaker here than in carrabin's own panel: the prefix
+    restriction (observation < PREFIX_LENGTH=4) leaves 3/2/1 residual pairs per
+    trial at lags 1/2/3, versus carrabin's 4/3/2 over its full 5-observation
+    sequence. Lag 3 is therefore a single pair per trial and should not be
+    over-read; it is also why the zero-variance guard below is needed at all.
     """
     df2 = _add_resid_prefix(df)
     # A qid with only 1 repeat produces a trivially-zero residual (its
@@ -472,8 +577,12 @@ def _autocorr_stats(df: pd.DataFrame):
         return "no_repeats"
     lags = [1, 2, 3]
     pid_rs: dict[int, list[float]] = {lag: [] for lag in lags}
+    # pid -> {lag: r}. pid_rs above deliberately discards which pid each value
+    # came from (it only needs the cross-pid aggregate), so track it separately
+    # rather than changing that structure.
+    per_pid_rs: dict[object, dict[int, float]] = {}
 
-    for _, pid_df in df2.groupby("pid"):
+    for pid_key, pid_df in df2.groupby("pid"):
         for lag in lags:
             pairs = []
             for (_, _), g in pid_df.groupby(["pid", "trial"]):
@@ -509,6 +618,7 @@ def _autocorr_stats(df: pd.DataFrame):
                 continue
             rv, _ = pearsonr(arr[:, 0], arr[:, 1])
             pid_rs[lag].append(rv)
+            per_pid_rs.setdefault(pid_key, {})[lag] = rv
 
     if all(len(v) == 0 for v in pid_rs.values()):
         return "insufficient"
@@ -516,27 +626,47 @@ def _autocorr_stats(df: pd.DataFrame):
     means = np.array([np.mean(pid_rs[lag]) if pid_rs[lag] else np.nan for lag in lags])
     sems = np.array([np.std(pid_rs[lag]) / np.sqrt(len(pid_rs[lag]))
                     if len(pid_rs[lag]) > 1 else np.nan for lag in lags])
+    if return_per_pid:
+        return lags, means, sems, per_pid_rs
     return lags, means, sems
 
 
 def _plot_panel_autocorr(ax, human: pd.DataFrame,
                          models: dict[str, pd.DataFrame] | None = None,
-                         palette: dict | None = None) -> None:
+                         palette: dict | None = None,
+                         show_individual: bool = True) -> None:
     palette = palette or {}
-    res = _autocorr_stats(human)
+    res = _autocorr_stats(human, return_per_pid=True)
     if isinstance(res, str):
         msg = ("Insufficient data\n(no qid repeats for this task)"
                if res == "no_repeats" else "Insufficient data")
         ax.text(0.5, 0.5, msg, ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
-    lags, means, sems = res
+    lags, means, sems, per_pid_rs = res
 
     handles, labels = [], []
-    ax.plot(lags, means, "o-", color=HUMAN_COLOR, lw=1.8, ms=5)
-    ax.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR, alpha=0.2)
+
+    # Human individual pids, same convention as cols 1-3. A pid is drawn only
+    # across the lags it actually has: the zero-variance and <3-pairs guards
+    # above can drop individual (pid, lag) points, so joining across a gap
+    # would imply a value that was never computed.
+    if show_individual:
+        for _, lag_map in per_pid_rs.items():
+            xs = [lag for lag in lags if lag in lag_map]
+            if len(xs) < 2:
+                continue
+            ax.plot(xs, [lag_map[lag] for lag in xs], color=INDIV_COLOR,
+                    lw=0.6, alpha=0.5, zorder=2)
+
+    ax.plot(lags, means, "o-", color=HUMAN_COLOR, lw=1.8, ms=5, zorder=5)
+    ax.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR,
+                    alpha=0.2, zorder=3)
     handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5))
     labels.append("Human")
+    if show_individual:
+        handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
+        labels.append("Individual pids")
 
     for i, (model_type, mdf) in enumerate(_stochastic_models(models or {}, human)):
         mres = _autocorr_stats(mdf)
@@ -550,7 +680,6 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame,
         handles.append(Line2D([0], [0], color=color, lw=1.5))
         labels.append(model_type)
 
-    ax.axhline(0, color="0.7", lw=0.8, ls="--")
     ax.set_xlabel("Lag (observations, within prefix)")
     ax.set_ylabel("Autocorrelation of trial-to-trial deviations")
     ax.set_xticks(lags)
@@ -743,8 +872,12 @@ def main() -> None:
                              "soltani_numbers and soltani_colors coexist.")
     parser.add_argument("--show_individual", dest="show_individual",
                         action="store_true", default=True,
-                        help="Overlay each pid as a thin grey line in cols 1-2 "
-                             "(Human only; default on)")
+                        help="Overlay each pid as a thin grey line in cols 1-4 "
+                             "(Human only; models show mean/CI regardless). "
+                             "Default on. Worth turning off for publication: "
+                             "individual lines stretch the y-axis considerably, "
+                             "since absolute variability differs by up to ~770x "
+                             "across participants in cols 3-4.")
     parser.add_argument("--hide_individual", dest="show_individual",
                         action="store_false")
     parser.add_argument("--plot_models", dest="plot_models",
@@ -756,6 +889,14 @@ def main() -> None:
                              "RL_lambda. Cols 3-4 are human-only by necessity, and "
                              "col 6 (cross-task lambda) is human-only by design -- "
                              "see the module docstring for both.")
+    parser.add_argument("--gt_mode", choices=GT_MODES, default="running_mean",
+                        help="Col 1 ground truth. 'running_mean' (default): the "
+                             "running mean/ratio of the observations so far -- what "
+                             "the task's own live feedback shows participants, so "
+                             "error decays toward 0. 'true': the fixed generative "
+                             "true_mean/true_p, so error PLATEAUS at that trial's "
+                             "sampling error instead. Mirrors plot_sequences.py's "
+                             "own --gt_mode.")
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
                             "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
@@ -778,7 +919,7 @@ def main() -> None:
 
     for row, task in enumerate(TASK_ROWS):
         print(f"task-{task}:")
-        human = _load_human(task, args.datafile)
+        human = _load_human(task, args.datafile, args.gt_mode)
         if human is None:
             print(f"  no data file found for this task/datafile combination -- skipping row")
             for col in range(6):
@@ -795,11 +936,14 @@ def main() -> None:
                 if mdf is not None:
                     models[model_type] = mdf
 
-        _plot_panel_performance(axes[row, 0], human, models, args.show_individual, palette)
+        _plot_panel_performance(axes[row, 0], human, models, args.show_individual,
+                                palette, args.gt_mode)
         _plot_panel_delta(axes[row, 1], human, models, args.show_individual, palette)
         human_for_repeats = add_quasi_qids(human) if task == "colors" else human
-        _plot_panel_variance_growth(axes[row, 2], human_for_repeats, models, palette)
-        _plot_panel_autocorr(axes[row, 3], human_for_repeats, models, palette)
+        _plot_panel_variance_growth(axes[row, 2], human_for_repeats, models,
+                                    palette, args.show_individual)
+        _plot_panel_autocorr(axes[row, 3], human_for_repeats, models,
+                             palette, args.show_individual)
         _plot_panel_splithalf_lambda(axes[row, 4], human, models, palette)
         lambda_by_task[task] = _fit_lambda_curve_fit(human)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
