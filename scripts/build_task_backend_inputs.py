@@ -45,6 +45,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build_model_inputs import build_from_df
+from utils.participant_filters import (
+    DEFAULT_EXCLUSION_METHOD,
+    EXCLUSION_METHODS,
+)
 
 TASK_BACKEND_DIR = Path(__file__).resolve().parents[1] / "task_backend"
 TASK_INTERNAL = {"numbers": "numbers", "colors": "colors"}
@@ -144,7 +148,11 @@ def list_candidates(pool_root: Path, task: str) -> None:
 
 
 def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[str]],
-                apply_filters: bool = True) -> None:
+                apply_filters: bool = True,
+                exclusion_method: str = "contingency",
+                max_error_sd: float | None = None,
+                min_skill: float | None = None,
+                require_both_tasks: bool = True) -> None:
     """pids_by_task: {'numbers': [...], 'colors': [...]} -- either list can
     be empty/omitted if this pilot didn't touch that task. Requires every
     listed pid to actually have a 'finished' row for that task -- reports
@@ -177,7 +185,11 @@ def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[s
     combined = pd.concat(frames, ignore_index=True)
     build_from_df(combined, out_name_numbers=f"soltani_numbers_{out_prefix}",
                  out_name_colors=f"soltani_colors_{out_prefix}",
-                 apply_filters=apply_filters)
+                 apply_filters=apply_filters,
+                 exclusion_method=exclusion_method,
+                 max_error_sd=max_error_sd,
+                 min_skill=min_skill,
+                 require_both_tasks=require_both_tasks)
     print("\nJOB_COMPLETE")
 
 
@@ -190,6 +202,34 @@ def main():
                    help="Output name suffix, e.g. 'pilot4' -> soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl")
     p.add_argument("--numbers_pids", default="", help="Comma-separated real prolific_pids for the numbers task")
     p.add_argument("--colors_pids", default="", help="Comma-separated real prolific_pids for the colors task")
+    p.add_argument("--exclusion_method", choices=EXCLUSION_METHODS,
+                   default=DEFAULT_EXCLUSION_METHOD,
+                   help="Which criterion set decides exclusion. 'contingency' "
+                        "(default): the three Cohen's f2 tests -- model-BASED, and "
+                        "excludes 42%%/32%% of complete_pairs numbers/colors. "
+                        "'performance': carrabin's own rule, a gross outlier on "
+                        "mean absolute error vs the true generative parameter -- "
+                        "model-FREE, and closer to the 16%%/17%% rates carrabin and "
+                        "yoo report. Both are always computed; only the decision "
+                        "differs. See utils/participant_filters.py.")
+    p.add_argument("--max_error_sd", type=float, default=None,
+                   help="Threshold for --exclusion_method performance: SDs above "
+                        "the retained group's mean absolute error. Default 2.0. "
+                        "carrabin's literal >6 SD excludes ZERO participants here, "
+                        "because our error distribution is continuous where theirs "
+                        "had a 6-SD gap.")
+    p.add_argument("--min_skill", type=float, default=None,
+                   help="Threshold for --exclusion_method baseline: skill below "
+                        "this is excluded. Default 0.0, meaning 'did not beat the "
+                        "best trivial strategy the instructions rule out' -- "
+                        "principled, so it needs no tuning.")
+    p.add_argument("--per_task_exclusion", action="store_true",
+                   help="Exclude per (pid, task) instead of per SUBJECT. Default "
+                        "is subject-level: a participant failing in either task is "
+                        "dropped from BOTH, so every task keeps the same people. "
+                        "Per-task exclusion degrades within-subject cross-task "
+                        "panels whenever the criterion is not equally strict in "
+                        "both tasks -- see filter_participants' docstring.")
     p.add_argument("--no_filter", action="store_true",
                    help="Skip utils.participant_filters entirely -- keep every "
                         "participant. For diagnosing how much the exclusion "
@@ -231,7 +271,11 @@ def main():
             "colors": [p.strip() for p in args.colors_pids.split(",") if p.strip()],
         }
     build_pilot(pool_root, args.pilot, pids_by_task,
-                apply_filters=not args.no_filter)
+                apply_filters=not args.no_filter,
+                exclusion_method=args.exclusion_method,
+                max_error_sd=args.max_error_sd,
+                min_skill=args.min_skill,
+                require_both_tasks=not args.per_task_exclusion)
 
 
 if __name__ == "__main__":

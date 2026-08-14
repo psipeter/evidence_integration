@@ -362,14 +362,239 @@ def flag_noncontingent_magnitude(df_task: pd.DataFrame, task: str,
     return pd.DataFrame(rows)
 
 
+# ── Criterion set 2: GROSS PERFORMANCE OUTLIER (model-free) ─────────────────
+#
+# The f2 criteria above test whether updating is CONTINGENT on prediction error,
+# which is mechanistically upstream of what the temporal figures measure (error
+# decay, |delta response| decay, residual variance growth). That makes them open
+# to the charge of excluding participants who "didn't fit the pattern we wanted"
+# rather than ones who didn't follow the instructions -- and on complete_pairs
+# they exclude 25/60 (42%) for numbers and 19/60 (32%) for colors, 33/60 (55%) as
+# a union.
+#
+# For comparison, the two published datasets this project fits:
+#   carrabin (Prat-Carrabin 2024): excluded 4/25 (16%) on ONE model-free quantity
+#     -- mean absolute error against the true generative parameter. The excluded
+#     group averaged .263 (SD .0298) vs .176 (SD .0132) for the retained 21, a
+#     separation of more than 6 SDs.
+#   yoo: excluded 8/46 (17%), of which SEVEN were fMRI-technical (1 structural
+#     abnormality, 6 head motion >3mm) and exactly ONE was behavioural -- a
+#     post-experiment questionnaire in which the subject said they tracked
+#     pairwise differences rather than the average. Behavioural rate ~2%.
+#
+# Neither used a model-based contingency test, and both are 2-4x more
+# conservative than ours. This criterion set implements carrabin's rule.
+#
+# NOTE our error distribution is CONTINUOUS where carrabin's had a 6-SD gap, so
+# carrabin's literal >6 SD threshold excludes ZERO participants here. Measured on
+# complete_pairs: >3 SD excludes 6 (10%) numbers / 1 (2%) colors; >2 SD excludes
+# 9 (15%) each; the single largest gap is one participant in each task. Default
+# is 2 SD. The two criterion sets largely agree on WHO is worst -- 19 of the 25
+# f2-excluded numbers pids are among the 25 worst by absolute error (16 of 19 for
+# colors) -- so this draws the same line much further up the same distribution.
+
+DEFAULT_MAX_ERROR_SD = 2.0   # SDs above the retained group's mean
+
+
+def flag_performance_outlier(df_task: pd.DataFrame, task: str,
+                             max_error_sd: float = DEFAULT_MAX_ERROR_SD) -> pd.DataFrame:
+    """Flag participants whose mean absolute error against the TRUE generative
+    parameter sits more than `max_error_sd` SDs above the mean of the retained
+    group. Model-free: references no decay/integration model, only the task's own
+    stated objective.
+
+    Applied iteratively from the worst participant down, recomputing the retained
+    group's mean and SD each time, so a single extreme participant cannot inflate
+    the SD and thereby shield the next one. Stops at the first participant who
+    falls inside the threshold.
+
+    `df_task` must be single-task and carry the truth column for that task
+    (true_mean for numbers, true_p for colors); `response` and the truth are
+    compared on the NATIVE response scale, as carrabin's rule does.
+    """
+    _assert_single_task(df_task)
+    d = _dedup(df_task).copy()
+
+    if task == "colors":
+        if "true_p" not in d.columns:
+            raise KeyError("flag_performance_outlier needs true_p for colors")
+        truth = pd.to_numeric(d["true_p"], errors="coerce") * 100.0
+    else:
+        if "true_mean" not in d.columns:
+            raise KeyError("flag_performance_outlier needs true_mean for numbers")
+        truth = pd.to_numeric(d["true_mean"], errors="coerce")
+
+    d["abs_err"] = (pd.to_numeric(d["response"], errors="coerce") - truth).abs()
+    per = (d.dropna(subset=["abs_err"])
+           .groupby("prolific_pid")["abs_err"].mean().sort_values())
+
+    flagged: set = set()
+    vals = per.values.copy()
+    names = list(per.index)
+    i = len(vals) - 1
+    while i > 1:
+        rest = vals[:i]
+        sd = rest.std(ddof=1)
+        if sd > 0 and vals[i] > rest.mean() + max_error_sd * sd:
+            flagged.add(names[i])
+            i -= 1
+        else:
+            break
+
+    return pd.DataFrame({
+        "prolific_pid": names,
+        "task": task,
+        "mean_abs_error": per.values,
+        "flagged_performance_outlier": [n in flagged for n in names],
+    })
+
+
 # ── Combined report + filtering ─────────────────────────────────────────────
+
+# ── Criterion set 3: WORSE THAN A TRIVIAL BASELINE (model-free) ─────────────
+#
+# The task instruction is "report the mean of ALL observations so far". Two
+# reference agents can be evaluated on each participant's OWN sequences:
+#
+#   optimal   report the running mean            -> lower bound on achievable error
+#   last      report only the latest observation -> what "not averaging" achieves
+#
+# skill = (err_last - err_pid) / (err_last - err_optimal)
+#
+#   skill >= 1  at the optimal running-mean level
+#   skill ~  0  no better than reporting only the most recent observation
+#   skill <  0  WORSE than that -- cannot be following the instruction at all
+#
+# ONE baseline, deliberately: "report the most recent observation" is the single
+# strategy the instruction most directly rules out ("the mean of ALL observations
+# so far"). An earlier version also tried a constant-midpoint baseline and used
+# whichever bound tighter per task, which made the criterion's MEANING
+# task-dependent -- for colors the midpoint bound and for numbers the last value.
+# Removed for interpretability: one criterion, one sentence, same meaning in both
+# tasks.
+#
+# CONSEQUENCE, worth knowing: for colors this baseline is near-VACUOUS on its own.
+# Reporting the last binary draw means slamming to 0% or 100% every trial (error
+# 39.35 vs optimal 11.75), so almost any behaviour beats it and skill < 0 excludes
+# essentially nobody. Colors exclusions therefore come almost entirely from the
+# both-tasks requirement propagating numbers' exclusions -- see
+# `require_both_tasks` in filter_participants.
+#
+# WHY THIS RATHER THAN "no improvement with more observations". That would be the
+# natural way to phrase an instruction-compliance test, but error-decay-with-
+# observation is exactly what temporal col 1 plots, and |delta response| decay is
+# col 2 -- excluding on the shape and then reporting the shape makes those panels
+# partly definitional. This is a LEVEL comparison against a NAMED alternative
+# strategy, so it shares no quantity with those panels.
+#
+# THE THRESHOLD NEEDS NO TUNING: skill < 0 means "did not beat a strategy the
+# instructions rule out", which is principled in a way that a chosen SD multiple
+# is not.
+#
+# WHAT IT FOUND, and why it settles the "are we excluding too many?" question:
+# skill < 0 excludes 31/60 (52%) for numbers and 24/60 (40%) for colors -- and it
+# picks out 23 of the 25 and 18 of the 19 participants the CONTINGENCY criteria
+# exclude. So an independent, model-free, non-circular criterion agrees on
+# essentially the same people. The high exclusion rate is not an artefact of an
+# aggressive model-based filter: roughly half of participants really do perform
+# worse than ignoring all but one observation, or worse than answering "50%"
+# every time. Note this is well above carrabin's 16% and yoo's 17%, but both were
+# supervised lab studies (yoo paying a $35 base); an unsupervised 32-trial x
+# 15-observation Prolific session is a different population.
+
+DEFAULT_MIN_SKILL = 0.0
+
+
+def flag_below_baseline(df_task: pd.DataFrame, task: str,
+                        min_skill: float = DEFAULT_MIN_SKILL) -> pd.DataFrame:
+    """Flag participants who do not beat the best trivial strategy on their own
+    sequences. Model-free, and shares no quantity with temporal cols 1-2 -- see
+    the block comment above.
+
+    `df_task` must be single-task and carry that task's truth column.
+    """
+    _assert_single_task(df_task)
+    d = _dedup(df_task).copy()
+
+    d["value_num"] = pd.to_numeric(d["value"], errors="coerce")
+    d["resp_num"] = pd.to_numeric(d["response"], errors="coerce")
+    if task == "colors":
+        if "true_p" not in d.columns:
+            raise KeyError("flag_below_baseline needs true_p for colors")
+        d["truth"] = pd.to_numeric(d["true_p"], errors="coerce") * 100.0
+        # value is +-1 (blue/red) -> the response scale, as _value_on_response_scale
+        d["val_scale"] = np.where(d["value_num"] == 1, 100.0, 0.0)
+    else:
+        if "true_mean" not in d.columns:
+            raise KeyError("flag_below_baseline needs true_mean for numbers")
+        d["truth"] = pd.to_numeric(d["true_mean"], errors="coerce")
+        d["val_scale"] = d["value_num"]
+
+    d = d.sort_values(["prolific_pid", "trial", "observation"])
+    d["running"] = (d.groupby(["prolific_pid", "trial"])["val_scale"]
+                    .transform(lambda s: s.expanding().mean()))
+
+    rows = []
+    for pid, g in d.groupby("prolific_pid"):
+        g = g.dropna(subset=["resp_num", "truth", "val_scale"])
+        if g.empty:
+            rows.append(dict(prolific_pid=pid, task=task, skill=np.nan,
+                             err_pid=np.nan, err_optimal=np.nan,
+                             err_baseline=np.nan, baseline_used="none"))
+            continue
+        err_pid = (g["resp_num"] - g["truth"]).abs().mean()
+        err_opt = (g["running"] - g["truth"]).abs().mean()
+        err_base = (g["val_scale"] - g["truth"]).abs().mean()   # last observation
+        skill = ((err_base - err_pid) / (err_base - err_opt)
+                 if err_base > err_opt else np.nan)
+        rows.append(dict(prolific_pid=pid, task=task, skill=skill,
+                         err_pid=err_pid, err_optimal=err_opt,
+                         err_baseline=err_base, baseline_used="last_value"))
+
+    out = pd.DataFrame(rows)
+    # NaN skill means the baseline was already at/below optimal for this pid --
+    # the comparison is undefined, so do not flag on it.
+    out["flagged_below_baseline"] = out["skill"].lt(min_skill).fillna(False)
+    return out
+
+
+# Which criterion set decides `excluded`. Both are always COMPUTED and reported;
+# only the `excluded` column differs, so a report always carries the diagnostics
+# for the method you did not choose.
+EXCLUSION_METHODS = ("contingency", "performance", "baseline")
+DEFAULT_EXCLUSION_METHOD = "contingency"
+
 
 def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors", "numbers"),
                              min_f2: float = DEFAULT_MIN_F2,
-                             min_updates: int = DEFAULT_MIN_UPDATES) -> pd.DataFrame:
+                             min_updates: int = DEFAULT_MIN_UPDATES,
+                             method: str = DEFAULT_EXCLUSION_METHOD,
+                             max_error_sd: float = DEFAULT_MAX_ERROR_SD,
+                             min_skill: float = DEFAULT_MIN_SKILL) -> pd.DataFrame:
     """Full diagnostic report, one row per (prolific_pid, task) present in
     `df`. `df` may span multiple tasks — this function does the required
-    per-task slicing before calling into any criterion itself."""
+    per-task slicing before calling into any criterion itself.
+
+    `method` selects which criterion set drives the `excluded` column:
+      'contingency'  the three Cohen's f2 tests (recency-only, non-contingent
+                     sign, non-contingent magnitude). Model-BASED: it asks
+                     whether updating is contingent on prediction error, which
+                     is upstream of what the temporal figures measure.
+      'performance'  gross performance outlier on mean absolute error against the
+                     true generative parameter, carrabin's own rule. Model-FREE.
+      'baseline'     did not beat the best TRIVIAL strategy (latest observation,
+                     or the scale midpoint) on their own sequences. Model-FREE,
+                     needs no threshold tuning, and shares no quantity with
+                     temporal cols 1-2. See flag_below_baseline.
+    Both criterion sets are computed either way, so the report always carries the
+    diagnostics for the method you did not pick -- which is the point: the
+    contingency measures remain reportable as a description of heterogeneity
+    (e.g. "n of N retained participants showed recency-only updating") even when
+    they are not driving exclusion.
+    """
+    if method not in EXCLUSION_METHODS:
+        raise ValueError(f"method must be one of {EXCLUSION_METHODS}, got {method!r}")
+
     reports = []
     for task in tasks:
         df_task = df[df["task"] == task]
@@ -378,8 +603,12 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
         r1 = flag_recency_only(df_task, task, min_f2, min_updates)
         r2 = flag_noncontingent_sign(df_task, task, min_f2, min_updates).drop(columns=["n_updates", "note"])
         r3 = flag_noncontingent_magnitude(df_task, task, min_f2, min_updates).drop(columns=["n_updates", "note"])
+        r4 = flag_performance_outlier(df_task, task, max_error_sd)
+        r5 = flag_below_baseline(df_task, task, min_skill)
         merged = r1.merge(r2, on=["prolific_pid", "task"], how="outer")
         merged = merged.merge(r3, on=["prolific_pid", "task"], how="outer")
+        merged = merged.merge(r4, on=["prolific_pid", "task"], how="outer")
+        merged = merged.merge(r5, on=["prolific_pid", "task"], how="outer")
         reports.append(merged)
 
     if not reports:
@@ -387,12 +616,23 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
                                      "f2_recency", "flagged_recency_only",
                                      "f2_sign", "flagged_noncontingent_sign",
                                      "f2_magnitude", "flagged_noncontingent_magnitude",
-                                     "excluded"])
+                                     "mean_abs_error", "flagged_performance_outlier",
+                                     "skill", "err_pid", "err_optimal",
+                                     "err_baseline", "baseline_used",
+                                     "flagged_below_baseline", "excluded"])
 
     report = pd.concat(reports, ignore_index=True)
-    report["excluded"] = (report["flagged_recency_only"].fillna(False) |
-                          report["flagged_noncontingent_sign"].fillna(False) |
-                          report["flagged_noncontingent_magnitude"].fillna(False))
+    report["flagged_any_contingency"] = (
+        report["flagged_recency_only"].fillna(False) |
+        report["flagged_noncontingent_sign"].fillna(False) |
+        report["flagged_noncontingent_magnitude"].fillna(False))
+    if method == "contingency":
+        report["excluded"] = report["flagged_any_contingency"]
+    elif method == "performance":
+        report["excluded"] = report["flagged_performance_outlier"].fillna(False)
+    else:
+        report["excluded"] = report["flagged_below_baseline"].fillna(False)
+    report.attrs["exclusion_method"] = method
     return report
 
 
@@ -404,10 +644,32 @@ def excluded_pairs(df: pd.DataFrame, **kwargs) -> set[tuple[str, str]]:
 
 
 def filter_participants(df: pd.DataFrame, report: pd.DataFrame | None = None,
-                        verbose: bool = True, **kwargs) -> pd.DataFrame:
+                        verbose: bool = True, require_both_tasks: bool = True,
+                        **kwargs) -> pd.DataFrame:
     """Return `df` with rows belonging to any excluded (prolific_pid, task)
-    pair removed. A participant excluded from one task keeps their data
-    from the other task, if they did both and only failed one.
+    pair removed.
+
+    `require_both_tasks=True` (default) makes exclusion SUBJECT-level: a
+    participant who fails in either task is dropped from BOTH, so every task ends
+    up with the same participants. Set False for the older per-(pid, task)
+    behaviour, where a participant excluded from one task kept their data from
+    the other.
+
+    Subject-level is the default because per-task exclusion silently degrades
+    every WITHIN-SUBJECT cross-task analysis whenever the criterion is not
+    equally strict in both tasks. Measured directly: under the 'baseline' method
+    with per-task exclusion, numbers retained 29 and colors 36, and the 26-pid
+    intersection was a differently-selected group from either sample -- the
+    cross-task lambda correlation fell to r=0.331 (p=0.099) from r=0.587
+    (p=0.0013) under a symmetric filter. That was NOT a power loss or a
+    reliability loss: lambda's split-half reliability was if anything higher
+    (colors 0.836 vs 0.796), the attenuation ceilings were indistinguishable
+    (0.791 vs 0.780), and lambda's SD and range were unchanged -- so the drop was
+    purely the composition of the intersection. Requiring both tasks makes the
+    intersection the sample by construction.
+
+    Only applies when `df` actually spans more than one task; single-task frames
+    are unaffected.
 
     Pass a pre-computed `report` (from compute_exclusion_report) to reuse
     it and avoid recomputing; otherwise one is computed from `df` using
@@ -418,11 +680,35 @@ def filter_participants(df: pd.DataFrame, report: pd.DataFrame | None = None,
     excl = report[report["excluded"]]
     excl_pairs = set(zip(excl["prolific_pid"], excl["task"]))
 
+    tasks_present = sorted(df["task"].unique())
+    n_propagated = 0
+    if require_both_tasks and len(tasks_present) > 1:
+        failed_any = {pid for pid, _ in excl_pairs}
+        expanded = {(pid, t) for pid in failed_any for t in tasks_present}
+        n_propagated = len(expanded) - len(excl_pairs)
+        excl_pairs = expanded
+
     if verbose:
+        method = report.attrs.get("exclusion_method", DEFAULT_EXCLUSION_METHOD)
+        if n_propagated:
+            print(f"require_both_tasks: propagated {n_propagated} additional "
+                  f"(pid, task) exclusion(s) so every task keeps the same "
+                  f"{len(set(df['prolific_pid'])) - len({p for p, _ in excl_pairs})} "
+                  f"participants")
         if excl_pairs:
-            print(f"Excluding {len(excl_pairs)} (prolific_pid, task) pair(s):")
+            print(f"Excluding {len(excl_pairs)} (prolific_pid, task) pair(s) "
+                  f"[method={method}]:")
             for _, row in excl.iterrows():
                 reasons = []
+                if row.get("flagged_below_baseline"):
+                    sk = row.get("skill")
+                    sk_str = f"{sk:.3f}" if pd.notna(sk) else "undefined"
+                    reasons.append(f"below_baseline (skill={sk_str} vs "
+                                   f"{row.get('baseline_used')})")
+                if row.get("flagged_performance_outlier"):
+                    err = row.get("mean_abs_error")
+                    err_str = f"{err:.2f}" if pd.notna(err) else "undefined"
+                    reasons.append(f"performance_outlier (mean |error|={err_str})")
                 if row.get("flagged_recency_only"):
                     f2_str = f"{row['f2_recency']:.4f}" if pd.notna(row['f2_recency']) else "undefined"
                     reasons.append(f"recency_only (f2={f2_str})")
@@ -434,7 +720,7 @@ def filter_participants(df: pd.DataFrame, report: pd.DataFrame | None = None,
                     reasons.append(f"noncontingent_magnitude (f2={f2_str})")
                 print(f"  {row['prolific_pid']} / {row['task']}: {', '.join(reasons)}")
         else:
-            print("No participants excluded.")
+            print(f"No participants excluded [method={method}].")
 
     keep_mask = ~df.apply(lambda r: (r["prolific_pid"], r["task"]) in excl_pairs, axis=1)
     return df[keep_mask].copy()

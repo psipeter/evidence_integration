@@ -196,14 +196,18 @@ keyed 1..n) needs an explicit guard. The known cases are already handled:
   from Supabase, instead of passing `--numbers_pids`/`--colors_pids` by hand. No
   cohort pid lists are recorded in this repo, so this is the only reproducible
   way to re-select the same people.
+- `--exclusion_method {contingency,performance,baseline}` selects WHICH criterion
+  set decides exclusion, and `--per_task_exclusion` opts out of the default
+  subject-level policy. See "Participant exclusion criteria" for all three and
+  the measured effect of each.
 - `--no_filter` skips `utils/participant_filters` entirely (also
   `build_from_df(apply_filters=False)`). For diagnosing how much the exclusion
   criteria change a result -- NOT for published output; it prints a warning.
-  On complete_pairs, 60 participants finished both tasks and the filters keep 27
-  (55% excluded); the excluded group roughly doubles both the mean and the SD of
-  performance error (numbers 0.107 -> 0.201 mean, 0.074 -> 0.141 SD), and the
-  MEDIAN moves as much as the mean, i.e. they are systematically worse rather
-  than a noisy tail.
+  On complete_pairs, 60 participants finished both tasks; `contingency` keeps 27
+  (55% excluded), `baseline`+require_both keeps 29, `performance` keeps 44. The
+  excluded group roughly doubles both the mean and the SD of performance error
+  (numbers 0.107 -> 0.201 mean, 0.074 -> 0.141 SD), and the MEDIAN moves as much
+  as the mean, i.e. they are systematically worse rather than a noisy tail.
 - Integer pids are derived from whoever SURVIVES filtering, so a filtered and an
   unfiltered build assign different pids to the same people. The two are
   comparable in aggregate only, never pid-by-pid.
@@ -506,6 +510,84 @@ mapping does guarantee). The real `prolific_pid` never appears in the
 saved pkl.
 
 ### Participant exclusion criteria (`utils/participant_filters.py`)
+
+THREE CANDIDATE CRITERION SETS, selected by `--exclusion_method`. All three are
+always COMPUTED and appear in the report; only the `excluded` column differs, so
+a report always carries the diagnostics for the methods you did not pick. None is
+settled -- they are candidates being compared.
+
+| method | basis | numbers | colors | notes |
+|--------|-------|---------|--------|-------|
+| `contingency` (default) | three Cohen's f² tests | 25/60 (42%) | 19/60 (32%) | model-BASED |
+| `performance` | carrabin's gross-outlier rule, `--max_error_sd` (default 2.0) | 9/60 (15%) | 9/60 (15%) | model-free |
+| `baseline` | did not beat "report the most recent observation", `--min_skill` (default 0.0) | 31/60 (52%) | ~0 | model-free, untuned threshold |
+
+**`require_both_tasks` is the DEFAULT** (opt out with `--per_task_exclusion`):
+a participant failing in either task is dropped from BOTH, so every task keeps
+the same people. Per-task exclusion silently degrades every WITHIN-SUBJECT
+cross-task panel (temporal col 6, variability col 3) whenever the criterion is
+not equally strict in both tasks. Measured directly under `baseline` with
+per-task exclusion: numbers retained 29 and colors 36, and the 26-pid
+intersection was a differently-selected group from either sample -- the
+cross-task λ correlation fell to r=0.331 (p=0.099) from r=0.587 (p=0.0013).
+That was NOT power or reliability: λ's split-half reliability was if anything
+HIGHER (colors 0.836 vs 0.796), the attenuation ceilings were indistinguishable
+(0.791 vs 0.780), and λ's SD and range were unchanged. Purely the composition of
+the intersection. Requiring both tasks makes the intersection the sample by
+construction, and restored r=0.409 (p=0.028) at n=29.
+
+**Published precedent, for calibration.** carrabin (Prat-Carrabin 2024) excluded
+4/25 (16%) on ONE model-free quantity -- mean absolute error against the true
+generative parameter, with the excluded group at .263 (SD .0298) against .176
+(SD .0132), a >6 SD separation. yoo excluded 8/46 (17%), of which SEVEN were
+fMRI-technical (1 structural abnormality, 6 head motion >3mm) and exactly ONE was
+behavioural, via a post-experiment questionnaire in which the subject said they
+tracked pairwise differences rather than the average. Neither used a model-based
+contingency test. Our rates are higher, but both were supervised lab studies (yoo
+paying a $35 base) against an unsupervised 32-trial × 15-observation Prolific
+session. NOTE carrabin's literal >6 SD threshold excludes ZERO participants here,
+because our error distribution is CONTINUOUS where theirs had a 6-SD gap.
+
+**Why the high rate is probably real, not an artefact of an aggressive filter.**
+The `baseline` criterion is model-free, shares no quantity with the temporal
+panels, and has an untuned threshold -- and it independently reproduces 23 of the
+25 and 18 of the 19 participants `contingency` excludes. Roughly half of numbers
+participants perform WORSE than reporting only the latest observation, which is
+non-compliance on any reading. Three criteria converging on the same people is a
+stronger argument than any one of them alone, and is how this should be reported.
+
+**Effect on the results, measured** (numbers unless noted; see the figure
+sections for what each panel is):
+
+| build | n both | cross-task λ r | col 3 p | col 2 decay |
+|-------|--------|----------------|---------|-------------|
+| contingency | 27 | 0.587 (p=.0013) | 0.00043 | 3.09x |
+| baseline + require_both | 29 | 0.409 (p=.028) | 0.00000 | 2.54x |
+| performance | 44 | 0.572 (p<.0001) | 0.033 | 1.23x |
+| no filter | 60 | **0.656** (p<.0001) | 0.011 | 1.13x |
+
+Two things to carry from that table. The DECAY results (cols 2-3) need a filter
+and weaken monotonically as it loosens. The CROSS-TASK λ correlation does not --
+it is STRONGEST with everyone included (r=0.656), so that finding does not depend
+on any exclusion. Different panels have different sensitivity to exclusion, and
+that asymmetry should be reported rather than smoothed over.
+
+**Threshold-choice honesty.** These criteria were compared partly on whether the
+results survive, which is the same hazard as tuning a threshold. What makes
+`baseline` defensible independently is that its threshold is PRINCIPLED, not
+chosen: skill < 0 means "did not beat a strategy the instructions rule out".
+`performance`'s 2.0 SD, by contrast, is a conventional outlier bound, and
+`contingency`'s f²=0.02 is Cohen's convention -- both citable, neither derived
+from this data.
+
+**A consequence of `baseline` worth stating explicitly in any write-up**: for
+colors this criterion is near-vacuous on its own, because "report the last binary
+draw" means slamming to 0%/100% every trial (error 39.35 vs optimal 11.75) and
+almost anything beats it. So under `baseline`, COLORS IS EFFECTIVELY FILTERED BY
+NUMBERS-TASK BEHAVIOUR, via `require_both_tasks`. Defensible -- numbers is where
+the trivial strategy is plausible -- but not something to leave implicit.
+
+#### The `contingency` criteria in detail
 
 Three criteria, combined with OR, identify participants who show no
 evidence of genuinely attempting the task (as opposed to attempting it

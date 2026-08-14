@@ -50,7 +50,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path
-from utils.participant_filters import filter_participants
+from utils.participant_filters import DEFAULT_EXCLUSION_METHOD, filter_participants
 
 
 def _dedup_successful(df: pd.DataFrame, task: str) -> pd.DataFrame:
@@ -63,7 +63,9 @@ def _rescale_0_100_to_neg1_1(x: pd.Series) -> pd.Series:
 
 
 def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="soltani_colors",
-                  apply_filters=True):
+                  apply_filters=True, exclusion_method=DEFAULT_EXCLUSION_METHOD,
+                  max_error_sd=None, min_skill=None,
+                  require_both_tasks=True):
     """Core logic, extracted from build() so a different raw-data SOURCE
     (e.g. scripts/build_task_backend_inputs.py, pulling from Supabase
     instead of a parsed JATOS-era task_results pilot file) can reuse this
@@ -76,6 +78,11 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
     [0,100] (numbers) / already-{-1,+1} (colors) scale, i.e. BEFORE any
     rescaling -- that happens in here, not before calling this).
 
+    `exclusion_method` selects WHICH criterion set drives exclusion --
+    'contingency' (the Cohen's f2 tests) or 'performance' (carrabin's model-free
+    gross-outlier rule). See utils/participant_filters.py; both are always
+    computed and reported, only the decision differs.
+
     apply_filters=False skips utils.participant_filters entirely, keeping every
     participant. Intended for diagnosing how much the exclusion criteria
     actually change a result -- build both versions under different out_names
@@ -85,7 +92,13 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
     pid-by-pid, only in aggregate.
     """
     if apply_filters:
-        df = filter_participants(df, verbose=True)
+        kw = {"method": exclusion_method}
+        if max_error_sd is not None:
+            kw["max_error_sd"] = max_error_sd
+        if min_skill is not None:
+            kw["min_skill"] = min_skill
+        df = filter_participants(df, verbose=True,
+                                 require_both_tasks=require_both_tasks, **kw)
     else:
         n_pid = df["prolific_pid"].nunique()
         print(f"\n*** FILTERS DISABLED -- keeping all {n_pid} participants "
