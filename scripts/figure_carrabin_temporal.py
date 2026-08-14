@@ -27,6 +27,11 @@ from scipy.stats import pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from utils.aggregate import (
+    AGGREGATE_LABEL,
+    add_aggregate_args,
+    plot_delta_aggregate,
+)
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import (
     FIGURE_SIZE,
@@ -74,7 +79,7 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
               .groupby(["pid", "observation"])["sq_err"].mean()
               .apply(np.sqrt).reset_index(name="rmse"))
     stats = h_rmse.groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index()
-    ax.plot(stats["observation"], stats["mean"], "o-", color=HUMAN_COLOR, lw=1.8, ms=5)
+    ax.plot(stats["observation"], stats["mean"], "-", color=HUMAN_COLOR, lw=1.8)
     ax.fill_between(stats["observation"],
                     stats["mean"] - stats["sem"], stats["mean"] + stats["sem"],
                     color=HUMAN_COLOR, alpha=0.2)
@@ -93,7 +98,7 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
                   .apply(np.sqrt).reset_index(name="rmse"))
         stats_m = m_rmse.groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index()
         color = palette.get(_display(mt), "0.5")
-        ax.plot(stats_m["observation"], stats_m["mean"], "o-", color=color, lw=1.8, ms=5)
+        ax.plot(stats_m["observation"], stats_m["mean"], "-", color=color, lw=1.8)
         ax.fill_between(stats_m["observation"],
                         stats_m["mean"] - stats_m["sem"], stats_m["mean"] + stats_m["sem"],
                         color=color, alpha=0.2)
@@ -110,8 +115,8 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
                   .apply(np.sqrt).reset_index(name="rmse"))
         stats_m = m_rmse.groupby("observation")["rmse"].agg(["mean", "sem"]).reset_index()
         color = palette.get("NoisyCounting_mle", palette.get("NoisyCounting (MLE)", "0.5"))
-        ax.plot(stats_m["observation"], stats_m["mean"], "o-",
-                color=color, lw=1.8, ms=5)
+        ax.plot(stats_m["observation"], stats_m["mean"], "-",
+                color=color, lw=1.8)
         ax.fill_between(stats_m["observation"],
                         stats_m["mean"] - stats_m["sem"], stats_m["mean"] + stats_m["sem"],
                         color=color, alpha=0.2)
@@ -128,8 +133,24 @@ def _plot_panel_a(ax, run_folder: str, palette: dict,
 # ── Panel B (T2) — Response change vs observation ─────────────────────────────
 
 def _plot_panel_b(ax, run_folder: str, palette: dict,
-                  model_order: list[str]) -> None:
-    """Panel B (T2): Mean |Δresponse| as a function of observation position."""
+                  model_order: list[str],
+                  aggregate: str = "hier_mean_median",
+                  errorbar_kind: str | None = None) -> None:
+    """Panel B (T2): |Δresponse| as a function of observation position.
+
+    Aggregation is shared with the soltani and yoo temporal figures via
+    utils.aggregate; see that module for the rationale. Note carrabin is the one
+    dataset where the choice barely matters -- its per-pid |delta| spread is only
+    1.7x (0.106-0.278) and the curve does not decay at all (0.1617 -> 0.1625
+    under a mean, 0.1550 -> 0.1531 under a median, agreeing within 1%), because
+    with 5 observations and 200 trials per participant there is no decay for a
+    mean to understate. Switched anyway so the three figures cannot drift apart.
+
+    Keeps carrabin's own first-observation convention: `delta` at the first
+    observation is |response| rather than NaN, i.e. the initial response is
+    treated as a change from 0. That is specific to this figure and is applied
+    inside abs_delta() below, before any aggregation.
+    """
     run_dir  = data_path("runs") / run_folder
     human    = pd.read_pickle(data_path("carrabin.pkl"))
     obs_vals = sorted(human["observation"].unique())
@@ -145,13 +166,8 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
             rows.append(g[["pid", "trial", "observation", "delta"]])
         return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
-    h_delta = abs_delta(human).dropna()
-    stats_h = (h_delta.groupby(["pid", "observation"])["delta"].mean().reset_index()
-               .groupby("observation")["delta"].agg(["mean", "sem"]).reset_index())
-    ax.plot(stats_h["observation"], stats_h["mean"], "o-", color=HUMAN_COLOR, lw=1.8, ms=5)
-    ax.fill_between(stats_h["observation"],
-                    stats_h["mean"] - stats_h["sem"], stats_h["mean"] + stats_h["sem"],
-                    color=HUMAN_COLOR, alpha=0.2)
+    plot_delta_aggregate(ax, abs_delta(human).dropna(), HUMAN_COLOR, aggregate,
+                         zorder_line=3, zorder_fill=1, errorbar_kind=errorbar_kind)
     handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)); labels.append("Human")
 
     for mt in model_order:
@@ -160,34 +176,25 @@ def _plot_panel_b(ax, run_folder: str, palette: dict,
         else:
             resp_path = run_dir / f"{mt}_carrabin_responses.pkl"
         if not resp_path.exists(): continue
-        m_delta = abs_delta(pd.read_pickle(resp_path)).dropna()
-        stats_m = (m_delta.groupby(["pid", "observation"])["delta"].mean().reset_index()
-                   .groupby("observation")["delta"].agg(["mean", "sem"]).reset_index())
         color = palette.get(_display(mt), "0.5")
-        ax.plot(stats_m["observation"], stats_m["mean"], "o-", color=color, lw=1.8, ms=5)
-        ax.fill_between(stats_m["observation"],
-                        stats_m["mean"] - stats_m["sem"], stats_m["mean"] + stats_m["sem"],
-                        color=color, alpha=0.2)
+        plot_delta_aggregate(ax, abs_delta(pd.read_pickle(resp_path)).dropna(),
+                             color, aggregate, zorder_line=4, zorder_fill=1,
+                             errorbar_kind=errorbar_kind)
         lbl = "NEF (MLE)" if mt == "NEF" else _display(mt)
         handles.append(Line2D([0], [0], color=color, lw=1.5)); labels.append(lbl)
 
     # Add NoisyCounting MLE explicitly
     nc_mle_path = run_dir / "NoisyCounting_carrabin_responses_mle.pkl"
     if nc_mle_path.exists():
-        m_delta = abs_delta(pd.read_pickle(nc_mle_path)).dropna()
-        stats_m = (m_delta.groupby(["pid", "observation"])["delta"].mean().reset_index()
-                   .groupby("observation")["delta"].agg(["mean", "sem"]).reset_index())
         color = palette.get("NoisyCounting_mle", palette.get("NoisyCounting (MLE)", "0.5"))
-        ax.plot(stats_m["observation"], stats_m["mean"], "o-",
-                color=color, lw=1.8, ms=5)
-        ax.fill_between(stats_m["observation"],
-                        stats_m["mean"] - stats_m["sem"], stats_m["mean"] + stats_m["sem"],
-                        color=color, alpha=0.2)
+        plot_delta_aggregate(ax, abs_delta(pd.read_pickle(nc_mle_path)).dropna(),
+                             color, aggregate, zorder_line=5, zorder_fill=1,
+                             errorbar_kind=errorbar_kind)
         handles.append(Line2D([0], [0], color=color, lw=1.5))
         labels.append("NoisyCounting (MLE)")
 
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Mean |Δresponse|")
+    ax.set_ylabel(f"{AGGREGATE_LABEL[aggregate]} |Δresponse|")
     ax.set_xticks(obs_vals); ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -249,7 +256,7 @@ def _plot_panel_c(ax, run_folder: str, palette: dict) -> None:
         means_arr = np.array(means)
         sems_arr  = np.array(sems)
 
-        ax.plot(lags, means_arr, "o-", color=color, lw=1.8, ms=5)
+        ax.plot(lags, means_arr, "-", color=color, lw=1.8)
         ax.fill_between(lags,
                         means_arr - sems_arr,
                         means_arr + sems_arr,
@@ -306,7 +313,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
         n_pid = by_pid_obs["pid"].nunique()
         stats["se"] = stats["std"] / np.sqrt(n_pid)
 
-        ax.plot(stats["observation"], stats["mean"], "o-", color=color, lw=1.8, ms=5)
+        ax.plot(stats["observation"], stats["mean"], "-", color=color, lw=1.8)
         ax.fill_between(stats["observation"],
                         stats["mean"] - stats["se"],
                         stats["mean"] + stats["se"],
@@ -327,6 +334,7 @@ def _plot_panel_d(ax, run_folder: str, palette: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_folder",   type=str, default="carrabin")
+    add_aggregate_args(parser)
     parser.add_argument(
         "--extra_models", nargs="*", default=[],
         help="Additional models beyond MODEL_ORDER (for panels A and B)",
@@ -356,7 +364,8 @@ def main() -> None:
     )
 
     _plot_panel_a(axes[0], args.run_folder, palette, model_order)
-    _plot_panel_b(axes[1], args.run_folder, palette, model_order)
+    _plot_panel_b(axes[1], args.run_folder, palette, model_order,
+                  args.aggregate, args.errorbar)
     _plot_panel_d(axes[2], args.run_folder, palette)
     _plot_panel_c(axes[3], args.run_folder, palette)
 

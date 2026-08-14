@@ -28,6 +28,11 @@ from scipy.stats import pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from utils.aggregate import (
+    AGGREGATE_LABEL,
+    add_aggregate_args,
+    plot_delta_aggregate,
+)
 from utils.paths import FIGURES_DIR, RUNS_DIR, data_path
 from utils.plot_style import (
     FIGURE_SIZE,
@@ -229,27 +234,42 @@ def _plot_panel_a(ax, run_folder, palette, model_order, nef_folder):
 
 # ── Panel B ───────────────────────────────────────────────────────────────────
 
-def _plot_panel_b(ax, run_folder, palette, model_order, nef_folder):
+def _plot_panel_b(ax, run_folder, palette, model_order, nef_folder,
+                  aggregate="hier_mean_median", errorbar_kind=None):
+    """Panel B (T2): |Delta response| vs observation.
+
+    Aggregation is shared with the soltani and carrabin temporal figures via
+    utils.aggregate -- see that module for why the default is a two-stage
+    mean-then-median. This panel previously called sns.lineplot straight on the
+    long per-trial frame with errorbar='ci', which is a POOLED MEAN with a ROW
+    bootstrap: the point estimate weighted participants by their response-change
+    amplitude, and the interval treated trials within a participant as
+    independent. yoo has a 3.1x spread in per-pid |delta| level (0.026-0.238) and
+    the high-amplitude participants tend to be flat, so that mean understated the
+    decay -- 1.66x first-to-last under a mean vs 2.38x under a median.
+    """
     run_dir = RUNS_DIR / run_folder
     nef_dir = RUNS_DIR / nef_folder if nef_folder else run_dir
     yoo     = pd.read_pickle(data_path("yoo.pkl"))
     handles, labels = [], []
 
-    sns.lineplot(data=_abs_delta_long(yoo), x="observation", y="delta",
-                 color=HUMAN_COLOR, lw=1.8, errorbar="ci", ax=ax, label="_nolegend_")
+    plot_delta_aggregate(ax, _abs_delta_long(yoo), HUMAN_COLOR, aggregate,
+                         zorder_line=3, zorder_fill=1,
+                         errorbar_kind=errorbar_kind)
     handles.append(Line2D([0],[0], color=HUMAN_COLOR, lw=1.8, alpha=0.65)); labels.append("Human")
 
-    for mt in model_order:
+    for i, mt in enumerate(model_order):
         rp = _resp_path(mt, run_dir, nef_dir)
         if not rp.exists(): continue
         color = palette.get(_display(mt), "0.5")
-        sns.lineplot(data=_abs_delta_long(pd.read_pickle(rp)),
-                     x="observation", y="delta", color=color, lw=1.8,
-                     errorbar="ci", ax=ax, label="_nolegend_")
+        plot_delta_aggregate(ax, _abs_delta_long(pd.read_pickle(rp)), color,
+                             aggregate, zorder_line=4 + i, zorder_fill=1,
+                             errorbar_kind=errorbar_kind)
         handles.append(Line2D([0],[0], color=color, lw=1.8, alpha=0.65))
         labels.append(_display(mt))
 
-    ax.set_xlabel("Observation"); ax.set_ylabel("Mean |Δresponse|")
+    ax.set_xlabel("Observation")
+    ax.set_ylabel(f"{AGGREGATE_LABEL[aggregate]} |Δresponse|")
     ax.set_xticks(OBS_TICKS); ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -335,6 +355,7 @@ def main() -> None:
     parser.add_argument("--run_folder", type=str, default="yoo")
     parser.add_argument("--nef_folder", type=str, default=None)
     parser.add_argument("--extra_models", nargs="*", default=[])
+    add_aggregate_args(parser)
     args = parser.parse_args()
 
     model_order = MODEL_ORDER + [m for m in args.extra_models if m not in MODEL_ORDER]
@@ -354,7 +375,8 @@ def main() -> None:
     )
 
     _plot_panel_a(axes[0], args.run_folder, palette, model_order, args.nef_folder)
-    _plot_panel_b(axes[1], args.run_folder, palette, model_order, args.nef_folder)
+    _plot_panel_b(axes[1], args.run_folder, palette, model_order, args.nef_folder,
+                  args.aggregate, args.errorbar)
     _plot_panel_c(axes[2], args.run_folder, args.nef_folder, palette, model_order)
     _plot_panel_d(axes[3], args.run_folder, palette, model_order, args.nef_folder)
 

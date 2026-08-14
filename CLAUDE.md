@@ -884,6 +884,8 @@ evidence_integration/
     collect.py
     losses.py
   utils/
+    aggregate.py     — SHARED aggregation for all three temporal figures'
+                       error and |Δresponse| curves; see "Cols 1-2 aggregation"
     paths.py
     plot_style.py    — apply_style, get_palette, pvalue_to_stars, fit_power_law_params
     slurm.py
@@ -1073,8 +1075,20 @@ so a run folder with only math fits shows P2 without bars. Set it back to
 
 ### Cols 1-2 aggregation (`--aggregate`, `--errorbar`)
 
-Both columns share one aggregation choice, applied identically to Human and every
-model. Default **`hier_mean_median`** with **`--errorbar ci`**.
+Lives in **`utils/aggregate.py`** and is SHARED by all three temporal figures
+(soltani cols 1-2, yoo panel B, carrabin panel B). Both columns share one
+aggregation choice, applied identically to Human and every model. Default
+**`hier_mean_median`** with **`--errorbar ci`**; flags come from
+`add_aggregate_args(parser)`.
+
+It was extracted because the three figures had been using three DIFFERENT
+schemes, with nothing making that visible anywhere: carrabin took the mean over
+each pid's trials then mean ± SEM across pids (`hier_mean_sem`); yoo called
+`sns.lineplot` straight on the long per-trial frame with `errorbar="ci"`, i.e. a
+pooled mean with a ROW bootstrap (`flat_mean`, and a pseudo-replicated interval);
+soltani had its own copy. Any estimator borrowed between them silently inherited
+a different aggregation — the same class of problem as the λ bounds bug. Do not
+reintroduce a per-figure implementation.
 
 | mode | what it does |
 |------|--------------|
@@ -1117,6 +1131,22 @@ Three findings worth not rediscovering:
   sits at the median rank there (values 0.0945, 0.0945, 0.0957, then 0.1138), and
   the median pid's identity changes each step. The mean is flat across that
   region. Do not read it as structure at a particular observation.
+
+Effect of switching each dataset to `hier_mean_median`, measured before doing it:
+
+| dataset | n_pid | n_obs | per-pid \|Δ\| spread | decay, mean → median |
+|---------|-------|-------|--------------------|---------------------|
+| carrabin | 21 | 5 | 1.7x | 1.00x → 1.01x (no change) |
+| yoo | 38 | 30 | 3.1x | 1.66x → 2.38x |
+| soltani numbers | 27 | 15 | 4.3x | 1.69x → 3.09x |
+
+Carrabin genuinely does not change — with 5 observations and 200 trials per pid
+there is no decay for a mean to understate, and the two estimators agree within
+1%. It was switched anyway so the three figures cannot drift apart again. Note
+carrabin keeps its own first-observation convention, where `delta` at the first
+observation is `|response|` rather than NaN (the initial response treated as a
+change from 0); that is applied inside its own `abs_delta()` BEFORE any
+aggregation, and does shift its first point under a median.
 
 Col 1's `flat_median` changes the METRIC, not just the estimator: RMSE already
 contains an averaging step, so a "median of RMSEs" is ill-defined. The
@@ -1267,6 +1297,15 @@ NFS mount uses local_lock=none. Atomic rename used for simulation DB writes.
 - New figure panels go inside existing figure_*.py scripts
 - Do not compute metrics in extras scripts — save raw data, compute in figure scripts
 - pvalue_to_stars, fit_power_law_params, smooth_curve, POWER_LAW_SMOOTH_WINDOW are in utils/plot_style.py
+- Aggregation for the temporal figures' error/|Δresponse| curves lives in
+  utils/aggregate.py and is SHARED by soltani, yoo and carrabin. Do not
+  reimplement it per figure, and do not aggregate inline in a panel — the three
+  figures previously used three different schemes with nothing making that
+  visible (see "Cols 1-2 aggregation"). Add flags via add_aggregate_args(parser)
+  so all three document the choice identically
+- Temporal curves are LINES ONLY — no markers/scatterpoints on the aggregate
+  curves (cols 1-4 of soltani, 1-4 of carrabin, 2 of yoo). Cols 5-6's regplots
+  keep their scatter, since there the per-pid points ARE the data
 
 ---
 
