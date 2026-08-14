@@ -62,7 +62,8 @@ def _rescale_0_100_to_neg1_1(x: pd.Series) -> pd.Series:
     return x / 50.0 - 1.0
 
 
-def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="soltani_colors"):
+def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="soltani_colors",
+                  apply_filters=True):
     """Core logic, extracted from build() so a different raw-data SOURCE
     (e.g. scripts/build_task_backend_inputs.py, pulling from Supabase
     instead of a parsed JATOS-era task_results pilot file) can reuse this
@@ -74,8 +75,21 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
     timed_out, qid, true_p, true_mean -- value/response on their NATIVE
     [0,100] (numbers) / already-{-1,+1} (colors) scale, i.e. BEFORE any
     rescaling -- that happens in here, not before calling this).
+
+    apply_filters=False skips utils.participant_filters entirely, keeping every
+    participant. Intended for diagnosing how much the exclusion criteria
+    actually change a result -- build both versions under different out_names
+    and compare. NOTE the pid mapping is derived from whoever survives
+    filtering, so an unfiltered build assigns DIFFERENT integer pids to the
+    same people than a filtered build does; the two are not comparable
+    pid-by-pid, only in aggregate.
     """
-    df = filter_participants(df, verbose=True)
+    if apply_filters:
+        df = filter_participants(df, verbose=True)
+    else:
+        n_pid = df["prolific_pid"].nunique()
+        print(f"\n*** FILTERS DISABLED -- keeping all {n_pid} participants "
+              f"({len(df)} rows). Do NOT use this build for published results. ***")
 
     # One pid mapping shared across both tasks, so a participant who did
     # both tasks gets the same integer pid in both output files.

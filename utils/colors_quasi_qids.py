@@ -30,8 +30,26 @@ singleton group of its own.
 
 DEFAULTS (verified empirically before settling on them, not guessed)
 -----------------------------------------------------------------------
-PREFIX_LENGTH=4 matches numbers' own prefix length exactly, giving a
-genuinely comparable window across both tasks. MIN_REPEATS=3 was chosen
+PREFIX_LENGTH=5 is a DELIBERATE departure from numbers' own designed prefix
+length of 4 (verified: within (pid, qid), numbers' `value` is identical across
+trials for observations 0-3 in 216/216 groups and identical in 0/216 at
+observation 4). Colors has no designed prefix at all -- its "repeats" are
+constructed here by finding trials whose first n draws happen to coincide -- so n
+is a free parameter, and there is no reason to inherit numbers' 4.
+
+n=5 was chosen because it matches CARRABIN's 5-observation repeat window, which
+makes the soltani colors versions of figure_soltani_temporal.py's cols 3-4
+directly comparable with figure_carrabin_temporal.py's own panels, and because
+4 was leaving those panels underpowered: with n=4/min_repeats=3 the variance-
+growth trend was +0.0044 per observation, 20/27 pids positive, Wilcoxon p=0.086;
+at n=5 it is +0.0135, 19/27, p=0.0047, still retaining all 27 pids. Larger n
+keeps improving the slope but starts losing participants (n=6 -> 23 pids), and
+min_repeats>=4 collapses the sample (n=5/min_repeats=4 -> 19 pids).
+
+Because colors draws are binary there are 2^n possible prefixes, so group size
+falls off roughly geometrically in n against a fixed ~32 trials -- that is the
+tradeoff being balanced here, not a data-quality question. MIN_REPEATS=3 was
+chosen
 over the more permissive 2 specifically because the yield turned out to
 support it: at P=4, R=3 gives 4-5 qualifying quasi-qid groups per
 participant, remarkably even across all 5 real participants checked at
@@ -43,7 +61,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-PREFIX_LENGTH = 4
+PREFIX_LENGTH = 5
 MIN_REPEATS = 3
 
 

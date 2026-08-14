@@ -24,21 +24,27 @@ Layout: 2x3
     people actually did?" Significance bars are drawn from SIG_REFERENCE
     outward (see below).
 
-Both P1 and P2 use violins rather than boxplots/rugplots: at this sample size
-(9 pids in pilot 5) a boxplot's quartiles are estimated from too few points to
-read as anything but noise, while the violin's density still communicates
-spread honestly. Kept consistent across both panels so they're comparable.
+Both P1 and P2 use BOXPLOTS, matching figure_carrabin_performance.py's and
+figure_yoo_performance.py's own panels (same sns.boxplot call, same 45-degree
+tick rotation) so the three datasets' performance figures are directly
+comparable. An earlier version used violins, on the argument that a boxplot's
+quartiles were estimated from too few points to read at that sample size -- but
+that was written against pilot 5's 9 pids, and complete_pairs has 27 per task,
+comfortably above carrabin's own 21. Cross-dataset consistency wins now that
+the sample size no longer argues against it.
 
-P1 vs P2 SHARE UNITS (percentage points)
------------------------------------------
-P1 is computed in [0,100] percent units directly (see _to_pct). P2's numbers
-come from each model's own fitted CV loss, which lives on the canonical [-1,1]
-scale -- multiplied by LOSS_TO_PCT to match. That factor is exactly 50 for BOTH
-tasks, which is not a coincidence worth glossing over: numbers converts with
-pct = (x+1)*50 and colors with pct = (x+1)/2*100 = 50x+50, so although the two
-tasks have different response semantics, both are affine with the same slope of
-50, and an RMSE (a difference, so the intercept drops out) therefore scales by
-50 either way.
+RESPONSE SCALE: [-1,1] THROUGHOUT
+----------------------------------
+Both panels are on the canonical [-1,1] scale that carrabin/yoo use, with no
+percent conversion anywhere. P1 is computed from responses on that scale; P2's
+numbers are each model's own fitted CV loss, which is natively on it. So the two
+panels share units without any compensation factor, and both are numerically
+comparable with figure_carrabin_performance.py and figure_yoo_performance.py --
+which is the point: an RMSE of 0.12 here means the same thing as an RMSE of 0.12
+there. An earlier version converted to [0,100] percent for readability, which
+required multiplying the CV loss by 50 to make the panels agree; that class of
+round-trip factor caused a real bug in the temporal figure's lambda fit, so it
+is deliberately gone.
 
 WHY P2 READS THE FITTED CV LOSS RATHER THAN RECOMPUTING RMSE
 --------------------------------------------------------------
@@ -82,10 +88,7 @@ Those files store value/response on the canonical [-1,1] scale carrabin/yoo
 also use, and true_mean rescaled the same way but true_p left on its native
 [0,1] probability scale (see build_model_inputs.py's own module docstring for
 the exact rescaling). Converted back to the original [0,100] percent scale here
-purely for readability:
-  numbers : pct = (x + 1) * 50
-  colors  : pct = (x + 1) / 2 * 100
-Ground truth is NOT true_mean/true_p at all (see
+and left on that scale. Ground truth is NOT true_mean/true_p at all (see
 _add_running_mean_ground_truth's own docstring) -- it's the running mean of
 `value` itself, put through the same pct conversion.
 
@@ -132,11 +135,6 @@ MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]
 # it is fit for these datasets -- matching the carrabin/yoo figures, where the
 # spiking model is always the reference the others are compared against.
 SIG_REFERENCE = "NEF"
-
-# [-1,1]-scale RMSE -> percentage points. Exactly 50 for both tasks; see
-# module docstring for why that holds despite their different response scales.
-LOSS_TO_PCT = 50.0
-
 
 # ── schematic placeholders (col 1) ──────────────────────────────────────────
 
@@ -227,14 +225,6 @@ def _plot_schematic(ax, task: str) -> None:
     ax.set_aspect("equal"); ax.set_anchor("C")
 
 
-# ── scale conversion back to [0,100] for readability ────────────────────────
-
-def _to_pct(x: pd.Series, task: str) -> pd.Series:
-    if task == "colors":
-        return (x + 1.0) / 2.0 * 100.0
-    return (x + 1.0) * 50.0
-
-
 # ── data loading ─────────────────────────────────────────────────────────────
 
 def _load_human(task: str, datafile: str | None) -> pd.DataFrame | None:
@@ -258,7 +248,7 @@ def _load_human(task: str, datafile: str | None) -> pd.DataFrame | None:
         return None
     df = pd.read_pickle(path)
     out = df[["pid", "trial", "observation", "value"]].copy()
-    out["response"] = _to_pct(df["response"], task)
+    out["response"] = df["response"]
     out = _add_running_mean_ground_truth(out, task)
     return out
 
@@ -273,10 +263,10 @@ def _add_running_mean_ground_truth(df: pd.DataFrame, task: str) -> pd.DataFrame:
     task_backend's own live 'correct answer' panel shows real
     participants exactly this quantity during the actual task, never the
     fixed target). Requires `value` (raw stimulus, native pkl scale --
-    NOT yet through _to_pct) already present in df."""
+    already on the canonical [-1,1] scale) already present in df."""
     df = df.sort_values(["pid", "trial", "observation"]).copy()
     running = df.groupby(["pid", "trial"])["value"].transform(lambda s: s.expanding().mean())
-    df["ground_truth"] = _to_pct(running, task)
+    df["ground_truth"] = running
     return df
 
 
@@ -295,7 +285,7 @@ def _load_model_responses(task: str, model_type: str, run_dir: Path,
         return None
     df = pd.read_pickle(resp_path)
     out = df[["pid", "trial", "observation"]].copy()
-    out["response"] = _to_pct(df["response"], task)
+    out["response"] = df["response"]
     return out
 
 
@@ -309,14 +299,14 @@ def _get_loss(perf_df: pd.DataFrame) -> pd.Series:
 def _load_model_loss(task: str, model_type: str, run_dir: Path,
                      datafile: str | None) -> pd.DataFrame | None:
     """Per-pid fitted CV loss (RMSE to human responses) for one
-    (task, model_type), converted to percentage points. Columns: [pid, rmse].
+    (task, model_type), on the canonical [-1,1] scale. Columns: [pid, rmse].
     Returns None if not yet fit/collected."""
     stem = dataset_stem(DATASET_FOR_TASK[task], datafile)
     perf_path = run_dir / f"{model_type}_{stem}_performance.pkl"
     if not perf_path.exists():
         return None
     perf = pd.read_pickle(perf_path).copy()
-    perf["rmse"] = _get_loss(perf) * LOSS_TO_PCT
+    perf["rmse"] = _get_loss(perf)
     return perf[["pid", "rmse"]]
 
 
@@ -360,17 +350,15 @@ def _plot_panel_p1(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
     plot_df = pd.concat(frames, ignore_index=True)
     order = [s for s in ["Human"] + MODEL_ORDER if s in set(plot_df["source"])]
 
-    sns.violinplot(data=plot_df, x="source", y="rmse", order=order,
-                   hue="source", palette=palette, legend=False, ax=ax,
-                   cut=0)
+    sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
+                hue="source", palette=palette, legend=False, ax=ax)
 
     ax.set_xlabel("")
-    ax.set_ylabel("Performance error vs running mean\n(RMSE, percentage points)")
-    ax.tick_params(axis="x", rotation=30)
-    # RMSE is non-negative, so neither the KDE tails nor the axis should imply
-    # negative error. cut=0 truncates each violin at its own observed min/max
-    # instead of letting the Gaussian kernel run past the data; the explicit
-    # floor then stops the axis itself from padding below 0.
+    ax.set_ylabel("Performance error vs running mean (RMSE)")
+    ax.tick_params(axis="x", rotation=45)
+    # RMSE is non-negative, so the axis should not imply negative error. (A
+    # boxplot cannot extend past the data the way a KDE could, so this is only
+    # about the axis padding, not the glyph.)
     ax.set_ylim(bottom=0)
     sns.despine(ax=ax, top=True, right=True)
 
@@ -402,16 +390,15 @@ def _plot_panel_p2(ax, task: str, run_dir: Path, datafile: str | None,
     plot_df = pd.concat(frames, ignore_index=True)
     order = [m for m in MODEL_ORDER if m in set(plot_df["source"])]
 
-    sns.violinplot(data=plot_df, x="source", y="rmse", order=order,
-                   hue="source", palette=palette, legend=False, ax=ax,
-                   cut=0)
+    sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
+                hue="source", palette=palette, legend=False, ax=ax)
 
     ax.set_xlabel("")
-    ax.set_ylabel("Model fit to human responses\n(cross-validated RMSE, percentage points)")
-    ax.tick_params(axis="x", rotation=30)
-    # See P1: cut=0 + a hard floor at 0, since RMSE cannot be negative. Set
-    # BEFORE annotate_nef_comparisons, which derives its line spacing from the
-    # current y-range (it only ever adjusts `top`, so the floor survives).
+    ax.set_ylabel("Model fit to human responses\n(cross-validated RMSE)")
+    ax.tick_params(axis="x", rotation=45)
+    # Floor at 0 since RMSE cannot be negative. Set BEFORE
+    # annotate_nef_comparisons, which derives its line spacing from the current
+    # y-range (it only ever adjusts `top`, so the floor survives).
     ax.set_ylim(bottom=0)
     sns.despine(ax=ax, top=True, right=True)
 

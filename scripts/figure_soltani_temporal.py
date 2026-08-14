@@ -71,7 +71,8 @@ Cols 3-4 DO now use quasi-qids for colors (task-colors)'s human data --
 colors' own literal `qid` column never repeats, so a DIFFERENT repeat
 structure is empirically derived instead: see utils/colors_quasi_qids.py's
 own module docstring for the full definition and the empirical sweep
-that settled its PREFIX_LENGTH=4/MIN_REPEATS=3 defaults. Numbers
+that settled its PREFIX_LENGTH/MIN_REPEATS defaults (now 5/3; numbers
+is fixed at its designed 4 -- see NUMBERS_PREFIX_LENGTH). Numbers
 (task-numbers) uses its real, designed qid repeats unchanged. Col 5
 doesn't use qid at all (it's a lambda power-law fit on the |delta
 response| curve alone), so it's unaffected either way.
@@ -84,9 +85,18 @@ responses.pkl -- NOT from a raw task_results_pilot*.pkl. Participant
 filtering and the prolific_pid -> int pid mapping already happened when
 those files were built (scripts/build_model_inputs.py), and model
 responses were fit directly against them, so this script does no
-filtering itself and merges everything on integer `pid`. Both are stored
-on the canonical [-1,1] scale carrabin/yoo use; converted back to [0,100]
-here purely for readability (see _to_pct).
+filtering itself and merges everything on integer `pid`.
+
+RESPONSE SCALE: everything here is on the canonical [-1,1] scale that
+carrabin/yoo use, and is LEFT there -- no percent conversion anywhere. That is
+deliberate: it means RMSE, mean |delta response|, and response variability are
+numerically comparable with the yoo and carrabin figures, and it means any
+estimator borrowed from those figures (notably the bounded power-law fit in
+_fit_lambda_curve_fit, whose A bound assumes this scale) drops in unmodified.
+An earlier version converted to [0,100] percent for readability, which required
+round-trip compensation factors and produced exactly one such bug -- see
+_fit_lambda_curve_fit's own docstring. The one remaining conversion is colors'
+true_p, which build_from_df leaves on [0,1]; see _add_ground_truth.
 
 NOTE ON CARRABIN'S "PANEL C"/"PANEL D" LABELS
 ------------------------------------------------
@@ -121,13 +131,18 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
-from scipy.stats import linregress, pearsonr
+from scipy.optimize import curve_fit as scipy_curve_fit
+from scipy.stats import pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path, dataset_stem, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, pvalue_to_stars
-from utils.colors_quasi_qids import add_quasi_qids
+from utils.colors_quasi_qids import (
+    MIN_REPEATS as QQ_MIN_REPEATS,
+    PREFIX_LENGTH as QQ_PREFIX_LENGTH,
+    add_quasi_qids,
+)
 
 TASK_ROWS        = ["colors", "numbers"]  # standing row-order convention
 DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
@@ -140,16 +155,22 @@ MODEL_ORDER       = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "
 # the qid-conditional mean identically zero (verified: max|resid| = 0.000e+00
 # for all four math models). See the module docstring.
 _STOCHASTIC_MODELS = frozenset({"NEF", "NoisyCounting"})
-PREFIX_LENGTH     = 4
+# Observations over which a qid's repeats share an identical stimulus prefix --
+# PER TASK, because the two tasks get their repeat structure completely
+# differently. numbers has a DESIGNED prefix of exactly 4 (verified: within
+# (pid, qid), `value` is identical across trials for observations 0-3 in 216/216
+# groups, and identical in 0/216 at observation 4) so raising it would silently
+# admit non-shared stimuli and turn genuine stimulus differences into "response
+# variability". colors has no designed prefix; its groups are constructed by
+# utils.colors_quasi_qids, so its length is that module's tunable parameter.
+NUMBERS_PREFIX_LENGTH = 4
+
+
+def _prefix_length(task: str, colors_prefix: int = QQ_PREFIX_LENGTH) -> int:
+    return colors_prefix if task == "colors" else NUMBERS_PREFIX_LENGTH
 HUMAN_COLOR       = "0.3"
 INDIV_COLOR       = "0.7"
 MIN_CORR_N        = 3  # matches the threshold used in figure_soltani_variability.py
-
-
-def _to_pct(x: pd.Series, task: str) -> pd.Series:
-    if task == "colors":
-        return (x + 1.0) / 2.0 * 100.0
-    return (x + 1.0) * 50.0
 
 
 def _load_human(task: str, datafile: str | None = None,
@@ -175,7 +196,7 @@ def _load_human(task: str, datafile: str | None = None,
         return None
     df = pd.read_pickle(path)
     out = df[["pid", "trial", "observation", "qid", "value"]].copy()
-    out["response"] = _to_pct(df["response"], task)
+    out["response"] = df["response"]
     # Carry through whichever generative-truth column this task has, so
     # gt_mode='true' can use it. numbers -> true_mean, colors -> true_p; they
     # are on DIFFERENT scales, which _add_ground_truth handles.
@@ -193,6 +214,10 @@ GT_MODES = ("running_mean", "true")
 # Axis-label wording per mode. "true mean/ratio" rather than naming a column,
 # since the underlying column differs by task (true_mean vs true_p).
 GT_LABEL = {"running_mean": "running mean", "true": "true mean/ratio"}
+
+def _power_law(n, A, lam):
+    """A * n**(-lam). Same form figure_yoo_temporal.py fits."""
+    return A * np.power(np.asarray(n, dtype=float), -lam)
 
 
 def _add_ground_truth(df: pd.DataFrame, task: str,
@@ -214,17 +239,18 @@ def _add_ground_truth(df: pd.DataFrame, task: str,
       other. Matches plot_sequences.py's own historical default.
 
     SCALE WARNING for gt_mode='true': build_from_df does NOT put these two
-    columns on the same scale. true_mean is rescaled to [-1,1] like
-    value/response (verified [-0.700, 0.700]), so it goes through _to_pct like
-    everything else. true_p is deliberately LEFT on its native [0,1]
-    probability scale (verified [0.133, 0.867]) even though colors' `response`
-    is on [-1,1] -- so it must be scaled by *100, NOT through _to_pct. Passing
-    true_p through _to_pct would silently map [0.133,0.867] to 57-93% instead of
-    13-87%. See utils/binary_transform.py's own module docstring, which flags
-    this same mismatch.
+    columns on the same scale, and this is the ONE place in the soltani figures
+    where a conversion is still required. true_mean is already rescaled to
+    [-1,1] like value/response (verified [-0.700, 0.700]) and is used as-is.
+    true_p is deliberately LEFT on its native [0,1] probability scale (verified
+    [0.133, 0.867]) even though colors' `response` is on [-1,1] -- so it must be
+    mapped with 2p-1. Using true_p directly would silently compress colors'
+    ground truth into [0,1], i.e. half the response range and never negative.
+    See utils/binary_transform.py's own module docstring, which flags the same
+    mismatch.
 
-    Requires `value` (raw stimulus, native pkl scale -- NOT yet through
-    _to_pct) already present in df for the running_mean mode.
+    Requires `value` (raw stimulus, [-1,1]) already present in df for the
+    running_mean mode.
     """
     if gt_mode not in GT_MODES:
         raise ValueError(f"gt_mode must be one of {GT_MODES}, got {gt_mode!r}")
@@ -234,17 +260,18 @@ def _add_ground_truth(df: pd.DataFrame, task: str,
     if gt_mode == "running_mean":
         running = df.groupby(["pid", "trial"])["value"].transform(
             lambda s: s.expanding().mean())
-        df["ground_truth"] = _to_pct(running, task)
+        df["ground_truth"] = running
         return df
 
     if task == "colors":
         if "true_p" not in df.columns:
             raise KeyError("gt_mode='true' needs a true_p column for colors")
-        df["ground_truth"] = df["true_p"] * 100.0      # native [0,1] -- see above
+        # true_p is P(blue) on [0,1]; map to the response scale as 2p-1.
+        df["ground_truth"] = df["true_p"] * 2.0 - 1.0
     else:
         if "true_mean" not in df.columns:
             raise KeyError("gt_mode='true' needs a true_mean column for numbers")
-        df["ground_truth"] = _to_pct(df["true_mean"], task)
+        df["ground_truth"] = df["true_mean"]
     return df
 
 
@@ -274,7 +301,7 @@ def _load_model(task: str, model_type: str, run_dir: Path,
         return None
     df = pd.read_pickle(resp_path)
     out = df[["pid", "trial", "observation"]].copy()
-    out["response"] = _to_pct(df["response"], task)
+    out["response"] = df["response"]
     return out
 
 
@@ -438,8 +465,8 @@ def _stochastic_models(models: dict[str, pd.DataFrame],
     return out
 
 
-def _add_resid_prefix(human: pd.DataFrame) -> pd.DataFrame:
-    sub = human[human["observation"] < PREFIX_LENGTH]
+def _add_resid_prefix(human: pd.DataFrame, prefix_length: int) -> pd.DataFrame:
+    sub = human[human["observation"] < prefix_length]
     means = (sub.groupby(["pid", "observation", "qid"])["response"]
              .mean().reset_index().rename(columns={"response": "qid_mean"}))
     df2 = sub.merge(means, on=["pid", "observation", "qid"])
@@ -449,7 +476,8 @@ def _add_resid_prefix(human: pd.DataFrame) -> pd.DataFrame:
 
 # ── Col 3 — Residual variance growth (prefix only) ──────────────────────────
 
-def _variance_growth_stats(df: pd.DataFrame, return_per_pid: bool = False):
+def _variance_growth_stats(df: pd.DataFrame, prefix_length: int,
+                           return_per_pid: bool = False):
     """Per-observation mean/SE of within-qid residual SD. Same hierarchy for
     Human and every model, so their curves are directly comparable.
 
@@ -468,7 +496,7 @@ def _variance_growth_stats(df: pd.DataFrame, return_per_pid: bool = False):
     and to cols 1-2 of this figure; do not switch these two columns to a
     different error convention in isolation.
     """
-    df2 = _add_resid_prefix(df)
+    df2 = _add_resid_prefix(df, prefix_length)
     MIN = 2
     grp = (df2.groupby(["pid", "observation", "qid"])["resid"]
            .apply(lambda x: x.std() if len(x) >= MIN else np.nan)
@@ -487,9 +515,10 @@ def _variance_growth_stats(df: pd.DataFrame, return_per_pid: bool = False):
 def _plot_panel_variance_growth(ax, human: pd.DataFrame,
                                 models: dict[str, pd.DataFrame] | None = None,
                                 palette: dict | None = None,
-                                show_individual: bool = True) -> None:
+                                show_individual: bool = True,
+                                prefix_length: int = NUMBERS_PREFIX_LENGTH) -> None:
     palette = palette or {}
-    stats, per_pid = _variance_growth_stats(human, return_per_pid=True)
+    stats, per_pid = _variance_growth_stats(human, prefix_length, return_per_pid=True)
     if stats is None:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
@@ -518,7 +547,7 @@ def _plot_panel_variance_growth(ax, human: pd.DataFrame,
         labels.append("Individual pids")
 
     for i, (model_type, mdf) in enumerate(_stochastic_models(models or {}, human)):
-        mstats = _variance_growth_stats(mdf)
+        mstats = _variance_growth_stats(mdf, prefix_length)
         if mstats is None:
             continue
         color = palette.get(model_type, "0.5")
@@ -532,7 +561,7 @@ def _plot_panel_variance_growth(ax, human: pd.DataFrame,
 
     ax.set_xlabel("Observation (prefix only)")
     ax.set_ylabel("Response variability")
-    ax.set_xticks(range(PREFIX_LENGTH))
+    ax.set_xticks(range(prefix_length))
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9)
     sns.despine(ax=ax, top=True, right=True)
@@ -540,7 +569,8 @@ def _plot_panel_variance_growth(ax, human: pd.DataFrame,
 
 # ── Col 4 — Within-trial residual autocorrelation (prefix only) ────────────
 
-def _autocorr_stats(df: pd.DataFrame, return_per_pid: bool = False):
+def _autocorr_stats(df: pd.DataFrame, prefix_length: int,
+                    return_per_pid: bool = False):
     """Cross-pid mean/SEM of within-trial residual autocorrelation at lags 1-3.
 
     Returns (lags, means, sems), or the string "no_repeats" / "insufficient"
@@ -554,12 +584,12 @@ def _autocorr_stats(df: pd.DataFrame, return_per_pid: bool = False):
     visible without changing the error convention cols 1-2 use.
 
     Note lag 3 is much weaker here than in carrabin's own panel: the prefix
-    restriction (observation < PREFIX_LENGTH=4) leaves 3/2/1 residual pairs per
+    restriction leaves progressively fewer residual pairs per
     trial at lags 1/2/3, versus carrabin's 4/3/2 over its full 5-observation
     sequence. Lag 3 is therefore a single pair per trial and should not be
     over-read; it is also why the zero-variance guard below is needed at all.
     """
-    df2 = _add_resid_prefix(df)
+    df2 = _add_resid_prefix(df, prefix_length)
     # A qid with only 1 repeat produces a trivially-zero residual (its
     # "mean" is just itself), not a genuine signal to autocorrelate --
     # the same degenerate case _plot_panel_variance_growth already guards
@@ -575,7 +605,7 @@ def _autocorr_stats(df: pd.DataFrame, return_per_pid: bool = False):
     repeat_counts = df2.groupby(["pid", "observation", "qid"]).size()
     if not (repeat_counts >= 2).any():
         return "no_repeats"
-    lags = [1, 2, 3]
+    lags = list(range(1, prefix_length))
     pid_rs: dict[int, list[float]] = {lag: [] for lag in lags}
     # pid -> {lag: r}. pid_rs above deliberately discards which pid each value
     # came from (it only needs the cross-pid aggregate), so track it separately
@@ -602,7 +632,7 @@ def _autocorr_stats(df: pd.DataFrame, return_per_pid: bool = False):
                 continue
             arr = np.array(pairs)
             # Guard against a single pid/lag combination happening to have
-            # zero variance on one side (e.g. lag=3 with PREFIX_LENGTH=4
+            # zero variance on one side (e.g. the longest lag in a short prefix
             # pairs exactly ONE point per trial -- observation 0 vs
             # observation 3 -- and a real participant who never moves the
             # slider away from its fixed per-trial starting position on
@@ -634,9 +664,10 @@ def _autocorr_stats(df: pd.DataFrame, return_per_pid: bool = False):
 def _plot_panel_autocorr(ax, human: pd.DataFrame,
                          models: dict[str, pd.DataFrame] | None = None,
                          palette: dict | None = None,
-                         show_individual: bool = True) -> None:
+                         show_individual: bool = True,
+                         prefix_length: int = NUMBERS_PREFIX_LENGTH) -> None:
     palette = palette or {}
-    res = _autocorr_stats(human, return_per_pid=True)
+    res = _autocorr_stats(human, prefix_length, return_per_pid=True)
     if isinstance(res, str):
         msg = ("Insufficient data\n(no qid repeats for this task)"
                if res == "no_repeats" else "Insufficient data")
@@ -669,7 +700,7 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame,
         labels.append("Individual pids")
 
     for i, (model_type, mdf) in enumerate(_stochastic_models(models or {}, human)):
-        mres = _autocorr_stats(mdf)
+        mres = _autocorr_stats(mdf, prefix_length)
         if isinstance(mres, str):
             continue
         mlags, mmeans, msems = mres
@@ -691,23 +722,50 @@ def _plot_panel_autocorr(ax, human: pd.DataFrame,
 # Human AND all models (deterministic included) -- see the panel's docstring.
 
 def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
-    """Fits the power-law decay A*n^(-lambda) to each pid's own mean
-    |delta response| vs observation curve -- in LOG-LOG SPACE (a plain
-    linear regression of log(delta) on log(observation), lambda = -slope)
-    rather than scipy.optimize.curve_fit's bounded nonlinear least squares
-    directly on the raw curve. This is a real fix, not a style choice:
-    with only ~32 trials per pid to average over 14 observation steps,
-    these curves are noisy and often close to flat (confirmed directly
-    against real task_backend data -- see chat history), and the bounded
-    nonlinear optimizer was reliably getting stuck exactly at its own
-    lam=0 lower bound for data like this (returning lambda~1e-11 to
-    1e-21 -- a degenerate floor artifact, not a genuine near-zero
-    estimate), rather than genuinely fitting anything. Log-log linear
-    regression has no bounds to stick to and handles a flat or even
-    slightly INCREASING curve (a real, honest possibility for noisy human
-    data, unlike the old [0,2]-bounded fit, which couldn't express
-    'no decay' as anything other than exactly 0) by simply returning a
-    small or negative lambda instead of degenerating."""
+    """Per-pid decay exponent lambda, fitting A*n^(-lambda) to that pid's own
+    mean |delta response| vs n curve by BOUNDED NONLINEAR LEAST SQUARES
+    (scipy.optimize.curve_fit), identical to figure_yoo_temporal.py's own
+    estimator -- same functional form, same p0=[0.1, 0.5], same
+    bounds=([0,0],[2,2]) -- so soltani and yoo lambdas are directly comparable.
+
+    TWO THINGS HAVE TO BE RIGHT FOR THAT COMPARABILITY, and both were wrong here
+    before; see the notes below. Do not "simplify" either one away.
+
+    (1) n MEANS "NUMBER OF OBSERVATIONS SEEN", NOT THE RAW observation VALUE.
+    yoo is 1-indexed, so its first valid delta sits at observation 2 with 2
+    observations seen, and n == observation. The soltani datasets are 0-indexed
+    (observation 0-14), so the first valid delta sits at observation 1 with 2
+    observations seen -- n must therefore be observation + 1. Feeding the raw
+    0-indexed value understated n by one, which has enormous leverage at the low
+    end of a power law (log(1) = 0 vs log(2) = 0.693) and made soltani lambdas
+    silently non-comparable to yoo's: human mean 0.279 raw vs 0.346 corrected.
+
+    (2) THE CURVE MUST BE ON THE [-1,1] SCALE BEFORE FITTING, which it now is
+    throughout this figure. yoo fits responses on the canonical [-1,1] scale,
+    where the |delta| curve starts around 0.11 and A in [0,2] is a comfortable
+    bound. An earlier version of this figure converted responses to [0,100]
+    percent for readability, putting the same curve near 6.0 -- so A saturated at
+    its upper bound of 2, the fit could not reach the curve, and lambda collapsed
+    to 0 for most pids. That BOUNDS artefact was mistaken for the nonlinear
+    optimizer being unusable on short, noisy soltani curves, and was why it got
+    (wrongly) replaced by a log-log regression. Do not reintroduce a percent
+    conversion upstream of this fit.
+
+    DO NOT USE A LOG-LOG LINEAR REGRESSION FOR LAMBDA -- here or anywhere else in
+    this project. It looks equivalent (it fits the same power law) but it is not
+    the same estimator: it minimises squared error in LOG space, which weights
+    the small late-observation deltas far more heavily than the large early ones
+    and is acutely sensitive to the arbitrary floor you must impose on
+    delta == 0. It also silently diverges from yoo/carrabin, which is exactly how
+    the two bugs above went unnoticed. On real complete_pairs data the two
+    methods correlate r=0.91 (human) / r=0.95 (RL_lambda) but differ in level --
+    human mean 0.433 nonlinear vs 0.346 log-log -- so switching between them
+    shifts every lambda in the figure.
+
+    Pids whose fit does not converge are omitted from the returned Series (2/27
+    for human numbers on complete_pairs), matching yoo's behaviour rather than
+    substituting a degenerate value.
+    """
     out: dict = {}
     for pid, grp in df.groupby("pid"):
         pieces = []
@@ -720,19 +778,17 @@ def _fit_lambda_curve_fit(df: pd.DataFrame) -> pd.Series:
         curve = curve[curve.index >= 1]
         if len(curve) < 3:
             continue
-        n = curve.index.values.astype(float)
+        # (1) observations seen, not the 0-indexed observation value.
+        n = curve.index.values.astype(float) + 1.0
+        # (2) back to the [-1,1] scale yoo fits on, so A in [0,2] is meaningful.
         y = curve.values.astype(float)
         if not (np.all(np.isfinite(n)) and np.all(np.isfinite(y))):
             continue
-        # A delta of exactly 0 is possible (identical consecutive
-        # responses) but undefined in log-space -- clip to a small floor
-        # rather than drop the observation entirely, since dropping would
-        # bias the fit toward whichever observations happened to have
-        # nonzero movement.
-        y = np.clip(y, 1e-6, None)
         try:
-            slope, intercept, _, _, _ = linregress(np.log(n), np.log(y))
-            out[pid] = -float(slope)
+            popt, _ = scipy_curve_fit(_power_law, n, y, p0=[0.1, 0.5],
+                                      bounds=([0.0, 0.0], [2.0, 2.0]),
+                                      maxfev=2000)
+            out[int(pid)] = float(popt[1])
         except Exception:
             pass
     return pd.Series(out, name="lambda_")
@@ -889,6 +945,18 @@ def main() -> None:
                              "RL_lambda. Cols 3-4 are human-only by necessity, and "
                              "col 6 (cross-task lambda) is human-only by design -- "
                              "see the module docstring for both.")
+    parser.add_argument("--colors_prefix_length", type=int, default=QQ_PREFIX_LENGTH,
+                        help="COLORS ONLY: how many leading observations a "
+                             "quasi-qid group must share (cols 3-4). Colors has no "
+                             "designed prefix, so this is free; numbers is fixed at "
+                             "its designed 4 and is NOT affected by this flag. "
+                             f"Default {QQ_PREFIX_LENGTH}.")
+    parser.add_argument("--colors_min_repeats", type=int, default=QQ_MIN_REPEATS,
+                        help="COLORS ONLY: minimum trials sharing a prefix for a "
+                             "quasi-qid group to qualify. Note cols 3 and 4 want "
+                             "different values -- col 3 needs >=3 for a usable "
+                             "within-group SD, col 4 only needs residual PAIRS and "
+                             f"does better at 2. Default {QQ_MIN_REPEATS}.")
     parser.add_argument("--gt_mode", choices=GT_MODES, default="running_mean",
                         help="Col 1 ground truth. 'running_mean' (default): the "
                              "running mean/ratio of the observations so far -- what "
@@ -939,11 +1007,15 @@ def main() -> None:
         _plot_panel_performance(axes[row, 0], human, models, args.show_individual,
                                 palette, args.gt_mode)
         _plot_panel_delta(axes[row, 1], human, models, args.show_individual, palette)
-        human_for_repeats = add_quasi_qids(human) if task == "colors" else human
+        colors_prefix = args.colors_prefix_length
+        human_for_repeats = (add_quasi_qids(human, prefix_length=colors_prefix,
+                                           min_repeats=args.colors_min_repeats)
+                             if task == "colors" else human)
+        prefix_length = _prefix_length(task, colors_prefix)
         _plot_panel_variance_growth(axes[row, 2], human_for_repeats, models,
-                                    palette, args.show_individual)
+                                    palette, args.show_individual, prefix_length)
         _plot_panel_autocorr(axes[row, 3], human_for_repeats, models,
-                             palette, args.show_individual)
+                             palette, args.show_individual, prefix_length)
         _plot_panel_splithalf_lambda(axes[row, 4], human, models, palette)
         lambda_by_task[task] = _fit_lambda_curve_fit(human)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
@@ -972,17 +1044,20 @@ def main() -> None:
                  "these models are deterministic, so their residual against a "
                  "qid-conditional mean is exactly zero. Col 6 (cross-task lambda) "
                  "is human-only by design -- an individual-differences check, not "
-                 "a model-fit panel. Cols 3-4 restricted to "
-                 "observation < prefix_length=4, the only region guaranteed "
-                 "identical across a qid's repeats in this task's design.")
+                 "a model-fit panel. " "Cols 3-4 restricted to the shared-prefix window "
+                 f"(numbers {NUMBERS_PREFIX_LENGTH} obs, by design; colors "
+                 f"{args.colors_prefix_length} obs, min_repeats="
+                 f"{args.colors_min_repeats}, constructed).")
     else:
         footer = ("Human data only (--plot_models off by default, to keep "
                  "pilot-stage human data most visible; pass --plot_models to "
                  "add fitted Mean/LeakyIntegrator/PrimacyRecency/RL_lambda "
-                 "to cols 1-2 and 5). Cols 3-4 restricted to observation < "
-                 "prefix_length=4, the only region guaranteed identical across "
-                 "a qid's repeats in this task's design. Col 6 (cross-task "
-                 "lambda) is human-only by design, unaffected by --plot_models.")
+                 "to cols 1-2 and 5-6). " "Cols 3-4 restricted to the shared-prefix window "
+                 f"(numbers {NUMBERS_PREFIX_LENGTH} obs, by design; colors "
+                 f"{args.colors_prefix_length} obs, min_repeats="
+                 f"{args.colors_min_repeats}, constructed)." " Col 6 "
+                 "(cross-task lambda) is human-only by design, unaffected by "
+                 "--plot_models.")
     fig.text(0.5, -0.02, footer,
               ha="center", va="top", fontsize=7, style="italic", color="0.4")
 

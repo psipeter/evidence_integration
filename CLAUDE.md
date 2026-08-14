@@ -188,8 +188,25 @@ unlike carrabin/yoo (both 1-indexed). Anything that assumes a 1-indexed
 observation (a log(observation) fit, a `t/(t+2)` count, an activity map
 keyed 1..n) needs an explicit guard. The known cases are already handled:
 `counting_integrator.activity_key_for_trial` for the activity map/seed,
-`_abs_delta_long`'s `observation >= 1` filter for the log-log lambda fit, and
+`_fit_lambda_curve_fit`'s `n = observation + 1` for the power-law λ fit, and
 `apply_binary_transform`'s `t = observation + 1`.
+
+`scripts/build_task_backend_inputs.py` flags worth knowing:
+- `--complete_pairs` derives the pid set with a `finished` row in BOTH tasks live
+  from Supabase, instead of passing `--numbers_pids`/`--colors_pids` by hand. No
+  cohort pid lists are recorded in this repo, so this is the only reproducible
+  way to re-select the same people.
+- `--no_filter` skips `utils/participant_filters` entirely (also
+  `build_from_df(apply_filters=False)`). For diagnosing how much the exclusion
+  criteria change a result -- NOT for published output; it prints a warning.
+  On complete_pairs, 60 participants finished both tasks and the filters keep 27
+  (55% excluded); the excluded group roughly doubles both the mean and the SD of
+  performance error (numbers 0.107 -> 0.201 mean, 0.074 -> 0.141 SD), and the
+  MEDIAN moves as much as the mean, i.e. they are systematically worse rather
+  than a noisy tail.
+- Integer pids are derived from whoever SURVIVES filtering, so a filtered and an
+  unfiltered build assign different pids to the same people. The two are
+  comparable in aggregate only, never pid-by-pid.
 
 Archived (do not reactivate): diederen, jiang, usher.
 
@@ -993,11 +1010,11 @@ Default: --nef_folder refit
 |-------|---------|
 | Col 1 | Task schematic (placeholder -- no schematic PDF exists yet) |
 | Col 2 (P1) | Estimation error vs the RUNNING MEAN (not the fixed generative
-         parameter), per pid, as a violin -- Human AND each fitted model.
-         See the file's own module docstring for why a violin over a
-         boxplot/rugplot at this sample size |
+         parameter), per pid, as a BOXPLOT -- Human AND each fitted model.
+         Same `sns.boxplot` call and 45-degree tick rotation as
+         figure_carrabin_performance.py / figure_yoo_performance.py |
 | Col 3 (P2) | Model fit: cross-validated RMSE to HUMAN responses, per pid,
-         one violin per model; significance bars from SIG_REFERENCE outward |
+         one boxplot per model; significance bars from SIG_REFERENCE outward |
 
 Row 1 = task-colors, row 2 = task-numbers. `--datafile <name>` selects which
 round's data to load AND which fits to pair with it (see "dataset vs
@@ -1006,7 +1023,7 @@ round's data to load AND which fits to pair with it (see "dataset vs
 **Mean scores exactly 0 in P1 by construction** -- Mean *is* the running mean
 and the ground truth *is* the running mean. This is a settled, deliberate
 choice, not an oversight: it doubles as a live check that math_models' Mean
-and `_add_running_mean_ground_truth` still agree, so a non-zero Mean violin
+and `_add_running_mean_ground_truth` still agree, so a non-zero Mean box
 means one of them has drifted. Do not "fix" it by dropping Mean from the panel
 or changing the panel's ground truth. Differs from
 figure_carrabin_performance.py's P1, whose ground truth is the fixed true_p,
@@ -1015,10 +1032,20 @@ where Mean is NOT degenerate.
 P2 reads each model's fitted k-fold CV loss from
 `{model}_{stem}_performance.pkl` via `_get_loss` -- NOT a recomputed RMSE from
 `_responses.pkl`, which would be in-sample and would flatter the 2-parameter
-models over parameter-free Mean. Both panels are in percentage points:
-`LOSS_TO_PCT = 50` converts the [-1,1]-scale loss, and 50 is correct for BOTH
-tasks (numbers `pct = (x+1)*50`, colors `pct = (x+1)/2*100 = 50x+50` -- same
-slope, and an RMSE is a difference so the intercept drops out).
+models over parameter-free Mean.
+
+**RESPONSE SCALE: [-1,1] EVERYWHERE, in all three soltani figures.** No percent
+conversion anywhere -- so RMSE, mean |Δresponse| and response variability are
+numerically comparable with the carrabin and yoo figures (an RMSE of 0.12 means
+the same thing in all of them), and any estimator borrowed from those figures
+drops in unmodified. An earlier version converted to [0,100] percent for
+readability, which required round-trip compensation factors (`LOSS_TO_PCT`,
+`PCT_PER_UNIT`, `_to_pct`) purely to undo itself -- and one of them caused the λ
+bounds bug above. Do not reintroduce a percent conversion. The ONE remaining
+conversion is colors' `true_p`, which `build_from_df` leaves on its native [0,1]
+while colors' `response` is on [-1,1]; `_add_ground_truth` maps it with `2p-1`.
+For reference, RL_lambda CV RMSE across datasets now reads directly: soltani
+numbers 0.085, carrabin 0.149, soltani colors 0.204, yoo 0.248.
 
 `SIG_REFERENCE = "NEF"`, matching the carrabin/yoo figures.
 `annotate_nef_comparisons` takes the reference as a parameter despite its name,
@@ -1044,12 +1071,65 @@ so a run folder with only math fits shows P2 without bars. Set it back to
 
 Cols 3-4 use colors' empirically-derived quasi-qid repeat structure
 (`utils/colors_quasi_qids.py`); numbers uses its real, designed qid
-repeats. λ fitted via log-log linear regression (lambda = -slope of
-log(delta) vs log(observation)), NOT `scipy.optimize.curve_fit`'s bounded
-nonlinear fit -- that reliably degenerated to a ~0 floor artifact on real,
-noisy human data (confirmed directly). `--plot_models` (off by default)
-overlays fitted Mean/LeakyIntegrator/PrimacyRecency/RL_lambda/NEF in cols 1-2
-and 5-6 (cols 3-4: stochastic only). `--datafile <name>` as above.
+repeats. `--plot_models` (off by default) overlays fitted
+Mean/LeakyIntegrator/PrimacyRecency/RL_lambda/NEF in cols 1-2 and 5-6
+(cols 3-4: stochastic only). `--datafile <name>` as above.
+
+**λ is fitted by BOUNDED NONLINEAR LEAST SQUARES** (`scipy.optimize.curve_fit`
+on `A*n^(-λ)`, `p0=[0.1,0.5]`, `bounds=([0,0],[2,2])`) -- byte-for-byte the same
+estimator `figure_yoo_temporal.py` uses, so soltani and yoo λ are comparable.
+**Do NOT use a log-log linear regression for λ anywhere in this project.** An
+earlier version of this figure did, on the belief that the nonlinear fit
+"degenerated to a ~0 floor on noisy human data" -- that was WRONG, and the
+misdiagnosis is instructive: the degeneracy was a BOUNDS artefact. yoo fits on
+the canonical [-1,1] scale where the |Δresponse| curve starts ~0.11 and `A<=2` is
+ample; this figure had converted responses to [0,100] percent, where the same
+curve starts ~6.0, so `A` saturated at 2, the fit could not reach the curve, and
+λ collapsed to 0 for 22/27 pids. Log-log also weights the small late-observation
+deltas far more heavily and depends on an arbitrary floor for `delta == 0`. The
+two methods correlate r=0.91 (human) / r=0.95 (RL_lambda) but differ in level.
+
+Two things λ depends on, both of which were wrong before:
+- **n means "observations seen", not the raw `observation` value.** soltani is
+  0-indexed, so `n = observation + 1`; yoo is 1-indexed, so `n = observation`.
+  Getting this wrong understated n by one, which has huge leverage at the low end
+  of a power law (log(1)=0 vs log(2)=0.693): human numbers λ 0.279 raw vs 0.433
+  corrected.
+- **the curve must be on [-1,1] before fitting** -- see the RESPONSE SCALE note
+  below.
+
+Sanity check that the estimator is working: `Mean` must return λ≈1 (a running
+mean has α(t)=1/t) and `LeakyIntegrator` λ≈0 (fixed γ). On complete_pairs they
+return 1.174/0.999 and 0.168/0.068 for numbers/colors. Neither was recoverable
+under the log-log version.
+
+**The shared-prefix window is PER TASK, and tunable for colors.**
+`NUMBERS_PREFIX_LENGTH = 4` is fixed by DESIGN -- verified directly: within
+`(pid, qid)`, numbers' `value` is identical across trials for observations 0-3 in
+216/216 groups and identical in 0/216 at observation 4, so widening it would
+admit non-shared stimuli and turn genuine stimulus differences into apparent
+"response variability". Colors has no designed prefix at all; its groups are
+CONSTRUCTED by `utils/colors_quasi_qids.py`, so its window is free, and its
+default is now **5** (`PREFIX_LENGTH`), matching carrabin's own 5-observation
+repeat window. `MIN_REPEATS = 3` for both -- three points is the floor for a
+meaningful "typical response" per repeat, and col 3's within-group SD needs more
+than 1 dof. Exposed as `--colors_prefix_length` / `--colors_min_repeats` on both
+figure_soltani_temporal.py and figure_soltani_variability.py (colors only;
+numbers is unaffected by either flag).
+
+Raising colors from 4 to 5 is what made its col 3 trend detectable: per-pid
+variance-growth slope went +0.0044 (20/27 pids positive, Wilcoxon p=0.086) to
++0.0135 (19/27, p=0.0047), retaining all 27 pids. Because colors draws are
+binary there are 2^n possible prefixes against ~32 trials, so group size falls
+off geometrically in n -- n=6 gives a steeper slope but drops to 23 pids, and
+`min_repeats>=4` collapses the sample. Note these defaults were chosen from a
+16-cell grid, so they are justified by matching carrabin's window and by SD
+validity, NOT by having won the search.
+
+Caveat for the variability figure's cross-task panel: its two axes are now
+computed over DIFFERENT windows (numbers 4, colors 5). The correlation is the
+interpretable quantity; absolute positions and the slope's distance from 1 are
+not.
 
 **Cols 3-4 include only Human + STOCHASTIC models**, where eligibility is
 decided by `_STOCHASTIC_MODELS` (NEF, NoisyCounting) rather than MODEL_ORDER.

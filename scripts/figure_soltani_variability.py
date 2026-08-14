@@ -36,7 +36,9 @@ repeats share the same first `prefix_length` (=4) observations, but the
 SUFFIX differs on every repeat because each repeat is steered toward a
 different target. So "response variability for identical inputs" is only
 a valid concept when restricted to `observation < prefix_length`.
-PREFIX_LENGTH is hardcoded to 4 below (matching task_backend/
+The prefix window is now PER TASK (numbers 4 by design, colors 5 constructed;
+see NUMBERS_PREFIX_LENGTH below). It was formerly hardcoded to 4 for both
+(matching task_backend/
 generate_sequences.py's own NUMBERS_N_PREFIX*-derived design, confirmed
 against a real pool sequence file's own prefix_length field before
 hardcoding it here, same as this file's own earlier pass already did).
@@ -85,9 +87,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path
 from utils.plot_style import FIGURE_SIZE, apply_style, label_panels, pvalue_to_stars
-from utils.colors_quasi_qids import add_quasi_qids
+from utils.colors_quasi_qids import (
+    MIN_REPEATS as QQ_MIN_REPEATS,
+    PREFIX_LENGTH as QQ_PREFIX_LENGTH,
+    add_quasi_qids,
+)
 
-PREFIX_LENGTH = 4
+# Shared-prefix window, PER TASK -- the two tasks get their repeat structure
+# completely differently and must not share one constant. numbers has a DESIGNED
+# prefix of exactly 4 (verified: within (pid, qid) its `value` is identical
+# across trials for observations 0-3 in 216/216 groups, and identical in 0/216 at
+# observation 4), so widening it would admit non-shared stimuli and turn genuine
+# stimulus differences into apparent response variability. colors has no designed
+# prefix at all -- its groups are constructed by utils.colors_quasi_qids -- so its
+# window is that module's tunable PREFIX_LENGTH (5), chosen to match carrabin's
+# own 5-observation repeat window. See that module's docstring.
+NUMBERS_PREFIX_LENGTH = 4
 HUMAN_COLOR   = "0.3"
 MIN_CORR_N    = 3  # matches figure_soltani_temporal.py's cross-task correlation threshold
 
@@ -95,7 +110,7 @@ MIN_CORR_N    = 3  # matches figure_soltani_temporal.py's cross-task correlation
 # ── metric helpers (both tasks -- colors' df must be pre-processed via
 # utils.colors_quasi_qids.add_quasi_qids first, see module docstring) ────
 
-def _prefix_response_std(df: pd.DataFrame) -> pd.DataFrame:
+def _prefix_response_std(df: pd.DataFrame, prefix_length: int) -> pd.DataFrame:
     """Mean std(response | qid, observation) within the prefix region,
     per pid. One row per pid; columns [pid, resp_std]. No timed_out/dedup
     filtering here -- both data/soltani_numbers.pkl and data/soltani_colors.pkl
@@ -103,13 +118,13 @@ def _prefix_response_std(df: pd.DataFrame) -> pd.DataFrame:
     build_model_inputs.py's build_from_df), unlike this file's own earlier
     version, which read a raw,
     not-yet-deduped pilot file."""
-    sub = df[df["observation"] < PREFIX_LENGTH]
+    sub = df[df["observation"] < prefix_length]
     grp = (sub.groupby(["pid", "qid", "observation"])["response"]
            .std().dropna().reset_index(name="resp_std"))
     return grp.groupby("pid")["resp_std"].mean().reset_index()
 
 
-def _prefix_response_std_split(df: pd.DataFrame) -> pd.DataFrame:
+def _prefix_response_std_split(df: pd.DataFrame, prefix_length: int) -> pd.DataFrame:
     """Per-pid prefix response std computed separately on ODD vs EVEN
     trial indices, not first-half/second-half -- a strict chronological
     split confounds genuine estimation noise (what split-half reliability
@@ -126,7 +141,7 @@ def _prefix_response_std_split(df: pd.DataFrame) -> pd.DataFrame:
         halves = {"first": trials[0::2], "second": trials[1::2]}
         vals = {}
         for half, tset in halves.items():
-            gg = g[(g["trial"].isin(tset)) & (g["observation"] < PREFIX_LENGTH)]
+            gg = g[(g["trial"].isin(tset)) & (g["observation"] < prefix_length)]
             pv = gg.groupby(["qid", "observation"])["response"].std().dropna()
             vals[half] = float(pv.mean()) if len(pv) > 0 else np.nan
         rows.append({"pid": pid, **vals})
@@ -202,7 +217,14 @@ def _plot_panel_crosstask(ax, colors_std: pd.DataFrame, numbers_std: pd.DataFram
     see module docstring). Merges on the real integer `pid`, which is
     valid either way -- the quasi-qid relabeling only ever touches which
     ROWS/trials qualify and what to call the derived group, never the
-    underlying participant identity itself."""
+    underlying participant identity itself.
+
+    NOTE the two axes are computed over DIFFERENT prefix windows: numbers over
+    its designed 4 observations, colors over the 5 its quasi-qids are built on.
+    That is deliberate -- each task uses the longest window over which its own
+    repeats genuinely share a stimulus -- but it means the two axes are not on
+    an identical measurement footing, so the CORRELATION is the interpretable
+    quantity here, not the absolute positions or the slope's distance from 1."""
     b = colors_std.set_index("pid")["resp_std"]
     c = numbers_std.set_index("pid")["resp_std"]
     both = b.index.intersection(c.index)
@@ -241,6 +263,15 @@ def _plot_panel_crosstask(ax, colors_std: pd.DataFrame, numbers_std: pd.DataFram
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--colors_prefix_length", type=int, default=QQ_PREFIX_LENGTH,
+                        help="COLORS ONLY (row 1): leading observations a quasi-qid "
+                             "group must share. numbers is fixed at its designed 4 "
+                             f"and is NOT affected. Default {QQ_PREFIX_LENGTH}.")
+    parser.add_argument("--colors_min_repeats", type=int, default=QQ_MIN_REPEATS,
+                        help="COLORS ONLY (row 1): minimum trials sharing a prefix "
+                             "for a quasi-qid group to qualify -- 3 is the floor for "
+                             "a meaningful 'typical response' per repeat. Default "
+                             f"{QQ_MIN_REPEATS}.")
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
                             "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
@@ -278,11 +309,15 @@ def main() -> None:
         prefix_std["colors"] = pd.DataFrame(columns=["pid", "resp_std"])
     else:
         df_colors = pd.read_pickle(colors_path)
-        df_colors_qq = add_quasi_qids(df_colors)
+        df_colors_qq = add_quasi_qids(df_colors,
+                                      prefix_length=args.colors_prefix_length,
+                                      min_repeats=args.colors_min_repeats)
         print(f"task-colors: {len(df_colors)} rows, {df_colors['pid'].nunique()} pids "
               f"-> {len(df_colors_qq)} rows in a qualifying quasi-qid group")
-        prefix_std["colors"] = _prefix_response_std(df_colors_qq)
-        split_df_colors = _prefix_response_std_split(df_colors_qq)
+        prefix_std["colors"] = _prefix_response_std(df_colors_qq,
+                                                    args.colors_prefix_length)
+        split_df_colors = _prefix_response_std_split(df_colors_qq,
+                                                     args.colors_prefix_length)
 
         _plot_panel_kde(axes[0, 0], prefix_std["colors"])
         _plot_panel_splithalf(axes[0, 1], split_df_colors)
@@ -296,8 +331,10 @@ def main() -> None:
     else:
         df_numbers = pd.read_pickle(numbers_path)
         print(f"task-numbers: {len(df_numbers)} rows, {df_numbers['pid'].nunique()} pids")
-        prefix_std["numbers"] = _prefix_response_std(df_numbers)
-        split_df_numbers = _prefix_response_std_split(df_numbers)
+        prefix_std["numbers"] = _prefix_response_std(df_numbers,
+                                                     NUMBERS_PREFIX_LENGTH)
+        split_df_numbers = _prefix_response_std_split(df_numbers,
+                                                      NUMBERS_PREFIX_LENGTH)
 
         _plot_panel_kde(axes[1, 0], prefix_std["numbers"])
         _plot_panel_splithalf(axes[1, 1], split_df_numbers)
@@ -321,7 +358,9 @@ def main() -> None:
               "Human only (this figure loads no model fits). task-colors uses an empirically-derived "
               "quasi-qid repeat structure (see this script's own module docstring); "
               "task-numbers uses its real, designed qid repeats. Both restricted to "
-              "observation < prefix_length=4.",
+              f"the shared-prefix window (numbers {NUMBERS_PREFIX_LENGTH} obs, by "
+              f"design; colors {args.colors_prefix_length} obs, min_repeats="
+              f"{args.colors_min_repeats}, constructed).",
               ha="center", va="top", fontsize=7, style="italic", color="0.4")
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

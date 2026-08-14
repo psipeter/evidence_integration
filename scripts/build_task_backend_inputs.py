@@ -143,7 +143,8 @@ def list_candidates(pool_root: Path, task: str) -> None:
         print(f"{pid:<28} {status:<12} {n_trials:<8} {stds or ''}")
 
 
-def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[str]]) -> None:
+def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[str]],
+                apply_filters: bool = True) -> None:
     """pids_by_task: {'numbers': [...], 'colors': [...]} -- either list can
     be empty/omitted if this pilot didn't touch that task. Requires every
     listed pid to actually have a 'finished' row for that task -- reports
@@ -175,7 +176,8 @@ def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[s
 
     combined = pd.concat(frames, ignore_index=True)
     build_from_df(combined, out_name_numbers=f"soltani_numbers_{out_prefix}",
-                 out_name_colors=f"soltani_colors_{out_prefix}")
+                 out_name_colors=f"soltani_colors_{out_prefix}",
+                 apply_filters=apply_filters)
     print("\nJOB_COMPLETE")
 
 
@@ -188,6 +190,14 @@ def main():
                    help="Output name suffix, e.g. 'pilot4' -> soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl")
     p.add_argument("--numbers_pids", default="", help="Comma-separated real prolific_pids for the numbers task")
     p.add_argument("--colors_pids", default="", help="Comma-separated real prolific_pids for the colors task")
+    p.add_argument("--no_filter", action="store_true",
+                   help="Skip utils.participant_filters entirely -- keep every "
+                        "participant. For diagnosing how much the exclusion "
+                        "criteria change a result. Integer pids will NOT match a "
+                        "filtered build of the same people.")
+    p.add_argument("--complete_pairs", action="store_true",
+                   help="Auto-select the pids with a 'finished' row in BOTH tasks, "
+                        "instead of passing --numbers_pids/--colors_pids by hand.")
     args = p.parse_args()
 
     pool_root = Path(args.pool_root)
@@ -200,11 +210,28 @@ def main():
         print("Need --pilot <name> (or --list_candidates <task> to probe first).")
         return
 
-    pids_by_task = {
-        "numbers": [p.strip() for p in args.numbers_pids.split(",") if p.strip()],
-        "colors": [p.strip() for p in args.colors_pids.split(",") if p.strip()],
-    }
-    build_pilot(pool_root, args.pilot, pids_by_task)
+    if args.complete_pairs:
+        # Participants with a 'finished' row in BOTH tasks. Derived live rather
+        # than from a stored list, because no cohort pid lists are recorded in
+        # the repo -- so this is the only reproducible way to re-select the same
+        # people. Both tasks get the SAME pid set by construction.
+        finished = {}
+        for task in ("numbers", "colors"):
+            rows = _fetch_all_events(pool_root, task)
+            finished[task] = {r["prolific_pid"] for r in rows
+                              if r["phase"] == "finished"
+                              and REAL_PID_PATTERN.match(r["prolific_pid"])}
+            print(f"  {task}: {len(finished[task])} finished real pids")
+        both = sorted(finished["numbers"] & finished["colors"])
+        print(f"  -> {len(both)} pids finished BOTH tasks")
+        pids_by_task = {"numbers": both, "colors": both}
+    else:
+        pids_by_task = {
+            "numbers": [p.strip() for p in args.numbers_pids.split(",") if p.strip()],
+            "colors": [p.strip() for p in args.colors_pids.split(",") if p.strip()],
+        }
+    build_pilot(pool_root, args.pilot, pids_by_task,
+                apply_filters=not args.no_filter)
 
 
 if __name__ == "__main__":
