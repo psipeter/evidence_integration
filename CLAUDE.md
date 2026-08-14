@@ -1057,11 +1057,13 @@ so a run folder with only math fits shows P2 without bars. Set it back to
 ### figure_soltani_temporal.py (T group, 2x6)
 | Panel | Content |
 |-------|---------|
-| Col 1 | Performance error vs observation (RMSE to running mean) |
-| Col 2 | Mean \|Δresponse\| vs observation |
-| Col 3 | Residual variance growth (prefix only, observation < 4) -- Human +
+| Col 1 | Performance error vs observation, against the ground truth chosen by
+         `--gt_mode` (default `true`) and aggregated per `--aggregate` |
+| Col 2 | \|Δresponse\| vs observation, aggregated per `--aggregate`. Colors
+         starts at observation 2, numbers at 1 (`DELTA_MIN_OBS`) |
+| Col 3 | Residual variance growth (shared-prefix window only) -- Human +
          STOCHASTIC models only; see below |
-| Col 4 | Within-trial residual autocorrelation, lag 1-3 (prefix only) --
+| Col 4 | Within-trial residual autocorrelation (shared-prefix window) --
          Human + STOCHASTIC models only; see below |
 | Col 5 | Split-half reliability of fitted λ -- ODD/EVEN trial split, not
          first/second half (see `_fit_lambda_split_half`'s own docstring);
@@ -1069,11 +1071,86 @@ so a run folder with only math fits shows P2 without bars. Set it back to
 | Col 6 | λ_model vs λ_human per pid, one regplot per model + identity line
          (~yoo T4). Mean kept as a null control; see below |
 
+### Cols 1-2 aggregation (`--aggregate`, `--errorbar`)
+
+Both columns share one aggregation choice, applied identically to Human and every
+model. Default **`hier_mean_median`** with **`--errorbar ci`**.
+
+| mode | what it does |
+|------|--------------|
+| `hier_mean_median` | mean over each pid's trials, then MEDIAN across pids (default) |
+| `hier_mean_sem` | mean over trials, then mean ± SEM across pids (the old behaviour) |
+| `flat_median` | pool all trials and pids, take the median |
+| `flat_mean` | pool all trials and pids, take the mean |
+
+`--errorbar {ci,se,iqr,pi80}`. `ci`/`se` are INFERENTIAL (how precisely the
+central tendency is pinned down); `iqr`/`pi80` are DESCRIPTIVE percentile spreads
+of the underlying values and **must not be called confidence intervals**.
+
+Why the default is a two-stage mean-then-median: per-pid |Δresponse| LEVEL varies
+3-4x across participants (yoo 0.026-0.238, soltani numbers 0.025-0.251) and the
+high-amplitude participants tend to be FLAT -- their movement is response noise
+that does not decay. Under a mean they contribute in proportion to amplitude and
+so dominate the late observations, roughly HALVING the visible decay: soltani
+numbers decays 1.69x under a mean vs 3.09x under a median (yoo 1.66x vs 2.38x).
+Taking the mean WITHIN a participant first (trials are exchangeable replicates)
+and the median ACROSS participants (who differ in kind) is the standard two-stage
+pattern; the reverse ordering would be the odd one.
+
+Three findings worth not rediscovering:
+- **A pooled (`flat_*`) median quantises to the response grid.** Responses come
+  from a 101-value slider, so a median over raw per-trial deltas lands on a grid
+  value and STAYS there: numbers' flat_median curve reads 0.06, 0.06, 0.06, 0.06,
+  0.06, 0.04, 0.04 -- 4 distinct values across the whole curve, vs 14 for
+  hier_mean_median. Averaging within pid first restores continuity.
+- **`flat_mean` == `hier_mean_sem`'s point estimate for col 2**, exactly (verified
+  max|diff| 1.4e-17), because trial counts are balanced (32/32 soltani, 30/30
+  yoo) and the operation is linear. The hierarchy was never doing anything for a
+  mean there. NOT true for col 1, where mean-of-sqrt differs from sqrt-of-mean by
+  Jensen's inequality.
+- **The `ci` band's step-like edge is inherent, not Monte Carlo noise.** With ~27
+  pids the bootstrap median can only land on a small set of order statistics (19
+  distinct values across 20000 resamples), so raising `n_boot` changes nothing
+  (upper-edge mean |step| 0.0188 / 0.0183 / 0.0183 at n_boot 1e3 / 1e4 / 1e5).
+  The same effect makes the median POINT estimate mildly non-monotone -- numbers'
+  col 1 dips at observation 5 and rebounds at 6 purely because a distribution gap
+  sits at the median rank there (values 0.0945, 0.0945, 0.0957, then 0.1138), and
+  the median pid's identity changes each step. The mean is flat across that
+  region. Do not read it as structure at a particular observation.
+
+Col 1's `flat_median` changes the METRIC, not just the estimator: RMSE already
+contains an averaging step, so a "median of RMSEs" is ill-defined. The
+aggregation is composed with the sqrt over raw per-trial squared errors, so
+`sqrt(median(sq_err))` IS the median absolute error and `sqrt(mean(sq_err))` is
+the pooled RMSE. The y-axis label follows the mode (`ERROR_METRIC_LABEL`) so it
+never claims an estimator that wasn't used.
+
+Colors' col 2 starts at observation 2 (`DELTA_MIN_OBS`). With binary evidence the
+first delta is near-degenerate -- the running mean either doesn't move or jumps
+the whole way -- so its per-trial distribution is BIMODAL on essentially two
+values, and a median lands in the zero mode. Measured: the colors Mean model has
+2 distinct delta values there with 58% exactly 0 (median 0.000 vs mean 0.424);
+colors humans 46% zeros (median 0.060 vs mean 0.394). Numbers has no such problem
+(7-9% zeros, ~87 distinct values) and starts at 1.
+
+Investigated and REJECTED: dropping observation 0 from cols 3-4 to avoid colors'
+slider-ceiling effect (78.7% of colors prefix responses are pinned at an extreme
+vs 0.3% for numbers). Col 4's correlations do improve, but col 3 gets WORSE for
+both tasks (numbers p=0.0004 -> 0.141) because losing a fitting point costs more
+than the contamination. The binding constraint was prefix length, not the ceiling.
+
 Cols 3-4 use colors' empirically-derived quasi-qid repeat structure
 (`utils/colors_quasi_qids.py`); numbers uses its real, designed qid
 repeats. `--plot_models` (off by default) overlays fitted
 Mean/LeakyIntegrator/PrimacyRecency/RL_lambda/NEF in cols 1-2 and 5-6
 (cols 3-4: stochastic only). `--datafile <name>` as above.
+
+`--gt_mode` defaults to **`true`** (the fixed generative true_mean/true_p), not
+`running_mean`. Against a fixed target error starts high and DECAYS as evidence
+accumulates; against the running mean it is flat-to-rising because the target
+itself moves. The two converge late in a trial as the running mean approaches the
+true mean. Measured on complete_pairs numbers: running_mean 2.90 -> 5.79 across
+observations, true 10.07 -> 6.40 (pre-scale-change units).
 
 **λ is fitted by BOUNDED NONLINEAR LEAST SQUARES** (`scipy.optimize.curve_fit`
 on `A*n^(-λ)`, `p0=[0.1,0.5]`, `bounds=([0,0],[2,2])`) -- byte-for-byte the same

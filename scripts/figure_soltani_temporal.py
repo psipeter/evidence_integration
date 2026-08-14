@@ -307,14 +307,219 @@ def _load_model(task: str, model_type: str, run_dir: Path,
 
 # ── Col 1 — Performance error vs observation ────────────────────────────────
 
-def _rmse_per_pid_obs(df: pd.DataFrame, ground_truth: pd.DataFrame) -> pd.DataFrame:
-    """df: [pid,trial,observation,response]; ground_truth: adds
-    [pid,trial,observation,ground_truth]. Returns per-(pid,observation) RMSE."""
+def _sq_err_long(df: pd.DataFrame, ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """Per-(pid, trial, observation) SQUARED error against `ground_truth`.
+
+    Kept un-aggregated on purpose. Col 1's error metric involves an averaging
+    step by construction -- RMSE is sqrt(mean(sq_err)) -- so a "flat median of
+    RMSEs" is not a well-defined thing to ask for: the mean over trials has
+    already happened before you get an RMSE to take a median of. Returning the
+    raw squared errors lets the aggregation choice be applied ONCE, afterwards,
+    by composing it with the sqrt (see _plot_error_aggregate).
+    """
     merged = df.merge(ground_truth[["pid", "trial", "observation", "ground_truth"]],
                       on=["pid", "trial", "observation"])
-    return (merged.assign(sq_err=(merged["response"] - merged["ground_truth"]) ** 2)
-            .groupby(["pid", "observation"])["sq_err"].mean()
+    return merged.assign(sq_err=(merged["response"] - merged["ground_truth"]) ** 2)
+
+
+def _rmse_per_pid_obs(df: pd.DataFrame, ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """Per-(pid, observation) RMSE. Used for the thin individual-pid overlay,
+    which is per-pid by definition regardless of the across-pid aggregation."""
+    long = _sq_err_long(df, ground_truth)
+    return (long.groupby(["pid", "observation"])["sq_err"].mean()
             .apply(np.sqrt).reset_index(name="rmse"))
+
+
+# Aggregation schemes for col 2's |delta response| curve. See
+# _plot_delta_aggregate for what each does and why the default is what it is.
+AGGREGATE_MODES = ("flat_median", "flat_mean", "hier_mean_sem", "hier_mean_median")
+
+# y-axis wording per mode, so the label never claims an estimator that wasn't used.
+# Col 1's metric depends on the aggregation, not just its estimator: a median of
+# squared errors under a sqrt IS the median absolute error, so the label must not
+# keep saying "RMSE". See _plot_error_aggregate.
+ERROR_METRIC_LABEL = {
+    "flat_median": "Median |error|",
+    "flat_mean": "Pooled RMSE",
+    "hier_mean_sem": "Performance error (RMSE)",
+    "hier_mean_median": "Median of per-pid RMSE",
+}
+
+# Band options for cols 1-2. Two DIFFERENT kinds of thing, deliberately kept
+# distinguishable because they answer different questions and a reader will
+# assume whichever one the caption implies:
+#   'ci'  -- percentile bootstrap CI of the ESTIMATOR (inferential: how well is
+#            the central tendency pinned down?). seaborn ('ci', 95).
+#   'se'  -- standard error of the MEAN across pids. Only meaningful with a mean
+#            estimator; pairing it with a median would be simply wrong.
+#   'iqr' -- 25th-75th percentile of the underlying values (DESCRIPTIVE: how
+#            spread out are participants?). seaborn ('pi', 50). NOT a confidence
+#            interval -- do not describe it as one.
+#   'pi80'-- as 'iqr' but the 10th-90th percentile.
+ERRORBAR_SPEC = {
+    "ci": ("ci", 95),
+    "se": "se",
+    "iqr": ("pi", 50),
+    "pi80": ("pi", 80),
+}
+
+# Default band per aggregation mode.
+#
+# hier_mean_median uses 'ci' -- a percentile bootstrap CI of the median over
+# pids, the correct inferential interval for this estimator. Its edge looks
+# step-like, and that is INHERENT rather than a resampling artefact: with ~27
+# participants the bootstrap median can only land on a small set of order
+# statistics (measured: 19 distinct values across 20000 resamples), so raising
+# n_boot does nothing -- upper-edge mean |step| is 0.0188 / 0.0183 / 0.0183 at
+# n_boot 1e3 / 1e4 / 1e5. Do not try to smooth it by raising n_boot.
+#
+# 'iqr' was considered and rejected as the default: smoother (0.0125) but WIDER
+# (mean width 0.094 vs 0.069) and, more importantly, it answers a different
+# question -- between-participant spread rather than how precisely the median is
+# pinned down. Use --errorbar iqr (or --show_individual) when individual
+# variability is the point. Two caveats on 'ci': at this n a percentile bootstrap
+# CI of a median can be mildly anticonservative and asymmetric, so do not
+# over-read a marginal non-overlap between two curves.
+ERRORBAR_DEFAULT = {
+    "flat_median": "ci",
+    "flat_mean": "ci",
+    "hier_mean_sem": "se",
+    "hier_mean_median": "ci",
+}
+
+AGGREGATE_LABEL = {
+    "flat_median": "Median",
+    "flat_mean": "Mean",
+    "hier_mean_sem": "Mean",
+    "hier_mean_median": "Median of per-pid mean",
+}
+
+
+def _plot_delta_aggregate(ax, delta_df: pd.DataFrame, color: str, mode: str,
+                          zorder_line: float, zorder_fill: float,
+                          errorbar_kind: str | None = None) -> None:
+    """Draw one source's |delta response| curve for col 2 under `mode`.
+
+    `delta_df` is LONG per-trial data -- one row per (pid, trial, observation)
+    with a `delta` column -- so every mode starts from the same input and only
+    the aggregation differs. Applied identically to Human and to every model.
+
+    WHY THE DEFAULT IS A POOLED (FLAT) MEDIAN. Per-pid |delta| LEVEL varies 3-4x
+    across participants (yoo 0.026-0.238, soltani numbers 0.025-0.251), and the
+    high-amplitude participants tend to be FLAT -- their movement is dominated by
+    response noise that does not decay. Under a mean they contribute in
+    proportion to their amplitude, so they dominate the late observations where
+    everyone else has already converged, roughly HALVING the visible decay: the
+    curve's implied power-law lambda is 0.243 under a mean vs 0.475 under a
+    median for soltani numbers (yoo: 0.132 vs 0.226). A median counts each
+    observation once regardless of amplitude.
+
+    'flat' vs 'hier' matters less than it looks for the MEAN: trial counts are
+    perfectly balanced (32/32 soltani, 30/30 yoo), so the pooled mean EQUALS the
+    mean of per-pid means to floating point (verified, max|diff| 1.4e-17). The
+    hierarchy was never doing anything for a mean. It matters a lot for a median,
+    and the pooled version is also visibly smoother -- 0/13 upward steps for
+    soltani vs 4/13 for the median of per-pid means -- because it takes a median
+    over ~860 values per observation instead of 27.
+
+    CI CAVEAT, read before quoting an interval. Seaborn bootstraps ROWS. For the
+    'hier_*' modes the rows are already one-per-(pid, observation), so its
+    bootstrap is correctly a bootstrap over PARTICIPANTS. For the 'flat_*' modes
+    the rows are individual trials, which are NOT independent within a
+    participant, so the interval is pseudo-replicated and TOO NARROW. It is
+    still useful as a visual indication of central-tendency stability, but do not
+    report it as a confidence interval over participants. A proper cluster
+    bootstrap would resample pids and recompute the pooled statistic; that is
+    deliberately not hand-rolled here.
+
+    WHY 'hier_mean_median' AVOIDS THE FLAT MEDIAN'S STAIRCASE. Responses come
+    from a 101-value slider, so a median taken over raw per-trial deltas lands
+    exactly on a grid value and STAYS there across observations -- numbers'
+    flat_median curve reads 0.06, 0.06, 0.06, 0.06, 0.06, 0.04, 0.04, visibly
+    quantised. Averaging within a participant first produces a continuous
+    per-pid value, so the median across pids is no longer pinned to the grid.
+    It also gives a CI over PARTICIPANTS rather than a row bootstrap, so the band
+    means what a reader will assume it means.
+
+    This panel is descriptive. The per-participant characterisation of decay
+    lives in cols 5-6, which fit lambda per pid and do inference across pids --
+    so col 2 does not need to carry that burden.
+    """
+    if mode not in AGGREGATE_MODES:
+        raise ValueError(f"aggregate must be one of {AGGREGATE_MODES}, got {mode!r}")
+
+    if mode.startswith("hier"):
+        # One row per (pid, observation) -> seaborn's row bootstrap IS a
+        # participant bootstrap, which is what makes hier_mean_median's CI
+        # correct without hand-rolling anything: errorbar=('ci',95) percentile-
+        # bootstraps the MEDIAN over pids. (An earlier version of this function
+        # left that mode as a stub claiming it needed an explicit bootstrap --
+        # that was wrong; only pairing a median with errorbar='se' would have
+        # been.) errorbar='se' with the mean reproduces the original
+        # mean+/-SEM-across-pids behaviour exactly.
+        data = (delta_df.groupby(["pid", "observation"])["delta"]
+                .mean().reset_index())
+        estimator = "median" if mode == "hier_mean_median" else "mean"
+    else:
+        data = delta_df
+        estimator = "median" if mode == "flat_median" else "mean"
+    errorbar = ERRORBAR_SPEC[errorbar_kind or ERRORBAR_DEFAULT[mode]]
+
+    sns.lineplot(data=data, x="observation", y="delta", ax=ax,
+                 estimator=estimator, errorbar=errorbar,
+                 color=color, marker="o", markersize=5, linewidth=1.8,
+                 err_kws={"alpha": 0.2, "zorder": zorder_fill},
+                 zorder=zorder_line, legend=False)
+
+
+def _plot_error_aggregate(ax, sq_err_df: pd.DataFrame, color: str, mode: str,
+                          zorder_line: float, zorder_fill: float,
+                          errorbar_kind: str | None = None) -> None:
+    """Draw one source's col-1 error curve under `mode`, from raw squared errors.
+
+    The aggregation is composed with the sqrt so it is applied exactly once:
+      flat_median   -> sqrt(median(sq_err)) == MEDIAN ABSOLUTE ERROR
+      flat_mean     -> sqrt(mean(sq_err))   == pooled RMSE
+      hier_mean_sem -> per-(pid, observation) RMSE, then mean +/- SEM across pids
+                       (the previous behaviour)
+
+    NOTE flat_median changes the METRIC, not just the estimator: it is a median
+    absolute error, not an RMSE, and the y-axis says so. That is the honest
+    consequence of asking for a median here -- a median of squared errors under a
+    sqrt IS the median absolute error, since sqrt is monotone. It is also far less
+    sensitive to the handful of participants whose responses barely track the
+    target at all.
+
+    NOTE ALSO flat_mean != hier_mean_sem's point estimate here, unlike in col 2.
+    Col 2's two versions coincide because trial counts are balanced and the
+    operation is linear; here mean-of-sqrt differs from sqrt-of-mean by Jensen's
+    inequality, so pooled RMSE sits at or above the mean of per-pid RMSEs.
+
+    Same row-bootstrap CI caveat as col 2 -- see _plot_delta_aggregate.
+    """
+    if mode not in AGGREGATE_MODES:
+        raise ValueError(f"aggregate must be one of {AGGREGATE_MODES}, got {mode!r}")
+
+    if mode.startswith("hier"):
+        # Per-pid RMSE first (sqrt of that pid's mean squared error), so the
+        # across-pid step operates on one value per participant.
+        data = (sq_err_df.groupby(["pid", "observation"])["sq_err"].mean()
+                .apply(np.sqrt).reset_index(name="v"))
+        ycol = "v"
+        estimator = "median" if mode == "hier_mean_median" else "mean"
+    else:
+        data = sq_err_df
+        ycol = "sq_err"
+        estimator = ((lambda x: float(np.sqrt(np.median(x))))
+                     if mode == "flat_median"
+                     else (lambda x: float(np.sqrt(np.mean(x)))))
+    errorbar = ERRORBAR_SPEC[errorbar_kind or ERRORBAR_DEFAULT[mode]]
+
+    sns.lineplot(data=data, x="observation", y=ycol, ax=ax,
+                 estimator=estimator, errorbar=errorbar,
+                 color=color, marker="o", markersize=5, linewidth=1.8,
+                 err_kws={"alpha": 0.2, "zorder": zorder_fill},
+                 zorder=zorder_line, legend=False)
 
 
 def _plot_hierarchical_line(ax, per_pid_df: pd.DataFrame, value_col: str,
@@ -332,8 +537,15 @@ def _plot_hierarchical_line(ax, per_pid_df: pd.DataFrame, value_col: str,
 
 def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
                             show_individual: bool, palette: dict,
-                            gt_mode: str = "running_mean") -> None:
-    rmse_df = _rmse_per_pid_obs(human[["pid", "trial", "observation", "response"]], human)
+                            gt_mode: str = "true",
+                            aggregate: str = "hier_mean_median",
+                            errorbar_kind: str | None = None) -> None:
+    # Order matters: `ground_truth` was already resolved by _add_ground_truth per
+    # gt_mode when the data was loaded, so the aggregation below is applied to
+    # errors against whichever target that chose.
+    hcols = human[["pid", "trial", "observation", "response"]]
+    sq_err_df = _sq_err_long(hcols, human)
+    rmse_df = _rmse_per_pid_obs(hcols, human)
 
     handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=1.8)]
     labels = ["Human"]
@@ -346,20 +558,22 @@ def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFr
         handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
         labels.append("Individual pids")
 
-    _plot_hierarchical_line(ax, rmse_df, "rmse", HUMAN_COLOR, zorder_line=3, zorder_fill=1)
+    _plot_error_aggregate(ax, sq_err_df, HUMAN_COLOR, aggregate,
+                          zorder_line=3, zorder_fill=1,
+                          errorbar_kind=errorbar_kind)
 
     for i, (model_type, mdf) in enumerate(models.items()):
-        model_rmse_df = _rmse_per_pid_obs(mdf, human)
         color = palette[model_type]
-        _plot_hierarchical_line(ax, model_rmse_df, "rmse", color,
-                                zorder_line=4 + i, zorder_fill=1)
+        _plot_error_aggregate(ax, _sq_err_long(mdf, human), color, aggregate,
+                              zorder_line=4 + i, zorder_fill=1,
+                              errorbar_kind=errorbar_kind)
         handles.append(Line2D([0], [0], color=color, lw=1.8))
         labels.append(model_type)
 
     obs_ticks = sorted(set(human["observation"]) | {o for m in models.values()
                                                     for o in m["observation"]})
     ax.set_xlabel("Observation")
-    ax.set_ylabel(f"Performance error vs {GT_LABEL[gt_mode]} (RMSE)")
+    ax.set_ylabel(f"{ERROR_METRIC_LABEL[aggregate]}\nvs {GT_LABEL[gt_mode]}")
     ax.set_xticks(obs_ticks)
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, ncol=1)
@@ -368,7 +582,21 @@ def _plot_panel_performance(ax, human: pd.DataFrame, models: dict[str, pd.DataFr
 
 # ── Col 2 — Mean |Delta response| vs observation ────────────────────────────
 
-def _abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
+# First observation whose |delta response| is worth plotting in col 2, PER TASK.
+# numbers: 1, the first defined delta (response[1]-response[0]).
+# colors: 2, deliberately dropping the first delta. With binary evidence the
+# response change at observation 1 is near-degenerate -- the running mean either
+# does not move (second draw matches the first) or jumps the whole way -- so the
+# per-trial distribution is BIMODAL on essentially two values. Measured on
+# complete_pairs: the colors Mean model has just 2 distinct delta values there
+# with 58% exactly 0, giving median 0.000 against mean 0.424; colors humans have
+# 46% exact zeros, median 0.060 against mean 0.394 (a 6.5x discrepancy). A median
+# lands in the zero mode and produces a spurious dip-then-spike. numbers has no
+# such problem (7-9% zeros, ~87 distinct values, median 0.100 vs mean 0.145).
+DELTA_MIN_OBS = {"colors": 2, "numbers": 1}
+
+
+def _abs_delta_long(df: pd.DataFrame, min_observation: int = 1) -> pd.DataFrame:
     pieces = []
     for (_, _), g in df.groupby(["pid", "trial"], sort=False):
         g = g.sort_values("observation").copy()
@@ -381,17 +609,21 @@ def _abs_delta_long(df: pd.DataFrame) -> pd.DataFrame:
     # since this task's `observation` is 0-indexed. NOT >=2 -- that's only
     # correct for yoo's own 1-indexed `observation` column, where the first
     # defined delta lands at observation=2.
-    return out[out["observation"] >= 1].dropna(subset=["delta"])
+    return out[out["observation"] >= min_observation].dropna(subset=["delta"])
 
 
 def _plot_panel_delta(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
-                      show_individual: bool, palette: dict) -> None:
+                      show_individual: bool, palette: dict,
+                      aggregate: str = "hier_mean_median",
+                      min_observation: int = 1,
+                      errorbar_kind: str | None = None) -> None:
     # Per-pid mean |delta| first (pooling over that pid's own trials) --
     # this is both what the thin individual-pid lines plot directly AND
     # what every bold line's mean/SEM is computed from, so thin lines and
     # bold lines are guaranteed consistent, and every model uses the exact
     # same hierarchy as Human.
-    delta_df = _abs_delta_long(human[["pid", "trial", "observation", "response"]])
+    delta_df = _abs_delta_long(human[["pid", "trial", "observation", "response"]],
+                               min_observation)
     per_pid = (delta_df.groupby(["pid", "observation"])["delta"]
               .mean().reset_index())
 
@@ -406,22 +638,23 @@ def _plot_panel_delta(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
         handles.append(Line2D([0], [0], color=INDIV_COLOR, lw=0.8))
         labels.append("Individual pids")
 
-    _plot_hierarchical_line(ax, per_pid, "delta", HUMAN_COLOR, zorder_line=3, zorder_fill=1)
+    _plot_delta_aggregate(ax, delta_df, HUMAN_COLOR, aggregate,
+                          zorder_line=3, zorder_fill=1,
+                          errorbar_kind=errorbar_kind)
 
     obs_ticks = set(human["observation"])
     for i, (model_type, mdf) in enumerate(models.items()):
-        model_delta_df = _abs_delta_long(mdf)
-        model_per_pid = (model_delta_df.groupby(["pid", "observation"])["delta"]
-                        .mean().reset_index())
+        model_delta_df = _abs_delta_long(mdf, min_observation)
         color = palette[model_type]
-        _plot_hierarchical_line(ax, model_per_pid, "delta", color,
-                                zorder_line=4 + i, zorder_fill=1)
+        _plot_delta_aggregate(ax, model_delta_df, color, aggregate,
+                              zorder_line=4 + i, zorder_fill=1,
+                              errorbar_kind=errorbar_kind)
         handles.append(Line2D([0], [0], color=color, lw=1.8))
         labels.append(model_type)
         obs_ticks |= set(mdf["observation"])
 
     ax.set_xlabel("Observation")
-    ax.set_ylabel("Mean |\u0394response|")
+    ax.set_ylabel(f"{AGGREGATE_LABEL[aggregate]} |\u0394response|")
     ax.set_xticks(sorted(obs_ticks))
     ax.set_ylim(bottom=0)
     ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, ncol=1)
@@ -945,6 +1178,31 @@ def main() -> None:
                              "RL_lambda. Cols 3-4 are human-only by necessity, and "
                              "col 6 (cross-task lambda) is human-only by design -- "
                              "see the module docstring for both.")
+    parser.add_argument("--aggregate", choices=AGGREGATE_MODES, default="hier_mean_median",
+                        help="COLS 1-2: how the per-trial error (col 1) and "
+                             "|delta response| (col 2) are aggregated. "
+                             "'hier_mean_median' (default) takes the mean over each pid's "
+                             "trials then the MEDIAN across pids -- mean where trials "
+                             "are exchangeable replicates, median where participants "
+                             "differ in kind. Avoids both a mean's outlier sensitivity "
+                             "and the response-grid quantisation a pooled median "
+                             "suffers. 'flat_median' pools all trials and pids and "
+                             "takes the median -- robust to the 3-4x spread in per-pid "
+                             "response-change AMPLITUDE, which under a mean roughly "
+                             "halves the visible decay. 'flat_mean' pools and means "
+                             "(identical to hier_mean_sem's point estimate, since trial "
+                             "counts are balanced). 'hier_mean_sem' is the previous "
+                             "behaviour: mean over each pid's trials, then mean+/-SEM "
+                             "across pids. 'hier_mean_median' is a STUB. Note the "
+                             "flat_* CI is a row bootstrap and so too narrow -- see "
+                             "_plot_delta_aggregate's docstring.")
+    parser.add_argument("--errorbar", choices=sorted(ERRORBAR_SPEC), default=None,
+                        help="COLS 1-2 band. Default depends on --aggregate "
+                             "(se for hier_mean_sem, ci otherwise). 'ci'/'se' are INFERENTIAL (how "
+                             "precisely is the central tendency pinned down); "
+                             "'iqr'/'pi80' are DESCRIPTIVE percentile spreads of the "
+                             "underlying values and must NOT be called confidence "
+                             "intervals.")
     parser.add_argument("--colors_prefix_length", type=int, default=QQ_PREFIX_LENGTH,
                         help="COLORS ONLY: how many leading observations a "
                              "quasi-qid group must share (cols 3-4). Colors has no "
@@ -957,14 +1215,17 @@ def main() -> None:
                              "different values -- col 3 needs >=3 for a usable "
                              "within-group SD, col 4 only needs residual PAIRS and "
                              f"does better at 2. Default {QQ_MIN_REPEATS}.")
-    parser.add_argument("--gt_mode", choices=GT_MODES, default="running_mean",
-                        help="Col 1 ground truth. 'running_mean' (default): the "
-                             "running mean/ratio of the observations so far -- what "
-                             "the task's own live feedback shows participants, so "
-                             "error decays toward 0. 'true': the fixed generative "
-                             "true_mean/true_p, so error PLATEAUS at that trial's "
-                             "sampling error instead. Mirrors plot_sequences.py's "
-                             "own --gt_mode.")
+    parser.add_argument("--gt_mode", choices=GT_MODES, default="true",
+                        help="Col 1 ground truth. 'true' (default): the FIXED "
+                             "generative true_mean/true_p, constant within a trial, "
+                             "so error starts high and DECAYS as evidence "
+                             "accumulates. 'running_mean': the running mean/ratio of "
+                             "the observations so far -- what the task's own live "
+                             "feedback shows participants -- against which error is "
+                             "flat-to-rising, because the target itself moves. The two "
+                             "converge late in a trial as the running mean approaches "
+                             "the true mean. Mirrors plot_sequences.py's own "
+                             "--gt_mode.")
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot4' -> "
                             "data/soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl. "
@@ -1005,8 +1266,11 @@ def main() -> None:
                     models[model_type] = mdf
 
         _plot_panel_performance(axes[row, 0], human, models, args.show_individual,
-                                palette, args.gt_mode)
-        _plot_panel_delta(axes[row, 1], human, models, args.show_individual, palette)
+                                palette, args.gt_mode, args.aggregate,
+                                args.errorbar)
+        _plot_panel_delta(axes[row, 1], human, models, args.show_individual,
+                          palette, args.aggregate,
+                          DELTA_MIN_OBS.get(task, 1), args.errorbar)
         colors_prefix = args.colors_prefix_length
         human_for_repeats = (add_quasi_qids(human, prefix_length=colors_prefix,
                                            min_repeats=args.colors_min_repeats)
