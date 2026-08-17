@@ -204,7 +204,8 @@ keyed 1..n) needs an explicit guard. The known cases are already handled:
   `build_from_df(apply_filters=False)`). For diagnosing how much the exclusion
   criteria change a result -- NOT for published output; it prints a warning.
   On complete_pairs, 60 participants finished both tasks; `contingency` keeps 27
-  (55% excluded), `baseline`+require_both keeps 29, `performance` keeps 44. The
+  (55% excluded), `integration`+require_both keeps 24, `performance` keeps 44,
+  `non_integrator` keeps ~24 per task. The
   excluded group roughly doubles both the mean and the SD of performance error
   (numbers 0.107 -> 0.201 mean, 0.074 -> 0.141 SD), and the MEDIAN moves as much
   as the mean, i.e. they are systematically worse rather than a noisy tail.
@@ -518,15 +519,112 @@ settled -- they are candidates being compared.
 
 | method | basis | numbers | colors | notes |
 |--------|-------|---------|--------|-------|
-| `contingency` (default) | three Cohen's f² tests | 25/60 (42%) | 19/60 (32%) | model-BASED |
-| `performance` | carrabin's gross-outlier rule, `--max_error_sd` (default 2.0) | 9/60 (15%) | 9/60 (15%) | model-free |
-| `baseline` | did not beat "report the most recent observation", `--min_skill` (default 0.0) | 31/60 (52%) | ~0 | model-free, untuned threshold |
+| `contingency` (default) | three Cohen's f² tests | 25/60 (42%) | 19/60 (32%) | model-BASED; `recency_only` tests the same construct as `non_integrator` |
+| `performance` | carrabin's gross-outlier rule, `--max_error_sd` (default 2.0) | 9/60 (15%) | 9/60 (15%) | model-free, accuracy-based |
+| `integration` | did not beat "report the most recent observation", `--min_skill` (default 0.10) | 36/61 (59%) | ~1 | model-free; **discards inaccurate integrators -- see below** |
+| **`non_integrator`** | **prior observations make no RELIABLE contribution to predicting the response** | **19/61 (31%)** | **17/61 (28%)** | **model-free, no magnitude threshold; the recommended criterion** |
+
+#### `non_integrator`: the definition-first criterion
+
+> A **non-integrator** is a participant for whom observations BEFORE the most
+> recent one make no reliable contribution to predicting their responses.
+
+Stated as a property of INFORMATION rather than of accuracy or of weighting,
+which is what makes it right for this project:
+
+- It does **not** require accuracy, so a participant who integrates all history
+  but inaccurately -- strong recency bias, or large response noise -- is RETAINED.
+- It does **not** require a particular weight on history, only that the weight be
+  distinguishable from zero. There is no magnitude threshold to choose.
+- It catches BOTH observed failure modes with one test: a copier gets no
+  predictive benefit from history, a random/drifting responder gets none from
+  anything.
+
+Operationalised as `response_t ~ 1 + value_t + mean(value_0..value_{t-1})` per
+participant, with a **trial-level cluster bootstrap** (resample whole trials) --
+necessary because responses within a trial are strongly dependent (the slider
+persists, the running mean moves slowly), so OLS standard errors are far too
+small. Retained if the prior-mean coefficient's CI excludes zero.
+`flag_non_integrator` in `utils/participant_filters.py`.
+
+**Validation it does not just carve the distribution arbitrarily**: the excluded
+group is far worse on an accuracy measure the criterion never sees -- median
+|error vs running mean| 8.33 vs 4.90 (numbers) and 27.37 vs 6.94 (colors).
+
+**Why the other three lose.** `performance` is accuracy-based, so it cannot
+distinguish an inaccurate integrator from a non-integrator. `integration` (the
+skill score) is **not monotone in integration depth**: measured on synthetic leaky
+integrators it PEAKS at alpha=0.20 (+0.745) and is lower for a near-optimal
+alpha=0.10 agent (+0.603), because with 15 observations mild recency
+overweighting tracks the running mean better than a sluggish filter does -- and a
+genuine alpha=0.70 integrator with realistic noise scores +0.115, a hair above
+its own 0.10 threshold. `contingency`'s `recency_only` is the closest of the
+three and tests the same construct; it differs in using an f²=0.02 effect-size
+threshold and in-sample variance without clustering. `non_integrator` is that
+idea done properly.
+
+**Tested and rejected**, all recorded in the code so they are not re-attempted:
+- Thresholding the serial-position weight on the latest observation (`g_lag0`).
+  It recovers alpha almost exactly (0.100/0.200/0.350/0.494/0.687/0.959 for true
+  alpha 0.10-1.00) and is nearly immune to response noise, so it is the right
+  MEASURE of integration depth -- but it is continuous with no natural cutoff
+  (largest gap 0.076 across a 0.03-1.00 range) and **cannot catch random
+  responders**, who produce diffuse weights scoring ~0.12, indistinguishable from
+  optimal. Any weight-based test is blind to the "nothing predicts them" mode.
+  Report `g_lag0` descriptively; do not filter on it.
+- A one-sided version (requiring a POSITIVE contribution, to catch scale
+  inversion). 1 of 61 numbers and 0 of 61 colors are reliably negative, and that
+  one is marginal (b=-0.074, CI [-0.171,-0.013]). Not worth the assumption.
+- Requiring stability across session HALVES. 26% of retained numbers participants
+  pass pooled but not both halves -- and the asymmetry runs the WRONG way for a
+  fatigue story: 12 integrate only in the second half against 4 only in the
+  first. The instability is mostly LATE LEARNING (error falls 19% from the first 8
+  to the last 8 trials), so requiring both halves penalises a slow start, which
+  is a consequence of the tutorial having no comprehension gate.
+- A trials 8-31 burn-in. Moves retention by exactly ONE participant per task
+  (numbers 42->41, colors 43->44), and the two retained sets are
+  indistinguishable in accuracy measured on the same late trials (4.90 vs 4.79
+  numbers; 6.94 vs 7.03 colors). Use all 32 trials.
+
+**IT IS NOT THRESHOLD-FREE.** It removes the arbitrary MAGNITUDE threshold, which
+was the main objection to the other three, and replaces it with a conventional
+significance level. Measured sensitivity, which should be reported as a range:
+
+| varied | numbers | colors |
+|--------|---------|--------|
+| `ci` = 90 / 95 / 99 | 16 / 17 / 24 flagged | 17 / 17 / 20 |
+| bootstrap `seed` at `n_boot=2000` | 17 / 18 / 19 | stable |
+| predictor set: `prior_mean` vs last-3-lags + older mean | 17 -> 23 (churn +10/-4) | 17 -> 15 (+3/-5) |
+
+`ci=99` adds 7 for numbers (+41%). Seed noise moved 2-3 participants at
+`n_boot=2000`, which is why the default is now **`n_boot=20000`** -- verified
+stable, seeds 0/1/2 give identical membership, ~10 s per task. `n_boot`, `ci` and
+`seed` are returned in the report so any exclusion set is reproducible.
+
+The **predictor set is the largest source of variation**, and `prior_mean` is
+right on principle, not merely convenient: it asks the definitional question as
+ONE test, whereas the full-lag version splits the signal across four correlated
+predictors, so every CI widens (power loss -> more flagged, numbers) while giving
+four uncorrected chances at significance (multiplicity -> fewer flagged, colors).
+Those errors moving in OPPOSITE directions across tasks is the signature of an
+ill-posed test. Do not add lag predictors without a multiplicity correction.
+
+**Known gaps, deliberately not engineered around.** The definition retains anyone
+whose responses reliably use history, so it does NOT catch: integrating the WRONG
+STATISTIC (running sum, max, a hand-picked subset); SCALE COMPRESSION (correct
+direction, only using 40-60 of the slider -- fine for temporal panels, bad for
+accuracy panels); or ANCHORED-WITH-A-NUDGE (parked near 50, shifting slightly).
+The first two are arguably correct to retain; the third is a real miss.
+Accuracy-sensitive analyses may want `performance` in ADDITION -- one filter
+serving both jobs was probably never the right goal. And being a significance
+test it is POWER-DEPENDENT: the ~30% rate is tied to this design's 32 trials and
+does not transfer to a shorter one.
 
 **`require_both_tasks` is the DEFAULT** (opt out with `--per_task_exclusion`):
 a participant failing in either task is dropped from BOTH, so every task keeps
 the same people. Per-task exclusion silently degrades every WITHIN-SUBJECT
 cross-task panel (temporal col 6, variability col 3) whenever the criterion is
-not equally strict in both tasks. Measured directly under `baseline` with
+not equally strict in both tasks. Measured directly under `integration` with
 per-task exclusion: numbers retained 29 and colors 36, and the 26-pid
 intersection was a differently-selected group from either sample -- the
 cross-task λ correlation fell to r=0.331 (p=0.099) from r=0.587 (p=0.0013).
@@ -549,7 +647,7 @@ session. NOTE carrabin's literal >6 SD threshold excludes ZERO participants here
 because our error distribution is CONTINUOUS where theirs had a 6-SD gap.
 
 **Why the high rate is probably real, not an artefact of an aggressive filter.**
-The `baseline` criterion is model-free, shares no quantity with the temporal
+The `integration` criterion is model-free, shares no quantity with the temporal
 panels, and has an untuned threshold -- and it independently reproduces 23 of the
 25 and 18 of the 19 participants `contingency` excludes. Roughly half of numbers
 participants perform WORSE than reporting only the latest observation, which is
@@ -562,6 +660,7 @@ sections for what each panel is):
 | build | n both | cross-task λ r | col 3 p | col 2 decay |
 |-------|--------|----------------|---------|-------------|
 | contingency | 27 | 0.587 (p=.0013) | 0.00043 | 3.09x |
+| non_integrator | not yet built | -- | -- | -- |
 | baseline + require_both | 29 | 0.409 (p=.028) | 0.00000 | 2.54x |
 | performance | 44 | 0.572 (p<.0001) | 0.033 | 1.23x |
 | no filter | 60 | **0.656** (p<.0001) | 0.011 | 1.13x |
@@ -574,16 +673,16 @@ that asymmetry should be reported rather than smoothed over.
 
 **Threshold-choice honesty.** These criteria were compared partly on whether the
 results survive, which is the same hazard as tuning a threshold. What makes
-`baseline` defensible independently is that its threshold is PRINCIPLED, not
+`integration` defensible independently is that its threshold is PRINCIPLED, not
 chosen: skill < 0 means "did not beat a strategy the instructions rule out".
 `performance`'s 2.0 SD, by contrast, is a conventional outlier bound, and
 `contingency`'s f²=0.02 is Cohen's convention -- both citable, neither derived
 from this data.
 
-**A consequence of `baseline` worth stating explicitly in any write-up**: for
+**A consequence of `integration` worth stating explicitly in any write-up**: for
 colors this criterion is near-vacuous on its own, because "report the last binary
 draw" means slamming to 0%/100% every trial (error 39.35 vs optimal 11.75) and
-almost anything beats it. So under `baseline`, COLORS IS EFFECTIVELY FILTERED BY
+almost anything beats it. So under `integration`, COLORS IS EFFECTIVELY FILTERED BY
 NUMBERS-TASK BEHAVIOUR, via `require_both_tasks`. Defensible -- numbers is where
 the trivial strategy is plausible -- but not something to leave implicit.
 

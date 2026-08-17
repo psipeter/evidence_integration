@@ -120,7 +120,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-DEFAULT_MIN_UPDATES = 10    # below this, we don't have enough data to judge
+DEFAULT_MIN_UPDATES = 10
+DEFAULT_MIN_TRIALS  = 8     # below this a trial-level bootstrap is meaningless    # below this, we don't have enough data to judge
 DEFAULT_MIN_F2      = 0.02  # Cohen's conventional "small effect" f^2 boundary -- see module docstring
 
 
@@ -451,7 +452,21 @@ def flag_performance_outlier(df_task: pd.DataFrame, task: str,
 
 # ── Combined report + filtering ─────────────────────────────────────────────
 
-# ── Criterion set 3: WORSE THAN A TRIVIAL BASELINE (model-free) ─────────────
+# ── Criterion set 3: NO EVIDENCE OF INTEGRATION (model-free) ────────────────
+#
+# Named for what the participant fails to DO -- integrate evidence beyond the most
+# recent observation -- rather than for the mechanism used to detect it. An earlier
+# name, 'baseline', described only the mechanism (compare against a baseline
+# strategy) and was uninformative: `performance` also compares against a baseline,
+# just a group-level one.
+#
+# IMPORTANT RELATIONSHIP TO `recency_only`: this criterion and the f2-based
+# recency_only criterion measure THE SAME CONSTRUCT ("uses only the most recent
+# observation") by two different methods -- incremental regression variance from
+# adding prior_mean over current_value, versus error against a copy baseline. That
+# is almost certainly WHY they agree on 23 of 25 excluded numbers participants and
+# 18 of 19 colors. Present that agreement as two operationalisations of one
+# construct converging, NOT as two independent lines of evidence.
 #
 # The task instruction is "report the mean of ALL observations so far". Two
 # reference agents can be evaluated on each participant's OWN sequences:
@@ -464,6 +479,15 @@ def flag_performance_outlier(df_task: pd.DataFrame, task: str,
 #   skill >= 1  at the optimal running-mean level
 #   skill ~  0  no better than reporting only the most recent observation
 #   skill <  0  WORSE than that -- cannot be following the instruction at all
+#
+# NOTE skill normalises by (err_last - err_optimal) computed on the participant's
+# OWN sequences, which is what makes it robust to the objection that copying is
+# nearly correct at low true_std: if copying is nearly correct then err_last
+# shrinks and the yardstick shrinks with it. Measured headroom on complete_pairs:
+# numbers err_last 8.35 vs err_optimal 3.28 (gap 5.07, and at least 3.99 for
+# EVERY participant); colors 39.35 vs 11.75 (gap 27.60). So there is real room to
+# discriminate even at std=10. Prefer this over a raw "fraction of responses
+# matching the displayed value", which IS confounded by true_std.
 #
 # ONE baseline, deliberately: "report the most recent observation" is the single
 # strategy the instruction most directly rules out ("the mean of ALL observations
@@ -487,9 +511,30 @@ def flag_performance_outlier(df_task: pd.DataFrame, task: str,
 # partly definitional. This is a LEVEL comparison against a NAMED alternative
 # strategy, so it shares no quantity with those panels.
 #
-# THE THRESHOLD NEEDS NO TUNING: skill < 0 means "did not beat a strategy the
-# instructions rule out", which is principled in a way that a chosen SD multiple
-# is not.
+# THE THRESHOLD IS READ OFF AN EMPIRICAL DISCONTINUITY, not tuned. Two candidate
+# anchors, and the second is stronger:
+#
+#   skill < 0     "did not beat a strategy the instructions rule out". Principled,
+#                 but LENIENT: a pure copier scores exactly 0 and is RETAINED, so
+#                 it excludes only participants worse than copying. Excludes 31/60
+#                 numbers, 0/60 colors.
+#   skill < 0.10  "moved at least slightly toward the true mean, relative to
+#                 copying" -- i.e. some evidence of integrating beyond the most
+#                 recent observation. DEFAULT.
+#
+# 0.10 is not a tuned value: the numbers skill distribution has a 0.29-wide VOID
+# immediately above the copying cluster. Sorted values run
+#   ... -0.0031, -0.0004, 0.0102, 0.0354, 0.0387, 0.0388, 0.0406, | 0.3339, 0.3829, ...
+# so ANY threshold in (0.041, 0.334) produces the IDENTICAL partition: 36/60
+# numbers excluded, 24 retained after require_both_tasks. Verified across
+# 0.05/0.10/0.15/0.20/0.25/0.30/0.33. The partition only starts moving at 0.35
+# (37) and 0.40 (39). Colors is barely affected either way (1-2 exclusions),
+# because its last-value baseline is near-vacuous -- see above.
+#
+# That void is itself the interesting finding: participants either barely beat
+# copying (<=0.041, n=36) or clearly integrate (>=0.334, n=24), with nobody in
+# between. It is the closest thing in this data to the 6-SD separation carrabin
+# reported, and it is what makes a threshold here defensible rather than chosen.
 #
 # WHAT IT FOUND, and why it settles the "are we excluding too many?" question:
 # skill < 0 excludes 31/60 (52%) for numbers and 24/60 (40%) for colors -- and it
@@ -502,14 +547,16 @@ def flag_performance_outlier(df_task: pd.DataFrame, task: str,
 # supervised lab studies (yoo paying a $35 base); an unsupervised 32-trial x
 # 15-observation Prolific session is a different population.
 
-DEFAULT_MIN_SKILL = 0.0
+DEFAULT_MIN_SKILL = 0.10
 
 
-def flag_below_baseline(df_task: pd.DataFrame, task: str,
+def flag_no_integration(df_task: pd.DataFrame, task: str,
                         min_skill: float = DEFAULT_MIN_SKILL) -> pd.DataFrame:
-    """Flag participants who do not beat the best trivial strategy on their own
-    sequences. Model-free, and shares no quantity with temporal cols 1-2 -- see
-    the block comment above.
+    """Flag participants who show no evidence of integrating beyond the most
+    recent observation: skill < min_skill, where skill=0 is "no better than
+    copying the latest value" and skill=1 is optimal. Model-free, and shares no
+    quantity with temporal cols 1-2 -- see the block comment above for why the
+    default threshold sits in a 0.29-wide empirical void rather than being tuned.
 
     `df_task` must be single-task and carry that task's truth column.
     """
@@ -520,13 +567,13 @@ def flag_below_baseline(df_task: pd.DataFrame, task: str,
     d["resp_num"] = pd.to_numeric(d["response"], errors="coerce")
     if task == "colors":
         if "true_p" not in d.columns:
-            raise KeyError("flag_below_baseline needs true_p for colors")
+            raise KeyError("flag_no_integration needs true_p for colors")
         d["truth"] = pd.to_numeric(d["true_p"], errors="coerce") * 100.0
         # value is +-1 (blue/red) -> the response scale, as _value_on_response_scale
         d["val_scale"] = np.where(d["value_num"] == 1, 100.0, 0.0)
     else:
         if "true_mean" not in d.columns:
-            raise KeyError("flag_below_baseline needs true_mean for numbers")
+            raise KeyError("flag_no_integration needs true_mean for numbers")
         d["truth"] = pd.to_numeric(d["true_mean"], errors="coerce")
         d["val_scale"] = d["value_num"]
 
@@ -554,14 +601,237 @@ def flag_below_baseline(df_task: pd.DataFrame, task: str,
     out = pd.DataFrame(rows)
     # NaN skill means the baseline was already at/below optimal for this pid --
     # the comparison is undefined, so do not flag on it.
-    out["flagged_below_baseline"] = out["skill"].lt(min_skill).fillna(False)
+    out["flagged_no_integration"] = out["skill"].lt(min_skill).fillna(False)
+    return out
+
+
+# ── Criterion set 4: NON-INTEGRATOR (definition-first, model-free) ──────────
+#
+# THE DEFINITION, which the other three criterion sets only approximate:
+#
+#   A NON-INTEGRATOR is a participant for whom observations BEFORE the most
+#   recent one make no reliable contribution to predicting their responses.
+#
+# Stated as a property of information rather than of accuracy or of weighting,
+# which is what makes it the right definition for this project:
+#
+#   - It does NOT require accuracy. A participant who integrates all history but
+#     inaccurately -- with strong recency bias, or with large response noise --
+#     still has a reliable contribution from prior observations, and is RETAINED.
+#     That is the case the accuracy-based criteria get wrong (see below).
+#   - It does NOT require a particular WEIGHT on history, only that the weight be
+#     distinguishable from zero. So there is no threshold to choose: the cut is a
+#     significance level, not a magnitude.
+#   - It catches BOTH observed failure modes with one test. A copier gets no
+#     predictive benefit from history; a random/drifting responder gets no benefit
+#     from anything. Both fail.
+#
+# OPERATIONALISATION. Per participant, regress the response on the most recent
+# observation AND the mean of all strictly-prior observations in that trial:
+#
+#     response_t ~ 1 + value_t + mean(value_0 .. value_{t-1})
+#
+# and ask whether the coefficient on the prior mean is reliably nonzero. Inference
+# is a TRIAL-LEVEL CLUSTER BOOTSTRAP (resample whole trials with replacement),
+# because responses within a trial are strongly dependent -- the slider persists
+# and the running mean changes slowly -- so ordinary OLS standard errors are far
+# too small here. Retained if the bootstrap CI excludes zero.
+#
+# WHY NOT the alternatives that were built and tested first:
+#
+#   'contingency'  the closest of the three, and closer to right than the two
+#                  below: recency_only tests the same construct. It differs in
+#                  using an f^2 EFFECT-SIZE threshold (0.02) rather than
+#                  reliability, and in using in-sample variance without
+#                  clustering. This criterion is that idea done properly.
+#   'performance'  a gross-outlier rule on mean absolute error. Accuracy-based, so
+#                  it cannot distinguish an inaccurate integrator from a
+#                  non-integrator -- exactly the confusion to avoid.
+#   'integration'  the skill score. Measured directly on synthetic leaky
+#                  integrators, it is NOT MONOTONE in integration depth: it peaks
+#                  at alpha=0.20 (+0.745) and is LOWER for a near-optimal
+#                  alpha=0.10 agent (+0.603), because with 15 observations a mild
+#                  overweighting of recent evidence tracks the running mean better
+#                  than a sluggish filter does. Worse, a genuine integrator with
+#                  alpha=0.70 and realistic response noise scores +0.115 -- a hair
+#                  above the 0.10 threshold. It discards inaccurate integrators.
+#
+# ALSO REJECTED, after testing on this data:
+#   Thresholding the serial-position weight on the latest observation (g_lag0).
+#   g_lag0 recovers alpha almost exactly (0.100/0.200/0.350/0.494/0.687/0.959 for
+#   true alpha 0.10-1.00) and is nearly immune to response noise, so it is the
+#   right MEASURE of integration depth -- but it is continuous with no natural
+#   cutoff (largest gap 0.076 in a 0.03-1.00 range), and it CANNOT catch random
+#   responders: unstructured responses give diffuse weights scoring ~0.12, which
+#   is indistinguishable from optimal. Any weight-based test is blind to the
+#   "nothing predicts them" failure mode. Report g_lag0 as a descriptive measure;
+#   do not filter on it.
+#   A one-sided version of this test (requiring a POSITIVE contribution, to catch
+#   scale inversion such as reporting % red instead of % blue). Tested: 1 of 61
+#   numbers participants and 0 of 61 colors have a reliably negative coefficient,
+#   and the one case is marginal (b=-0.074, CI [-0.171,-0.013]). Not worth the
+#   added directional assumption.
+#   Requiring stability across session HALVES. Tested: 26% of retained numbers
+#   participants pass pooled but not both halves -- and the asymmetry runs the
+#   WRONG way for a fatigue story. 12 participants integrate only in the second
+#   half against 4 only in the first, i.e. the instability is mostly LATE
+#   LEARNING, consistent with error falling 19% from the first 8 to the last 8
+#   trials. Requiring both halves would penalise a slow start, which is a
+#   consequence of the tutorial having no comprehension gate rather than a
+#   participant defect.
+#   Restricting evaluation to trials 8-31 (a burn-in). Tested: moves retention by
+#   exactly ONE participant per task (numbers 42->41, colors 43->44), and the two
+#   retained sets are indistinguishable in accuracy on the same late trials
+#   (median |error vs running| 4.90 vs 4.79 for numbers, 6.94 vs 7.03 for colors).
+#   No gain, so use all 32 trials.
+#
+# WHAT IT DOES ON complete_pairs: excludes 19/61 numbers and 18/61 colors (~30%),
+# against carrabin's 16% and yoo's 17%. The excluded group is far worse on an
+# accuracy measure the criterion never sees -- median |error vs running mean| 8.33
+# vs 4.90 (numbers) and 27.37 vs 6.94 (colors) -- which is the validation that it
+# is not carving the distribution arbitrarily.
+#
+# KNOWN GAPS, deliberately not engineered around. The definition retains anyone
+# whose responses reliably use history, so it does NOT catch: integrating the
+# WRONG STATISTIC (running sum, max, a hand-picked subset); SCALE COMPRESSION
+# (correct direction, only using 40-60 of the slider -- fine for temporal panels,
+# bad for accuracy panels); or ANCHORED-WITH-A-NUDGE (parked near 50, shifting
+# slightly with the evidence). The first two are arguably correct to retain; the
+# third is a real miss. Accuracy-sensitive analyses may still want the
+# 'performance' criterion in addition -- one filter serving both jobs was probably
+# never the right goal.
+#
+# AND ONE STRUCTURAL LIMITATION: this is a SIGNIFICANCE test, so it is
+# power-dependent. The same behaviour passes with 32 trials and fails with 16. The
+# ~30% rate is tied to this design's trial count and does not transfer.
+
+# n_boot is high because MONTE CARLO NOISE ALONE MOVES MEMBERSHIP. Measured on
+# complete_pairs numbers: at n_boot=2000, seeds 0/1/2 give 17/18/19 flagged, and
+# n_boot=500 gives 19 -- so two to three participants' fate was decided by the
+# random seed. (An earlier comment in this file claimed raising n_boot to 2000
+# "fixed" that; it reduced it, it did not eliminate it.) The Gram-matrix bootstrap
+# below makes 20000 resamples cheap, so there is no reason to economise. `seed` is
+# returned in the report so any exclusion set is reproducible.
+DEFAULT_N_BOOT = 20000
+DEFAULT_CI = 95.0
+
+# SENSITIVITY OF THIS CRITERION, measured -- report the range, not just the point.
+# The criterion removes the ARBITRARY MAGNITUDE threshold that the other three
+# have (f^2=0.02, 2 SD, skill<0.10), which was the main objection to them. It does
+# NOT make the criterion threshold-free. On complete_pairs:
+#
+#   ci level     numbers 16 / 17 / 24 flagged at ci = 90 / 95 / 99
+#                colors  17 / 17 / 20
+#                90<->95 is stable; 99 adds 7 for numbers (+41%). Churn is
+#                one-directional, as it must be (a wider CI is more likely to
+#                include zero), but the significance level is consequential.
+#   seed         +/- 2 participants at n_boot=2000; hence the default above.
+#   predictors   the LARGEST source of variation. Using the last 3 lags
+#                individually plus an older-mean term instead of a single
+#                prior_mean gives numbers 23 (churn +10/-4) and colors 15
+#                (+3/-5) -- 14 participants change status in numbers.
+#
+# WHY prior_mean IS NEVERTHELESS THE RIGHT FORM, and not merely convenient: it
+# asks the definitional question ("does history beyond the latest observation
+# contribute?") as ONE test. The full-lag version splits that signal across four
+# correlated predictors, so every CI widens (power loss -> MORE flagged, as in
+# numbers) while simultaneously giving four uncorrected chances at significance
+# (multiplicity -> FEWER flagged, as in colors). Those two errors moving in
+# opposite directions across tasks is the signature of an ill-posed test. Do not
+# "improve" this by adding lag predictors without correcting for multiplicity.
+
+
+def flag_non_integrator(df_task: pd.DataFrame, task: str,
+                        n_boot: int = DEFAULT_N_BOOT,
+                        ci: float = DEFAULT_CI,
+                        seed: int = 0) -> pd.DataFrame:
+    """Flag participants for whom observations before the most recent make no
+    reliable contribution to predicting their responses. See the block comment
+    above for the definition, the operationalisation, and what it does and does
+    not catch.
+
+    Returns one row per participant with the prior-mean coefficient, its
+    bootstrap CI, the coefficient on the latest observation for reference, and
+    `flagged_non_integrator`.
+    """
+    _assert_single_task(df_task)
+    d = _dedup(df_task).copy()
+
+    d["resp_num"] = pd.to_numeric(d["response"], errors="coerce")
+    d["val_scale"] = _value_on_response_scale(d, task)
+    d = d.sort_values(["prolific_pid", "trial", "observation"])
+    # Mean of STRICTLY PRIOR observations within the trial. shift() first so the
+    # current observation is excluded -- otherwise the two predictors are
+    # collinear by construction and the test is meaningless.
+    d["prior_mean"] = (d.groupby(["prolific_pid", "trial"])["val_scale"]
+                       .transform(lambda s: s.shift().expanding().mean()))
+    d = d.dropna(subset=["resp_num", "val_scale", "prior_mean"])
+
+    rng = np.random.default_rng(seed)
+    lo_q, hi_q = (100.0 - ci) / 2.0, 100.0 - (100.0 - ci) / 2.0
+
+    def _solve(AtA, Aty):
+        """OLS coefficients from normal equations. Returns (b_latest, b_prior)."""
+        try:
+            b = np.linalg.solve(AtA, Aty)
+        except np.linalg.LinAlgError:
+            return np.nan, np.nan
+        return float(b[1]), float(b[2])
+
+    rows = []
+    for pid, sub in d.groupby("prolific_pid"):
+        trials = sub["trial"].unique()
+        if len(trials) < DEFAULT_MIN_TRIALS or len(sub) < DEFAULT_MIN_UPDATES:
+            rows.append(dict(prolific_pid=pid, task=task, b_latest=np.nan,
+                             b_prior=np.nan, b_prior_lo=np.nan, b_prior_hi=np.nan,
+                             n_trials=len(trials), n_boot=n_boot, ci=ci, seed=seed,
+                             note="too few trials/updates"))
+            continue
+
+        # Per-trial X'X and X'y. A trial-level bootstrap resample is then just a
+        # SUM of these, so each resample costs one 3x3 solve instead of rebuilding
+        # a DataFrame -- which is what makes n_boot=20000 affordable (the previous
+        # pd.concat version took minutes per task at n_boot=2000).
+        AtA = np.empty((len(trials), 3, 3))
+        Aty = np.empty((len(trials), 3))
+        for j, t in enumerate(trials):
+            g = sub[sub["trial"] == t]
+            X = np.column_stack([np.ones(len(g)),
+                                 g["val_scale"].to_numpy(float),
+                                 g["prior_mean"].to_numpy(float)])
+            y = g["resp_num"].to_numpy(float)
+            AtA[j] = X.T @ X
+            Aty[j] = X.T @ y
+
+        b_latest, b_prior = _solve(AtA.sum(0), Aty.sum(0))
+
+        idx = rng.integers(0, len(trials), size=(n_boot, len(trials)))
+        boots = np.empty(n_boot)
+        for i in range(n_boot):
+            sel = idx[i]
+            boots[i] = _solve(AtA[sel].sum(0), Aty[sel].sum(0))[1]
+        boots = boots[np.isfinite(boots)]
+        if len(boots) < n_boot // 2:
+            lo = hi = np.nan
+        else:
+            lo, hi = (float(x) for x in np.percentile(boots, [lo_q, hi_q]))
+        rows.append(dict(prolific_pid=pid, task=task, b_latest=b_latest,
+                         b_prior=b_prior, b_prior_lo=lo, b_prior_hi=hi,
+                         n_trials=len(trials), n_boot=n_boot, ci=ci, seed=seed,
+                         note=""))
+
+    out = pd.DataFrame(rows)
+    # Reliable contribution = CI excludes zero. A NaN CI (too little data, or a
+    # degenerate design matrix) is NOT evidence of integration, so it flags.
+    reliable = (out["b_prior_lo"] > 0) | (out["b_prior_hi"] < 0)
+    out["flagged_non_integrator"] = ~reliable.fillna(False)
     return out
 
 
 # Which criterion set decides `excluded`. Both are always COMPUTED and reported;
 # only the `excluded` column differs, so a report always carries the diagnostics
 # for the method you did not choose.
-EXCLUSION_METHODS = ("contingency", "performance", "baseline")
+EXCLUSION_METHODS = ("contingency", "performance", "integration", "non_integrator")
 DEFAULT_EXCLUSION_METHOD = "contingency"
 
 
@@ -570,7 +840,8 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
                              min_updates: int = DEFAULT_MIN_UPDATES,
                              method: str = DEFAULT_EXCLUSION_METHOD,
                              max_error_sd: float = DEFAULT_MAX_ERROR_SD,
-                             min_skill: float = DEFAULT_MIN_SKILL) -> pd.DataFrame:
+                             min_skill: float = DEFAULT_MIN_SKILL,
+                             n_boot: int = DEFAULT_N_BOOT) -> pd.DataFrame:
     """Full diagnostic report, one row per (prolific_pid, task) present in
     `df`. `df` may span multiple tasks — this function does the required
     per-task slicing before calling into any criterion itself.
@@ -585,7 +856,7 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
       'baseline'     did not beat the best TRIVIAL strategy (latest observation,
                      or the scale midpoint) on their own sequences. Model-FREE,
                      needs no threshold tuning, and shares no quantity with
-                     temporal cols 1-2. See flag_below_baseline.
+                     temporal cols 1-2. See flag_no_integration.
     Both criterion sets are computed either way, so the report always carries the
     diagnostics for the method you did not pick -- which is the point: the
     contingency measures remain reportable as a description of heterogeneity
@@ -604,11 +875,13 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
         r2 = flag_noncontingent_sign(df_task, task, min_f2, min_updates).drop(columns=["n_updates", "note"])
         r3 = flag_noncontingent_magnitude(df_task, task, min_f2, min_updates).drop(columns=["n_updates", "note"])
         r4 = flag_performance_outlier(df_task, task, max_error_sd)
-        r5 = flag_below_baseline(df_task, task, min_skill)
+        r5 = flag_no_integration(df_task, task, min_skill)
+        r6 = flag_non_integrator(df_task, task, n_boot=n_boot).drop(columns=["note"])
         merged = r1.merge(r2, on=["prolific_pid", "task"], how="outer")
         merged = merged.merge(r3, on=["prolific_pid", "task"], how="outer")
         merged = merged.merge(r4, on=["prolific_pid", "task"], how="outer")
         merged = merged.merge(r5, on=["prolific_pid", "task"], how="outer")
+        merged = merged.merge(r6, on=["prolific_pid", "task"], how="outer")
         reports.append(merged)
 
     if not reports:
@@ -619,7 +892,10 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
                                      "mean_abs_error", "flagged_performance_outlier",
                                      "skill", "err_pid", "err_optimal",
                                      "err_baseline", "baseline_used",
-                                     "flagged_below_baseline", "excluded"])
+                                     "flagged_no_integration", "b_latest",
+                                     "b_prior", "b_prior_lo", "b_prior_hi",
+                                     "n_trials", "n_boot", "ci", "seed",
+                                     "flagged_non_integrator", "excluded"])
 
     report = pd.concat(reports, ignore_index=True)
     report["flagged_any_contingency"] = (
@@ -630,8 +906,10 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
         report["excluded"] = report["flagged_any_contingency"]
     elif method == "performance":
         report["excluded"] = report["flagged_performance_outlier"].fillna(False)
+    elif method == "integration":
+        report["excluded"] = report["flagged_no_integration"].fillna(False)
     else:
-        report["excluded"] = report["flagged_below_baseline"].fillna(False)
+        report["excluded"] = report["flagged_non_integrator"].fillna(False)
     report.attrs["exclusion_method"] = method
     return report
 
@@ -700,10 +978,18 @@ def filter_participants(df: pd.DataFrame, report: pd.DataFrame | None = None,
                   f"[method={method}]:")
             for _, row in excl.iterrows():
                 reasons = []
-                if row.get("flagged_below_baseline"):
+                if row.get("flagged_non_integrator"):
+                    b = row.get("b_prior")
+                    lo, hi = row.get("b_prior_lo"), row.get("b_prior_hi")
+                    if pd.notna(b) and pd.notna(lo):
+                        reasons.append(f"non_integrator (b_prior={b:+.3f}, "
+                                       f"CI [{lo:+.3f},{hi:+.3f}] includes 0)")
+                    else:
+                        reasons.append("non_integrator (CI undefined)")
+                if row.get("flagged_no_integration"):
                     sk = row.get("skill")
                     sk_str = f"{sk:.3f}" if pd.notna(sk) else "undefined"
-                    reasons.append(f"below_baseline (skill={sk_str} vs "
+                    reasons.append(f"no_integration (skill={sk_str} vs "
                                    f"{row.get('baseline_used')})")
                 if row.get("flagged_performance_outlier"):
                     err = row.get("mean_abs_error")

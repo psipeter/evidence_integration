@@ -207,7 +207,9 @@ def main():
                    help="Which criterion set decides exclusion. 'contingency' "
                         "(default): the three Cohen's f2 tests -- model-BASED, and "
                         "excludes 42%%/32%% of complete_pairs numbers/colors. "
-                        "'performance': carrabin's own rule, a gross outlier on "
+                        "'integration': no evidence of integrating beyond the "
+                        "most recent observation (model-free, threshold read off an "
+                        "empirical void). 'performance': carrabin's own rule, a gross outlier on "
                         "mean absolute error vs the true generative parameter -- "
                         "model-FREE, and closer to the 16%%/17%% rates carrabin and "
                         "yoo report. Both are always computed; only the decision "
@@ -219,10 +221,12 @@ def main():
                         "because our error distribution is continuous where theirs "
                         "had a 6-SD gap.")
     p.add_argument("--min_skill", type=float, default=None,
-                   help="Threshold for --exclusion_method baseline: skill below "
-                        "this is excluded. Default 0.0, meaning 'did not beat the "
-                        "best trivial strategy the instructions rule out' -- "
-                        "principled, so it needs no tuning.")
+                   help="Threshold for --exclusion_method integration: skill below "
+                        "this is excluded. Default 0.10, meaning 'moved at least "
+                        "slightly toward the true mean, relative to copying the "
+                        "latest observation'. Read off a 0.29-wide empirical void "
+                        "in the skill distribution -- any value in (0.041, 0.334) "
+                        "gives the identical partition -- rather than tuned.")
     p.add_argument("--per_task_exclusion", action="store_true",
                    help="Exclude per (pid, task) instead of per SUBJECT. Default "
                         "is subject-level: a participant failing in either task is "
