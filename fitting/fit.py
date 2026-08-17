@@ -93,7 +93,32 @@ def _cross_validate(
     human: pd.DataFrame,
     k: int = 5,
 ) -> tuple[float, list[float]]:
-    """K-fold CV using pre-computed responses. Works for NEF and math models."""
+    """Partition trials into k disjoint folds and return (mean fold loss, folds).
+
+    NOT held-out validation, despite the name -- worth being precise about, since
+    the outputs get labelled "cross-validated" downstream. Model responses are
+    computed ONCE from one parameter set and then partitioned, so every fold
+    contributes to the objective Optuna minimises; no fold is excluded from
+    parameter selection. The returned mean is therefore an IN-SAMPLE loss,
+    computed in a partitioned way. Verified: for RL_lambda on soltani_numbers
+    pid 1, mean-of-folds 0.06295 vs the all-trials loss 0.06308 -- a difference of
+    1.2e-4, which is just Jensen's inequality (mean of sqrt vs sqrt of mean).
+
+    What the folds DO give is a real spread across trial subsets (the per-fold
+    losses are disjoint by trial and land in _folds.pkl), which is useful as a
+    stability check even though it is not validation.
+
+    ACCEPTED FOR NOW, not fixed. Expected optimism is small -- these models have
+    0-2 free parameters against ~480 observations per participant -- but that has
+    NOT been measured. Real nested CV would fit on k-1 folds and evaluate on the
+    held-out fold, at ~k times the fitting cost (trivial for math models,
+    significant for NEF). If model COMPARISON across differing parameter counts
+    ever matters (e.g. parameter-free Mean against the 2-parameter models), this
+    should be fixed first, because in-sample loss favours the richer model.
+
+    Applies to carrabin and yoo identically -- this is shared code, not a soltani
+    quirk.
+    """
     trials = np.asarray(sorted(human["trial"].unique()))
     rng = np.random.RandomState(seed=int(params["pid"]))
     shuffled = trials.copy()

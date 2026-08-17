@@ -46,15 +46,24 @@ required multiplying the CV loss by 50 to make the panels agree; that class of
 round-trip factor caused a real bug in the temporal figure's lambda fit, so it
 is deliberately gone.
 
-WHY P2 READS THE FITTED CV LOSS RATHER THAN RECOMPUTING RMSE
---------------------------------------------------------------
-The fitted loss in {model}_{stem}_performance.pkl is the k-fold
-cross-validated RMSE to human responses -- i.e. held-out. Recomputing RMSE
-from the collected _responses.pkl instead would be an IN-SAMPLE number, which
-flatters models with more free parameters (PrimacyRecency's 2, RL_lambda's 2)
-relative to Mean's 0. Matches figure_carrabin_performance.py's own panel B,
-which reads performance.pkl for the same reason. Read via _get_loss, never by
-hardcoding a column name.
+WHY P2 READS THE FITTED LOSS RATHER THAN RECOMPUTING RMSE
+----------------------------------------------------------
+It reads {model}_{stem}_performance.pkl because that is the quantity the fit
+actually minimised, so the panel shows what was optimised rather than a
+separately-recomputed number. Matches figure_carrabin_performance.py's own
+panel B. Read via _get_loss, never by hardcoding a column name.
+
+CORRECTION, and a caveat to carry: an earlier version of this docstring said the
+fitted loss is "k-fold cross-validated ... i.e. held-out", and that recomputing
+from _responses.pkl would be in-sample and would "flatter models with more free
+parameters". That was WRONG. fitting.fit._cross_validate computes responses ONCE
+per parameter set and then partitions trials, so every fold feeds the objective
+and nothing is held out -- BOTH numbers are in-sample (verified: mean-of-folds
+0.06295 vs all-trials 0.06308, a 1.2e-4 Jensen gap). See _cross_validate's own
+docstring. Consequence for this panel: comparing models with the SAME number of
+free parameters (PrimacyRecency vs RL_lambda, both 2) is fine, but comparing
+parameter-free Mean against them is biased in favour of the richer models, and
+should not be read as evidence that Mean fits worse.
 
 SIGNIFICANCE BARS
 -----------------
@@ -394,7 +403,7 @@ def _plot_panel_p2(ax, task: str, run_dir: Path, datafile: str | None,
                 hue="source", palette=palette, legend=False, ax=ax)
 
     ax.set_xlabel("")
-    ax.set_ylabel("Model fit to human responses\n(cross-validated RMSE)")
+    ax.set_ylabel("Model fit to human responses\n(fitted RMSE, in-sample)")
     ax.tick_params(axis="x", rotation=45)
     # Floor at 0 since RMSE cannot be negative. Set BEFORE
     # annotate_nef_comparisons, which derives its line spacing from the current

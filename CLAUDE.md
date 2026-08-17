@@ -1196,7 +1196,7 @@ Default: --nef_folder refit
          parameter), per pid, as a BOXPLOT -- Human AND each fitted model.
          Same `sns.boxplot` call and 45-degree tick rotation as
          figure_carrabin_performance.py / figure_yoo_performance.py |
-| Col 3 (P2) | Model fit: cross-validated RMSE to HUMAN responses, per pid,
+| Col 3 (P2) | Model fit: fitted RMSE to HUMAN responses (IN-SAMPLE -- see below), per pid,
          one boxplot per model; significance bars from SIG_REFERENCE outward |
 
 Row 1 = task-colors, row 2 = task-numbers. `--datafile <name>` selects which
@@ -1212,10 +1212,30 @@ or changing the panel's ground truth. Differs from
 figure_carrabin_performance.py's P1, whose ground truth is the fixed true_p,
 where Mean is NOT degenerate.
 
-P2 reads each model's fitted k-fold CV loss from
-`{model}_{stem}_performance.pkl` via `_get_loss` -- NOT a recomputed RMSE from
-`_responses.pkl`, which would be in-sample and would flatter the 2-parameter
-models over parameter-free Mean.
+P2 reads each model's fitted loss from `{model}_{stem}_performance.pkl` via
+`_get_loss` (never hardcode a column name), because that is what the fit
+minimised.
+
+**That loss is IN-SAMPLE, not held-out.** `fitting.fit._cross_validate` computes
+model responses ONCE per parameter set and then partitions trials into k disjoint
+folds, so every fold contributes to the objective Optuna minimises and no fold is
+excluded from parameter selection. Verified: for RL_lambda on soltani_numbers
+pid 1, mean-of-folds 0.06295 against the all-trials loss 0.06308 -- a 1.2e-4
+difference, purely Jensen's inequality. The per-fold spread in `_folds.pkl` is
+real and useful as a stability check, but it is not validation. This is SHARED
+code, so carrabin and yoo are identical in this respect.
+
+ACCEPTED, NOT FIXED. Expected optimism is small (0-2 free parameters against ~480
+observations per participant) but has not been measured. Consequence to respect:
+comparing models with the SAME parameter count (PrimacyRecency vs RL_lambda) is
+fine, but comparing parameter-free Mean against them is biased toward the richer
+models. Fix with real nested CV -- fit on k-1 folds, evaluate on the held-out
+fold, ~k times the cost -- before any claim rests on cross-complexity comparison.
+
+Related performance note found alongside this: `math_models.run` issues a pandas
+`query` per observation (~480 per parameter set), so a 300-trial Optuna fit does
+~144k queries per participant. Precomputing each trial's value array once would
+speed the math-model pipeline up substantially.
 
 **RESPONSE SCALE: [-1,1] EVERYWHERE, in all three soltani figures.** No percent
 conversion anywhere -- so RMSE, mean |Δresponse| and response variability are
