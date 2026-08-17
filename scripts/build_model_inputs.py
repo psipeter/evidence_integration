@@ -64,7 +64,6 @@ def _rescale_0_100_to_neg1_1(x: pd.Series) -> pd.Series:
 
 def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="soltani_colors",
                   apply_filters=True, exclusion_method=DEFAULT_EXCLUSION_METHOD,
-                  max_error_sd=None, min_skill=None,
                   require_both_tasks=True):
     """Core logic, extracted from build() so a different raw-data SOURCE
     (e.g. scripts/build_task_backend_inputs.py, pulling from Supabase
@@ -93,10 +92,6 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
     """
     if apply_filters:
         kw = {"method": exclusion_method}
-        if max_error_sd is not None:
-            kw["max_error_sd"] = max_error_sd
-        if min_skill is not None:
-            kw["min_skill"] = min_skill
         df = filter_participants(df, verbose=True,
                                  require_both_tasks=require_both_tasks, **kw)
     else:

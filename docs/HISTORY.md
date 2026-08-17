@@ -4868,3 +4868,175 @@ likely constraint to watch as real participant N grows, but this depends
 on the actual plan tier and total planned N, neither confidently known
 from this session.
 
+## Participant exclusion criteria: four candidates, and how we chose (this session)
+
+Started from the hypothesis that the existing filter was TOO AGGRESSIVE (it
+excluded 33/60 = 55% of complete_pairs as a union). That hypothesis turned out to
+be wrong, but chasing it produced a better criterion and, more usefully, a
+definition to justify it. Recording the progression because most of the dead ends
+are ones that would be re-attempted otherwise.
+
+### The four candidates
+
+| method | basis | numbers | colors |
+|--------|-------|---------|--------|
+| `contingency` | three Cohen's f² tests (recency_only, noncontingent sign/magnitude) | 25/60 (42%) | 19/60 (32%) |
+| `performance` | carrabin's rule: mean abs error >N SD above the retained mean | 9/60 (15%) | 9/60 (15%) |
+| `integration` | skill score vs "copy the latest observation" | 36/61 (59%) | ~1 |
+| **`non_integrator`** | **prior observations make no RELIABLE contribution** | **19/61 (31%)** | **17/61 (28%)** |
+
+`non_integrator` is now the default. `performance` and `integration` moved to
+`archive/utils/archive_exclusion_criteria.py`. `contingency` retained as a
+computed DIAGNOSTIC (it no longer decides anything) because recency_only tests the
+same construct as non_integrator by a different method, and their agreement --
+23/25 and 18/19 -- is what validates the exclusions.
+
+### Published precedent, which is what prompted the whole investigation
+
+carrabin excluded 4/25 (16%) on ONE model-free quantity: mean |p̂ − p|, with the
+excluded group at .263 (SD .0298) against .176 (SD .0132), a >6 SD separation.
+yoo excluded 8/46 (17%), of which SEVEN were fMRI-technical (1 structural
+abnormality, 6 head motion >3 mm) and exactly ONE was behavioural -- a
+post-experiment questionnaire in which the subject said they tracked pairwise
+differences rather than the average. Neither used a model-based contingency test.
+Applying our own criteria back to their data: carrabin's 21 retained subjects all
+score skill 1.00-1.51 (0 would fail ours), but 7 of yoo's 38 (18%) WOULD fail --
+so our criterion is stricter than field norms, which is worth stating.
+
+### Why the high rate is real, not an artefact
+
+The `integration` criterion is model-free, shares no quantity with the temporal
+panels, and independently reproduced 23/25 and 18/19 of the contingency
+exclusions. Roughly half of numbers participants perform worse than reporting
+ONLY the latest observation (mean error 8.35 vs an optimal 3.28). The original
+"too aggressive" hypothesis is disconfirmed.
+
+### What the bad participants are actually DOING
+
+Assigning each participant the candidate strategy that best predicts their
+responses. Zero good participants are best fit by `last_value`; zero bad ones by
+`running_mean`. But there are TWO distinct failure modes, not one:
+
+- **Literal copying** (23 of 37 bad numbers participants). Exact-copy rates of
+  0.63-1.00, best-fit error down to 0.0-1.6 points. Transcribing the stimulus.
+- **Drifting** (11 of 37). Best fit by their OWN PREVIOUS RESPONSE, moving the
+  slider constantly (within-trial SD 7.7-27.1 vs 4.4 for good participants) with
+  no relation to the evidence. Not a sticky slider -- they move MORE than good
+  participants.
+
+That second mode is why a single-axis filter cannot work: copiers sit at one
+extreme of any weighting measure and drifters sit in the middle, alongside genuine
+integrators.
+
+Contributing context: they are NOT rushing (median inter-observation latency 4.2 s
+vs 3.4 s for retained -- SLOWER), not timing out, not leaving the slider still,
+and passed the tutorial first try. Comprehension failure, not inattention. Which
+explains why five rounds of instruction and bonus tweaks did not move it. The
+tutorial teaches but has NO pass/fail gate; gating it on demonstrated performance
+is the highest-value fix available.
+
+### Measured and rejected
+
+- **`frac_copy_value`** as a metric. Confounded by `true_std`: at std=10, copying
+  the latest value is nearly correct. Superseded by skill/`g_lag0`, which
+  normalise per participant.
+- **The skill score** (`integration`). Its threshold was defensible -- a 0.29-wide
+  empirical void, so any cut in (0.041, 0.334) gave the identical partition -- but
+  the METRIC is not monotone in integration depth. On synthetic leaky integrators
+  it PEAKS at α=0.20 (+0.745), above a near-optimal α=0.10 (+0.603), because with
+  15 observations mild recency overweighting tracks the running mean better than a
+  sluggish filter. A genuine α=0.70 integrator with realistic noise scores +0.115,
+  a hair above its own 0.10 threshold. It discards inaccurate integrators.
+- **`g_lag0`**, the serial-position weight on the latest observation from
+  regressing each response on ALL prior observations. Recovers α almost exactly
+  (0.100/0.200/0.350/0.494/0.687/0.959 for true α 0.10-1.00) and is nearly immune
+  to response noise -- so it IS the right MEASURE of integration depth. But it is
+  continuous with no natural cutoff (largest gap 0.076 across 0.03-1.00) and
+  CANNOT catch random responders, whose diffuse weights score ~0.12,
+  indistinguishable from optimal. Any weight-based test is blind to the "nothing
+  predicts them" mode. Report it descriptively; do not filter on it.
+- **`gain`** (b_current + b_prior ≈ 1 as a validity check). Catches random and
+  frozen responders cleanly (0.00 vs 0.94-1.00) but was rejected as a filter
+  component in favour of a single test.
+- **A one-sided version** of the final criterion, to catch scale inversion
+  (reporting % red for % blue). 1 of 61 numbers and 0 of 61 colors are reliably
+  negative, and that one is marginal (b=-0.074, CI [-0.171,-0.013]).
+- **Stability across session halves.** 26% of retained numbers participants pass
+  pooled but not both halves -- and the asymmetry runs the WRONG way for fatigue:
+  12 integrate only in the SECOND half against 4 only in the first. Mostly late
+  LEARNING, consistent with error falling 19% from the first 8 to the last 8
+  trials. Would penalise a slow start.
+- **A trials 8-31 burn-in.** Moves retention by ONE participant per task (numbers
+  42→41, colors 43→44), retained sets indistinguishable in accuracy on the same
+  late trials (4.90 vs 4.79; 6.94 vs 7.03). Use all 32.
+
+### Fatigue: there is none
+
+Within task, error DECREASES with trial index (numbers -0.075/trial p=0.001;
+colors -0.066 p=0.004), first 8 → last 8 trials 9.63 → 7.76 (-19.4%). Across
+tasks the second task is if anything better (skill 0.262 → 0.380, p=0.45), with
+order well counterbalanced (32 numbers-first, 28 colors-first). Only 3 numbers and
+1 colors participant worsen beyond their own noise (per-pid slope t>2); the 22
+with positive slopes are the upper half of a null distribution, and 22/60 is BELOW
+the 30/60 expected by chance. The slope IS a reliable individual trait (split-half
+r=0.758 numbers) -- but the reliable variation is in how much people IMPROVE.
+Low-skill participants improve FASTEST (corr(skill, slope) = +0.297, p=0.021),
+which is the opposite of "the disengaged fatigue".
+
+Trial order is randomised per participant (54 and 53 distinct orders across 60),
+and adjusting each trial's error for that trial's optimal-agent error leaves the
+slope unchanged (-0.0751 → -0.0741), so the improvement is not a sequence artefact.
+
+### `require_both_tasks` became the default
+
+A participant failing in either task is dropped from BOTH. Found by following up a
+collapse in the within-subject cross-task panels: under per-task exclusion with
+`integration`, numbers retained 29 and colors 36, and the 26-pid intersection was
+a differently-selected group -- cross-task λ correlation fell to r=0.331 (p=0.099)
+from r=0.587 (p=0.0013). NOT power (cp_perf at n=44 gives r=0.572), NOT reliability
+(λ split-half was HIGHER, colors 0.836 vs 0.796; attenuation ceilings 0.791 vs
+0.780), NOT range restriction (λ SD and range unchanged). Purely the composition
+of the intersection.
+
+### Effect on the results
+
+| build | n both | cross-task λ r | col 3 p | col 2 decay | λ numbers |
+|-------|--------|----------------|---------|-------------|-----------|
+| contingency (`complete_pairs`) | 27 | 0.587 (p=.0013) | 0.00043 | 3.09x | 0.433 |
+| **non_integrator (`cp_ni`)** | **35** | **0.508 (p=.0018)** | **0.00051** | **2.46x** | **0.390** |
+| integration | 24 | 0.338 (p=.107) | 0.00000 | 2.90x | 0.474 |
+| performance | 44 | 0.572 (p<.0001) | 0.033 | 1.23x | 0.266 |
+| no filter | 60 | 0.656 (p<.0001) | 0.011 | 1.13x | 0.240 |
+
+`non_integrator` gives 8 MORE participants than the contingency filter with every
+result intact -- the only criterion that improves the sample without weakening
+anything.
+
+Two asymmetries worth carrying into any write-up. The DECAY results (cols 2-3)
+need a filter and weaken monotonically as it loosens. The CROSS-TASK λ correlation
+does NOT -- it is strongest with everyone included (r=0.656, n=60), so that finding
+depends on no exclusion at all. Different panels have different sensitivity to
+exclusion; report the asymmetry rather than smoothing it over.
+
+### Honest limitations of the chosen criterion
+
+Not threshold-free, though I described it that way at one point. It removes the
+arbitrary MAGNITUDE threshold and replaces it with a conventional significance
+level, whose sensitivity is: ci=90/95/99 → 16/17/24 flagged (numbers), 17/17/20
+(colors), so ci=99 adds 7 (+41%). Bootstrap seed moved 2-3 participants at
+n_boot=2000, hence the default n_boot=20000 (verified: seeds 0/1/2 identical, ~10 s
+per task via a Gram-matrix bootstrap). The PREDICTOR SET is the largest source of
+variation -- last-3-lags + older mean gives numbers 23 (churn +10/-4) and colors 15
+(+3/-5) -- but `prior_mean` is right on principle: it asks the definitional
+question as ONE test, whereas the full-lag version widens every CI (power loss →
+more flagged) while giving four uncorrected chances at significance (multiplicity →
+fewer flagged); those errors moving in opposite directions across tasks is the
+signature of an ill-posed test.
+
+Known gaps, deliberately not engineered around: it retains anyone whose responses
+reliably use history, so it does not catch integrating the WRONG STATISTIC (running
+sum, max, a subset), SCALE COMPRESSION (right direction, only 40-60 of the slider),
+or ANCHORED-WITH-A-NUDGE. The first two are arguably correct to retain; the third
+is a real miss. And being a significance test it is POWER-DEPENDENT: the ~30% rate
+is tied to this design's 32 trials.
+

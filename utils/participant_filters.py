@@ -363,248 +363,6 @@ def flag_noncontingent_magnitude(df_task: pd.DataFrame, task: str,
     return pd.DataFrame(rows)
 
 
-# ── Criterion set 2: GROSS PERFORMANCE OUTLIER (model-free) ─────────────────
-#
-# The f2 criteria above test whether updating is CONTINGENT on prediction error,
-# which is mechanistically upstream of what the temporal figures measure (error
-# decay, |delta response| decay, residual variance growth). That makes them open
-# to the charge of excluding participants who "didn't fit the pattern we wanted"
-# rather than ones who didn't follow the instructions -- and on complete_pairs
-# they exclude 25/60 (42%) for numbers and 19/60 (32%) for colors, 33/60 (55%) as
-# a union.
-#
-# For comparison, the two published datasets this project fits:
-#   carrabin (Prat-Carrabin 2024): excluded 4/25 (16%) on ONE model-free quantity
-#     -- mean absolute error against the true generative parameter. The excluded
-#     group averaged .263 (SD .0298) vs .176 (SD .0132) for the retained 21, a
-#     separation of more than 6 SDs.
-#   yoo: excluded 8/46 (17%), of which SEVEN were fMRI-technical (1 structural
-#     abnormality, 6 head motion >3mm) and exactly ONE was behavioural -- a
-#     post-experiment questionnaire in which the subject said they tracked
-#     pairwise differences rather than the average. Behavioural rate ~2%.
-#
-# Neither used a model-based contingency test, and both are 2-4x more
-# conservative than ours. This criterion set implements carrabin's rule.
-#
-# NOTE our error distribution is CONTINUOUS where carrabin's had a 6-SD gap, so
-# carrabin's literal >6 SD threshold excludes ZERO participants here. Measured on
-# complete_pairs: >3 SD excludes 6 (10%) numbers / 1 (2%) colors; >2 SD excludes
-# 9 (15%) each; the single largest gap is one participant in each task. Default
-# is 2 SD. The two criterion sets largely agree on WHO is worst -- 19 of the 25
-# f2-excluded numbers pids are among the 25 worst by absolute error (16 of 19 for
-# colors) -- so this draws the same line much further up the same distribution.
-
-DEFAULT_MAX_ERROR_SD = 2.0   # SDs above the retained group's mean
-
-
-def flag_performance_outlier(df_task: pd.DataFrame, task: str,
-                             max_error_sd: float = DEFAULT_MAX_ERROR_SD) -> pd.DataFrame:
-    """Flag participants whose mean absolute error against the TRUE generative
-    parameter sits more than `max_error_sd` SDs above the mean of the retained
-    group. Model-free: references no decay/integration model, only the task's own
-    stated objective.
-
-    Applied iteratively from the worst participant down, recomputing the retained
-    group's mean and SD each time, so a single extreme participant cannot inflate
-    the SD and thereby shield the next one. Stops at the first participant who
-    falls inside the threshold.
-
-    `df_task` must be single-task and carry the truth column for that task
-    (true_mean for numbers, true_p for colors); `response` and the truth are
-    compared on the NATIVE response scale, as carrabin's rule does.
-    """
-    _assert_single_task(df_task)
-    d = _dedup(df_task).copy()
-
-    if task == "colors":
-        if "true_p" not in d.columns:
-            raise KeyError("flag_performance_outlier needs true_p for colors")
-        truth = pd.to_numeric(d["true_p"], errors="coerce") * 100.0
-    else:
-        if "true_mean" not in d.columns:
-            raise KeyError("flag_performance_outlier needs true_mean for numbers")
-        truth = pd.to_numeric(d["true_mean"], errors="coerce")
-
-    d["abs_err"] = (pd.to_numeric(d["response"], errors="coerce") - truth).abs()
-    per = (d.dropna(subset=["abs_err"])
-           .groupby("prolific_pid")["abs_err"].mean().sort_values())
-
-    flagged: set = set()
-    vals = per.values.copy()
-    names = list(per.index)
-    i = len(vals) - 1
-    while i > 1:
-        rest = vals[:i]
-        sd = rest.std(ddof=1)
-        if sd > 0 and vals[i] > rest.mean() + max_error_sd * sd:
-            flagged.add(names[i])
-            i -= 1
-        else:
-            break
-
-    return pd.DataFrame({
-        "prolific_pid": names,
-        "task": task,
-        "mean_abs_error": per.values,
-        "flagged_performance_outlier": [n in flagged for n in names],
-    })
-
-
-# ── Combined report + filtering ─────────────────────────────────────────────
-
-# ── Criterion set 3: NO EVIDENCE OF INTEGRATION (model-free) ────────────────
-#
-# Named for what the participant fails to DO -- integrate evidence beyond the most
-# recent observation -- rather than for the mechanism used to detect it. An earlier
-# name, 'baseline', described only the mechanism (compare against a baseline
-# strategy) and was uninformative: `performance` also compares against a baseline,
-# just a group-level one.
-#
-# IMPORTANT RELATIONSHIP TO `recency_only`: this criterion and the f2-based
-# recency_only criterion measure THE SAME CONSTRUCT ("uses only the most recent
-# observation") by two different methods -- incremental regression variance from
-# adding prior_mean over current_value, versus error against a copy baseline. That
-# is almost certainly WHY they agree on 23 of 25 excluded numbers participants and
-# 18 of 19 colors. Present that agreement as two operationalisations of one
-# construct converging, NOT as two independent lines of evidence.
-#
-# The task instruction is "report the mean of ALL observations so far". Two
-# reference agents can be evaluated on each participant's OWN sequences:
-#
-#   optimal   report the running mean            -> lower bound on achievable error
-#   last      report only the latest observation -> what "not averaging" achieves
-#
-# skill = (err_last - err_pid) / (err_last - err_optimal)
-#
-#   skill >= 1  at the optimal running-mean level
-#   skill ~  0  no better than reporting only the most recent observation
-#   skill <  0  WORSE than that -- cannot be following the instruction at all
-#
-# NOTE skill normalises by (err_last - err_optimal) computed on the participant's
-# OWN sequences, which is what makes it robust to the objection that copying is
-# nearly correct at low true_std: if copying is nearly correct then err_last
-# shrinks and the yardstick shrinks with it. Measured headroom on complete_pairs:
-# numbers err_last 8.35 vs err_optimal 3.28 (gap 5.07, and at least 3.99 for
-# EVERY participant); colors 39.35 vs 11.75 (gap 27.60). So there is real room to
-# discriminate even at std=10. Prefer this over a raw "fraction of responses
-# matching the displayed value", which IS confounded by true_std.
-#
-# ONE baseline, deliberately: "report the most recent observation" is the single
-# strategy the instruction most directly rules out ("the mean of ALL observations
-# so far"). An earlier version also tried a constant-midpoint baseline and used
-# whichever bound tighter per task, which made the criterion's MEANING
-# task-dependent -- for colors the midpoint bound and for numbers the last value.
-# Removed for interpretability: one criterion, one sentence, same meaning in both
-# tasks.
-#
-# CONSEQUENCE, worth knowing: for colors this baseline is near-VACUOUS on its own.
-# Reporting the last binary draw means slamming to 0% or 100% every trial (error
-# 39.35 vs optimal 11.75), so almost any behaviour beats it and skill < 0 excludes
-# essentially nobody. Colors exclusions therefore come almost entirely from the
-# both-tasks requirement propagating numbers' exclusions -- see
-# `require_both_tasks` in filter_participants.
-#
-# WHY THIS RATHER THAN "no improvement with more observations". That would be the
-# natural way to phrase an instruction-compliance test, but error-decay-with-
-# observation is exactly what temporal col 1 plots, and |delta response| decay is
-# col 2 -- excluding on the shape and then reporting the shape makes those panels
-# partly definitional. This is a LEVEL comparison against a NAMED alternative
-# strategy, so it shares no quantity with those panels.
-#
-# THE THRESHOLD IS READ OFF AN EMPIRICAL DISCONTINUITY, not tuned. Two candidate
-# anchors, and the second is stronger:
-#
-#   skill < 0     "did not beat a strategy the instructions rule out". Principled,
-#                 but LENIENT: a pure copier scores exactly 0 and is RETAINED, so
-#                 it excludes only participants worse than copying. Excludes 31/60
-#                 numbers, 0/60 colors.
-#   skill < 0.10  "moved at least slightly toward the true mean, relative to
-#                 copying" -- i.e. some evidence of integrating beyond the most
-#                 recent observation. DEFAULT.
-#
-# 0.10 is not a tuned value: the numbers skill distribution has a 0.29-wide VOID
-# immediately above the copying cluster. Sorted values run
-#   ... -0.0031, -0.0004, 0.0102, 0.0354, 0.0387, 0.0388, 0.0406, | 0.3339, 0.3829, ...
-# so ANY threshold in (0.041, 0.334) produces the IDENTICAL partition: 36/60
-# numbers excluded, 24 retained after require_both_tasks. Verified across
-# 0.05/0.10/0.15/0.20/0.25/0.30/0.33. The partition only starts moving at 0.35
-# (37) and 0.40 (39). Colors is barely affected either way (1-2 exclusions),
-# because its last-value baseline is near-vacuous -- see above.
-#
-# That void is itself the interesting finding: participants either barely beat
-# copying (<=0.041, n=36) or clearly integrate (>=0.334, n=24), with nobody in
-# between. It is the closest thing in this data to the 6-SD separation carrabin
-# reported, and it is what makes a threshold here defensible rather than chosen.
-#
-# WHAT IT FOUND, and why it settles the "are we excluding too many?" question:
-# skill < 0 excludes 31/60 (52%) for numbers and 24/60 (40%) for colors -- and it
-# picks out 23 of the 25 and 18 of the 19 participants the CONTINGENCY criteria
-# exclude. So an independent, model-free, non-circular criterion agrees on
-# essentially the same people. The high exclusion rate is not an artefact of an
-# aggressive model-based filter: roughly half of participants really do perform
-# worse than ignoring all but one observation, or worse than answering "50%"
-# every time. Note this is well above carrabin's 16% and yoo's 17%, but both were
-# supervised lab studies (yoo paying a $35 base); an unsupervised 32-trial x
-# 15-observation Prolific session is a different population.
-
-DEFAULT_MIN_SKILL = 0.10
-
-
-def flag_no_integration(df_task: pd.DataFrame, task: str,
-                        min_skill: float = DEFAULT_MIN_SKILL) -> pd.DataFrame:
-    """Flag participants who show no evidence of integrating beyond the most
-    recent observation: skill < min_skill, where skill=0 is "no better than
-    copying the latest value" and skill=1 is optimal. Model-free, and shares no
-    quantity with temporal cols 1-2 -- see the block comment above for why the
-    default threshold sits in a 0.29-wide empirical void rather than being tuned.
-
-    `df_task` must be single-task and carry that task's truth column.
-    """
-    _assert_single_task(df_task)
-    d = _dedup(df_task).copy()
-
-    d["value_num"] = pd.to_numeric(d["value"], errors="coerce")
-    d["resp_num"] = pd.to_numeric(d["response"], errors="coerce")
-    if task == "colors":
-        if "true_p" not in d.columns:
-            raise KeyError("flag_no_integration needs true_p for colors")
-        d["truth"] = pd.to_numeric(d["true_p"], errors="coerce") * 100.0
-        # value is +-1 (blue/red) -> the response scale, as _value_on_response_scale
-        d["val_scale"] = np.where(d["value_num"] == 1, 100.0, 0.0)
-    else:
-        if "true_mean" not in d.columns:
-            raise KeyError("flag_no_integration needs true_mean for numbers")
-        d["truth"] = pd.to_numeric(d["true_mean"], errors="coerce")
-        d["val_scale"] = d["value_num"]
-
-    d = d.sort_values(["prolific_pid", "trial", "observation"])
-    d["running"] = (d.groupby(["prolific_pid", "trial"])["val_scale"]
-                    .transform(lambda s: s.expanding().mean()))
-
-    rows = []
-    for pid, g in d.groupby("prolific_pid"):
-        g = g.dropna(subset=["resp_num", "truth", "val_scale"])
-        if g.empty:
-            rows.append(dict(prolific_pid=pid, task=task, skill=np.nan,
-                             err_pid=np.nan, err_optimal=np.nan,
-                             err_baseline=np.nan, baseline_used="none"))
-            continue
-        err_pid = (g["resp_num"] - g["truth"]).abs().mean()
-        err_opt = (g["running"] - g["truth"]).abs().mean()
-        err_base = (g["val_scale"] - g["truth"]).abs().mean()   # last observation
-        skill = ((err_base - err_pid) / (err_base - err_opt)
-                 if err_base > err_opt else np.nan)
-        rows.append(dict(prolific_pid=pid, task=task, skill=skill,
-                         err_pid=err_pid, err_optimal=err_opt,
-                         err_baseline=err_base, baseline_used="last_value"))
-
-    out = pd.DataFrame(rows)
-    # NaN skill means the baseline was already at/below optimal for this pid --
-    # the comparison is undefined, so do not flag on it.
-    out["flagged_no_integration"] = out["skill"].lt(min_skill).fillna(False)
-    return out
-
-
 # ── Criterion set 4: NON-INTEGRATOR (definition-first, model-free) ──────────
 #
 # THE DEFINITION, which the other three criterion sets only approximate:
@@ -831,34 +589,48 @@ def flag_non_integrator(df_task: pd.DataFrame, task: str,
 # Which criterion set decides `excluded`. Both are always COMPUTED and reported;
 # only the `excluded` column differs, so a report always carries the diagnostics
 # for the method you did not choose.
-EXCLUSION_METHODS = ("contingency", "performance", "integration", "non_integrator")
-DEFAULT_EXCLUSION_METHOD = "contingency"
+# 'performance' and 'integration' were moved to
+# archive/utils/archive_exclusion_criteria.py -- see that module for why each
+# loses. 'contingency' is RETAINED as a computed diagnostic even though it no
+# longer decides anything: recency_only tests the same construct as
+# non_integrator by a different method (in-sample f^2 vs trial-clustered
+# bootstrap reliability), and their agreement -- 23 of 25 and 18 of 19 excluded
+# participants -- is the strongest available evidence that the exclusions are not
+# an artefact of one statistic. Every exclusion in the verbose log therefore
+# carries both criteria's numbers.
+EXCLUSION_METHODS = ("contingency", "non_integrator")
+DEFAULT_EXCLUSION_METHOD = "non_integrator"
 
 
 def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors", "numbers"),
                              min_f2: float = DEFAULT_MIN_F2,
                              min_updates: int = DEFAULT_MIN_UPDATES,
                              method: str = DEFAULT_EXCLUSION_METHOD,
-                             max_error_sd: float = DEFAULT_MAX_ERROR_SD,
-                             min_skill: float = DEFAULT_MIN_SKILL,
                              n_boot: int = DEFAULT_N_BOOT) -> pd.DataFrame:
     """Full diagnostic report, one row per (prolific_pid, task) present in
     `df`. `df` may span multiple tasks — this function does the required
     per-task slicing before calling into any criterion itself.
 
     `method` selects which criterion set drives the `excluded` column:
+      'non_integrator' (DEFAULT)  prior observations make no reliable
+                     contribution to predicting the response, by trial-clustered
+                     bootstrap. Definition-first, model-free, no magnitude
+                     threshold. See flag_non_integrator.
       'contingency'  the three Cohen's f2 tests (recency-only, non-contingent
                      sign, non-contingent magnitude). Model-BASED: it asks
                      whether updating is contingent on prediction error, which
-                     is upstream of what the temporal figures measure.
-      'performance'  gross performance outlier on mean absolute error against the
-                     true generative parameter, carrabin's own rule. Model-FREE.
-      'baseline'     did not beat the best TRIVIAL strategy (latest observation,
-                     or the scale midpoint) on their own sequences. Model-FREE,
-                     needs no threshold tuning, and shares no quantity with
-                     temporal cols 1-2. See flag_no_integration.
-    Both criterion sets are computed either way, so the report always carries the
-    diagnostics for the method you did not pick -- which is the point: the
+                     is upstream of what the temporal figures measure. Retained
+                     mainly as a DIAGNOSTIC -- recency_only tests the same
+                     construct as non_integrator by a different method, and their
+                     agreement is the evidence that the exclusions are not an
+                     artefact of one statistic.
+
+    Two further criteria ('performance', 'integration') were tested and moved to
+    archive/utils/archive_exclusion_criteria.py; see that module for why each
+    loses.
+
+    BOTH live criterion sets are computed either way, so the report always carries
+    the diagnostics for the method you did not pick. That is the point: the
     contingency measures remain reportable as a description of heterogeneity
     (e.g. "n of N retained participants showed recency-only updating") even when
     they are not driving exclusion.
@@ -874,13 +646,9 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
         r1 = flag_recency_only(df_task, task, min_f2, min_updates)
         r2 = flag_noncontingent_sign(df_task, task, min_f2, min_updates).drop(columns=["n_updates", "note"])
         r3 = flag_noncontingent_magnitude(df_task, task, min_f2, min_updates).drop(columns=["n_updates", "note"])
-        r4 = flag_performance_outlier(df_task, task, max_error_sd)
-        r5 = flag_no_integration(df_task, task, min_skill)
         r6 = flag_non_integrator(df_task, task, n_boot=n_boot).drop(columns=["note"])
         merged = r1.merge(r2, on=["prolific_pid", "task"], how="outer")
         merged = merged.merge(r3, on=["prolific_pid", "task"], how="outer")
-        merged = merged.merge(r4, on=["prolific_pid", "task"], how="outer")
-        merged = merged.merge(r5, on=["prolific_pid", "task"], how="outer")
         merged = merged.merge(r6, on=["prolific_pid", "task"], how="outer")
         reports.append(merged)
 
@@ -889,10 +657,7 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
                                      "f2_recency", "flagged_recency_only",
                                      "f2_sign", "flagged_noncontingent_sign",
                                      "f2_magnitude", "flagged_noncontingent_magnitude",
-                                     "mean_abs_error", "flagged_performance_outlier",
-                                     "skill", "err_pid", "err_optimal",
-                                     "err_baseline", "baseline_used",
-                                     "flagged_no_integration", "b_latest",
+                                     "b_latest",
                                      "b_prior", "b_prior_lo", "b_prior_hi",
                                      "n_trials", "n_boot", "ci", "seed",
                                      "flagged_non_integrator", "excluded"])
@@ -904,10 +669,6 @@ def compute_exclusion_report(df: pd.DataFrame, tasks: tuple[str, ...] = ("colors
         report["flagged_noncontingent_magnitude"].fillna(False))
     if method == "contingency":
         report["excluded"] = report["flagged_any_contingency"]
-    elif method == "performance":
-        report["excluded"] = report["flagged_performance_outlier"].fillna(False)
-    elif method == "integration":
-        report["excluded"] = report["flagged_no_integration"].fillna(False)
     else:
         report["excluded"] = report["flagged_non_integrator"].fillna(False)
     report.attrs["exclusion_method"] = method
@@ -986,15 +747,6 @@ def filter_participants(df: pd.DataFrame, report: pd.DataFrame | None = None,
                                        f"CI [{lo:+.3f},{hi:+.3f}] includes 0)")
                     else:
                         reasons.append("non_integrator (CI undefined)")
-                if row.get("flagged_no_integration"):
-                    sk = row.get("skill")
-                    sk_str = f"{sk:.3f}" if pd.notna(sk) else "undefined"
-                    reasons.append(f"no_integration (skill={sk_str} vs "
-                                   f"{row.get('baseline_used')})")
-                if row.get("flagged_performance_outlier"):
-                    err = row.get("mean_abs_error")
-                    err_str = f"{err:.2f}" if pd.notna(err) else "undefined"
-                    reasons.append(f"performance_outlier (mean |error|={err_str})")
                 if row.get("flagged_recency_only"):
                     f2_str = f"{row['f2_recency']:.4f}" if pd.notna(row['f2_recency']) else "undefined"
                     reasons.append(f"recency_only (f2={f2_str})")

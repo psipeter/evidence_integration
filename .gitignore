@@ -100,7 +100,10 @@ task/sequences_pool/
 # that needs to live in git history to be recoverable.
 task/sequences_pool_binary_prefix_backup/
 
-# Task sequence data files (superseded by task/sequences/*.pkl)
+# Canonical production datasets, built by scripts/build_task_backend_inputs.py
+# (complete_pairs + the non_integrator exclusion criterion). Gitignored like all
+# of data/ -- rebuild with:
+#   venv/bin/python scripts/build_task_backend_inputs.py --complete_pairs
 data/soltani_numbers.pkl
 data/soltani_colors.pkl
 

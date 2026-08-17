@@ -147,11 +147,9 @@ def list_candidates(pool_root: Path, task: str) -> None:
         print(f"{pid:<28} {status:<12} {n_trials:<8} {stds or ''}")
 
 
-def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[str]],
+def build_pilot(pool_root: Path, out_prefix: str | None, pids_by_task: dict[str, list[str]],
                 apply_filters: bool = True,
                 exclusion_method: str = "contingency",
-                max_error_sd: float | None = None,
-                min_skill: float | None = None,
                 require_both_tasks: bool = True) -> None:
     """pids_by_task: {'numbers': [...], 'colors': [...]} -- either list can
     be empty/omitted if this pilot didn't touch that task. Requires every
@@ -183,12 +181,15 @@ def build_pilot(pool_root: Path, out_prefix: str, pids_by_task: dict[str, list[s
         return
 
     combined = pd.concat(frames, ignore_index=True)
-    build_from_df(combined, out_name_numbers=f"soltani_numbers_{out_prefix}",
-                 out_name_colors=f"soltani_colors_{out_prefix}",
+    # out_prefix=None writes the CANONICAL unsuffixed data/soltani_{task}.pkl --
+    # the production dataset, which is what the figures read when --datafile is
+    # omitted. Pass a prefix only for comparison builds (a pilot, or an
+    # alternative exclusion method); see utils.paths.dataset_stem.
+    suffix = f"_{out_prefix}" if out_prefix else ""
+    build_from_df(combined, out_name_numbers=f"soltani_numbers{suffix}",
+                 out_name_colors=f"soltani_colors{suffix}",
                  apply_filters=apply_filters,
                  exclusion_method=exclusion_method,
-                 max_error_sd=max_error_sd,
-                 min_skill=min_skill,
                  require_both_tasks=require_both_tasks)
     print("\nJOB_COMPLETE")
 
@@ -199,34 +200,26 @@ def main():
     p.add_argument("--list_candidates", choices=["numbers", "colors"], default=None,
                    help="Probe current real-pid status for one task, then exit -- doesn't build anything.")
     p.add_argument("--pilot", default=None,
+                   # Omit for the canonical production build.
                    help="Output name suffix, e.g. 'pilot4' -> soltani_numbers_pilot4.pkl / soltani_colors_pilot4.pkl")
     p.add_argument("--numbers_pids", default="", help="Comma-separated real prolific_pids for the numbers task")
     p.add_argument("--colors_pids", default="", help="Comma-separated real prolific_pids for the colors task")
     p.add_argument("--exclusion_method", choices=EXCLUSION_METHODS,
                    default=DEFAULT_EXCLUSION_METHOD,
-                   help="Which criterion set decides exclusion. 'contingency' "
-                        "(default): the three Cohen's f2 tests -- model-BASED, and "
-                        "excludes 42%%/32%% of complete_pairs numbers/colors. "
-                        "'integration': no evidence of integrating beyond the "
-                        "most recent observation (model-free, threshold read off an "
-                        "empirical void). 'performance': carrabin's own rule, a gross outlier on "
-                        "mean absolute error vs the true generative parameter -- "
-                        "model-FREE, and closer to the 16%%/17%% rates carrabin and "
-                        "yoo report. Both are always computed; only the decision "
-                        "differs. See utils/participant_filters.py.")
-    p.add_argument("--max_error_sd", type=float, default=None,
-                   help="Threshold for --exclusion_method performance: SDs above "
-                        "the retained group's mean absolute error. Default 2.0. "
-                        "carrabin's literal >6 SD excludes ZERO participants here, "
-                        "because our error distribution is continuous where theirs "
-                        "had a 6-SD gap.")
-    p.add_argument("--min_skill", type=float, default=None,
-                   help="Threshold for --exclusion_method integration: skill below "
-                        "this is excluded. Default 0.10, meaning 'moved at least "
-                        "slightly toward the true mean, relative to copying the "
-                        "latest observation'. Read off a 0.29-wide empirical void "
-                        "in the skill distribution -- any value in (0.041, 0.334) "
-                        "gives the identical partition -- rather than tuned.")
+                   help="Which criterion set decides exclusion. 'non_integrator' "
+                        "(default): observations before the most recent make no "
+                        "RELIABLE contribution to predicting the response, by "
+                        "trial-clustered bootstrap -- definition-first, model-free, "
+                        "no magnitude threshold; excludes 19/61 numbers and 17/61 "
+                        "colors of complete_pairs (~30%%). 'contingency': the three "
+                        "Cohen's f2 tests -- model-BASED, excludes 42%%/32%%; kept "
+                        "mainly as a diagnostic, since recency_only tests the same "
+                        "construct as non_integrator by a different method and "
+                        "their agreement is what validates the exclusions. Both are "
+                        "always COMPUTED and appear in the report; only the "
+                        "decision differs. Two further criteria were tested and "
+                        "archived -- see archive/utils/archive_exclusion_criteria.py "
+                        "and utils/participant_filters.py.")
     p.add_argument("--per_task_exclusion", action="store_true",
                    help="Exclude per (pid, task) instead of per SUBJECT. Default "
                         "is subject-level: a participant failing in either task is "
@@ -248,10 +241,6 @@ def main():
 
     if args.list_candidates:
         list_candidates(pool_root, args.list_candidates)
-        return
-
-    if not args.pilot:
-        print("Need --pilot <name> (or --list_candidates <task> to probe first).")
         return
 
     if args.complete_pairs:
@@ -277,8 +266,6 @@ def main():
     build_pilot(pool_root, args.pilot, pids_by_task,
                 apply_filters=not args.no_filter,
                 exclusion_method=args.exclusion_method,
-                max_error_sd=args.max_error_sd,
-                min_skill=args.min_skill,
                 require_both_tasks=not args.per_task_exclusion)
 
 
