@@ -104,6 +104,16 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
+        "NoisyRL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            # Noise SDs on the canonical [-1,1] response scale. Upper bound 0.30
+            # is generous: the measured human within-qid residual SD is ~0.055
+            # (~2.8 points on the 0-100 slider), so 0.30 leaves room for a state
+            # noise term to compound without saturating the scale in one update.
+            "sigma_state": (0.0, 0.30, 0.001),
+            "sigma_resp": (0.0, 0.30, 0.001),
+        },
         "NEF": {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
@@ -121,6 +131,16 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NoisyRL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            # Noise SDs on the canonical [-1,1] response scale. Upper bound 0.30
+            # is generous: the measured human within-qid residual SD is ~0.055
+            # (~2.8 points on the 0-100 slider), so 0.30 leaves room for a state
+            # noise term to compound without saturating the scale in one update.
+            "sigma_state": (0.0, 0.30, 0.001),
+            "sigma_resp": (0.0, 0.30, 0.001),
         },
         "NEF": {
             **_NEF_RANGES,

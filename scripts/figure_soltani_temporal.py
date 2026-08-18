@@ -972,6 +972,17 @@ def main() -> None:
                              "across participants in cols 3-4.")
     parser.add_argument("--hide_individual", dest="show_individual",
                         action="store_false")
+    parser.add_argument("--models", nargs="+", default=None, metavar="MODEL",
+                        help="Restrict the overlaid models to these, in this "
+                             "order, instead of all of MODEL_ORDER "
+                             f"({', '.join(MODEL_ORDER)}). Implies --plot_models. "
+                             "Colours are taken from each model's position in the "
+                             "FULL MODEL_ORDER, not from the restricted list, so a "
+                             "model keeps the same colour whichever subset it is "
+                             "plotted in -- and so subset figures stay comparable "
+                             "with full ones. Cols 3-4 additionally keep only the "
+                             "stochastic models (NEF), so restricting to a "
+                             "deterministic model leaves those panels human-only.")
     parser.add_argument("--plot_models", dest="plot_models",
                         action="store_true", default=False,
                         help="Overlay fitted models in cols 1-2 (mean/CI lines) "
@@ -1014,8 +1025,19 @@ def main() -> None:
 
     run_dir = resolve_run_folder(args.run_folder)
     apply_style()
+    # Palette is indexed by position in the FULL MODEL_ORDER so a model's colour
+    # does not shift when a subset is plotted.
     pal = get_palette(len(MODEL_ORDER))
     palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
+
+    if args.models:
+        unknown = [m for m in args.models if m not in MODEL_ORDER]
+        if unknown:
+            parser.error(f"unknown model(s) {unknown}; choose from {MODEL_ORDER}")
+        model_order = list(args.models)
+        args.plot_models = True          # asking for models implies plotting them
+    else:
+        model_order = list(MODEL_ORDER)
 
     fig, axes = plt.subplots(
         2, 6,
@@ -1039,7 +1061,7 @@ def main() -> None:
             continue
         models = {}
         if args.plot_models:
-            for model_type in MODEL_ORDER:
+            for model_type in model_order:
                 mdf = _load_model(task, model_type, run_dir, args.datafile)
                 if mdf is not None:
                     models[model_type] = mdf
@@ -1082,7 +1104,7 @@ def main() -> None:
     label_panels(axes)
 
     if args.plot_models:
-        footer = (f"Cols 1-2, 5 model fits: {', '.join(MODEL_ORDER)} from run "
+        footer = (f"Cols 1-2, 5 model fits: {', '.join(model_order)} from run "
                  f"'{args.run_folder}'. Cols 3-4 are human-only by necessity: "
                  "these models are deterministic, so their residual against a "
                  "qid-conditional mean is exactly zero. Col 6 (cross-task lambda) "
