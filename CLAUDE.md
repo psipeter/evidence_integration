@@ -766,6 +766,83 @@ task_backend at all: **`docs/HISTORY.md`**.
 | RL_lambda | Power-law delta rule (explicit equation) | alpha_0, lambda_ |
 | NEF | Spiking NEF integrator (emergent power-law dynamics) | alpha_0, lambda_ |
 
+| NoisyRL_lambda | RL_lambda + tunable state and response noise; soltani only | alpha_0, lambda_, sigma_state, sigma_resp |
+
+### NoisyRL_lambda
+
+    alpha(n) = alpha_0 / n^lambda
+    e_n = clip(e_{n-1} + alpha(n)(x_n - e_{n-1}) + xi_n, -1, 1)   xi ~ N(0, sigma_state)
+    r_n = clip(e_n + eta_n, -1, 1)                                eta ~ N(0, sigma_resp)
+
+Two noise sources doing DIFFERENT jobs, which is the point of the model:
+- `sigma_state` enters the ESTIMATE, so it persists and compounds -- a perturbation
+  at step j reaches step n with weight `prod_{k=j+1..n}(1-alpha(k))`. This produces
+  residual variance GROWTH and within-trial residual AUTOCORRELATION, i.e. what
+  temporal cols 3-4 measure.
+- `sigma_resp` enters only the REPORTED value, i.i.d. per observation. Raises
+  |Δresponse| by ~`1.128*sigma_resp` uniformly, producing a PLATEAU rather than
+  growth, and contributing zero autocorrelation.
+
+Seeded `_trial_seed(seed, trial)` exactly as NoisyCounting. This is LOAD-BEARING,
+not cosmetic: `_run_soltani_common` re-simulates from scratch for every
+(trial, observation) -- 480 calls per parameter set -- so a TRIAL-scoped seed makes
+observation k+1's call replay the same draws as observation k's for its first k
+steps. Seeding per-observation would give 15 unrelated trajectories and destroy the
+state/response distinction. `eta` is drawn at EVERY step though only the last is
+used, to keep that replay aligned -- do not "optimise" that draw away.
+
+**Noise parameters have NONZERO LOWER BOUNDS, and must.** RMSE cannot identify
+them: squared error is minimised by the conditional mean, so noise only hurts.
+Measured with floors at 0: `sigma_state` median 0.0000 (24/35 exactly zero),
+`sigma_resp` median 0.0000 (25/35 zero), largest value anywhere 0.026 against a
+measured human within-qid residual SD of ~0.055. Same collapse documented below for
+NoisyCounting's `sigma_c`. Current floors: `sigma_state` 0.02 (both tasks),
+`sigma_resp` 0.04 (numbers) / 0.055 (colors), chosen by sweeping both against human
+prefix response variability and RMSE-vs-running-mean. With floors in place
+essentially every pid sits AT them (numbers 35/35 both), so the fitted values are
+not evidence about the noise level -- the floors are.
+
+**THE RESULT THIS BUYS.** Fitted `alpha_0`/`lambda_` barely move (numbers lambda
+0.704 -> 0.662, r=0.964 with RL_lambda's), but the temporal profile changes
+decisively:
+
+| numbers | \|Δ\| first→last | ratio | plateau | descriptive λ | gap vs human |
+|---------|------------------|-------|---------|---------------|--------------|
+| HUMAN | 0.1506 → 0.0613 | 2.46 | 0.0633 | 0.294 | -- |
+| RL_lambda | 0.1317 → 0.0182 | 7.24 | 0.0223 | 0.921 | +0.382, p<0.0001 |
+| NoisyRL_lambda | 0.1475 → 0.0590 | **2.50** | 0.0537 | 0.405 | **+0.035, p=0.62** |
+
+The decay ratio goes from ~3x too steep to essentially exact, and the descriptive-λ
+gap becomes statistically indistinguishable from zero. For colors the plateau match
+becomes exact (0.0853 vs human 0.0854, from 0.0615) and the per-pid λ correlation
+improves 0.782 -> 0.894.
+
+**What is and is not circular here.** σ_resp's floor was CALIBRATED to the measured
+within-qid residual SD, and the plateau is largely a function of that same
+quantity -- so "noise reproduces the plateau" is partly by construction. What is
+NOT circular: nothing tied σ to the DECAY RATIO or to the descriptive λ, and both
+landed on target. Two independent quantities came right from one calibrated input.
+State it that way, not as "the noisy model fits better".
+
+**Known limitations, both real.**
+- The human prefix-variability PROFILE is 0.0093, 0.0515, 0.0511, 0.0491 -- a
+  near-zero floor at observation 0 then a 5.5x step. The model always produces its
+  HIGHEST variability at observation 0 and flat-to-declining after, because
+  `alpha(1) = alpha_0 ~ 0.95` means it jumps almost fully to x_1 and both noise
+  terms are expressed immediately. No value in this family fixes it. Plausibly the
+  human pattern is task structure (after one observation the answer is obvious;
+  integration only begins at observation 1), so judge the match on observations 1-3.
+- Identical noise for every pid gives human-SCALE variability but not human
+  INDIVIDUAL DIFFERENCES in it. The variability figure shows this directly:
+  NoisyRL_lambda's prefix-variability distribution is a narrow spike (~0.04-0.05)
+  against the human's broad right-skewed 0.2-0.5, and its split-half reliability is
+  much weaker (numbers r=0.49** vs human 0.81****; colors r=0.23 ns vs 0.59***).
+  The numbers λ CORRELATION also drops (0.644 -> 0.524) even as the level matches.
+  Next step is per-participant σ_resp fixed at each pid's own measured value, which
+  should preserve the level match and recover the correlation. `MODEL_PARAMS`
+  supports a `fixed` dict but not per-participant values -- that is the plumbing
+  needed.
+
 NoisyCounting applies to carrabin only. Two fitted versions:
 - RMSE-fitted: sigma_c collapses to ~0 (response-noise artefact; methodologically revealing)
 - MLE-fitted (fit_mle.py): recovers sigma_c ~0.03-0.08, nu ~0.08-0.21
@@ -1440,7 +1517,34 @@ interpretable quantity; absolute positions and the slope's distance from 1 are
 not.
 
 **Cols 3-4 include only Human + STOCHASTIC models**, where eligibility is
-decided by `_STOCHASTIC_MODELS` (NEF, NoisyCounting) rather than MODEL_ORDER.
+decided by `STOCHASTIC_MODELS` (NEF, NoisyCounting, NoisyRL_lambda) rather than
+MODEL_ORDER.
+
+### `--models`, and utils/soltani_models.py
+
+All THREE soltani figures take `--models MODEL [MODEL ...]`, defaulting to
+**Mean LeakyIntegrator PrimacyRecency**. RL_lambda, NoisyRL_lambda and NEF are
+opt-in, so a default figure stays readable.
+
+`MODEL_ORDER`, `DEFAULT_MODELS`, `STOCHASTIC_MODELS` and the
+`add_model_args`/`resolve_models`/`stochastic_only` helpers live in ONE place,
+`utils/soltani_models.py`. Each figure previously carried its own MODEL_ORDER copy
+-- the same failure mode that let the three temporal figures end up with three
+different aggregation schemes (see utils/aggregate.py). Do not reintroduce a
+per-figure copy.
+
+`MODEL_ORDER` is also the COLOUR order, since `get_palette` returns the first n of
+a fixed list: a model's colour is its index. So **append, never insert** --
+inserting shifts every later model's colour and silently makes new figures
+incomparable with old ones (verified `get_palette(5) == get_palette(6)[:5]`, which
+is why NoisyRL_lambda went last). Palettes are always built over the FULL
+MODEL_ORDER, never a requested subset, so a model keeps its colour in any subset.
+
+The variability figure gained model support in the same change (it previously
+loaded none) plus a `--run_folder` flag. Only STOCHASTIC models are eligible there
+-- every panel is built on within-qid residuals, which are exactly zero for a
+deterministic model -- so with the all-deterministic default it prints an
+explanatory line and stays human-only.
 Both panels use residuals against a qid-conditional mean, and since a qid's
 repeats share an identical prefix by design, a DETERMINISTIC model gives the
 identical response every repeat and its residual is EXACTLY zero (verified on

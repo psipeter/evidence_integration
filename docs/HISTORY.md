@@ -5040,3 +5040,134 @@ or ANCHORED-WITH-A-NUDGE. The first two are arguably correct to retain; the thir
 is a real miss. And being a significance test it is POWER-DEPENDENT: the ~30% rate
 is tied to this design's 32 trials.
 
+## NoisyRL_lambda: response noise reconciles the fitted/descriptive lambda gap (this session)
+
+Started from a worry that RL_lambda was fitting badly: most fitted `lambda_` above
+0.75 (9/35 pinned at exactly 1.0) against a descriptive lambda -- measured from the
+decay of |Δresponse| -- below 0.5. Chasing it produced a resolution, a new model,
+and three retracted hypotheses of mine along the way. Recording the whole
+progression because the dead ends were each plausible.
+
+### The fits were not bad; the comparison was mis-specified
+
+Two things were measured before drawing any conclusion:
+- **Parameter recovery works.** Fitting noiseless RL_lambda to noisy RL_lambda data
+  recovers lambda almost exactly at every noise level tested (true 0.20 -> 0.192,
+  0.40 -> 0.367, 0.60 -> 0.592, 0.80 -> 0.808, even at noise SD 0.10, double the
+  human level). So misspecification-via-noise does NOT bias lambda upward.
+- **lambda is strongly identified, not weakly.** The RMSE profile along lambda is
+  steep and monotone (pid 1: 0.1032 at lambda=0 -> 0.0484 at 0.8). No flat region,
+  no boundary drift. The optimiser finds a real minimum.
+
+So the high fitted lambda is a finding about response LEVELS, not an artefact. The
+two lambdas measure different things: fitted lambda answers "what weighting
+reproduces where the slider ends up", descriptive lambda answers "how fast does the
+amount of movement shrink".
+
+### The mechanism, and what "noise" means here
+
+Human |Δresponse| PLATEAUS (~0.06 on [-1,1]) rather than decaying to zero. A
+deterministic RL_lambda has |Δ| -> 0 by construction, since |Δ| = alpha(t)*|PE| and
+alpha(t) -> 0. Sequence variation keeps |PE| alive but cannot keep |Δ| alive -- the
+gain shrinks regardless. This was a genuine confusion worth resolving explicitly:
+the relevant noise is RESPONSE noise (slider imprecision, lapses, tick rounding),
+NOT sequence variation. The two are separable because within a qid group the stimuli
+are IDENTICAL, so within-qid residual SD measures response variation with sequences
+held fixed. Measured: humans ~0.055; every math model exactly 0.000e+00.
+
+Decisive test: adding each pid's OWN measured response noise to RL_lambda's fitted
+output moves its descriptive lambda from 0.921 to 0.369 against a human 0.294 --
+paired gap +0.008, p=0.668, indistinguishable -- with the plateau also matching
+(gap -0.0044, p=0.599). For colors the deterministic model was already close and
+noise overshoots, so this is largely a numbers-task phenomenon.
+
+### PrimacyRecency does not show the discrepancy, and the reason is structural
+
+At median fitted parameters, the normalised weight on the NEWEST observation:
+
+| t | PrimacyRecency | RL_lambda alpha(t) |
+|---|----------------|--------------------|
+| 1 | 1.000 | 0.947 |
+| 5 | 0.373 | 0.305 |
+| 15 | 0.327 | 0.141 |
+
+PR asymptotes to a CONSTANT (~0.33) because for `o=t` the recency factor is
+`eps_r^1` at every t, so the newest observation always retains weight. RL_lambda's
+alpha decays without bound. Hence PR's |Δ| plateaus by construction and RL_lambda's
+cannot. Late-observation plateau, numbers: human 0.0633, PR 0.0445, RL_lambda
+0.0223, Mean 0.0131. Descriptive-lambda gap ordered identically: PR +0.219,
+RL_lambda +0.396, Mean +0.765. LeakyIntegrator overshoots the other way (plateau
+0.0992, gap -0.232) because fixed gamma means constant weight forever. So the three
+models BRACKET the human -- a coherent story about wanting a decaying-but-floored
+learning rate.
+
+### Retracted along the way
+
+- **"Add an asymptotic term to alpha(t)."** Wrong. Response noise produces an
+  |Δ| floor by itself (`E|Δ| -> 1.128*sigma` even when the systematic Δ -> 0), so
+  an alpha floor would fit noise with a systematic parameter. Tested per pid: 13/35
+  prefer a floored power law, but the fitted floor is statistically
+  indistinguishable from the floor PREDICTED by each pid's own response noise
+  (numbers median 0.0455 vs 0.0625 predicted, p=0.377, correlated r=0.661 across
+  pids). Note this also invalidates the descriptive-lambda level we had been
+  quoting: fitting the floored form gives lambda median 1.642 vs 0.294 for the pure
+  form, so the noise floor drags the pure-form exponent down.
+- **"LeakyIntegrator's `v=0.0` init handicaps it."** Wrong, and checked against the
+  task rather than argued: `DEFAULT_VALUE = 50` and `lastResponse` is reset at every
+  trial start, so each trial genuinely begins with the slider at the midpoint =
+  exactly 0.0 on [-1,1]. The init IS the task's initial condition; initialising at
+  x_0 would ignore where the slider actually was.
+- **"PrimacyRecency's recency exponent disagrees with its docstring."** Wrong.
+  Verified numerically identical under the docstring's stated 1-indexed convention;
+  I had misread `eps_r**(n-o)` as giving `eps_r^0` on the last observation when it
+  gives `eps_r^1`.
+
+### The model, and what it establishes
+
+`NoisyRL_lambda` = RL_lambda + `sigma_state` (perturbs the estimate, compounds ->
+variance growth and autocorrelation, i.e. temporal cols 3-4) + `sigma_resp`
+(perturbs only the report, i.i.d. -> a plateau, no autocorrelation). Reduces to
+RL_lambda exactly at sigma=0.
+
+RMSE cannot identify either sigma (both collapse to ~0; 24-25 of 35 exactly zero),
+so both carry nonzero LOWER BOUNDS chosen by matching human prefix variability and
+RMSE-vs-running-mean. With floors in place essentially every pid sits at them, so
+the fitted values are not evidence about the noise level.
+
+What it buys, with `alpha_0`/`lambda_` barely moved (numbers lambda 0.704 -> 0.662,
+r=0.964):
+
+| numbers | ratio first/last | plateau | descriptive lambda | gap vs human |
+|---------|------------------|---------|--------------------|--------------|
+| HUMAN | 2.46 | 0.0633 | 0.294 | -- |
+| RL_lambda | 7.24 | 0.0223 | 0.921 | +0.382, p<0.0001 |
+| NoisyRL_lambda | **2.50** | 0.0537 | 0.405 | **+0.035, p=0.62** |
+
+Colors: plateau becomes exact (0.0853 vs 0.0854) and the per-pid lambda correlation
+improves 0.782 -> 0.894.
+
+**Circularity, stated honestly.** sigma_resp's floor was calibrated to the measured
+within-qid residual SD, and the plateau is largely a function of that quantity -- so
+the plateau match is partly by construction. NOT circular: nothing tied sigma to the
+DECAY RATIO or the descriptive lambda, and both landed on target. Two independent
+quantities from one calibrated input.
+
+### Still open
+
+- Identical noise for all pids gives human-scale variability but not human
+  individual DIFFERENCES: NoisyRL_lambda's prefix-variability distribution is a
+  narrow spike (~0.04-0.05) vs the human's broad 0.2-0.5, split-half reliability is
+  weaker (numbers r=0.49** vs 0.81****), and the numbers lambda correlation actually
+  DROPS 0.644 -> 0.524 even as the level matches. Per-participant sigma_resp fixed
+  at each pid's measured value is the obvious next step; MODEL_PARAMS supports a
+  `fixed` dict but not per-pid values.
+- The observation-0 variability profile cannot be matched by this model family
+  (human 0.0093 -> 0.0515 step; model always highest at observation 0). Probably
+  task structure rather than a noise process.
+- A distributional (NLL) loss remains the only route that would actually FIT the
+  noise rather than calibrate it. Tabled: `compute_sim_db_loss` keys cells on the
+  FULL sequence tuple, which suits carrabin's repeated sequence pool but not
+  soltani's mostly-unique per-participant sequences, and `build_sim_db`
+  hand-duplicates each model's implementation (seeding by simulation index rather
+  than by trial), so adding a third pair doubles the drift risk.
+

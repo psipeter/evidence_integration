@@ -123,6 +123,7 @@ import seaborn as sns
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path, dataset_stem, resolve_run_folder
+from utils.soltani_models import MODEL_ORDER, add_model_args, resolve_models
 from utils.plot_style import (
     FIGURE_SIZE,
     annotate_nef_comparisons,
@@ -138,7 +139,8 @@ DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
 
 # Same four models, in the same order, as figure_soltani_temporal.py -- so a
 # model keeps one colour across the whole soltani figure set.
-MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]
+# MODEL_ORDER now comes from utils.soltani_models, shared with the temporal and
+# variability figures -- see that module on append-only ordering and colours.
 
 # Reference model for P2's significance bars; see module docstring. NEF now that
 # it is fit for these datasets -- matching the carrabin/yoo figures, where the
@@ -335,7 +337,7 @@ def _rmse_per_pid(df: pd.DataFrame, ground_truth: pd.DataFrame) -> pd.DataFrame:
 
 
 def _plot_panel_p1(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
-                   palette: dict) -> None:
+                   palette: dict, model_order: list | None = None) -> None:
     """RMSE to the running-mean ground truth, per pid, as one violin per
     source (Human first, then each fitted model).
 
@@ -348,7 +350,7 @@ def _plot_panel_p1(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
     h["source"] = "Human"
     frames.append(h)
 
-    for model_type in MODEL_ORDER:
+    for model_type in (model_order or MODEL_ORDER):
         mdf = models.get(model_type)
         if mdf is None:
             continue
@@ -357,7 +359,8 @@ def _plot_panel_p1(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
         frames.append(m)
 
     plot_df = pd.concat(frames, ignore_index=True)
-    order = [s for s in ["Human"] + MODEL_ORDER if s in set(plot_df["source"])]
+    order = [s for s in ["Human"] + (model_order or MODEL_ORDER)
+             if s in set(plot_df["source"])]
 
     sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
                 hue="source", palette=palette, legend=False, ax=ax)
@@ -375,11 +378,11 @@ def _plot_panel_p1(ax, human: pd.DataFrame, models: dict[str, pd.DataFrame],
 # ── Panel P2 — Model fit to human responses ─────────────────────────────────
 
 def _plot_panel_p2(ax, task: str, run_dir: Path, datafile: str | None,
-                   palette: dict) -> None:
+                   palette: dict, model_order: list | None = None) -> None:
     """Per-pid fitted CV RMSE to human responses, one violin per model, with
     paired-Wilcoxon significance bars drawn from SIG_REFERENCE outward."""
     frames = []
-    for model_type in MODEL_ORDER:
+    for model_type in (model_order or MODEL_ORDER):
         loss_df = _load_model_loss(task, model_type, run_dir, datafile)
         if loss_df is None:
             print(f"  (no {model_type} performance file -- skipping in P2)")
@@ -397,7 +400,7 @@ def _plot_panel_p2(ax, task: str, run_dir: Path, datafile: str | None,
         return
 
     plot_df = pd.concat(frames, ignore_index=True)
-    order = [m for m in MODEL_ORDER if m in set(plot_df["source"])]
+    order = [m for m in (model_order or MODEL_ORDER) if m in set(plot_df["source"])]
 
     sns.boxplot(data=plot_df, x="source", y="rmse", order=order,
                 hue="source", palette=palette, legend=False, ax=ax)
@@ -415,7 +418,8 @@ def _plot_panel_p2(ax, task: str, run_dir: Path, datafile: str | None,
         annotate_nef_comparisons(
             ax, plot_df, "source", "rmse", order,
             nef_label=SIG_REFERENCE,
-            compare_only=[m for m in MODEL_ORDER if m != SIG_REFERENCE],
+            compare_only=[m for m in (model_order or MODEL_ORDER)
+                          if m != SIG_REFERENCE],
         )
 
 
@@ -423,6 +427,7 @@ def _plot_panel_p2(ax, task: str, run_dir: Path, datafile: str | None,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    add_model_args(parser)
     parser.add_argument("--datafile", default=None,
                        help="Suffix identifying which dataset to load, e.g. 'pilot5' -> "
                             "data/soltani_numbers_pilot5.pkl / soltani_colors_pilot5.pkl. "
@@ -438,8 +443,10 @@ def main() -> None:
     apply_style()
     run_dir = resolve_run_folder(args.run_folder)
 
+    # Palette over the FULL MODEL_ORDER so colours are subset-invariant.
     pal = get_palette(len(MODEL_ORDER))
     palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
+    model_order = resolve_models(args.models, parser)
     palette["Human"] = HUMAN_COLOR
 
     fig, axes = plt.subplots(
@@ -464,7 +471,7 @@ def main() -> None:
         print(f"  {len(human)} rows, {human['pid'].nunique()} pids")
 
         models = {}
-        for model_type in MODEL_ORDER:
+        for model_type in model_order:
             mdf = _load_model_responses(task, model_type, run_dir, args.datafile)
             if mdf is not None:
                 models[model_type] = mdf
@@ -475,8 +482,9 @@ def main() -> None:
             print("  no fitted model responses found for this task/datafile")
 
         _plot_schematic(axes[row, 0], task)
-        _plot_panel_p1(axes[row, 1], human, models, palette)
-        _plot_panel_p2(axes[row, 2], task, run_dir, args.datafile, palette)
+        _plot_panel_p1(axes[row, 1], human, models, palette, model_order)
+        _plot_panel_p2(axes[row, 2], task, run_dir, args.datafile, palette,
+                       model_order)
         axes[row, 0].set_title(f"task-{task}", loc="left", fontsize=9, style="italic")
 
     label_panels(axes)

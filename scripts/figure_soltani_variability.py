@@ -85,8 +85,16 @@ from scipy.stats import gaussian_kde, pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.paths import FIGURES_DIR, data_path
-from utils.plot_style import FIGURE_SIZE, apply_style, label_panels, pvalue_to_stars
+from utils.paths import FIGURES_DIR, data_path, dataset_stem, resolve_run_folder
+from utils.plot_style import (
+    FIGURE_SIZE, apply_style, get_palette, label_panels, pvalue_to_stars,
+)
+from utils.soltani_models import (
+    MODEL_ORDER,
+    add_model_args,
+    resolve_models,
+    stochastic_only,
+)
 from utils.colors_quasi_qids import (
     MIN_REPEATS as QQ_MIN_REPEATS,
     PREFIX_LENGTH as QQ_PREFIX_LENGTH,
@@ -102,6 +110,9 @@ from utils.colors_quasi_qids import (
 # prefix at all -- its groups are constructed by utils.colors_quasi_qids -- so its
 # window is that module's tunable PREFIX_LENGTH (5), chosen to match carrabin's
 # own 5-observation repeat window. See that module's docstring.
+# Task -> dataset family, matching the other two soltani figures.
+DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
+
 NUMBERS_PREFIX_LENGTH = 4
 HUMAN_COLOR   = "0.3"
 MIN_CORR_N    = 3  # matches figure_soltani_temporal.py's cross-task correlation threshold
@@ -150,7 +161,49 @@ def _prefix_response_std_split(df: pd.DataFrame, prefix_length: int) -> pd.DataF
 
 # ── Col 1 — KDE of prefix response variability ──────────────────────────────
 
-def _plot_panel_kde(ax, prefix_std: pd.DataFrame) -> None:
+def _load_model_responses(task: str, model_type: str, run_dir: Path,
+                          datafile: str | None):
+    """Collected model responses for this (task, model), or None if not fit."""
+    dataset = DATASET_FOR_TASK[task]
+    stem = dataset_stem(dataset, datafile)
+    path = run_dir / f"{model_type}_{stem}_responses.pkl"
+    if not path.exists():
+        return None
+    df = pd.read_pickle(path)
+    return df[["pid", "trial", "observation", "response"]].copy()
+
+
+def _model_prefix_std(task: str, models: list, run_dir: Path,
+                      datafile: str | None, prefix_length: int,
+                      human_for_repeats: pd.DataFrame) -> dict:
+    """Per-model prefix response variability, for the STOCHASTIC models only.
+
+    Deterministic models are excluded upstream by stochastic_only(): their
+    response to an identical stimulus prefix is identical by construction, so
+    their within-qid residual SD is EXACTLY zero and every panel here would draw
+    a spike at 0. That is the same filter temporal cols 3-4 apply, for the same
+    reason.
+
+    qid is taken from the HUMAN frame rather than the model's own, because for
+    colors it is a constructed quasi-qid that only exists there.
+    """
+    out = {}
+    qid_map = human_for_repeats[["pid", "trial", "observation", "qid"]]
+    for model_type in stochastic_only(models):
+        md = _load_model_responses(task, model_type, run_dir, datafile)
+        if md is None:
+            print(f"  (no {model_type} responses -- skipping in variability)")
+            continue
+        md = md.merge(qid_map, on=["pid", "trial", "observation"], how="inner")
+        std = _prefix_response_std(md, prefix_length)
+        split = _prefix_response_std_split(md, prefix_length)
+        out[model_type] = (std, split)
+    return out
+
+
+def _plot_panel_kde(ax, prefix_std: pd.DataFrame,
+                    model_std: dict | None = None,
+                    palette: dict | None = None) -> None:
     vals = prefix_std["resp_std"].dropna()
     if len(vals) < 2:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
@@ -173,6 +226,20 @@ def _plot_panel_kde(ax, prefix_std: pd.DataFrame) -> None:
         top = float(kde([v])[0]) / kde_peak
         ax.vlines(v, 0, top, color=HUMAN_COLOR, lw=0.6, alpha=0.5, zorder=2)
 
+    # Stochastic models, same normalisation (peak 1) so shapes are comparable.
+    for model_type, (std_df, _) in (model_std or {}).items():
+        mv = std_df["resp_std"].dropna()
+        if len(mv) < 2:
+            continue
+        color = (palette or {}).get(model_type, "0.5")
+        mx = np.linspace(0, x_max, 400)
+        mk = gaussian_kde(mv, bw_method="scott")
+        md = mk(mx)
+        md = md / md.max()
+        md[mx < float(mv.min())] = 0
+        md[mx > float(mv.max())] = 0
+        ax.plot(mx, md, lw=1.6, color=color, label=model_type, zorder=3)
+
     ax.set_xlabel("Prefix response variability")
     ax.set_ylabel("Normalised density")
     ax.set_xlim(left=0); ax.set_ylim(bottom=0)
@@ -182,7 +249,9 @@ def _plot_panel_kde(ax, prefix_std: pd.DataFrame) -> None:
 
 # ── Col 2 — Split-half reliability ──────────────────────────────────────────
 
-def _plot_panel_splithalf(ax, split_df: pd.DataFrame) -> None:
+def _plot_panel_splithalf(ax, split_df: pd.DataFrame,
+                          model_std: dict | None = None,
+                          palette: dict | None = None) -> None:
     wide = split_df.dropna(subset=["first", "second"])
     if len(wide) < 2:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
@@ -194,10 +263,24 @@ def _plot_panel_splithalf(ax, split_df: pd.DataFrame) -> None:
                 scatter=True, line_kws={"lw": 1.5},
                 scatter_kws={"s": 20, "alpha": 0.7})
 
+    handles, labels = [], []
+    for model_type, (_, msplit) in (model_std or {}).items():
+        mw = msplit.dropna(subset=["first", "second"])
+        if len(mw) < 2:
+            continue
+        color = (palette or {}).get(model_type, "0.5")
+        sns.regplot(data=mw, x="first", y="second", ax=ax, color=color,
+                    ci=95 if len(mw) >= MIN_CORR_N else None, scatter=True,
+                    line_kws={"lw": 1.5}, scatter_kws={"s": 14, "alpha": 0.6})
+        if len(mw) >= MIN_CORR_N:
+            mr, mp = pearsonr(mw["first"], mw["second"])
+            handles.append(Line2D([0], [0], color=color, lw=1.5))
+            labels.append(f"{model_type} r={mr:.2f}{pvalue_to_stars(mp)}")
+
     if len(wide) >= MIN_CORR_N:
         r, p = pearsonr(wide["first"], wide["second"])
-        ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)],
-                  labels=[f"Human r={r:.2f}{pvalue_to_stars(p)}"],
+        ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5)] + handles,
+                  labels=[f"Human r={r:.2f}{pvalue_to_stars(p)}"] + labels,
                   fontsize=8, frameon=True, framealpha=0.9)
     else:
         ax.text(0.02, 0.98, f"n={len(wide)} (too few for r)",
@@ -263,6 +346,12 @@ def _plot_panel_crosstask(ax, colors_std: pd.DataFrame, numbers_std: pd.DataFram
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    add_model_args(parser)
+    parser.add_argument("--run_folder", type=str, default="soltani",
+                        help="Run folder holding the fitted model responses. Only "
+                             "used when --models names a STOCHASTIC model; the "
+                             "deterministic ones have exactly zero prefix response "
+                             "variability and are filtered out.")
     parser.add_argument("--colors_prefix_length", type=int, default=QQ_PREFIX_LENGTH,
                         help="COLORS ONLY (row 1): leading observations a quasi-qid "
                              "group must share. numbers is fixed at its designed 4 "
@@ -287,7 +376,19 @@ def main() -> None:
         constrained_layout=True,
     )
 
+    model_order = resolve_models(args.models, parser)
+    # Palette over the FULL MODEL_ORDER so a model's colour is subset-invariant
+    # and matches the other two soltani figures.
+    pal = get_palette(len(MODEL_ORDER))
+    palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
+    run_dir = resolve_run_folder(args.run_folder)
+    if model_order and not stochastic_only(model_order):
+        print(f"  (no stochastic models in {model_order} -- this figure is "
+              f"human-only; every panel here is built on within-qid residuals, "
+              f"which are exactly zero for a deterministic model)")
+
     prefix_std: dict[str, pd.DataFrame] = {}
+    model_std: dict[str, dict] = {}
 
     def _dataset_path(stem: str) -> Path:
         name = f"{stem}_{args.datafile}" if args.datafile else stem
@@ -319,8 +420,13 @@ def main() -> None:
         split_df_colors = _prefix_response_std_split(df_colors_qq,
                                                      args.colors_prefix_length)
 
-        _plot_panel_kde(axes[0, 0], prefix_std["colors"])
-        _plot_panel_splithalf(axes[0, 1], split_df_colors)
+        model_std["colors"] = _model_prefix_std(
+            "colors", model_order, run_dir, args.datafile,
+            args.colors_prefix_length, df_colors_qq)
+        _plot_panel_kde(axes[0, 0], prefix_std["colors"],
+                        model_std["colors"], palette)
+        _plot_panel_splithalf(axes[0, 1], split_df_colors,
+                              model_std["colors"], palette)
         axes[0, 0].set_title("task-colors", loc="left", fontsize=9, style="italic")
 
     # Row 1 = numbers -- real qid, unchanged.
@@ -336,8 +442,13 @@ def main() -> None:
         split_df_numbers = _prefix_response_std_split(df_numbers,
                                                       NUMBERS_PREFIX_LENGTH)
 
-        _plot_panel_kde(axes[1, 0], prefix_std["numbers"])
-        _plot_panel_splithalf(axes[1, 1], split_df_numbers)
+        model_std["numbers"] = _model_prefix_std(
+            "numbers", model_order, run_dir, args.datafile,
+            NUMBERS_PREFIX_LENGTH, df_numbers)
+        _plot_panel_kde(axes[1, 0], prefix_std["numbers"],
+                        model_std["numbers"], palette)
+        _plot_panel_splithalf(axes[1, 1], split_df_numbers,
+                              model_std["numbers"], palette)
         axes[1, 0].set_title("task-numbers", loc="left", fontsize=9, style="italic")
 
     # Col 3: cross-task comparison -- only meaningful if BOTH tasks' files
@@ -355,7 +466,7 @@ def main() -> None:
     label_panels(axes)
 
     fig.text(0.5, -0.02,
-              "Human only (this figure loads no model fits). task-colors uses an empirically-derived "
+              "Stochastic models only where requested via --models; deterministic models have exactly zero prefix variability. task-colors uses an empirically-derived "
               "quasi-qid repeat structure (see this script's own module docstring); "
               "task-numbers uses its real, designed qid repeats. Both restricted to "
               f"the shared-prefix window (numbers {NUMBERS_PREFIX_LENGTH} obs, by "

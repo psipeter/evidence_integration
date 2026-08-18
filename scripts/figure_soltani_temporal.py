@@ -138,6 +138,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import FIGURES_DIR, data_path, dataset_stem, resolve_run_folder
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette, label_panels, pvalue_to_stars
+from utils.soltani_models import (
+    MODEL_ORDER,
+    STOCHASTIC_MODELS as _STOCHASTIC_MODELS,
+    add_model_args,
+    resolve_models,
+    stochastic_only,
+)
 from utils.aggregate import (
     AGGREGATE_LABEL,
     AGGREGATE_MODES,
@@ -154,7 +161,9 @@ from utils.colors_quasi_qids import (
 
 TASK_ROWS        = ["colors", "numbers"]  # standing row-order convention
 DATASET_FOR_TASK = {"colors": "soltani_colors", "numbers": "soltani_numbers"}
-MODEL_ORDER       = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]
+# MODEL_ORDER, DEFAULT_MODELS and _STOCHASTIC_MODELS now come from
+# utils.soltani_models so all three soltani figures share one definition -- see
+# that module for why appending (never inserting) matters for colours.
 
 # Models with a NOISY generative process, so their response to a repeated
 # stimulus prefix varies across repeats. Cols 3-4 measure exactly that
@@ -972,17 +981,7 @@ def main() -> None:
                              "across participants in cols 3-4.")
     parser.add_argument("--hide_individual", dest="show_individual",
                         action="store_false")
-    parser.add_argument("--models", nargs="+", default=None, metavar="MODEL",
-                        help="Restrict the overlaid models to these, in this "
-                             "order, instead of all of MODEL_ORDER "
-                             f"({', '.join(MODEL_ORDER)}). Implies --plot_models. "
-                             "Colours are taken from each model's position in the "
-                             "FULL MODEL_ORDER, not from the restricted list, so a "
-                             "model keeps the same colour whichever subset it is "
-                             "plotted in -- and so subset figures stay comparable "
-                             "with full ones. Cols 3-4 additionally keep only the "
-                             "stochastic models (NEF), so restricting to a "
-                             "deterministic model leaves those panels human-only.")
+    add_model_args(parser)
     parser.add_argument("--plot_models", dest="plot_models",
                         action="store_true", default=False,
                         help="Overlay fitted models in cols 1-2 (mean/CI lines) "
@@ -1030,14 +1029,9 @@ def main() -> None:
     pal = get_palette(len(MODEL_ORDER))
     palette = {m: pal[i] for i, m in enumerate(MODEL_ORDER)}
 
+    model_order = resolve_models(args.models, parser)
     if args.models:
-        unknown = [m for m in args.models if m not in MODEL_ORDER]
-        if unknown:
-            parser.error(f"unknown model(s) {unknown}; choose from {MODEL_ORDER}")
-        model_order = list(args.models)
         args.plot_models = True          # asking for models implies plotting them
-    else:
-        model_order = list(MODEL_ORDER)
 
     fig, axes = plt.subplots(
         2, 6,
