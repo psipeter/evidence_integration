@@ -847,7 +847,67 @@ NoisyCounting applies to carrabin only. Two fitted versions:
 - RMSE-fitted: sigma_c collapses to ~0 (response-noise artefact; methodologically revealing)
 - MLE-fitted (fit_mle.py): recovers sigma_c ~0.03-0.08, nu ~0.08-0.21
 
-RNN (models/RNN.py): retained for reference; not used in active figures.
+### RNN as a conditional-mean estimator (models/RNN.py)
+
+A TinyGRU (`n_hidden` units, k-fold over trials, early stopping) fit per
+participant, after Ger, Shahar & Shahar (2024, eLife). Intended as a
+"best-possible" predictor of a participant's responses, so that
+`sigma = std(source - RNN)` estimates irreducible response variability and the RNN
+prediction can serve as a denoised conditional-mean target.
+
+**Whether that premise holds is DATASET-DEPENDENT, and it was measured on both.**
+The test is whether the RNN beats simple models on HELD-OUT data -- if a
+2-parameter model out-predicts it, it is not a best-possible conditional mean and
+its residual is contaminated with its own prediction error.
+
+| | trials/pid | obs/trial | sequences | held-out RMSE |
+|---|---|---|---|---|
+| carrabin | 200 | 5 | repeating pool | RNN **0.1225** beats NoisyCounting 0.1324 (15/21 pids) and every other model 21/21 |
+| soltani | 32 | 15 | mostly unique | RNN **0.0626** LOSES to RL_lambda 0.0526 (0/4 pids) and to the parameter-free running mean 0.0545 |
+
+Carrabin gives the GRU 6x more trials AND repeating sequences, so a held-out trial
+has often been seen -- interpolation. Soltani's 32 sequences are unique, so a
+held-out trial is genuinely novel -- extrapolation, which is where a 101-parameter
+model loses to a 2-parameter delta rule. **So use the RNN for carrabin; for soltani
+use qid-grouped response std.**
+
+`n_hidden` matters but does not rescue it. Sweep on soltani_numbers (4 pids, k=8,
+28 of 32 trials per fit), held-out RMSE: n_hidden=1 0.1751, 2 0.0911, **3 0.0626**,
+4 0.0701, 5 0.0722. A clean U-shape with an interior optimum -- 1 underfits, 4-5
+overfit -- and the default of 4 was mistuned by ~19 percentage points. But even at
+the optimum RL_lambda wins on 4/4 pids.
+
+Consequences for the two applications considered:
+- `sigma_RNN` cannot replace prefix (qid-grouped) variability for soltani. At the
+  best setting it is 0.0626 against the qid estimate of ~0.055 -- only 14%
+  inflated, tempting, but the inflation is the GRU's OWN prediction error, and
+  RL_lambda's residual on the same rows would give a lower estimate still.
+- The RNN prediction cannot serve as a denoised target for a distributional loss on
+  soltani, because it is LESS accurate than the models being evaluated. Scoring
+  NoisyRL_lambda against a target that RL_lambda predicts better would be perverse.
+  A distributional (NLL) loss needs no conditional-mean estimator anyway -- score
+  the observed y under the model's simulated predictive distribution.
+
+TWO BUGS FIXED while investigating, both of which made the module unusable on
+soltani rather than merely inaccurate:
+- `build_trial_tensors` derived observations per trial from `max(observation)`,
+  silently assuming 1-INDEXED data. On soltani (0-indexed, 0..14) it computed
+  n_obs=14 while every trial has 15 rows, so the `len(td) != n_obs` guard dropped
+  EVERY trial and the function failed on an empty stack. Now uses the modal row
+  count, which is index-agnostic, and raises with a clear message if no trial
+  matches.
+- `generate_rnn_responses` emitted `observation = oi + 1` over `range(n_obs)`,
+  hardcoding 1-indexing: on soltani that mislabelled every row and dropped
+  observation 0. Now uses each trial's own observation labels.
+
+Also added `cross_validated_predictions()`, which stitches OUT-OF-FOLD predictions
+covering every observation, so sigma is not deflated by the fit absorbing noise
+(in-sample sigma on soltani is ~0.046-0.056 against 0.18 out-of-fold at k=5 --
+in-sample matches the qid estimate only because it has memorised the trials). Note
+it still uses the held-out fold for early stopping, so its predictions are mildly
+optimistic; a nested split was judged not worth a third partition of 32 trials.
+
+RNN fits are retained for reference and are not used in active figures.
 
 ---
 
@@ -1727,7 +1787,9 @@ change (e.g. "change X to Y", "add Z", "remove W").
 - Do not pass a full path as run_folder — always use a short name
 - Do not commit or push without being asked
 - Do not run NEF simulations through MCP tool calls (will time out)
-- Do not use RNN-based sigma as the noise metric — use qid-grouped response std
+- Do not use RNN-based sigma as the noise metric FOR SOLTANI — use qid-grouped
+  response std. The rule is dataset-specific, not a general one; it holds for
+  soltani and NOT for carrabin. See "RNN as a conditional-mean estimator" below
 - Do not compute metrics in extras scripts — save raw data, compute in figure scripts
 - Do not save figures as PNG or SVG — PDF only
 - Do not upload figure images unnecessarily — use numerical checks first

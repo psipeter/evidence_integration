@@ -177,22 +177,36 @@ def build_trial_tensors(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Build input (batch, seq, 2) and target (batch, seq) tensors."""
     pid_data = pid_data.sort_values(["trial", "observation"])
-    n_obs = int(pid_data["observation"].max())
-    inputs_list, targets_list = [], []
+    # Number of observations per trial, taken as the MODAL ROW COUNT rather than
+    # max(observation). The old version used max(observation), which silently
+    # assumed 1-INDEXED observations: on soltani (0-indexed, 0..14) it computed
+    # n_obs=14 while every trial has 15 rows, so the `len(td) != n_obs` guard
+    # below dropped EVERY trial and the function failed on an empty stack. Row
+    # counts are index-agnostic and work for carrabin (1..5), yoo (1..30) and
+    # soltani (0..14) alike.
+    counts = pid_data.groupby("trial").size()
+    n_obs = int(counts.mode().iloc[0]) if len(counts) else 0
+    inputs_list, targets_list, kept = [], [], []
 
     for trial in trials:
         td = pid_data[pid_data["trial"] == trial].sort_values("observation")
         if len(td) != n_obs:
             continue
+        kept.append(int(trial))
         x_vals = td["value"].to_numpy(dtype=np.float32)
         t_vals = td["observation"].to_numpy(dtype=np.float32)
         resp   = td["response"].to_numpy(dtype=np.float32)
         inputs_list.append(np.stack([x_vals, t_vals], axis=1))
         targets_list.append(resp)
 
+    if not inputs_list:
+        raise ValueError(
+            f"no usable trials: expected {n_obs} observations per trial, got "
+            f"{sorted(set(counts.values))}")
     return (
         torch.tensor(np.stack(inputs_list),  dtype=torch.float32),
         torch.tensor(np.stack(targets_list), dtype=torch.float32),
+        kept,
     )
 
 
@@ -289,8 +303,8 @@ def cross_validate(
 
     for i, val_trials in enumerate(folds):
         train_trials = [t for j, f in enumerate(folds) for t in f if j != i]
-        tr_inp, tr_tgt = build_trial_tensors(pid_data, train_trials)
-        va_inp, va_tgt = build_trial_tensors(pid_data, list(val_trials))
+        tr_inp, tr_tgt, _ = build_trial_tensors(pid_data, train_trials)
+        va_inp, va_tgt, _ = build_trial_tensors(pid_data, list(val_trials))
         torch.manual_seed(seed + i)
         m, n_ep, val_loss = train_model(
             TinyGRU(n_hidden), tr_inp, tr_tgt, va_inp, va_tgt,
@@ -321,19 +335,23 @@ def generate_rnn_responses(
     model.eval()
     model = model.cpu()
     trials = sorted(pid_data["trial"].unique())
-    inp, _ = build_trial_tensors(pid_data, trials)
+    inp, _, trials = build_trial_tensors(pid_data, trials)
     with torch.no_grad():
         preds, _ = model(inp)
     preds_np = preds.numpy()
-    pid  = int(pid_data["pid"].iloc[0])
-    n_obs = int(pid_data["observation"].max())
+    pid = int(pid_data["pid"].iloc[0])
     rows = []
     for ti, trial in enumerate(trials):
-        for oi in range(n_obs):
+        # Use that trial's OWN observation labels rather than range(n_obs)+1 --
+        # the old version hardcoded 1-indexing and would mislabel every soltani
+        # row (and silently drop observation 0) when merged back onto the source.
+        obs_labels = (pid_data[pid_data["trial"] == trial]
+                      .sort_values("observation")["observation"].to_numpy())
+        for oi, obs in enumerate(obs_labels):
             rows.append({
                 "pid":         pid,
                 "trial":       int(trial),
-                "observation": oi + 1,
+                "observation": int(obs),
                 "response":    float(np.clip(preds_np[ti, oi], -1.0, 1.0)),
             })
     df = pd.DataFrame(rows)
@@ -342,11 +360,89 @@ def generate_rnn_responses(
     return df
 
 
+def cross_validated_predictions(
+    pid_data: pd.DataFrame,
+    dataset: str = "carrabin",
+    n_hidden: int = 4,
+    lr: float = 1e-3,
+    k: int = 5,
+    max_epochs: int = 3000,
+    patience: int = 300,
+    seed: int = 42,
+    use_shrinkage: bool = True,
+) -> pd.DataFrame:
+    """OUT-OF-FOLD RNN predictions covering every observation, as the conditional
+    mean estimate mu_hat.
+
+    K-fold over TRIALS; each fold's model predicts only the trials it did not
+    train on, and the folds are stitched back together. So every row gets a
+    prediction from a model that never saw it, and NOTHING is discarded -- there
+    is no coverage/validity tradeoff, only a reorganisation of which fit produces
+    which prediction.
+
+    WHY NOT the in-sample predictions from generate_rnn_responses (which is what
+    fit() saves, and what compute_sigma has historically consumed):
+
+      - For a SIGMA metric, in-sample residuals are systematically too small,
+        because the fit absorbs part of the noise. A TinyGRU with n_hidden=4 has
+        ~101 parameters against ~480 observations per pid (p/n ~ 0.21, so sigma
+        deflated ~11%); n_hidden=2 gives ~39 parameters (p/n ~ 0.08, ~4%). Early
+        stopping lowers the effective dof below the raw count, so treat those as
+        upper bounds -- but the DIRECTION is guaranteed. Worse, the absorbed
+        fraction need not be uniform across pids: a high-noise participant offers
+        more noise to absorb, so the spread of sigma ACROSS pids can be
+        compressed, which is exactly the measurement individual-differences claims
+        rest on.
+      - For a DENOISED TARGET in a distributional loss, in-sample predictions
+        defeat the purpose entirely. The point of scoring against mu_hat instead
+        of the observed y is that mu_hat is noise-free; an in-sample mu_hat has
+        absorbed part of that very noise realisation and sits closer to y than the
+        true conditional mean does. In the limit of a perfect fit mu_hat == y and
+        the denoised target IS the raw target -- the benefit shrinks as the fit
+        improves, which is self-defeating.
+
+    KNOWN RESIDUAL LEAKAGE, worth stating rather than hiding: train_model uses the
+    held-out fold for EARLY STOPPING as well, so the stopping epoch is chosen on
+    the same data the predictions are made for. That makes these predictions
+    mildly optimistic. Removing it needs a nested train/stop/test split, which
+    costs a third partition of only 32 trials. Judged not worth it here, but it
+    means sigma from this function is a slight LOWER bound rather than exact.
+    """
+    rng = np.random.RandomState(seed)
+    trials = sorted(pid_data["trial"].unique())
+    shuffled = list(trials)
+    rng.shuffle(shuffled)
+    folds = [list(map(int, f)) for f in np.array_split(shuffled, k)]
+
+    pieces = []
+    for i, val_trials in enumerate(folds):
+        train_trials = [t for j, f in enumerate(folds) for t in f if j != i]
+        tr_inp, tr_tgt, _ = build_trial_tensors(pid_data, train_trials)
+        va_inp, va_tgt, _ = build_trial_tensors(pid_data, val_trials)
+        torch.manual_seed(seed + i)
+        model, _, _ = train_model(
+            TinyGRU(n_hidden), tr_inp, tr_tgt, va_inp, va_tgt,
+            lr=lr, max_epochs=max_epochs, patience=patience,
+            use_shrinkage=use_shrinkage,
+        )
+        # predict ONLY this fold's held-out trials
+        held = pid_data[pid_data["trial"].isin(val_trials)]
+        pieces.append(generate_rnn_responses(model, held, dataset=dataset))
+
+    out = pd.concat(pieces, ignore_index=True)
+    return out.sort_values(["trial", "observation"]).reset_index(drop=True)
+
+
 def compute_sigma(
     source_data: pd.DataFrame,
     rnn_responses: pd.DataFrame,
 ) -> float:
-    """Per-participant sigma: std(source_response - rnn_response)."""
+    """Per-participant sigma: std(source_response - rnn_response).
+
+    Pass OUT-OF-FOLD predictions from cross_validated_predictions() -- see that
+    function for why in-sample predictions deflate sigma and compress its spread
+    across participants.
+    """
     merged = source_data.merge(
         rnn_responses[["pid", "trial", "observation", "response"]],
         on=["pid", "trial", "observation"],
@@ -402,8 +498,8 @@ def fit(
     va_t     = list(shuffled[:n_val])
     tr_t     = list(shuffled[n_val:])
 
-    tr_inp, tr_tgt = build_trial_tensors(pid_data, tr_t)
-    va_inp, va_tgt = build_trial_tensors(pid_data, va_t)
+    tr_inp, tr_tgt, _ = build_trial_tensors(pid_data, tr_t)
+    va_inp, va_tgt, _ = build_trial_tensors(pid_data, va_t)
     torch.manual_seed(seed)
     final_model, final_epochs, final_val_loss = train_model(
         TinyGRU(n_hidden), tr_inp, tr_tgt, va_inp, va_tgt,

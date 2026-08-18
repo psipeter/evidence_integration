@@ -5171,3 +5171,116 @@ quantities from one calibrated input.
   hand-duplicates each model's implementation (seeding by simulation index rather
   than by trial), so adding a third pair doubles the drift risk.
 
+## RNN as a conditional-mean estimator: works for carrabin, fails for soltani (this session)
+
+Goal was a distributional fit metric to complement RMSE, which cannot see variance
+(demonstrated repeatedly this session: NoisyRL_lambda's noise parameters collapse to
+their bounds under RMSE). The proposed route -- from earlier discussion -- was to
+fit an RNN per participant as a "best possible" conditional-mean estimator, then use
+(a) the residual SD as a response-variability metric covering all 15 observations
+rather than only the shared prefix, and (b) the RNN prediction as a DENOISED target
+for a distributional loss.
+
+Conclusion: the premise is DATASET-DEPENDENT. It holds for carrabin and fails for
+soltani, for a structural reason rather than a tuning one. Use the RNN for
+carrabin; for soltani keep qid-grouped response std.
+
+### The decisive test, and what it showed
+
+The test is whether the RNN beats simple models on HELD-OUT data. If a 2-parameter
+model out-predicts it, it is not a best-possible conditional mean, and its residual
+is contaminated with its own prediction error rather than being response noise.
+
+| | trials/pid | obs/trial | sequences | held-out RMSE |
+|---|---|---|---|---|
+| carrabin | 200 | 5 | repeating pool | RNN 0.1225 BEATS NoisyCounting 0.1324 (15/21 pids), and every other model 21/21 |
+| soltani numbers | 32 | 15 | mostly unique | RNN 0.0626 LOSES to RL_lambda 0.0526 (0/4 pids) and to the parameter-free running mean 0.0545 |
+
+Carrabin gives the GRU 6x more trials AND repeating sequences, so a held-out trial
+has often been seen in training -- interpolation. Soltani's 32 sequences are unique,
+so a held-out trial is genuinely novel -- extrapolation, which is the regime where a
+101-parameter model loses to a 2-parameter delta rule.
+
+Worth noting the carrabin numbers came from files already on disk
+(data/runs/carrabin/RNN_carrabin_performance.pkl), whose saved `loss` IS
+`cv_rmse` -- genuinely out-of-fold at k=5, n_hidden=4.
+
+### Two of my hypotheses were wrong
+
+Asked why the same setup succeeded on carrabin and failed on soltani, I proposed
+(a) the old carrabin result was in-sample and (b) it used a different n_hidden.
+BOTH wrong: the saved loss is held-out cv_rmse, and n_hidden was 4 in both cases.
+The difference is training data and sequence structure, which neither hypothesis
+touched.
+
+### n_hidden matters but does not rescue it
+
+Sweep on soltani_numbers, 4 pids, k=8 (28 of 32 trials per fit), held-out RMSE:
+
+| n_hidden | RMSE | vs RL_lambda |
+|---|---|---|
+| 1 | 0.1751 | +233% |
+| 2 | 0.0911 | +73% |
+| **3** | **0.0626** | **+19%** |
+| 4 | 0.0701 | +33% |
+| 5 | 0.0722 | +37% |
+
+A clean U-shape with an interior optimum -- 1 underfits, 4-5 overfit -- so the
+default of 4 WAS mistuned, by ~19 percentage points. But even at n_hidden=3
+RL_lambda wins on 4/4 pids and the zero-parameter running mean still wins too.
+
+### Consequences for the two applications
+
+- **sigma_RNN cannot replace prefix variability for soltani.** At the best setting
+  it is 0.0626 against the qid-repeat estimate of ~0.055 -- only 14% inflated,
+  which is tempting -- but the inflation is the GRU's own prediction error, and
+  RL_lambda's residual on the same rows would give a lower estimate still. At the
+  original settings (k=5, n_hidden=4) sigma_RNN was 0.18, more than 3x the qid
+  estimate.
+- **The RNN prediction cannot be a denoised target for a distributional loss on
+  soltani**, because it is LESS accurate than the models being evaluated. Scoring
+  NoisyRL_lambda against a target that RL_lambda predicts better would be perverse.
+
+An NLL needs no conditional-mean estimator anyway: score the observed y under the
+model's simulated predictive distribution. That penalises mean AND variance
+mismatch together as a proper scoring rule -- the quadratic term punishes a wrong
+mean and understated variance, log(sigma) punishes overstated variance. The RNN's
+remaining possible roles were (i) a denoised target for the mean term and (ii) a
+noise ceiling for normalising NLL across participants; (i) is now ruled out for
+soltani, and (ii) would inherit the same contamination.
+
+Note the NLL is UNDEFINED for deterministic models (sigma_m = 0 gives infinite
+NLL; compute_sim_db_loss clamps at 1e-3, silently turning it into scaled squared
+error with an arbitrary scale). So it applies to stochastic models only and
+complements RMSE rather than replacing it.
+
+### Two bugs fixed, both of which made models/RNN.py unusable on soltani
+
+- `build_trial_tensors` derived observations-per-trial from `max(observation)`,
+  silently assuming 1-INDEXED data. On soltani (0..14) that gave n_obs=14 while
+  every trial has 15 rows, so the `len(td) != n_obs` guard dropped EVERY trial and
+  the function failed on an empty stack. Now uses the modal row count
+  (index-agnostic) and raises with a clear message if nothing matches. Same class
+  of 0-indexing bug as the ones fixed earlier in the activity keying and the lambda
+  estimator.
+- `generate_rnn_responses` emitted `observation = oi + 1` over `range(n_obs)`,
+  hardcoding 1-indexing: on soltani it mislabelled every row and dropped
+  observation 0. Now uses each trial's own observation labels.
+
+Also added `cross_validated_predictions()`, stitching OUT-OF-FOLD predictions across
+folds so every observation gets a prediction from a model that did not see it, with
+nothing discarded. Motivation: in-sample residuals are systematically too small
+because the fit absorbs noise, and on soltani that is severe -- in-sample sigma
+~0.046-0.056 against 0.18 out-of-fold at k=5. In-sample sigma happens to MATCH the
+qid estimate (~0.055), but only because the GRU has memorised each trial, so the
+agreement is coincidental rather than validating. The function still uses the
+held-out fold for early stopping, making its predictions mildly optimistic; a
+nested split was judged not worth a third partition of 32 trials.
+
+### Caveats on the soltani conclusion
+
+4 pids, numbers only, one seed per setting. 0.0626 vs 0.0526 on n=4 is not a strong
+separation and a firm decision would want ~10 pids. The ordering was consistent
+across all four pids at every n_hidden, which is why the thread was stopped here
+rather than powered up.
+
