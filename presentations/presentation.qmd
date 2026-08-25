@@ -32,3 +32,86 @@ bibliography: "references.bib"
 :::
 
 ::::
+
+## Evidence Integration
+
+::: {.image-card}
+![](images/evidence_integration_examples.jpg){width="85%"}
+:::
+
+## Behavioral Experiments (old)
+
+::: {.image-card}
+![](images/old_tasks.svg){width="90%"}
+:::
+
+## Behavioral Experiments (new)
+
+::: {.image-card}
+![](images/new_tasks.svg){width="90%"}
+:::
+
+## Responses improve with data
+
+::: {.image-card}
+![](figures/temporal_performance.svg){width="85%"}
+:::
+
+## Theories and Models
+
+::: {.r-stack}
+
+::: {.image-card}
+![](images/complexity_1.svg){width="90%"}
+:::
+
+::: {.fragment .image-card fragment-index="1"}
+![](images/complexity_2.svg){width="90%"}
+:::
+
+::: {.fragment .image-card fragment-index="2"}
+![](images/complexity_3.svg){width="90%"}
+:::
+
+::: {.fragment .image-card fragment-index="3"}
+![](images/complexity_4.svg){width="90%"}
+:::
+
+::: {.fragment .image-card fragment-index="4"}
+![](images/complexity_5.svg){width="90%"}
+:::
+
+:::
+
+
+## Weighted Prediction Error
+
+People update beliefs using *prediction error*
+
+::: {.fragment}
+$$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I_n)$$
+:::
+
+::: {.fragment}
+::: {.image-card}
+![](images/wpe.svg){style="height: 200px; width: auto;"}
+:::
+:::
+
+## Spiking Neural Network Model
+
+::: {.image-card}
+![](images/snn.svg){width="90%"}
+:::
+
+## Neural Dynamics
+
+::: {.image-card}
+![](images/spikes.svg){width="90%"}
+:::
+
+## Model Performance
+
+::: {.image-card}
+![](figures/model_performance.svg){width="90%"}
+:::
