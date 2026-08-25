@@ -1,0 +1,130 @@
+/*-- scss:defaults --*/
+$dartmouth-green: #00693e;
+$stone-gray:      #424141;
+$body-bg:         #ffffff;
+$body-color:      $stone-gray;
+$font-family-sans-serif: "Inter", "Open Sans", sans-serif;
+@import url('https://rsms.me/inter/inter.css');
+html { font-family: 'Inter', sans-serif; }
+
+/*-- scss:rules --*/
+
+// 1. TYPOGRAPHY & HEADERS
+.reveal {
+  h1, h2, .title, .title-slide h1 {
+    color: $dartmouth-green !important;
+  }
+
+  .subtitle, .title-slide p, #title-slide .subtitle {
+    color: $dartmouth-green !important;
+    // opacity: 1 !important;
+    // font-weight: 700 !important;
+    font-size: 1.2em !important;
+  }
+
+  .slides {
+    text-align: left;
+  }
+
+  h2 {
+    font-weight: 700;
+    border-bottom: 2px solid #eeeeee;
+    padding-bottom: 8px;
+  }
+
+  strong, b {
+    color: $dartmouth-green;
+  }
+}
+
+// 3. MISC
+.reveal .logo {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  max-height: 50px;
+}
+
+.v-center-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 600px;
+}
+
+.list-fill {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+}
+
+.reveal ol, .reveal ul {
+    width: 100%;
+}
+.reveal li {
+    width: 100%;
+}
+
+.image-card {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  filter: drop-shadow(0 10px 15px rgba(0,0,0,0.15));
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+.image-card img {
+  display: block;
+  margin: 0 auto;
+}
+
+.reveal .columns .column {
+  /* Reduce space between the main numbered items */
+  .fragment {
+    margin-bottom: 0.5em; 
+  }
+
+  /* Target the nested math bullets */
+  ul {
+    font-size: 0.75em;    /* Shrinks the math details */
+    margin-top: -0.2em;   /* Pulls the math closer to its header */
+    color: #555;          /* Optional: slightly dimmer for better hierarchy */
+    
+    li {
+      margin-bottom: 0;   /* Removes extra air between lines */
+    }
+  }
+}
+
+.tight-list {
+  /* Target the fragment divs specifically */
+  .fragment {
+    margin-top: 0 !important;
+    margin-bottom: 0.0em !important; /* Adjust this for the perfect gap */
+  }
+
+  /* Ensure the list itself has no extra padding */
+  ol, ul {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  /* Optional: Fine-tune the gap between the number and the sub-bullet */
+  li {
+    margin-bottom: 0;
+  }
+}
+
+#refs {
+  line-height: 1.4;
+  font-size: 0.75em;
+}
+
+.hanging-indent div.csl-entry {
+  margin-bottom: 0.5em;
+}

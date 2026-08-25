@@ -1,7 +1,15 @@
 """
 Participant-level model fitting via Optuna (TPE) and k-fold CV.
 
-Objective: RMSE from ``fitting.losses.compute_loss``.
+Objective: RMSE from ``fitting.losses.compute_loss`` by default, or Gaussian
+NLL from ``fitting.losses.compute_nll``/``nll_from_ensemble`` via ``--loss nll``.
+NLL applies to STOCHASTIC models only (currently NoisyRL_lambda) -- a
+deterministic model's ensemble is a delta function and its NLL is undefined; see
+``models.math_models.simulate_ensemble``'s docstring. RMSE cannot identify a
+noise parameter at all (it collapses to zero, since squared error only sees the
+mean); NLL was verified on soltani_numbers pid 1 to have a genuine INTERIOR
+optimum (sigma_resp ~0.04-0.05, NLL falling from 389 at sigma_resp=0.001 to
+-2.46 at the optimum and rising again beyond it) -- see docs/HISTORY.md.
 
 Entry point::
 
@@ -29,6 +37,7 @@ import pandas as pd
 
 import fitting.losses as losses
 import models.math_models as math_models
+from models.math_models import _STOCHASTIC_ENSEMBLE_MODELS
 from models import NEF
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path, dataset_stem, resolve_run_folder
@@ -140,6 +149,44 @@ def _cross_validate(
     return float(np.mean(fold_losses)), fold_losses
 
 
+def _cross_validate_nll(
+    params: dict,
+    ens: np.ndarray,
+    row_index: pd.DataFrame,
+    human: pd.DataFrame,
+    k: int = 5,
+    sigma_floor: float = losses.NLL_SIGMA_FLOOR,
+) -> tuple[float, list[float]]:
+    """NLL analogue of _cross_validate: partitions the SAME ensemble (simulated
+    once per Optuna trial, not once per fold -- re-simulating per fold would cost
+    k times as much for no benefit, since the ensemble already covers every row)
+    into folds by trial, using the identical seeding as _cross_validate so a given
+    pid gets the SAME trial/fold partition regardless of --loss. Not held-out
+    validation, for the same reason _cross_validate is not -- every fold
+    contributes to the mean Optuna minimises.
+    """
+    trials = np.asarray(sorted(human["trial"].unique()))
+    rng = np.random.RandomState(seed=int(params["pid"]))
+    shuffled = trials.copy()
+    rng.shuffle(shuffled)
+    folds = np.array_split(shuffled, k)
+
+    human_sorted = human.sort_values(["trial", "observation"])
+    fold_losses: list[float] = []
+    for fold_trials in folds:
+        holdout_trials = [int(t) for t in fold_trials.tolist()]
+        if not holdout_trials:
+            continue
+        mask = row_index["trial"].isin(holdout_trials).to_numpy()
+        y = human_sorted.loc[human_sorted["trial"].isin(holdout_trials),
+                             "response"].to_numpy(float)
+        fold_losses.append(losses.nll_from_ensemble(ens[:, mask], y, sigma_floor))
+
+    if not fold_losses:
+        raise ValueError("No non-empty CV folds were generated")
+    return float(np.mean(fold_losses)), fold_losses
+
+
 def fit(
     dataset: str,
     model_type: str,
@@ -150,8 +197,23 @@ def fit(
     run_folder: Path | str | None = None,
     optuna_seed: int = 42,
     datafile: str | None = None,
+    loss_fn: str = "rmse",
+    n_sims: int = 100,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Fit one participant/model combination and persist outputs."""
+    """Fit one participant/model combination and persist outputs.
+
+    loss_fn='nll' requires model_type in models.math_models._STOCHASTIC_ENSEMBLE_MODELS
+    (currently {"NoisyRL_lambda"}); checked up front so a bad combination fails
+    before an Optuna study is created, not on the first trial.
+    """
+    if loss_fn not in ("rmse", "nll"):
+        raise ValueError(f"loss_fn must be 'rmse' or 'nll', got {loss_fn!r}")
+    if loss_fn == "nll" and model_type not in _STOCHASTIC_ENSEMBLE_MODELS:
+        raise ValueError(
+            f"--loss nll needs a stochastic model; {model_type!r} is "
+            f"deterministic, so its ensemble is a delta function and NLL is "
+            f"undefined. Use --loss rmse for this model, or fit one of "
+            f"{sorted(_STOCHASTIC_ENSEMBLE_MODELS)}.")
     if run_folder is None:
         run_folder = RUNS_DIR / "default"
     run_folder = resolve_run_folder(run_folder)
@@ -180,14 +242,21 @@ def fit(
     def objective(trial: optuna.trial.Trial) -> float:
         params = _suggest_params(trial, model_type, dataset, pid, datafile)
         trial_wall_start = time.time()
-        if model_type == "NEF":
-            model_responses_full = NEF.run(params)
+        if loss_fn == "nll":
+            # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
+            # resulting ensemble by trial rather than re-simulating per fold.
+            ens, row_index = math_models.simulate_ensemble(
+                params, n_sims, return_index=True)
+            mean_loss, fold_losses = _cross_validate_nll(
+                params, ens, row_index, human, k=k)
         else:
-            model_responses_full = math_models.run(params)
-
-        mean_loss, fold_losses = _cross_validate(
-            params, model_responses_full, human, k=k
-        )
+            if model_type == "NEF":
+                model_responses_full = NEF.run(params)
+            else:
+                model_responses_full = math_models.run(params)
+            mean_loss, fold_losses = _cross_validate(
+                params, model_responses_full, human, k=k
+            )
 
         trial.set_user_attr(
             "runtime_minutes",
@@ -202,6 +271,7 @@ def fit(
                 "trial_number": trial.number,
                 "fold": int(i + 1),
                 "loss": float(fold_loss),
+                "loss_fn": loss_fn,
             }
             for param_name, param_val in params.items():
                 if param_name not in (
@@ -241,6 +311,10 @@ def fit(
                 "dataset": dataset,
                 "pid": int(pid),
                 "loss": float(best_trial.value),
+                # RMSE and NLL are NOT on the same scale (NLL can be negative) --
+                # any reader of {model}_{stem}_performance.pkl must check this
+                # before comparing `loss` across a mix of the two.
+                "loss_fn": loss_fn,
                 "runtime": float(
                     best_trial.user_attrs.get("runtime_minutes", float("nan"))
                 ),
@@ -286,6 +360,25 @@ if __name__ == "__main__":
              "appearing in every output filename. Omit for the canonical "
              "data/{dataset}.pkl.",
     )
+    parser.add_argument(
+        "--loss", dest="loss_fn", choices=("rmse", "nll"), default="rmse",
+        help="'rmse' (default): fitting.losses.compute_loss, works for any model "
+             "but cannot identify a noise parameter (collapses to 0). 'nll': "
+             "Gaussian NLL of observed responses under the model's simulated "
+             "predictive distribution -- a proper scoring rule that penalises "
+             "both a wrong mean AND a wrong variance, so it CAN find a genuine "
+             "noise level. Only for models in "
+             "models.math_models._STOCHASTIC_ENSEMBLE_MODELS (a deterministic "
+             "model's ensemble is a delta function, so NLL is undefined).",
+    )
+    parser.add_argument(
+        "--n_sims", type=int, default=100,
+        help="Ensemble size per NLL evaluation (ignored for --loss rmse). "
+             "Verified stable at n_sims=100 -- 5 reseeded reps all picked the "
+             "same argmin on a sigma_resp sweep -- with a smaller ensemble "
+             "(n_sims=25) already agreeing. Cost is roughly linear: n_sims=100 "
+             "is ~0.45s/eval, i.e. ~2.3 min for a 300-trial fit.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -298,6 +391,8 @@ if __name__ == "__main__":
         run_folder=args.run_folder,
         optuna_seed=args.optuna_seed,
         datafile=args.datafile,
+        loss_fn=args.loss_fn,
+        n_sims=args.n_sims,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")

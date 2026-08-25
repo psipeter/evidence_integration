@@ -8,6 +8,8 @@ Supports datasets: carrabin, yoo, soltani_colors, soltani_numbers.
 import numpy as np
 import pandas as pd
 
+import models.math_models as math_models
+
 def _filter_first_blocks(human: pd.DataFrame, n_blocks: int = 2) -> pd.DataFrame:
     """
     Keep only the first `n_blocks` consecutive blocks per distribution
@@ -95,6 +97,87 @@ def compute_loss(
 
 
 # ── PMMH-style likelihood from simulation database ────────────────────────────
+
+# Floor on the ensemble SD, to keep the Gaussian NLL finite. NOT a free
+# parameter and NOT a way to admit deterministic models: a deterministic model's
+# ensemble SD is exactly 0, and clamping it turns the NLL into scaled squared
+# error with an arbitrary scale -- which is what compute_sim_db_loss's own 1e-3
+# clamp silently does. compute_nll REFUSES deterministic models instead. This
+# floor exists only for the rare cell where a genuinely stochastic model happens
+# to produce near-identical responses across sims (e.g. both noise SDs at their
+# lower bounds and a clipped response).
+NLL_SIGMA_FLOOR = 1e-3
+
+
+def nll_from_ensemble(ens: np.ndarray, y: np.ndarray,
+                      sigma_floor: float = NLL_SIGMA_FLOOR) -> float:
+    """Gaussian NLL of `y` (one observed value per column) under the per-column
+    (mean, SD) of `ens` (n_sims x n_columns). The arithmetic core of
+    compute_nll and _cross_validate_nll, factored out so a fold can subset
+    `ens`'s columns and reuse it without re-simulating."""
+    if ens.shape[1] != len(y):
+        raise ValueError(f"ensemble has {ens.shape[1]} columns, y has {len(y)} rows")
+    mu = ens.mean(axis=0)
+    sigma = np.maximum(ens.std(axis=0, ddof=1), sigma_floor)
+    return float(np.mean(np.log(sigma) + (y - mu) ** 2 / (2.0 * sigma ** 2)))
+
+
+def compute_nll(params: dict, human: pd.DataFrame, n_sims: int = 100,
+                sigma_floor: float = NLL_SIGMA_FLOOR) -> float:
+    """Gaussian negative log-likelihood of the OBSERVED human responses under the
+    model's simulated predictive distribution. Lower is better.
+
+        NLL = sum over rows of [ log(sigma_m) + (y - mu_m)^2 / (2 sigma_m^2) ]
+
+    where (mu_m, sigma_m) are the mean and SD across `n_sims` independent
+    realisations of the model at this parameter point, per (pid, trial,
+    observation) row, and y is the single observed human response for that row.
+
+    WHY THIS RATHER THAN RMSE. RMSE cannot see variance -- it is minimised by the
+    conditional mean, so any noise parameter collapses to its lower bound
+    (measured on NoisyRL_lambda: sigma_state median 0.0000 with 24/35 pids exactly
+    zero, sigma_resp 25/35 zero, when the floors were 0). NLL is a PROPER SCORING
+    RULE and penalises both failure modes at once: the quadratic term punishes a
+    wrong conditional mean AND an understated sigma, while log(sigma_m) punishes an
+    overstated one. A model that nails the mean but claims sigma=0 is destroyed by
+    the quadratic term; one that inflates sigma to hedge pays through log(sigma_m).
+
+    NO CONDITIONAL-MEAN ESTIMATOR IS NEEDED. Scoring the observed y directly means
+    the human's own variance never has to be estimated, which is what makes this
+    workable on soltani where repeats cover only the shared prefix. An RNN was
+    investigated as a denoised target for the mean term and RULED OUT for these
+    tasks -- on 32 unique sequences it is a WORSE predictor than a 2-parameter
+    delta rule (held-out RMSE 0.0626 vs RL_lambda's 0.0526, losing on 4/4 pids),
+    so scoring against it would be perverse. See models/RNN.py's own section in
+    CLAUDE.md.
+
+    KEYED ON (pid, trial, observation), unlike compute_sim_db_loss which keys
+    cells on the full stimulus-sequence tuple. That keying suits carrabin's
+    repeated sequence pool, where one cell accumulates many observed responses,
+    but not soltani: its 32 sequences per participant are essentially unique, so
+    nearly every cell would hold n=1 and the variance term would carry no
+    information. Simulating per participant sidesteps the problem entirely --
+    sigma_m comes from the ENSEMBLE, not from repeated observations.
+
+    STOCHASTIC MODELS ONLY. A deterministic model has sigma_m == 0 for every row,
+    making the NLL undefined; simulate_ensemble raises rather than let a clamp
+    silently convert this into scaled squared error. So this loss COMPLEMENTS RMSE
+    rather than replacing it -- it cannot rank all six soltani models against each
+    other.
+    """
+    model_type = params["model_type"]
+    pid = int(params["pid"])
+
+    ens = math_models.simulate_ensemble(params, n_sims)   # (n_sims, n_rows)
+    hp = human[human["pid"] == pid].sort_values(["trial", "observation"])
+    y = hp["response"].to_numpy(float)
+    try:
+        return nll_from_ensemble(ens, y, sigma_floor)
+    except ValueError as exc:
+        raise ValueError(
+            f"row mismatch for pid {pid} / {model_type}: {exc}. Both must be "
+            f"sorted by (trial, observation) and cover the same rows.") from exc
+
 
 def compute_sim_db_loss(
     model_type: str,

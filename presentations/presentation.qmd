@@ -1,0 +1,34 @@
+---
+title: "How People Learn"
+subtitle: "from Streams of Information"
+author: "Peter Duggins"
+format: 
+  revealjs:
+    theme: [default, custom.scss]
+    logo: images/logo.svg
+    incremental: true 
+    highlight-style: github
+    slide-number: true
+    html-math-method: katex
+    # embed-resources: true
+bibliography: "references.bib"
+
+---
+
+## Cognitive Neuroscience
+
+:::: {.columns}
+
+::: {.column width="50%"}
+::: {.image-card}
+![](images/brain_model_behavior.svg){style="height: 480px; width: auto;"}
+:::
+:::
+
+::: {.column width="50%"}
+::: {.image-card}
+![](images/cognitive_science_loop.svg){style="height: 480px; width: auto;"}
+:::
+:::
+
+::::

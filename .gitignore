@@ -62,6 +62,20 @@ jobs/
 logs/
 
 # =============================================================================
+# Presentations (Quarto/reveal.js)
+# =============================================================================
+# Track: *.qmd source, custom.scss, references.bib, and images/ assets --
+# these are the actual authored content for the talk.
+# Ignore: rendered HTML and Quarto's bundled reveal.js/katex/highlight.js
+# library directory -- both are fully reproducible via
+#   quarto render presentations/presentation.qmd
+# and the library directory in particular is large, third-party, and adds
+# nothing not already implied by the .qmd (same reasoning as figures/*,
+# data/runs/, and task/dist* elsewhere in this file).
+presentations/*.html
+presentations/*_files/
+
+# =============================================================================
 # OS & Editor
 # =============================================================================
 .DS_Store

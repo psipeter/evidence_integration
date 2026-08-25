@@ -124,7 +124,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # residual SD -- pure response variation, since stimuli are identical
             # within a qid group) and RMSE against the running mean.
             #
-            #   sigma_resp = 0.04  matches the measured human within-qid residual
+            #   sigma_resp = 0.055  matches the measured human within-qid residual
             #                       SD. Sets the FLOOR of prefix variability;
             #                       i.i.d. per observation so it does not compound.
             #   sigma_state = 0.02  brings late-prefix variability to 0.0494-0.0516
@@ -151,8 +151,8 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # imprecision -- only begins at observation 1. So judge the match on
             # observations 1-3, and treat the observation-0 mismatch as a genuine
             # limitation of this model family rather than something to tune away.
-            "sigma_state": (0.02, 0.30, 0.001),
-            "sigma_resp": (0.04, 0.30, 0.001),
+            "sigma_state": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
         },
         "NEF": {
             **_NEF_RANGES,
@@ -219,8 +219,8 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # imprecision -- only begins at observation 1. So judge the match on
             # observations 1-3, and treat the observation-0 mismatch as a genuine
             # limitation of this model family rather than something to tune away.
-            "sigma_state": (0.02, 0.30, 0.001),
-            "sigma_resp": (0.055, 0.30, 0.001),
+            "sigma_state": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
         },
         "NEF": {
             **_NEF_RANGES,

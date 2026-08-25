@@ -52,10 +52,87 @@ _YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_
 # motivated this integration) -- no NoisyCounting (carrabin-specific) or
 # plain fixed-alpha RL (superseded by RL_lambda, which subsumes it at
 # lambda_->0) for either task dataset.
+# Models whose ensemble is non-degenerate, i.e. usable with a distributional
+# loss. Deterministic models are excluded by construction, not by policy.
+_STOCHASTIC_ENSEMBLE_MODELS = frozenset({"NoisyRL_lambda"})
+
 _SOLTANI_COLORS_MODELS = frozenset(
     {"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NoisyRL_lambda"})
 _SOLTANI_NUMBERS_MODELS = frozenset(
     {"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NoisyRL_lambda"})
+
+
+def simulate_ensemble(params: dict, n_sims: int,
+                      return_index: bool = False):
+    """`n_sims` independent realisations of a STOCHASTIC model, for a
+    distributional loss. Returns (n_sims, n_rows) with rows ordered exactly as
+    `run(params)` returns them, i.e. sorted by (trial, observation).
+
+    WHY THIS EXISTS RATHER THAN CALLING run() n_sims TIMES. run() re-simulates
+    from scratch for every (trial, observation) -- 480 pandas .query() calls per
+    parameter point on soltani -- so an ensemble of 100 would be ~48k queries per
+    Optuna trial, which is not viable. Here each (trial, sim) is ONE forward pass
+    of 15 steps, so a 100-sim ensemble is ~3200 passes and takes well under a
+    second.
+
+    SEEDING MATCHES run(): sim i uses _trial_seed(i, trial), so
+    `simulate_ensemble(params, n)[i]` is identical to
+    `run({**params, "seed": i}).response`. There is a test for this invariant in
+    tests/ -- it is the guard against this function drifting from _model_response,
+    which is exactly what happened between math_models.py and
+    scripts/build_sim_db.py's hand-written NoisyCounting copy.
+
+    Only implemented for models whose response is a stochastic function of the
+    stimulus. Deterministic models raise: their ensemble is a delta function, so a
+    Gaussian NLL over it is undefined (see fitting.losses.compute_nll).
+
+    `return_index=True` additionally returns a DataFrame with `trial` and
+    `observation` columns, one row per ENSEMBLE COLUMN in the same order --
+    letting a caller (e.g. fitting.fit's cross-validation) partition columns by
+    trial without re-deriving the (trial, observation) sort order itself.
+    """
+    model_type = params["model_type"]
+    if model_type not in _STOCHASTIC_ENSEMBLE_MODELS:
+        raise ValueError(
+            f"simulate_ensemble is for stochastic models only; {model_type!r} is "
+            f"deterministic, so its ensemble is a delta function and a Gaussian "
+            f"NLL over it is undefined. Use RMSE for that model.")
+
+    dataset = params["dataset"]
+    stem = dataset_stem(dataset, params.get("datafile"))
+    human = pd.read_pickle(data_path(f"{stem}.pkl"))
+    pid = int(params["pid"])
+    hp = human[human["pid"] == pid].sort_values(["trial", "observation"])
+
+    alpha_0 = float(params["alpha_0"])
+    lambda_ = float(params["lambda_"])
+    sigma_state = float(params["sigma_state"])
+    sigma_resp = float(params["sigma_resp"])
+
+    per_trial = []
+    index_rows = []
+    for trial, g in hp.groupby("trial", sort=True):
+        vals = g["value"].to_numpy(float)
+        n_obs = len(vals)
+        out = np.empty((n_sims, n_obs))
+        for sim in range(n_sims):
+            rng = np.random.RandomState(_trial_seed(sim, int(trial)))
+            e = 0.0
+            for n, x in enumerate(vals, start=1):
+                e = float(np.clip(e + (alpha_0 / n ** lambda_) * (x - e)
+                                  + rng.normal(0.0, sigma_state), -1, 1))
+                out[sim, n - 1] = float(np.clip(e + rng.normal(0.0, sigma_resp),
+                                                -1, 1))
+        per_trial.append(out)
+        if return_index:
+            n_obs = len(vals)
+            index_rows.append(pd.DataFrame(
+                {"trial": [int(trial)] * n_obs, "observation": range(n_obs)}))
+
+    ens = np.concatenate(per_trial, axis=1)
+    if return_index:
+        return ens, pd.concat(index_rows, ignore_index=True)
+    return ens
 
 
 def run(params: dict, save: bool = False, trials: list | None = None) -> pd.DataFrame:
