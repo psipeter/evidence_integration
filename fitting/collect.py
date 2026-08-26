@@ -20,9 +20,22 @@ def _load_groups(run_folder: Path) -> dict[tuple[str, str], list[int]]:
     """Map (dataset_stem, model_type) -> pids, read from run_config.json.
 
     Keyed on the STEM (dataset family + optional --datafile suffix, see
-    utils.paths.dataset_stem) rather than the bare dataset name, because that is
-    what every output filename actually uses. This lets one run folder hold fits
-    against several builds of the same dataset without them colliding.
+    utils.paths.dataset_stem, PLUS a `_nll` suffix when the job used
+    --loss nll) rather than the bare dataset name, because that is what every
+    output filename actually uses. This lets one run folder hold fits against
+    several builds of the same dataset, and both loss functions, without them
+    colliding.
+
+    The `_nll` suffix mirrors fitting.fit's OWN file_stem construction exactly
+    (`f"{stem}_nll" if loss_fn == "nll" else stem`) and fitting.submit's
+    corresponding job-script naming -- this function drifting from either of
+    those silently means every NLL job's outputs exist on disk but never get
+    aggregated, since the stem this function computes would not match the
+    actual filenames. That happened once already: this function originally had
+    no knowledge of loss_fn at all, so it built the RMSE stem for every job
+    regardless, and _collect_params/_collect_responses silently collected
+    nothing for every NLL fit even though the run_config.json entries and the
+    per-pid files were both present.
     """
     config_path = run_folder / "run_config.json"
     if not config_path.exists():
@@ -32,6 +45,8 @@ def _load_groups(run_folder: Path) -> dict[tuple[str, str], list[int]]:
     groups: dict[tuple[str, str], list[int]] = defaultdict(list)
     for job in config.get("jobs", []):
         stem = dataset_stem(job["dataset"], job.get("datafile"))
+        if job.get("loss_fn") == "nll":
+            stem = f"{stem}_nll"
         groups[(stem, job["model_type"])].append(int(job["pid"]))
     return groups
 
