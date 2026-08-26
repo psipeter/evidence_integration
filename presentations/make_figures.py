@@ -1031,6 +1031,7 @@ MODEL_DISPLAY = {
     "PrimacyRecency": "PR",
     "NEF": "NEF",
     "RL_lambda": "RL_l",
+    "NoisyRL_lambda": "Noisy RL",
 }
 
 
@@ -1280,11 +1281,10 @@ def make_lambda_sanity_models() -> Path:
 
 # ── Response variability for identical inputs (balls, colors, numbers) ─────
 
-# Matches figure_carrabin_variability.py's own panel A metric exactly;
-# shortened for the axis label itself (narrower panels here, since panel A
-# is reserved-but-blank) -- same reasoning as shortening "odd-indexed
-# trials" to "odd trials" for the lambda sanity-check panels.
-VARIABILITY_NOISE_LABEL = "Response variability"
+# Matches figure_carrabin_variability.py's own panel A metric, but with
+# user-facing text (x-axis label, slide titles) renamed "Response Noise" --
+# shorter and reads more naturally as a slide title than "variability".
+VARIABILITY_NOISE_LABEL = "Response Noise"
 
 # (task_key, panel title) -- snacks/yoo excluded: figure_yoo_temporal.py has
 # no variance-growth/within-qid-repeat panel at all for that task (no
@@ -1407,8 +1407,8 @@ def _variability_model_path(task_key: str, model: str) -> Path:
     return RUNS_DIR / "soltani" / f"{model}_{dataset}_responses.pkl"
 
 
-def _plot_variability_panel(ax, legend_ax, task_key: str, title: str,
-                            include_models: bool) -> None:
+def _plot_variability_panel(ax, task_key: str, title: str,
+                            include_models: bool, show_ylabel: bool) -> None:
     """Panels B-D: normalized KDE of per-pid response variability for
     identical (repeated-stimulus) inputs -- matching
     figure_carrabin_variability.py's own panel A (KDE + peak-normalized +
@@ -1418,6 +1418,15 @@ def _plot_variability_panel(ax, legend_ax, task_key: str, title: str,
     machinery (see _variability_qid_map). Human is plain gray; task color
     lives on the panel title only, same convention as every other figure
     in this deck.
+
+    X-AXIS IS PER-PANEL (autoscaled to that task's own data, with headroom)
+    -- NOT shared across B-D. A shared range was tried first, but left a
+    lot of empty space in the narrower-scale tasks (balls/numbers) once the
+    range had to accommodate colors' wider spread; per-panel autoscaling
+    trades cross-task comparability for using each panel's own space fully.
+    show_ylabel controls whether this panel draws its own y-axis label/
+    ticks (only the leftmost of the three needs to, since the density is
+    already peak-normalized to 1 everywhere).
 
     When include_models=True, only ONE model per task gets drawn as a
     proper KDE line -- whichever one actually has a nonzero noise term
@@ -1431,12 +1440,15 @@ def _plot_variability_panel(ax, legend_ax, task_key: str, title: str,
     x=0 -- one marker per pid, honestly showing "this model's variability
     really is zero for every participant" rather than hiding that fact or
     faking a distribution that doesn't exist.
+
+    No dedicated legend row here (see make_variability_human's own note on
+    why the reserved legend row was removed) -- with >1 source, a legend is
+    drawn INSIDE the axes itself instead.
     """
     qid_map, prefix = _variability_qid_map(task_key)
     human_path = _human_data_path(task_key)
     human_vals = _variability_series(task_key, human_path, qid_map, prefix).dropna()
 
-    legend_ax.axis("off")
     ax.set_title(title, color=TASK_COLORS[task_key])
 
     if len(human_vals) < 2:
@@ -1507,66 +1519,704 @@ def _plot_variability_panel(ax, legend_ax, task_key: str, title: str,
             labels.append(MODEL_DISPLAY.get(model, model))
 
     ax.set_xlabel(VARIABILITY_NOISE_LABEL, fontsize=14)
-    ax.set_ylabel("Normalized density")
+    ax.set_ylabel("Normalized density" if show_ylabel else "")
+    ax.tick_params(axis="y", labelleft=show_ylabel)
     ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
     sns.despine(ax=ax, top=True, right=True)
-    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
-                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    # Skip the legend entirely when there's only one source (just "Human")
+    # -- a single-entry legend saying "Human" is redundant clutter once
+    # there's nothing else to distinguish it from; the panel title already
+    # names the task. Kept ready for when models get re-added: with >1
+    # source, drawn INSIDE the axes (no dedicated row anymore).
+    if len(handles) > 1:
+        ax.legend(handles=handles, labels=labels, fontsize=9, loc="upper right",
+                  frameon=True, framealpha=0.9)
+
+
+def _embed_svg_into_rect(main_path: Path, insert_path: Path,
+                         rect: tuple[float, float, float, float],
+                         id_prefix: str) -> None:
+    """Merge `insert_path`'s SVG content into `main_path`'s own rect (x, y,
+    w, h, in main_path's own viewBox units), overwriting main_path in place
+    with ONE genuinely self-contained SVG -- NOT a nested <image
+    href="sibling.svg">, which silently fails to load further external
+    resources once a composite like this is itself embedded via <img> in
+    the deck (the same browser-sandboxing quirk discovered building
+    presentations/images/behavioral_tasks.svg earlier this project). IDs are
+    namespaced with id_prefix to avoid collisions with main_path's own
+    (matplotlib-generated) IDs -- same fix as that composite."""
+    import re
+
+    def extract_svg_body(path: Path) -> str:
+        text = path.read_text(encoding="utf-8")
+        start = text.index("<svg")
+        end = text.rindex("</svg>") + len("</svg>")
+        body = text[start:end]
+        return re.sub(r'(width|height)="([0-9.]+)mm"', r'\1="\2"', body, count=2)
+
+    def namespace_ids(svg_text: str, prefix: str) -> str:
+        ids = set(re.findall(r'\bid="([^"]+)"', svg_text))
+        svg_text = re.sub(r'\bid="([^"]+)"',
+                         lambda m: f'id="{prefix}{m.group(1)}"', svg_text)
+        for old_id in ids:
+            esc = re.escape(old_id)
+            svg_text = re.sub(rf'((?:xlink:)?href="#){esc}(")',
+                             rf'\g<1>{prefix}{old_id}\g<2>', svg_text)
+            svg_text = re.sub(rf'(url\(#){esc}(\))',
+                             rf'\g<1>{prefix}{old_id}\g<2>', svg_text)
+        return svg_text
+
+    main_body = extract_svg_body(main_path)
+    x, y, w, h = rect
+    insert_body = namespace_ids(extract_svg_body(insert_path), id_prefix)
+
+    # Replace the insert's OWN width/height (and any x/y) on its root <svg>
+    # tag rather than appending new ones alongside them -- appending caused
+    # an invalid "attribute redefined" SVG (confirmed by rendering: Chromium
+    # refused to parse past that point). Only the FIRST <svg ...> opening
+    # tag is touched (re.sub count=1), matching how extract_svg_body already
+    # isolates just the root element.
+    svg_open_end = insert_body.index(">", insert_body.index("<svg"))
+    svg_open_tag = insert_body[:svg_open_end]
+    svg_open_tag = re.sub(r'\s(width|height|x|y)="[^"]*"', "", svg_open_tag)
+    svg_open_tag += f' x="{x}" y="{y}" width="{w}" height="{h}" preserveAspectRatio="xMidYMid meet"'
+    insert_body = svg_open_tag + insert_body[svg_open_end:]
+
+    insert_at = main_body.rindex("</svg>")
+    merged = main_body[:insert_at] + insert_body + main_body[insert_at:]
+    main_path.write_text(merged, encoding="utf-8")
+
+
+def _panel_a_rect(fig, ax) -> tuple[float, float, float, float]:
+    """axes[0]'s own plotting rectangle, in the SAME point-space as the
+    saved SVG's viewBox (FIGURE_SIZE inches * 72 pt/inch -- matplotlib's
+    SVG backend default, confirmed against an actual saved file: figsize
+    (10.6, 5.45) -> viewBox "0 0 763.2 392.4", i.e. exactly *72). Forces a
+    draw first, since constrained_layout only finalizes axes positions at
+    draw/save time, not immediately after subplot creation. matplotlib's
+    Bbox is bottom-up (y0=bottom); SVG is top-down, so y is flipped."""
+    fig.canvas.draw()
+    bbox = ax.get_position()
+    w_pt = FIGURE_SIZE[0] * 72
+    h_pt = FIGURE_SIZE[1] * 72
+    x = bbox.x0 * w_pt
+    y = (1 - bbox.y1) * h_pt
+    w = (bbox.x1 - bbox.x0) * w_pt
+    h = (bbox.y1 - bbox.y0) * h_pt
+    return (x, y, w, h)
+
+
+# Hand-made schematic explaining the response-variability metric itself
+# (repeated identical trials -> spread of responses = "response noise") --
+# goes in panel A of both variability figures, the same conceptual role
+# _plot_lambda_demo's "Fitting example" panel plays for the lambda figures.
+VARIABILITY_SCHEMATIC = Path(__file__).resolve().parent / "images" / "response_noise_schematic.svg"
 
 
 def make_variability_human() -> Path:
-    """1x4 panel, same layout as make_lambda_sanity_human: panel A left
-    BLANK (per instruction -- a hand-made image goes there later), panels
-    B-D are Human-only KDEs of response variability for identical inputs,
-    one per task (balls, colors, numbers -- snacks excluded, see
-    VARIABILITY_TASK_PANELS). Same 2-row GridSpec (plots + a dedicated
-    legend row) as the lambda sanity-check figures, for the same reason:
-    a bbox_to_anchor legend became unreliable once FIGURE_SIZE was fixed.
+    """1x4 panel: panel A holds VARIABILITY_SCHEMATIC (a hand-made diagram of
+    the metric itself -- repeated identical trials, response spread =
+    "response noise"), composited in via _embed_svg_into_rect rather than
+    plotted; panels B-D are Human-only KDEs of response variability for
+    identical inputs, one per task (balls, colors, numbers -- snacks
+    excluded, see VARIABILITY_TASK_PANELS), each autoscaled to its OWN data
+    range (see _plot_variability_panel's own docstring for why the shared
+    range this used to have was dropped).
+
+    PLAIN 1x4 plt.subplots -- NOT the 2-row GridSpec (plots + a dedicated
+    legend row) the lambda sanity-check figures use. That reserved legend
+    row left a lot of empty space at the bottom once the legend itself
+    stopped being drawn (single-source panels skip it -- see
+    _plot_variability_panel), so it was removed; a legend, if one ever
+    becomes necessary again, is drawn INSIDE each axes instead (no
+    reserved row).
     """
     _apply_slide_style()
-    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
-    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
-    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
 
     axes[0].axis("off")
-    legend_axes[0].axis("off")
+    axes[0].set_title("Metric Definition", color="0.3")
 
-    for ax, lax, (task_key, title) in zip(axes[1:], legend_axes[1:], VARIABILITY_TASK_PANELS):
-        _plot_variability_panel(ax, lax, task_key, title, include_models=False)
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[1:], VARIABILITY_TASK_PANELS)):
+        _plot_variability_panel(ax, task_key, title, include_models=False,
+                                show_ylabel=(i == 0))
+
+    panel_a_rect = _panel_a_rect(fig, axes[0])
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = FIGURES_DIR / "variability_human.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+
+    if VARIABILITY_SCHEMATIC.exists():
+        _embed_svg_into_rect(out_path, VARIABILITY_SCHEMATIC, panel_a_rect, "panelA_")
+    else:
+        print(f"  (missing {VARIABILITY_SCHEMATIC.name} -- panel A left blank)")
+
+    print(f"Saved {out_path}")
+    return out_path
+
+
+def make_variability_models() -> Path:
+    """Same layout as make_variability_human (including the panel-A
+    schematic), but panels B-D now add each task's ONE genuinely-stochastic
+    model as a proper KDE, plus every other (deterministic) model as a
+    jittered cluster of points at x=0 -- see _plot_variability_panel's own
+    docstring for why.
+
+    NOTE: NoisyRL_lambda's fit was found to be from an old, pre-quasi-MLE
+    RMSE run (sigma_state/sigma_resp pinned at their manually-chosen floor,
+    not genuinely fit per pid -- see chat); the actual NLL/quasi-MLE fitting
+    work for colors/numbers has been offloaded to another session, so model
+    plotting is DISABLED here for now (include_models=False, same as the
+    human-only figure) rather than showing that stale result. Once a real
+    fit lands, flip include_models back to True below -- the plotting
+    machinery itself is untouched and ready.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+
+    axes[0].axis("off")
+    axes[0].set_title("Metric Definition", color="0.3")
+
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[1:], VARIABILITY_TASK_PANELS)):
+        _plot_variability_panel(ax, task_key, title, include_models=False,
+                                show_ylabel=(i == 0))
+
+    panel_a_rect = _panel_a_rect(fig, axes[0])
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "variability_models.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+
+    if VARIABILITY_SCHEMATIC.exists():
+        _embed_svg_into_rect(out_path, VARIABILITY_SCHEMATIC, panel_a_rect, "panelA_")
+    else:
+        print(f"  (missing {VARIABILITY_SCHEMATIC.name} -- panel A left blank)")
+
+    print(f"Saved {out_path}")
+    return out_path
+
+
+
+# -- Model performance under the new NLL/quasi-MLE metric (all four tasks) --
+
+# Real, fresh fitting output found on disk (see chat) after searching the
+# codebase directly rather than a since-unlocatable "EI#16" chat: a genuine
+# per-pid NLL fit now exists for every task, replacing RMSE's inability to
+# identify a noise term at all (RMSE is minimised by the conditional mean,
+# so any noise parameter collapses to its lower bound -- confirmed earlier
+# this session for NoisyRL_lambda's old RMSE fit: sigma_state pinned at
+# EXACTLY 0.02 for all 35 pids). Verified this NEW fit is genuinely
+# per-pid, not another floor-collapse: NoisyRL_lambda's sigma_state now has
+# 37 distinct values across 45 pids (numbers), ranging 0.017-0.292, not one
+# repeated constant.
+#
+# THE METRIC ITSELF (read from fitting/losses.py's own compute_nll/
+# nll_from_ensemble, models/math_models.py's simulate_ensemble): Gaussian
+# NLL of each observed human response under the model's own SIMULATED
+# predictive distribution -- mean and SD taken across an ensemble of
+# n_sims=100 independent stochastic simulations at that pid's fitted
+# parameters, per (pid, trial, observation) row. This is a proper scoring
+# rule: a wrong conditional mean is punished by the quadratic term, an
+# UNDERSTATED sigma is punished by the same quadratic term blowing up as
+# sigma shrinks, and an OVERSTATED sigma is punished by log(sigma) -- unlike
+# RMSE, which cannot see variance at all. Lower (more negative -- NLL can be
+# negative, unlike RMSE) is better, same "lower = better" direction RMSE
+# used, so _compute_sig_lines below needs no change.
+#
+# WHY EVERY MODEL NOW HAS AN "_resp_noise" FILE VARIANT: NLL is undefined
+# for a deterministic model (its ensemble SD is exactly 0, an infinite
+# NLL) -- simulate_ensemble refuses to silently paper over this the way an
+# ad hoc sigma floor would. So Mean/LeakyIntegrator/PrimacyRecency/RL_lambda
+# were each given one ADDED free parameter, sigma_resp (i.i.d. Gaussian
+# response noise on top of that model's own deterministic prediction),
+# making every model's NLL well-defined and put on the SAME scale for the
+# first time. NoisyRL_lambda already had its own genuine noise mechanism
+# (sigma_state), so it keeps its own name -- no "_resp_noise" suffix, and no
+# separate sigma_resp column in its own fit (verified directly: its saved
+# nll_params.pkl has only alpha_0/lambda_/sigma_state, three parameters).
+#
+# NO NEF FIT EXISTS UNDER THIS METRIC AT ALL (checked directly: no
+# "*NEF*nll*" file anywhere in data/runs) -- full NEF simulation at
+# n_sims=100 per Optuna trial was presumably judged too expensive to run
+# yet. NoisyRL_lambda is therefore the uniform "best/reference" model for
+# EVERY task here, not split NEF-for-balls/snacks vs RL_lambda-for-colors/
+# numbers the way make_model_performance's own reference was.
+#
+# A REAL DATA-VINTAGE DIFFERENCE FROM make_model_performance, WORTH FLAGGING
+# EXPLICITLY: this fit's own human data has 45 pids for colors/numbers
+# (confirmed against the CURRENT canonical data/soltani_{colors,numbers}.pkl
+# -- both now 45, not the 35 every earlier figure in this deck, including
+# make_model_performance itself, was built against). carrabin (21) and yoo
+# (38) are unchanged. This figure is therefore NOT a strict apples-to-apples
+# re-run of make_model_performance on a different loss -- its colors/
+# numbers panels reflect 10 more participants than the RMSE figure's do.
+#
+# RL_lambda's OWN box is dropped here, per instruction -- NoisyRL_lambda
+# already plays RL_lambda's role at this position (the "our model" entry),
+# so showing both would be redundant. NoisyRL_lambda is recolored to
+# RL_lambda's OWN established color (#d55e00, red-orange) rather than its
+# usual tan (#ca9161, still used elsewhere in this deck, e.g. the
+# variability figures) -- same convention as NEF/RL_lambda sharing one
+# color in make_model_performance: same color signals "playing the same
+# conceptual role", here explicitly replacing RL_lambda's own slot. Legend
+# TEXT stays "Noisy RL" (MODEL_DISPLAY, unchanged) -- only the color, not
+# the label, is borrowed.
+NLL_MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"]
+NLL_REFERENCE = "NoisyRL_lambda"  # uniform across all four tasks -- see above
+
+# Legend labels for THIS figure specifically -- full (non-abbreviated) names
+# now that the legend only has 4 entries and comfortably fits them, unlike
+# MODEL_DISPLAY's compact "LI"/"PR" abbreviations built for the 5-entry
+# legends elsewhere in this deck. NoisyRL_lambda is labeled "RL_lambda*" per
+# explicit instruction -- the asterisk is a live-talk footnote (explained
+# verbally, not spelled out in the figure itself).
+NLL_LABELS = {
+    "Mean": "Mean",
+    "LeakyIntegrator": "LeakyIntegrator",
+    "PrimacyRecency": "PrimacyRecency",
+    "NoisyRL_lambda": "RL_lambda*",
+}
+
+# Local color override for THIS figure only -- MODEL_COLORS itself is left
+# untouched (NoisyRL_lambda's own tan still applies everywhere else, e.g.
+# make_variability_models).
+NLL_MODEL_COLORS = {m: MODEL_COLORS[m] for m in NLL_MODEL_ORDER}
+NLL_MODEL_COLORS["NoisyRL_lambda"] = MODEL_COLORS["RL_lambda"]
+
+NLL_TASK_PANELS = [
+    ("balls", "Balls task"),
+    ("snacks", "Snacks task"),
+    ("colors", "Colors task"),
+    ("numbers", "Numbers task"),
+]
+
+
+def _nll_perf_path(task_key: str, model: str) -> Path:
+    """Path to one (task, model)'s *_nll_performance.pkl. Every model except
+    NoisyRL_lambda is fit as its own name PLUS "_resp_noise" on disk (see
+    this section's own module-level comment for why) -- that suffix is
+    purely a file-naming/fitting-pipeline detail, so it's added here rather
+    than exposed to any caller; every other function in this file refers to
+    these models by their plain names (Mean, LeakyIntegrator, ...)."""
+    file_model = model if model == "NoisyRL_lambda" else f"{model}_resp_noise"
+    if task_key == "balls":
+        return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_performance.pkl"
+    if task_key == "snacks":
+        return RUNS_DIR / "yoo" / f"{file_model}_yoo_nll_performance.pkl"
+    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
+    return RUNS_DIR / "soltani" / f"{file_model}_{dataset}_nll_performance.pkl"
+
+
+def make_model_performance_nll() -> Path:
+    """1x4 panel: model fit under the NEW NLL/quasi-MLE metric, one panel
+    per task (balls, snacks, colors, numbers) -- same layout, significance-
+    bar logic, and shared-legend convention as make_model_performance, but
+    a genuinely different loss (see this section's own module-level
+    comment for the full metric description, the "_resp_noise" file-naming
+    quirk, why NoisyRL_lambda is the uniform reference model here, and the
+    45-vs-35-pid data-vintage caveat for colors/numbers).
+
+    Y-AXIS IS SHARED (sharey=True) but NOT forced to start at 0 -- unlike
+    make_model_performance's RMSE (which is non-negative by construction),
+    NLL can be, and often is, negative (confirmed directly: loss ranges as
+    low as -3.03 for numbers/NoisyRL_lambda), so clamping the bottom would
+    misrepresent the actual data.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                             constrained_layout=True)
+
+    panel_data = []
+    for i, (ax, (task_key, title)) in enumerate(zip(axes, NLL_TASK_PANELS)):
+        rows = []
+        for model in NLL_MODEL_ORDER:
+            path = _nll_perf_path(task_key, model)
+            if not path.exists():
+                print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+                continue
+            perf = pd.read_pickle(path)
+            rows.append(pd.DataFrame({
+                "pid": perf["pid"],
+                "nll": _get_loss(perf),
+                "model": model,
+            }))
+
+        if not rows:
+            ax.text(0.5, 0.5, "No fitted models\nfor this task",
+                    ha="center", va="center", transform=ax.transAxes,
+                    color="0.5", style="italic")
+            ax.set_title(title, color=TASK_COLORS[task_key])
+            continue
+
+        plot_df = pd.concat(rows, ignore_index=True)
+        order = [m for m in NLL_MODEL_ORDER if m in plot_df["model"].unique()]
+        pal = {m: NLL_MODEL_COLORS[m] for m in order}
+
+        sns.boxplot(data=plot_df, x="model", y="nll", order=order,
+                    hue="model", palette=pal, legend=False, ax=ax)
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.set_xlabel("")
+        ax.set_ylabel("Model fit (NLL to\nhuman responses)" if i == 0 else "")
+        ax.tick_params(axis="y", labelleft=(i == 0))
+        ax.set_xticks([])
+        sns.despine(ax=ax, top=True, right=True)
+        panel_data.append((ax, task_key, title, order, plot_df))
+
+    # No ax.set_ylim(bottom=0) here -- see this function's own docstring.
+    y_lo, y_hi = axes[0].get_ylim()
+    dy_step = (y_hi - y_lo) * 0.07
+    per_panel_sig_lines = []
+    max_bars = 0
+    for ax, task_key, title, order, plot_df in panel_data:
+        sig_lines = (_compute_sig_lines(plot_df, "model", "nll", order, NLL_REFERENCE)
+                    if NLL_REFERENCE in order else [])
+        per_panel_sig_lines.append((ax, sig_lines))
+        max_bars = max(max_bars, len(sig_lines))
+
+    if max_bars:
+        axes[0].set_ylim(top=y_hi + dy_step * 0.5 + max_bars * dy_step * 2.0 + dy_step)
+
+    for ax, sig_lines in per_panel_sig_lines:
+        y_current = y_hi + dy_step * 0.5
+        for x1, x2, stars in sig_lines:
+            draw_sig_line(ax, x1, x2, y_current, stars)
+            y_current += dy_step * 2.0
+
+    legend_handles = [Patch(facecolor=NLL_MODEL_COLORS[m], label=NLL_LABELS.get(m, m))
+                      for m in NLL_MODEL_ORDER]
+    fig.get_layout_engine().set(h_pad=0.25)
+    fig.legend(handles=legend_handles, loc="outside lower center", ncol=5,
+               frameon=True, framealpha=0.9)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "model_performance_nll.svg"
     fig.savefig(out_path)
     plt.close(fig)
     print(f"Saved {out_path}")
     return out_path
 
 
-def make_variability_models() -> Path:
-    """Same layout as make_variability_human, but panels B-D add each
-    task's ONE genuinely-stochastic model as a proper KDE, plus every
-    other (deterministic) model as a jittered cluster of points at x=0 --
-    see _plot_variability_panel's own docstring for why. Panel A is still
-    left blank.
+
+# -- Response variability growth + autocorrelation (balls, colors, numbers) --
+
+# Matches figure_carrabin_temporal.py's rendered panels D (variance growth)
+# and C (autocorrelation) for balls, and figure_soltani_temporal.py's cols
+# 3-4 for colors/numbers -- both built on residuals against a qid-
+# conditional mean (resid = response - mean(response | pid, observation,
+# qid)), restricted to the window where a qid's repeats genuinely share an
+# identical stimulus (see _variability_qid_map, reused directly here --
+# same qid/quasi-qid/prefix machinery already established for the
+# response-noise figures, not reinvented).
+
+RESID_TASK_PANELS = [
+    ("balls", "Balls task"),
+    ("colors", "Colors task"),
+    ("numbers", "Numbers task"),
+]
+
+# Minimum repeats required within one (pid, observation, qid) cell before
+# its std is trusted, PER TASK -- copied from each task's OWN script AS
+# CODED, not reconciled into one value. figure_carrabin_temporal.py's own
+# panel D hardcodes MIN=3; figure_soltani_temporal.py's own
+# _variance_growth_stats hardcodes MIN=2. This is a genuine, likely
+# unintentional inconsistency between the two source scripts (neither this
+# session's own instructions nor the scripts' own comments resolve it), so
+# each task keeps its own established value rather than picking one to
+# apply everywhere.
+RESID_MIN_REPEATS = {"balls": 3, "colors": 2, "numbers": 2}
+
+# Autocorrelation lag range, PER TASK -- again copied from each task's own
+# script. carrabin explicitly excludes lag 4 despite having 5 observations
+# ("lag-4 is degenerate: (obs1, obs5) residuals near-zero for some pids" --
+# that script's own comment); colors' prefix is 5 (lags 1-4); numbers'
+# prefix is 4 (lags 1-3).
+RESID_LAGS = {"balls": [1, 2, 3], "colors": [1, 2, 3, 4], "numbers": [1, 2, 3]}
+
+
+def _resid_frame(task_key: str, path: Path, qid_map: pd.DataFrame,
+                 prefix: int | None) -> pd.DataFrame:
+    """One (task, source)'s raw response file -> residuals against the
+    qid-conditional mean, restricted to the shared-prefix window (or the
+    whole trial for balls, prefix=None). Columns: [pid, trial, observation,
+    qid, resid]."""
+    df = pd.read_pickle(path)[["pid", "trial", "observation", "response"]]
+    if prefix is not None:
+        df = df[df["observation"] < prefix]
+    df = df.merge(qid_map, on=["pid", "trial", "observation"])
+    means = (df.groupby(["pid", "observation", "qid"])["response"]
+             .mean().reset_index().rename(columns={"response": "qid_mean"}))
+    df = df.merge(means, on=["pid", "observation", "qid"])
+    df["resid"] = df["response"] - df["qid_mean"]
+    return df
+
+
+def _resid_variance_growth(resid_df: pd.DataFrame, min_repeats: int) -> pd.DataFrame | None:
+    """Per-observation mean/SE (across pids) of within-qid residual SD --
+    matching figure_carrabin_temporal.py's own panel D / figure_soltani_
+    temporal.py's own _variance_growth_stats exactly (std within (pid, obs,
+    qid) -> mean over qid within (pid, obs) -> mean/SEM across pids).
+    Individual-pid overlay lines are DELIBERATELY omitted here (unlike both
+    source scripts, which include them by default) -- this presentation
+    deck hasn't shown per-pid overlays in any other figure, and the
+    mean+SEM band alone matches this deck's own established convention."""
+    grp = (resid_df.groupby(["pid", "observation", "qid"])["resid"]
+           .apply(lambda x: x.std() if len(x) >= min_repeats else np.nan)
+           .dropna().reset_index(name="std"))
+    if grp.empty:
+        return None
+    by_pid_obs = grp.groupby(["pid", "observation"])["std"].mean().reset_index()
+    stats = by_pid_obs.groupby("observation")["std"].agg(["mean", "std"]).reset_index()
+    n_pid = by_pid_obs["pid"].nunique()
+    stats["se"] = stats["std"] / np.sqrt(n_pid)
+    return stats
+
+
+def _resid_autocorr(resid_df: pd.DataFrame, lags: list[int]):
+    """Cross-pid mean/SEM of within-trial lag-k residual autocorrelation --
+    matching figure_soltani_temporal.py's own _autocorr_stats (pairs by
+    ACTUAL observation index, not array position, so a missing checkpoint
+    can't silently mispair two observations that aren't really `lag` apart;
+    provably equivalent to carrabin's own position-based pairing for balls
+    specifically, since every carrabin trial always has all 5 observations
+    with no gaps -- so this one shared implementation is faithful to both
+    source scripts, not a compromise between them). Returns (lags, means,
+    sems) or "no_repeats"/"insufficient" (see figure_soltani_temporal.py's
+    own degenerate-case guards, reproduced identically: a qid with only one
+    repeat gives a trivially-zero residual, not a genuine signal)."""
+    repeat_counts = resid_df.groupby(["pid", "observation", "qid"]).size()
+    if not (repeat_counts >= 2).any():
+        return "no_repeats"
+
+    pid_rs: dict[int, list[float]] = {lag: [] for lag in lags}
+    for _, pid_df in resid_df.groupby("pid"):
+        for lag in lags:
+            pairs = []
+            for (_, _), g in pid_df.groupby(["pid", "trial"]):
+                obs_to_resid = dict(zip(g["observation"], g["resid"]))
+                for o, resid_o in obs_to_resid.items():
+                    if (o + lag) in obs_to_resid:
+                        pairs.append((resid_o, obs_to_resid[o + lag]))
+            if len(pairs) < 3:
+                continue
+            arr = np.array(pairs)
+            if arr[:, 0].std() <= 1e-9 or arr[:, 1].std() <= 1e-9:
+                continue
+            rv, _ = pearsonr(arr[:, 0], arr[:, 1])
+            pid_rs[lag].append(rv)
+
+    if all(len(v) == 0 for v in pid_rs.values()):
+        return "insufficient"
+
+    means = np.array([np.mean(pid_rs[lag]) if pid_rs[lag] else np.nan for lag in lags])
+    sems = np.array([np.std(pid_rs[lag]) / np.sqrt(len(pid_rs[lag]))
+                    if len(pid_rs[lag]) > 1 else np.nan for lag in lags])
+    return lags, means, sems
+
+
+# Hand-made schematic explaining the autocorrelation metric itself -- goes
+# in panel A, same conceptual role VARIABILITY_SCHEMATIC plays for the
+# response-noise figures. Not yet created (per instruction, left blank
+# until it exists); the missing-file guard below prints a note and leaves
+# the panel blank rather than failing.
+AUTOCORR_SCHEMATIC = Path(__file__).resolve().parent / "images" / "autocorr_schematic.svg"
+
+
+def make_variance_autocorr_human() -> Path:
+    """1x4 panel: panel A holds AUTOCORR_SCHEMATIC (a hand-made diagram of
+    the metric itself), composited in via _embed_svg_into_rect -- same
+    convention as make_variability_human's own panel A; panels B-D are
+    Human-only within-trial lag-k residual autocorrelation, one per task
+    [balls, colors, numbers] -- snacks excluded, same reasoning as
+    VARIABILITY_TASK_PANELS. Y-AXIS IS SHARED across B-D (sharey=True), so
+    the three tasks' decay is directly comparable rather than each panel
+    autoscaling to its own range.
+
+    VARIANCE GROWTH (the OLD top row) WAS DROPPED, per instruction, after
+    checking the actual numbers directly rather than relying on the
+    earlier visual read (which was wrong -- see chat): only Human and
+    NoisyRL_lambda show a genuine, substantial DECAYING autocorrelation
+    (starting well above zero, decaying toward/past it); every
+    "_resp_noise" model (Mean/LeakyIntegrator/PrimacyRecency/RL_lambda)
+    stays within about +-0.09 of zero at EVERY lag in EVERY task -- noise
+    scatter around zero, not a real signal. Autocorrelation alone is the
+    metric that actually distinguishes state-persistent noise from pure
+    i.i.d. response noise; variance growth did not (it grew inconsistently
+    for the resp_noise models too, likely just sampling noise around a
+    flat truth).
     """
     _apply_slide_style()
-    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
-    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
-    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                             constrained_layout=True)
 
     axes[0].axis("off")
-    legend_axes[0].axis("off")
+    axes[0].set_title("Metric Definition", color="0.3")
 
-    for ax, lax, (task_key, title) in zip(axes[1:], legend_axes[1:], VARIABILITY_TASK_PANELS):
-        _plot_variability_panel(ax, lax, task_key, title, include_models=True)
+    for i, (ax_ac, (task_key, title)) in enumerate(zip(axes[1:], RESID_TASK_PANELS)):
+        qid_map, prefix = _variability_qid_map(task_key)
+        human_path = _human_data_path(task_key)
+        resid_df = _resid_frame(task_key, human_path, qid_map, prefix)
+
+        lags = RESID_LAGS[task_key]
+        res = _resid_autocorr(resid_df, lags)
+        ax_ac.set_title(title, color=TASK_COLORS[task_key])
+        if isinstance(res, str):
+            msg = ("Insufficient data\n(no qid repeats for this task)"
+                  if res == "no_repeats" else "Insufficient data")
+            ax_ac.text(0.5, 0.5, msg, ha="center", va="center",
+                      transform=ax_ac.transAxes, color="0.5", style="italic")
+        else:
+            _, means, sems = res
+            ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
+            ax_ac.plot(lags, means, "-", color=HUMAN_COLOR, lw=2.2, zorder=3)
+            ax_ac.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR,
+                              alpha=0.2, zorder=1)
+        ax_ac.set_xlabel("Lag (observations)")
+        ax_ac.set_ylabel("Autocorrelation" if i == 0 else "")
+        ax_ac.tick_params(axis="y", labelleft=(i == 0))
+        ax_ac.set_xticks(lags)
+        ax_ac.margins(x=0.15)  # keeps the rightmost tick label from
+        # clipping against the canvas edge in the last column -- there's
+        # no neighboring panel there to absorb the overflow.
+        sns.despine(ax=ax_ac, top=True, right=True)
+
+    panel_a_rect = _panel_a_rect(fig, axes[0])
+
+    # Same legend SLOT reserved as make_variance_autocorr_models (same
+    # h_pad, same "outside lower center" placement) -- so the figure
+    # doesn't resize/shift when models get added on the follow-up slide;
+    # only "Human" is actually shown yet, matching make_lambda_human's own
+    # human-only stage convention exactly.
+    fig.get_layout_engine().set(h_pad=0.25)
+    fig.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")],
+               loc="outside lower center", ncol=1, frameon=True, framealpha=0.9)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = FIGURES_DIR / "variability_models.svg"
+    out_path = FIGURES_DIR / "variance_autocorr_human.svg"
     fig.savefig(out_path)
     plt.close(fig)
+
+    if AUTOCORR_SCHEMATIC.exists():
+        _embed_svg_into_rect(out_path, AUTOCORR_SCHEMATIC, panel_a_rect, "panelA_")
+    else:
+        print(f"  (missing {AUTOCORR_SCHEMATIC.name} -- panel A left blank)")
+
+    print(f"Saved {out_path}")
+    return out_path
+
+
+# The full 5-model roster for the models figure -- unlike
+# make_model_performance_nll's boxplot (which dropped RL_lambda's own box
+# as redundant with NoisyRL_lambda at that single x-position), both
+# RL_lambda and NoisyRL_lambda are kept here with their own established
+# MODEL_COLORS: their CURVES can look genuinely different (RL_lambda's own
+# added sigma_resp vs NoisyRL_lambda's own sigma_state mechanism), so
+# showing both is informative rather than redundant.
+RESID_MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NoisyRL_lambda"]
+
+
+def _nll_responses_path(task_key: str, model: str) -> Path:
+    """Path to one (task, model)'s *_nll_responses.pkl -- same "_resp_noise"
+    file-naming quirk as _nll_perf_path (see that function's own
+    docstring), just pointing at the actual per-observation response
+    SEQUENCE (needed to compute a residual) rather than the scalar
+    performance loss."""
+    file_model = model if model == "NoisyRL_lambda" else f"{model}_resp_noise"
+    if task_key == "balls":
+        return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_responses.pkl"
+    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
+    return RUNS_DIR / "soltani" / f"{file_model}_{dataset}_nll_responses.pkl"
+
+
+def make_variance_autocorr_models() -> Path:
+    """Same 1x4 layout as make_variance_autocorr_human (panel A unchanged),
+    now overlaying each of the 5 NLL-fitted models on panels B-D's
+    autocorrelation. Confirms directly (not just visually -- the earlier
+    visual read of the 2x3 version was wrong, see chat) that only
+    NoisyRL_lambda shows genuine decaying autocorrelation resembling
+    Human's own pattern; the four "_resp_noise" models stay within noise
+    of zero at every lag in every task, matching what their own math
+    predicts (i.i.d. response noise, added AFTER the clean deterministic
+    trajectory per models/math_models.py's own add_noise(), has no
+    mechanism to produce lag correlation).
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                             constrained_layout=True)
+
+    axes[0].axis("off")
+    axes[0].set_title("Metric Definition", color="0.3")
+
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2.2)]
+    legend_labels = ["Human"]
+    for m in RESID_MODEL_ORDER:
+        legend_handles.append(Line2D([0], [0], color=MODEL_COLORS[m], lw=2.2))
+        legend_labels.append(MODEL_DISPLAY.get(m, m))
+
+    for i, (ax_ac, (task_key, title)) in enumerate(zip(axes[1:], RESID_TASK_PANELS)):
+        qid_map, prefix = _variability_qid_map(task_key)
+        human_path = _human_data_path(task_key)
+        human_resid = _resid_frame(task_key, human_path, qid_map, prefix)
+
+        model_resids = {}
+        for m in RESID_MODEL_ORDER:
+            mpath = _nll_responses_path(task_key, m)
+            if not mpath.exists():
+                print(f"  (missing {mpath.name} -- skipping {m} for {task_key})")
+                continue
+            model_resids[m] = _resid_frame(task_key, mpath, qid_map, prefix)
+
+        lags = RESID_LAGS[task_key]
+        ax_ac.set_title(title, color=TASK_COLORS[task_key])
+        ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
+        res = _resid_autocorr(human_resid, lags)
+        if isinstance(res, str):
+            msg = ("Insufficient data\n(no qid repeats for this task)"
+                  if res == "no_repeats" else "Insufficient data")
+            ax_ac.text(0.5, 0.5, msg, ha="center", va="center",
+                      transform=ax_ac.transAxes, color="0.5", style="italic")
+        else:
+            _, means, sems = res
+            ax_ac.plot(lags, means, "-", color=HUMAN_COLOR, lw=2.2, zorder=6)
+            ax_ac.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR,
+                              alpha=0.2, zorder=1)
+        for j, m in enumerate(RESID_MODEL_ORDER):
+            if m not in model_resids:
+                continue
+            mres = _resid_autocorr(model_resids[m], lags)
+            if isinstance(mres, str):
+                continue
+            _, mmeans, msems = mres
+            color = MODEL_COLORS[m]
+            ax_ac.plot(lags, mmeans, "-", color=color, lw=2.0, zorder=5 - j)
+            ax_ac.fill_between(lags, mmeans - msems, mmeans + msems, color=color,
+                              alpha=0.15, zorder=1)
+        ax_ac.set_xlabel("Lag (observations)")
+        ax_ac.set_ylabel("Autocorrelation" if i == 0 else "")
+        ax_ac.tick_params(axis="y", labelleft=(i == 0))
+        ax_ac.set_xticks(lags)
+        ax_ac.margins(x=0.15)
+        sns.despine(ax=ax_ac, top=True, right=True)
+
+    panel_a_rect = _panel_a_rect(fig, axes[0])
+
+    fig.get_layout_engine().set(h_pad=0.25)
+    fig.legend(handles=legend_handles, labels=legend_labels,
+               loc="outside lower center", ncol=6, frameon=True, framealpha=0.9)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "variance_autocorr_models.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+
+    if AUTOCORR_SCHEMATIC.exists():
+        _embed_svg_into_rect(out_path, AUTOCORR_SCHEMATIC, panel_a_rect, "panelA_")
+    else:
+        print(f"  (missing {AUTOCORR_SCHEMATIC.name} -- panel A left blank)")
+
     print(f"Saved {out_path}")
     return out_path
 
@@ -1574,6 +2224,7 @@ def make_variability_models() -> Path:
 FIGURES = {
     "temporal_performance": make_temporal_performance,
     "model_performance": make_model_performance,
+    "model_performance_nll": make_model_performance_nll,
     "response_change": make_response_change,
     "lambda_human": make_lambda_human,
     "lambda_models": make_lambda_models,
@@ -1581,6 +2232,8 @@ FIGURES = {
     "lambda_sanity_models": make_lambda_sanity_models,
     "variability_human": make_variability_human,
     "variability_models": make_variability_models,
+    "variance_autocorr_human": make_variance_autocorr_human,
+    "variance_autocorr_models": make_variance_autocorr_models,
 }
 
 

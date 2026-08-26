@@ -102,6 +102,7 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/model_performance.svg){width="90%"}
 :::
 
+
 ## Smaller Updates Over Time
 
 ::: {.image-card}
@@ -110,7 +111,7 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 
 []{.fragment fragment-index="1" data-swap-target="response-change-img" data-swap-src="figures/response_change_full.svg" data-swap-prev="figures/response_change_human.svg"}
 
-## Individual Differences in $|\Delta R|$
+## Individual Differences
 
 ::: {.image-card}
 ![](figures/lambda_human.svg){width="90%"}
@@ -122,7 +123,7 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/lambda_models.svg){width="90%"}
 :::
 
-## Sanity Check
+## Consistent Across Trials & Tasks
 
 ::: {.image-card}
 ![](figures/lambda_sanity_human.svg){width="90%"}
@@ -134,14 +135,26 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/lambda_sanity_models.svg){width="90%"}
 :::
 
-## Response Variability
+## Response Noise
 
 ::: {.image-card}
 ![](figures/variability_human.svg){width="90%"}
 :::
 
-## Model Response Variability
+## Model Performance (NLL)
 
 ::: {.image-card}
-![](figures/variability_models.svg){width="90%"}
+![](figures/model_performance_nll.svg){width="90%"}
+:::
+
+## Response Noise Dynamics
+
+::: {.image-card}
+![](figures/variance_autocorr_human.svg){width="90%"}
+:::
+
+## Response Noise Dynamics
+
+::: {.image-card}
+![](figures/variance_autocorr_models.svg){width="90%"}
 :::
