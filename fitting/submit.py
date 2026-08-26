@@ -46,6 +46,22 @@ def _make_run_folder() -> Path:
 
 
 def _write_run_config(run_folder: Path, jobs: list[dict]) -> None:
+    """Append `jobs` to run_config.json, deduplicating against what is already
+    recorded there.
+
+    Dedup key includes loss_fn. It did NOT originally, which caused a real
+    failure: NoisyRL_lambda was fit by RMSE earlier (before the noise-mechanism
+    split), writing (dataset, datafile, model_type, pid) entries under that key.
+    Submitting the SAME model_type later with --loss nll silently skipped every
+    pid that happened to share a key with one of those old RMSE entries --
+    fewer than half the intended batch was ever recorded, even though
+    submission itself (the unconditional loop in main()) is NOT gated by this
+    function and so every job still ran. The result: completed output files on
+    disk for pids collect.py had no way to know existed, since collect reads
+    run_config.json to decide what to look for. loss_fn now participates in the
+    key so an RMSE fit and an NLL fit of the same model_type/pid are never
+    treated as duplicates of each other -- they are not the same fit.
+    """
     import subprocess as sp
 
     try:
@@ -62,13 +78,15 @@ def _write_run_config(run_folder: Path, jobs: list[dict]) -> None:
         existing = json.loads(config_path.read_text())
         prev_jobs = list(existing.get("jobs", []))
         existing_keys = {
-            (j["dataset"], j.get("datafile"), j["model_type"], j["pid"])
+            (j["dataset"], j.get("datafile"), j["model_type"], j["pid"],
+             j.get("loss_fn", "rmse"))
             for j in prev_jobs
         }
         new_jobs = [
             j
             for j in jobs
-            if (j["dataset"], j.get("datafile"), j["model_type"], j["pid"])
+            if (j["dataset"], j.get("datafile"), j["model_type"], j["pid"],
+                j.get("loss_fn", "rmse"))
             not in existing_keys
         ]
         prev_jobs.extend(new_jobs)
