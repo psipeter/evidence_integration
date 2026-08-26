@@ -77,7 +77,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
             # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
             # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 0.30, 0.001),
+            "sigma_state": (0.001, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -89,21 +89,21 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         # Same add_noise() wrapper, applied to the other three deterministic
         # base models. Bounds mirror each base model's own entry exactly.
         "Mean_resp_noise": {
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "LeakyIntegrator_resp_noise": {
             "gamma": (0.001, 0.999, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "PrimacyRecency_resp_noise": {
             "eps_p": (0.001, 1.0, 0.001),
             "eps_r": (0.001, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "NEF": {
             **_NEF_RANGES,
@@ -134,7 +134,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
             # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
             # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 0.30, 0.001),
+            "sigma_state": (0.001, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -146,21 +146,21 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         # Same add_noise() wrapper, applied to the other three deterministic
         # base models. Bounds mirror each base model's own entry exactly.
         "Mean_resp_noise": {
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "LeakyIntegrator_resp_noise": {
             "gamma": (0.001, 0.999, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "PrimacyRecency_resp_noise": {
             "eps_p": (0.001, 1.0, 0.001),
             "eps_r": (0.001, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "PrimacyRecency": {
             "eps_p": (0.001, 1.0, 0.001),
@@ -196,7 +196,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
             # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
             # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 0.30, 0.001),
+            "sigma_state": (0.001, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -208,21 +208,21 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         # Same add_noise() wrapper, applied to the other three deterministic
         # base models. Bounds mirror each base model's own entry exactly.
         "Mean_resp_noise": {
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "LeakyIntegrator_resp_noise": {
             "gamma": (0.001, 0.999, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "PrimacyRecency_resp_noise": {
             "eps_p": (0.001, 1.0, 0.001),
             "eps_r": (0.001, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "NEF": {
             **_NEF_RANGES,
@@ -254,7 +254,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
             # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
             # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 0.30, 0.001),
+            "sigma_state": (0.001, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -266,21 +266,21 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         # Same add_noise() wrapper, applied to the other three deterministic
         # base models. Bounds mirror each base model's own entry exactly.
         "Mean_resp_noise": {
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "LeakyIntegrator_resp_noise": {
             "gamma": (0.001, 0.999, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "PrimacyRecency_resp_noise": {
             "eps_p": (0.001, 1.0, 0.001),
             "eps_r": (0.001, 1.0, 0.001),
-            "sigma_resp": (0.001, 0.30, 0.001),
+            "sigma_resp": (0.001, 2.0, 0.001),
         },
         "NEF": {
             **_NEF_RANGES,
