@@ -37,7 +37,7 @@ import pandas as pd
 
 import fitting.losses as losses
 import models.math_models as math_models
-from models.math_models import _STOCHASTIC_ENSEMBLE_MODELS
+from models.math_models import _NOISE_WRAPPABLE_BASE_MODELS, _STOCHASTIC_ENSEMBLE_MODELS, base_model_of, is_resp_noise_model
 from models import NEF
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path, dataset_stem, resolve_run_folder
@@ -203,21 +203,37 @@ def fit(
     """Fit one participant/model combination and persist outputs.
 
     loss_fn='nll' requires model_type in models.math_models._STOCHASTIC_ENSEMBLE_MODELS
-    (currently {"NoisyRL_lambda"}); checked up front so a bad combination fails
-    before an Optuna study is created, not on the first trial.
+    (a genuinely stochastic model, e.g. "NoisyRL_lambda") OR a name ending in
+    "_resp_noise" whose base model is in _NOISE_WRAPPABLE_BASE_MODELS (a
+    deterministic model wrapped with i.i.d. response noise via
+    models.math_models.add_noise, e.g. "RL_lambda_resp_noise"). Checked up front
+    so a bad combination fails before an Optuna study is created, not on the
+    first trial.
     """
     if loss_fn not in ("rmse", "nll"):
         raise ValueError(f"loss_fn must be 'rmse' or 'nll', got {loss_fn!r}")
-    if loss_fn == "nll" and model_type not in _STOCHASTIC_ENSEMBLE_MODELS:
-        raise ValueError(
-            f"--loss nll needs a stochastic model; {model_type!r} is "
-            f"deterministic, so its ensemble is a delta function and NLL is "
-            f"undefined. Use --loss rmse for this model, or fit one of "
-            f"{sorted(_STOCHASTIC_ENSEMBLE_MODELS)}.")
+    if loss_fn == "nll":
+        is_ensemble_model = model_type in _STOCHASTIC_ENSEMBLE_MODELS
+        is_wrapped_model = (is_resp_noise_model(model_type)
+                            and base_model_of(model_type) in _NOISE_WRAPPABLE_BASE_MODELS)
+        if not (is_ensemble_model or is_wrapped_model):
+            raise ValueError(
+                f"--loss nll needs a stochastic model or a '<model>_resp_noise' "
+                f"wrapper; {model_type!r} is neither. Use --loss rmse for this "
+                f"model, or fit one of {sorted(_STOCHASTIC_ENSEMBLE_MODELS)} or "
+                f"'{{model}}_resp_noise' for model in "
+                f"{sorted(_NOISE_WRAPPABLE_BASE_MODELS)}.")
     if run_folder is None:
         run_folder = RUNS_DIR / "default"
     run_folder = resolve_run_folder(run_folder)
     stem = dataset_stem(dataset, datafile)
+    # NLL fits get a distinct filename suffix, inserted before {pid}, so they
+    # can NEVER collide with an RMSE fit of the same model_type in the same
+    # run_folder -- {model_type}_{stem}_nll_{pid}_*.pkl vs
+    # {model_type}_{stem}_{pid}_*.pkl. Loss scale differs (NLL can be negative;
+    # RMSE cannot), so silently overwriting one with the other would be a real
+    # correctness hazard, not just a naming inconvenience.
+    file_stem = f"{stem}_nll" if loss_fn == "nll" else stem
     human = pd.read_pickle(data_path(f"{stem}.pkl"))
     human = human.query("pid == @pid")
     if human.empty:
@@ -231,7 +247,7 @@ def fit(
 
     study = optuna.create_study(
         direction="minimize",
-        study_name=f"{model_type}_{stem}_{pid}",
+        study_name=f"{model_type}_{file_stem}_{pid}",
         storage=storage,
         load_if_exists=True,
         sampler=optuna.samplers.TPESampler(seed=optuna_seed),
@@ -245,8 +261,16 @@ def fit(
         if loss_fn == "nll":
             # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
             # resulting ensemble by trial rather than re-simulating per fold.
-            ens, row_index = math_models.simulate_ensemble(
-                params, n_sims, return_index=True)
+            # Two ensemble sources, dispatched on model_type:
+            #   genuinely stochastic (NoisyRL_lambda)     -> simulate_ensemble
+            #   deterministic + i.i.d. wrapper (*_resp_noise) -> add_noise
+            if model_type in _STOCHASTIC_ENSEMBLE_MODELS:
+                ens, row_index = math_models.simulate_ensemble(
+                    params, n_sims, return_index=True)
+            else:
+                ens, row_index = math_models.add_noise(
+                    params, n_sims, sigma_resp=params["sigma_resp"],
+                    return_index=True)
             mean_loss, fold_losses = _cross_validate_nll(
                 params, ens, row_index, human, k=k)
         else:
@@ -322,19 +346,35 @@ def fit(
         ]
     )
     folds_df = pd.DataFrame(trial_records)
-    folds_df.to_pickle(run_folder / f"{model_type}_{stem}_{pid}_folds.pkl")
+    folds_df.to_pickle(run_folder / f"{model_type}_{file_stem}_{pid}_folds.pkl")
 
-    params_df.to_pickle(run_folder / f"{model_type}_{stem}_{pid}_params.pkl")
+    params_df.to_pickle(run_folder / f"{model_type}_{file_stem}_{pid}_params.pkl")
     performance_df.to_pickle(
-        run_folder / f"{model_type}_{stem}_{pid}_performance.pkl"
+        run_folder / f"{model_type}_{file_stem}_{pid}_performance.pkl"
     )
 
     if model_type == "NEF":
         save_responses(pid, dataset, run_folder, model_type, datafile)
+    elif is_resp_noise_model(model_type):
+        # run() cannot be called directly with a suffixed model_type -- its
+        # validator only knows base model names. Save ONE seeded draw from
+        # add_noise (n_sims=1), matching the existing convention for a
+        # stochastic model's saved _responses.pkl (NoisyRL_lambda's run() also
+        # returns a single seeded realisation, not an ensemble summary).
+        best_params_full = {**best_params}
+        ens, row_index = math_models.add_noise(
+            best_params_full, 1, sigma_resp=best_params_full["sigma_resp"],
+            return_index=True)
+        df = row_index.copy()
+        df["model_type"] = model_type
+        df["pid"] = int(pid)
+        df["response"] = ens[0]
+        df["response_raw"] = ens[0]
+        df.to_pickle(run_folder / f"{model_type}_{file_stem}_{pid}_responses.pkl")
     else:
         best_params_full = {**best_params}
         df = math_models.run(best_params_full)
-        df.to_pickle(run_folder / f"{model_type}_{stem}_{pid}_responses.pkl")
+        df.to_pickle(run_folder / f"{model_type}_{file_stem}_{pid}_responses.pkl")
 
     return params_df, performance_df
 

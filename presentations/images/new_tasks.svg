@@ -1487,9 +1487,9 @@
          transform="translate(135.27809,147.86064)"><tspan
            x="55.949394"
            y="-3.671484"
-           id="tspan3841"><tspan
+           id="tspan3294"><tspan
              style="font-style:normal;stroke:none"
-             id="tspan3839">t=15</tspan></tspan></text>
+             id="tspan3292">t=15</tspan></tspan></text>
       <path
          style="fill:#1a1a1a;stroke:#000000;stroke-width:1;stroke-dasharray:none;marker-end:url(#marker31-2)"
          d="M 84.299346,18.52206 197.97611,132.19882"
@@ -2173,9 +2173,9 @@
            transform="translate(135.27809,147.86064)"><tspan
              x="55.949394"
              y="-3.671484"
-             id="tspan3845"><tspan
+             id="tspan3298"><tspan
                style="font-style:normal;stroke:none"
-               id="tspan3843">t=15</tspan></tspan></text>
+               id="tspan3296">t=15</tspan></tspan></text>
         <path
            style="fill:#1a1a1a;stroke:#000000;stroke-width:1;stroke-dasharray:none;marker-end:url(#marker31-2-5)"
            d="M 84.299346,18.52206 197.97611,132.19882"
@@ -2192,24 +2192,24 @@
        sodipodi:nodetypes="cc" />
     <text
        xml:space="preserve"
-       style="font-size:12.7px;line-height:1.25;font-family:Inter;-inkscape-font-specification:'Inter, Normal';fill:#0173b2;fill-opacity:1;stroke-width:0.264583"
+       style="font-size:12.7px;line-height:1.25;font-family:Inter;-inkscape-font-specification:'Inter, Normal';fill:#bd54de;fill-opacity:1;stroke-width:0.264583"
        x="-68.850685"
        y="41.315865"
        id="text19079"><tspan
          sodipodi:role="line"
          id="tspan19077"
-         style="font-size:12.7px;fill:#0173b2;fill-opacity:1;stroke-width:0.264583"
+         style="font-size:12.7px;fill:#bd54de;fill-opacity:1;stroke-width:0.264583"
          x="-68.850685"
          y="41.315865">Numbers Task</tspan></text>
     <text
        xml:space="preserve"
-       style="font-size:12.7px;line-height:1.25;font-family:Inter;-inkscape-font-specification:'Inter, Normal';fill:#de8f05;fill-opacity:1;stroke-width:0.264583"
+       style="font-size:12.7px;line-height:1.25;font-family:Inter;-inkscape-font-specification:'Inter, Normal';fill:#458d95;fill-opacity:1;stroke-width:0.264583"
        x="164.51897"
        y="41.392601"
        id="text19079-9"><tspan
          sodipodi:role="line"
          id="tspan19077-8"
-         style="font-size:12.7px;fill:#de8f05;fill-opacity:1;stroke-width:0.264583"
+         style="font-size:12.7px;fill:#458d95;fill-opacity:1;stroke-width:0.264583"
          x="164.51897"
          y="41.392601">Colors Task</tspan></text>
   </g>

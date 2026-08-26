@@ -83,22 +83,6 @@ html { font-family: 'Inter', sans-serif; }
   margin: 0 auto;
 }
 
-// reveal.js's own .r-stack > * { margin: auto; } disables CSS Grid's default
-// stretch sizing for every child, so an .image-card inside an .r-stack
-// shrinks to its own intrinsic content size instead of filling the grid
-// track -- a percentage width on the <img> then resolves against that
-// shrunk box rather than the slide's actual available width. This
-// overrides it so any .r-stack build-up (complexity_*.svg-style fragment
-// stacks, etc.) sizes identically to a plain, non-stacked .image-card
-// slide by default, with no per-slide inline style needed.
-.reveal .r-stack {
-  width: 100%;
-
-  > .image-card {
-    width: 100%;
-  }
-}
-
 .reveal .columns .column {
   /* Reduce space between the main numbered items */
   .fragment {

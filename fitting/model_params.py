@@ -65,6 +65,32 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
+        "NoisyRL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
+            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
+            # via add_noise()) at EQUAL parameter count. See
+            # models/math_models.py's _noisy_rl_lambda_response docstring and
+            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
+            # only, not calibrated -- --loss nll finds a genuine interior optimum
+            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
+            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
+            # genuine finding, not evidence the floor needs raising.
+            "sigma_state": (0.001, 0.30, 0.001),
+        },
+        # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
+        # applied to a plain deterministic RL_lambda. One extra parameter, same
+        # as NoisyRL_lambda's sigma_state -- the pairing that isolates whether
+        # COMPOUNDING noise beats i.i.d. noise on NLL, rather than one model
+        # simply having more parameters. `--loss nll` only; add_noise's ensemble
+        # is undefined as a Gaussian likelihood without noise (see
+        # fitting.losses.compute_nll's docstring).
+        "RL_lambda_resp_noise": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
         "NEF": {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 5},  # 5 obs/trial
@@ -81,6 +107,32 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
+        },
+        "NoisyRL_lambda": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
+            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
+            # via add_noise()) at EQUAL parameter count. See
+            # models/math_models.py's _noisy_rl_lambda_response docstring and
+            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
+            # only, not calibrated -- --loss nll finds a genuine interior optimum
+            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
+            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
+            # genuine finding, not evidence the floor needs raising.
+            "sigma_state": (0.001, 0.30, 0.001),
+        },
+        # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
+        # applied to a plain deterministic RL_lambda. One extra parameter, same
+        # as NoisyRL_lambda's sigma_state -- the pairing that isolates whether
+        # COMPOUNDING noise beats i.i.d. noise on NLL, rather than one model
+        # simply having more parameters. `--loss nll` only; add_noise's ensemble
+        # is undefined as a Gaussian likelihood without noise (see
+        # fitting.losses.compute_nll's docstring).
+        "RL_lambda_resp_noise": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
         },
         "PrimacyRecency": {
             "eps_p": (0.001, 1.0, 0.001),
@@ -107,51 +159,27 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NoisyRL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            # Noise SDs on the canonical [-1,1] response scale, with NONZERO
-            # LOWER BOUNDS. The floors exist because RMSE cannot identify these
-            # parameters: squared error is minimised by the conditional mean, so
-            # noise can only hurt, and an unconstrained fit drives both to zero.
-            # Measured directly -- fitting with lower bound 0.0 gave
-            # sigma_state median 0.0000 (24/35 exactly zero) and sigma_resp median
-            # 0.0000 (25/35 exactly zero) for numbers, with the largest value
-            # anywhere 0.026 against a measured human within-qid residual SD of
-            # ~0.055. Same collapse CLAUDE.md documents for NoisyCounting's
-            # sigma_c under RMSE.
-            #
-            # The floors were chosen by sweeping (sigma_state, sigma_resp) at each
-            # participant's OWN fitted alpha_0/lambda_ and comparing two human
-            # quantities: prefix response variability (within-(pid, obs, qid)
-            # residual SD -- pure response variation, since stimuli are identical
-            # within a qid group) and RMSE against the running mean.
-            #
-            #   sigma_resp = 0.055  matches the measured human within-qid residual
-            #                       SD. Sets the FLOOR of prefix variability;
-            #                       i.i.d. per observation so it does not compound.
-            #   sigma_state = 0.02  brings late-prefix variability to 0.0494-0.0516
-            #                       against human 0.0491-0.0511. Perturbs the
-            #                       ESTIMATE so it compounds, which is what
-            #                       produces variance GROWTH across observations
-            #                       and within-trial residual autocorrelation
-            #                       (temporal cols 3-4).
-            #
-            # At those values RMSE vs the running mean is 0.0743 against a human
-            # 0.1004, so the model still tracks at least as well as participants do
-            # -- noise is not being added past the point of plausibility.
-            #
-            # KNOWN LIMITATION, not fixed by any value in this family. The human
-            # prefix-variability PROFILE is 0.0093, 0.0515, 0.0511, 0.0491 -- a
-            # near-zero floor at observation 0 then a 5.5x step. The model always
-            # produces its HIGHEST variability at observation 0 and flat-to-
-            # declining after, because alpha(1) = alpha_0 ~ 0.95 means it jumps
-            # almost fully to x_1 and both noise terms are expressed immediately.
-            # There is no mechanism for variability to start near zero and then
-            # appear. Plausibly the human pattern is task structure rather than a
-            # noise process: after one observation the right answer is obvious
-            # (report it), and integration -- with its idiosyncrasy and
-            # imprecision -- only begins at observation 1. So judge the match on
-            # observations 1-3, and treat the observation-0 mismatch as a genuine
-            # limitation of this model family rather than something to tune away.
+            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
+            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
+            # via add_noise()) at EQUAL parameter count. See
+            # models/math_models.py's _noisy_rl_lambda_response docstring and
+            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
+            # only, not calibrated -- --loss nll finds a genuine interior optimum
+            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
+            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
+            # genuine finding, not evidence the floor needs raising.
             "sigma_state": (0.001, 0.30, 0.001),
+        },
+        # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
+        # applied to a plain deterministic RL_lambda. One extra parameter, same
+        # as NoisyRL_lambda's sigma_state -- the pairing that isolates whether
+        # COMPOUNDING noise beats i.i.d. noise on NLL, rather than one model
+        # simply having more parameters. `--loss nll` only; add_noise's ensemble
+        # is undefined as a Gaussian likelihood without noise (see
+        # fitting.losses.compute_nll's docstring).
+        "RL_lambda_resp_noise": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
             "sigma_resp": (0.001, 0.30, 0.001),
         },
         "NEF": {
@@ -175,51 +203,27 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NoisyRL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-            # Noise SDs on the canonical [-1,1] response scale, with NONZERO
-            # LOWER BOUNDS. The floors exist because RMSE cannot identify these
-            # parameters: squared error is minimised by the conditional mean, so
-            # noise can only hurt, and an unconstrained fit drives both to zero.
-            # Measured directly -- fitting with lower bound 0.0 gave
-            # sigma_state median 0.0000 (24/35 exactly zero) and sigma_resp median
-            # 0.0000 (25/35 exactly zero) for numbers, with the largest value
-            # anywhere 0.026 against a measured human within-qid residual SD of
-            # ~0.055. Same collapse CLAUDE.md documents for NoisyCounting's
-            # sigma_c under RMSE.
-            #
-            # The floors were chosen by sweeping (sigma_state, sigma_resp) at each
-            # participant's OWN fitted alpha_0/lambda_ and comparing two human
-            # quantities: prefix response variability (within-(pid, obs, qid)
-            # residual SD -- pure response variation, since stimuli are identical
-            # within a qid group) and RMSE against the running mean.
-            #
-            #   sigma_resp = 0.055  matches the measured human within-qid residual
-            #                       SD. Sets the FLOOR of prefix variability;
-            #                       i.i.d. per observation so it does not compound.
-            #   sigma_state = 0.02  brings late-prefix variability to 0.0494-0.0516
-            #                       against human 0.0491-0.0511. Perturbs the
-            #                       ESTIMATE so it compounds, which is what
-            #                       produces variance GROWTH across observations
-            #                       and within-trial residual autocorrelation
-            #                       (temporal cols 3-4).
-            #
-            # At those values RMSE vs the running mean is 0.0743 against a human
-            # 0.1004, so the model still tracks at least as well as participants do
-            # -- noise is not being added past the point of plausibility.
-            #
-            # KNOWN LIMITATION, not fixed by any value in this family. The human
-            # prefix-variability PROFILE is 0.0093, 0.0515, 0.0511, 0.0491 -- a
-            # near-zero floor at observation 0 then a 5.5x step. The model always
-            # produces its HIGHEST variability at observation 0 and flat-to-
-            # declining after, because alpha(1) = alpha_0 ~ 0.95 means it jumps
-            # almost fully to x_1 and both noise terms are expressed immediately.
-            # There is no mechanism for variability to start near zero and then
-            # appear. Plausibly the human pattern is task structure rather than a
-            # noise process: after one observation the right answer is obvious
-            # (report it), and integration -- with its idiosyncrasy and
-            # imprecision -- only begins at observation 1. So judge the match on
-            # observations 1-3, and treat the observation-0 mismatch as a genuine
-            # limitation of this model family rather than something to tune away.
+            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
+            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
+            # via add_noise()) at EQUAL parameter count. See
+            # models/math_models.py's _noisy_rl_lambda_response docstring and
+            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
+            # only, not calibrated -- --loss nll finds a genuine interior optimum
+            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
+            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
+            # genuine finding, not evidence the floor needs raising.
             "sigma_state": (0.001, 0.30, 0.001),
+        },
+        # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
+        # applied to a plain deterministic RL_lambda. One extra parameter, same
+        # as NoisyRL_lambda's sigma_state -- the pairing that isolates whether
+        # COMPOUNDING noise beats i.i.d. noise on NLL, rather than one model
+        # simply having more parameters. `--loss nll` only; add_noise's ensemble
+        # is undefined as a Gaussian likelihood without noise (see
+        # fitting.losses.compute_nll's docstring).
+        "RL_lambda_resp_noise": {
+            "alpha_0": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 1.0, 0.001),
             "sigma_resp": (0.001, 0.30, 0.001),
         },
         "NEF": {

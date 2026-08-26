@@ -32,38 +32,43 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from scipy.stats import wilcoxon
+from scipy.optimize import curve_fit
+from scipy.stats import gaussian_kde, pearsonr, wilcoxon
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, RUNS_DIR
-from utils.aggregate import plot_error_aggregate
+from utils.aggregate import plot_error_aggregate, plot_delta_aggregate
 from utils.plot_style import draw_sig_line, pvalue_to_stars
 
 FIGURES_DIR = Path(__file__).resolve().parent / "figures"
-# 1050x700 is the FULL slide canvas (3:2), but a title bar + footer eat a
-# fixed chunk of that height regardless of slide content, so the actual
-# USABLE area inside an .image-card is closer to ~1050x550 -- a wider ratio
-# than the nominal slide. Sized empirically against this deck's own
-# title+footer chrome (measured overflow at figsize=(9,6)/3:2, width=85%)
-# rather than the raw slide dimensions, so a figure at this figsize clears
-# the footer bar with margin at typical display widths (75-90%).
-SLIDE_FIGSIZE = (9, 4.7)  # ~1.91:1
+# ONE shared figsize for EVERY figure this script produces, regardless of
+# panel count -- so every generated figure fills the same visual footprint
+# at the same display width% in the deck, rather than each figure picking
+# its own canvas size. Midway between what "Responses improve with data"
+# (a single panel, (9, 4.7)) and "Model Performance"/"Response Change Decay"
+# (four panels, (11, 6.2)) each used before being unified -- one panel and
+# four panels don't need the same canvas size to look equally full, but a
+# consistent canvas across every figure is what was asked for here.
+FIGURE_SIZE = (10.6, 5.45)
 
-# new_tasks.svg's own "Numbers Task"/"Colors Task" labels use seaborn
-# colorblind indices 0/1 (#0173b2/#de8f05) -- old_tasks.svg's "Balls
-# Task"/"Snacks Task" reuse those SAME two indices, which is fine on their
-# own separate slide but collides once all four tasks share one panel here.
-# Balls keeps index 2 (teal). Colors keeps its own slide's orange
-# (#de8f05, index 1) since numbers already has index 0 and nothing else
-# in this figure uses orange. Snacks -- which would otherwise collide with
-# balls/colors' own slide colors -- gets pink (#cc78bc, the NEF color in
-# model_palette.svg) instead of its own slide's red-orange.
+# 4-color TASK palette (distinct from MODEL_COLORS/other colors used
+# throughout this deck -- Dartmouth green #00693e, the tab10 red/purple used
+# for equation highlighting, and every MODEL_COLORS hue). Chosen by searching
+# seaborn's husl_palette (evenly-hue-spaced, seaborn-native) over starting
+# hue for the offset that maximizes the WORST-CASE CIELAB deltaE both (a)
+# between these 4 colors and (b) against every color already in use in this
+# presentation -- not just picked by eye. Candidates considered and
+# rejected: seaborn's own remaining colorblind indices 6-9 (pink/gray/
+# yellow/sky-blue -- the gray and sky-blue collide with Human-curve gray and
+# Mean's blue), Set2/Dark2/tab10's own remaining colors, Accent (a pale
+# ffff99 yellow projects poorly). This palette's worst-case separation
+# (deltaE ~22-23) comfortably beats all of those (deltaE as low as 0.4-17).
 TASK_COLORS = {
-    "numbers": "#0173b2",
-    "colors": "#de8f05",
-    "balls": "#029e73",
-    "snacks": "#cc78bc",
+    "balls": "#c86741",
+    "snacks": "#638e3f",
+    "colors": "#458d95",
+    "numbers": "#bd54de",
 }
 TASK_LABELS = {
     "numbers": "Numbers task",
@@ -94,7 +99,6 @@ def _apply_slide_style() -> None:
         "xtick.major.width": 1.2,
         "ytick.major.width": 1.2,
         "lines.linewidth": 2.5,
-        "savefig.bbox": "tight",
         "savefig.transparent": False,
     })
 
@@ -187,7 +191,7 @@ def make_temporal_performance() -> Path:
     integrate over.
     """
     _apply_slide_style()
-    fig, ax = plt.subplots(figsize=SLIDE_FIGSIZE, constrained_layout=True)
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE, constrained_layout=True)
 
     handles, labels = [], []
     for task in TASK_ORDER:
@@ -229,6 +233,16 @@ MODEL_COLORS = {
     "PrimacyRecency": "#029e73",
     "RL_lambda": "#d55e00",
     "NEF": "#d55e00",
+    # Index 5 of the same seaborn-colorblind MODEL_ORDER palette (see
+    # utils/soltani_models.py's own module docstring: "NoisyRL_lambda is last
+    # so that adding it left every existing model's colour untouched") --
+    # NOT reusing #d55e00: unlike RL_lambda (a deterministic stand-in for
+    # NEF elsewhere in this deck), NoisyRL_lambda is a genuinely DIFFERENT
+    # model (adds two real noise terms) playing a DIFFERENT role in the
+    # variability figure below -- the one soltani model with actual
+    # nonzero within-qid-repeat variance, standing in for NEF (not yet fit
+    # for colors/numbers) in that specific sense only.
+    "NoisyRL_lambda": "#ca9161",
 }
 
 # (task_key, panel title, model list). Model lists intentionally differ in
@@ -386,7 +400,7 @@ def make_model_performance() -> Path:
     by, another panel's bars.
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=(11, 4.4), sharey=True,
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
                              constrained_layout=True)
 
     panel_data = []  # (ax, task_key, title, order, plot_df) for panels with data
@@ -408,7 +422,7 @@ def make_model_performance() -> Path:
             ax.text(0.5, 0.5, "No fitted models\nfor this task",
                     ha="center", va="center", transform=ax.transAxes,
                     color="0.5", style="italic")
-            ax.set_title(title)
+            ax.set_title(title, color=TASK_COLORS[task_key])
             continue
 
         plot_df = pd.concat(rows, ignore_index=True)
@@ -417,7 +431,7 @@ def make_model_performance() -> Path:
 
         sns.boxplot(data=plot_df, x="model", y="rmse", order=order,
                     hue="model", palette=pal, legend=False, ax=ax)
-        ax.set_title(title)
+        ax.set_title(title, color=TASK_COLORS[task_key])
         ax.set_xlabel("")
         ax.set_ylabel("Model fit (RMSE to\nhuman responses)" if i == 0 else "")
         ax.tick_params(axis="y", labelleft=(i == 0))
@@ -452,6 +466,7 @@ def make_model_performance() -> Path:
     legend_handles = [Patch(facecolor=MODEL_COLORS[m], label=m)
                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency"]]
     legend_handles.append(Patch(facecolor=MODEL_COLORS["NEF"], label="NEF / RL_lambda"))
+    fig.get_layout_engine().set(h_pad=0.25)
     fig.legend(handles=legend_handles, loc="outside lower center", ncol=4,
                frameon=True, framealpha=0.9)
 
@@ -463,9 +478,1109 @@ def make_model_performance() -> Path:
     return out_path
 
 
+# ── Response change decay across all four tasks ───────────────────
+
+# Same 4-model list per task as make_model_performance (Mean/LeakyIntegrator/
+# PrimacyRecency + NEF or RL_lambda), reused here for the identical reason.
+DELTA_TASK_PANELS = [
+    ("balls", "Balls task", "NEF"),
+    ("snacks", "Snacks task", "NEF"),
+    ("colors", "Colors task", "RL_lambda"),
+    ("numbers", "Numbers task", "RL_lambda"),
+]
+
+# First observation whose |delta response| is included, PER TASK -- copied
+# from each source figure's own established convention, not reinvented:
+#   balls (carrabin): 1 -- every observation has a defined delta (see
+#     FIRST_OBS_IS_RESPONSE below; there is nothing to drop).
+#   snacks (yoo): 2 -- figure_yoo_temporal.py's own _abs_delta_long drops the
+#     first defined delta (at its 1-indexed observation=1) unconditionally.
+#   colors: 2, numbers: 1 -- figure_soltani_temporal.py's own DELTA_MIN_OBS;
+#     colors' first delta is near-degenerate/bimodal with binary evidence
+#     (see that script's own module-level comment above its DELTA_MIN_OBS).
+DELTA_MIN_OBS = {"balls": 1, "snacks": 2, "colors": 2, "numbers": 1}
+
+# carrabin's own panel B treats the FIRST observation's delta as |response|
+# (a "change" from a neutral zero starting point) rather than leaving it
+# undefined/NaN like every other task -- applied identically to Human AND
+# every model's response file in that script, so it's applied the same way
+# here, not just to Human.
+FIRST_OBS_IS_RESPONSE = {"balls": True, "snacks": False, "colors": False, "numbers": False}
+
+HUMAN_COLOR = "0.3"  # matches every figure_*.py script's own HUMAN_COLOR
+
+
+def _human_data_path(task_key: str) -> Path:
+    if task_key == "balls":
+        return data_path("carrabin.pkl")
+    if task_key == "snacks":
+        return data_path("yoo.pkl")
+    return data_path("soltani_colors.pkl" if task_key == "colors" else "soltani_numbers.pkl")
+
+
+def _delta_responses_path(task_key: str, model: str) -> Path:
+    """Path to one (task, model)'s *_responses.pkl -- the actual per-
+    observation response SEQUENCE (needed to compute a delta), NOT the
+    scalar *_performance.pkl loss make_model_performance reads. Two
+    quirks, both copied from each source figure's own established choice
+    rather than the plainer default:
+      balls (carrabin): NEF specifically comes from
+        NEF_carrabin_responses_mle.pkl (the MLE-fitted variant), matching
+        figure_carrabin_temporal.py's own panel B -- NOT the RMSE-fitted
+        NEF_carrabin_responses.pkl make_model_performance uses for ITS
+        (different) panel C. Different panels of the same working script
+        can and do use different fit variants; this one follows panel B's.
+      snacks (yoo): NEF comes from data/runs/refit/, matching this
+        project's own default --nef_folder refit for yoo figures.
+    """
+    if task_key == "balls":
+        if model == "NEF":
+            return RUNS_DIR / "carrabin" / "NEF_carrabin_responses_mle.pkl"
+        return RUNS_DIR / "carrabin" / f"{model}_carrabin_responses.pkl"
+    if task_key == "snacks":
+        run_dir = RUNS_DIR / ("refit" if model == "NEF" else "yoo")
+        return run_dir / f"{model}_yoo_responses.pkl"
+    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
+    return RUNS_DIR / "soltani" / f"{model}_{dataset}_responses.pkl"
+
+
+def _abs_delta_long(df: pd.DataFrame, min_obs: int,
+                     first_obs_is_response: bool) -> pd.DataFrame:
+    """Per-(pid, trial, observation) |delta response|, one row per defined
+    delta. Applied IDENTICALLY to Human and every model's response file --
+    same function, same flags per task -- so a task's own quirks
+    (first_obs_is_response, min_obs) never accidentally apply to one
+    source but not another."""
+    pieces = []
+    for (_, _), g in df.groupby(["pid", "trial"], sort=False):
+        g = g.sort_values("observation").copy()
+        g["delta"] = g["response"].diff().abs()
+        if first_obs_is_response:
+            first_idx = g["observation"].idxmin()
+            g.loc[first_idx, "delta"] = abs(g.loc[first_idx, "response"])
+        pieces.append(g)
+    if not pieces:
+        return pd.DataFrame(columns=["pid", "trial", "observation", "delta"])
+    out = pd.concat(pieces, ignore_index=True)
+    return out[out["observation"] >= min_obs].dropna(subset=["delta"])
+
+
+def _load_response_change_data() -> dict:
+    """task_key -> (human_delta_df, {model: delta_df}, title, ref_label).
+    Loaded ONCE and shared between the human-only and human+models figure
+    passes below, so both read the exact same underlying data."""
+    out = {}
+    for task_key, title, ref_label in DELTA_TASK_PANELS:
+        min_obs = DELTA_MIN_OBS[task_key]
+        first_resp = FIRST_OBS_IS_RESPONSE[task_key]
+
+        human_df = pd.read_pickle(_human_data_path(task_key))
+        human_delta = _abs_delta_long(
+            human_df[["pid", "trial", "observation", "response"]], min_obs, first_resp)
+
+        models = {}
+        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
+            path = _delta_responses_path(task_key, model)
+            if not path.exists():
+                print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+                continue
+            mdf = pd.read_pickle(path)[["pid", "trial", "observation", "response"]]
+            models[model] = _abs_delta_long(mdf, min_obs, first_resp)
+
+        out[task_key] = (human_delta, models, title, ref_label)
+    return out
+
+
+def _four_xticks(obs_max: float) -> list[int]:
+    """[0, ..., obs_max] with exactly 2 evenly-spaced intermediate ticks (4
+    total), rounded to whole observations since that's what they are."""
+    raw = np.linspace(0, obs_max, 4)
+    return sorted(set(int(round(v)) for v in raw))
+
+
+def _draw_response_change_panel(ax, human_delta: pd.DataFrame, models: dict,
+                                ref_label: str, include_models: bool,
+                                ylabel: str, obs_max: float) -> None:
+    plot_delta_aggregate(ax, human_delta, HUMAN_COLOR, "hier_mean_median",
+                         zorder_line=3, zorder_fill=1, errorbar_kind=None)
+    if include_models:
+        for i, model in enumerate(["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]):
+            if model in models:
+                plot_delta_aggregate(ax, models[model], MODEL_COLORS[model],
+                                     "hier_mean_median", zorder_line=4 + i,
+                                     zorder_fill=1, errorbar_kind=None)
+    ax.set_xlabel("Observation")
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(left=0, right=obs_max)
+    ax.set_xticks(_four_xticks(obs_max))
+    ax.set_ylim(bottom=0)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_response_change() -> list[Path]:
+    """Two 1x4-panel figures (same layout as make_model_performance: one
+    panel per task, sharey=True, one shared legend below instead of a
+    per-panel one) for a two-stage reveal.js build: response_change_human.svg
+    (Human only) advances to response_change_full.svg (+ all 4 models) via
+    an .r-stack fragment, the same pattern presentations/images/
+    complexity_*.svg already uses for the "Theories and Models" slide.
+
+    Metric: median (across pids) of each pid's own mean |delta response|
+    vs observation -- the established "response change" panel from
+    figure_carrabin_temporal.py's panel B / figure_yoo_temporal.py's panel B
+    / figure_soltani_temporal.py's col 2, via the shared
+    utils.aggregate.plot_delta_aggregate (hier_mean_median), so this curve's
+    shape is directly comparable to those working figures. Per-task
+    first-observation/minimum-observation conventions are copied from each
+    source rather than reinvented -- see DELTA_MIN_OBS/FIRST_OBS_IS_RESPONSE
+    and _delta_responses_path's own docstrings for exactly which, and why
+    carrabin's NEF comes from a DIFFERENT fit variant (MLE) here than in
+    make_model_performance (RMSE) -- that mismatch is inherited from the two
+    source panels this figure and that one are each modeled on, not
+    introduced by combining them.
+
+    BOTH STAGES SHARE IDENTICAL Y-LIMITS PER PANEL, computed from the FULL
+    (human+models) pass and then applied explicitly to the human-only pass
+    -- not left to each figure's own autoscale. Two separately-saved SVGs
+    have no shared Axes object the way sharey=True panels within ONE figure
+    do, so without this the human-only curve would render at a different
+    vertical scale than it does once models are added, and the r-stack
+    overlay would visibly jump/rescale on that fragment's build step instead
+    of the models cleanly drawing in on top of an unchanged human curve.
+    """
+    _apply_slide_style()
+    data = _load_response_change_data()
+
+    # Max observation actually plotted per task (human UNION every model
+    # that loaded), used for the shared x-axis range/ticks below -- computed
+    # once so both stages use the identical range regardless of whether a
+    # given model's file happened to be missing in one stage's data.
+    obs_max_by_task = {}
+    for task_key in data:
+        human_delta, models, _, _ = data[task_key]
+        obs_vals = [human_delta["observation"].max()] + [
+            df["observation"].max() for df in models.values() if len(df)]
+        obs_max_by_task[task_key] = max(obs_vals)
+
+    # Pass 1: human + models, to establish canonical per-panel y-limits AND
+    # produce the "full" stage-2 image.
+    fig_full, axes_full = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                                       constrained_layout=True)
+    for i, (task_key, title, ref_label) in enumerate(DELTA_TASK_PANELS):
+        human_delta, models, _, _ = data[task_key]
+        ax = axes_full[i]
+        ylabel = "Median |\u0394response|" if i == 0 else ""
+        _draw_response_change_panel(ax, human_delta, models, ref_label,
+                                    include_models=True, ylabel=ylabel,
+                                    obs_max=obs_max_by_task[task_key])
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.tick_params(axis="y", labelleft=(i == 0))
+
+    axes_full[0].set_ylim(bottom=0)  # shared -- applies to every panel
+    shared_top = axes_full[0].get_ylim()[1]
+
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=3, label="Human")]
+    legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=3, label=m)
+                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency"]]
+    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=3,
+                                 label="NEF / RL_lambda"))
+    fig_full.get_layout_engine().set(h_pad=0.25)
+    fig_full.legend(handles=legend_handles, loc="outside lower center", ncol=5,
+                    frameon=True, framealpha=0.9)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    full_path = FIGURES_DIR / "response_change_full.svg"
+    fig_full.savefig(full_path)
+    plt.close(fig_full)
+    print(f"Saved {full_path}")
+
+    # Pass 2: human only, reusing pass 1's shared_top so the two images
+    # align exactly when overlaid as an r-stack fragment build.
+    fig_human, axes_human = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                                         constrained_layout=True)
+    for i, (task_key, title, ref_label) in enumerate(DELTA_TASK_PANELS):
+        human_delta, models, _, _ = data[task_key]
+        ax = axes_human[i]
+        ylabel = "Median |\u0394response|" if i == 0 else ""
+        _draw_response_change_panel(ax, human_delta, models, ref_label,
+                                    include_models=False, ylabel=ylabel,
+                                    obs_max=obs_max_by_task[task_key])
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.tick_params(axis="y", labelleft=(i == 0))
+
+    axes_human[0].set_ylim(0, shared_top)  # identical to pass 1, not autoscaled
+
+    # Same legend SLOT reserved in both images (so constrained_layout gives
+    # both passes the same amount of bottom margin and the axes don't shift
+    # position between stages) -- but only "Human" actually shown yet.
+    fig_human.get_layout_engine().set(h_pad=0.25)
+    fig_human.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=3, label="Human")],
+                     loc="outside lower center", ncol=1,
+                     frameon=True, framealpha=0.9)
+
+    human_path = FIGURES_DIR / "response_change_human.svg"
+    fig_human.savefig(human_path)
+    plt.close(fig_human)
+    print(f"Saved {human_path}")
+
+    return [human_path, full_path]
+
+
+
+# ── Lambda fitting, individual differences, and recency bias ─────────────
+
+# Copied EXACTLY from figure_soltani_temporal.py's/figure_yoo_temporal.py's
+# own _fit_lambda_curve_fit (same functional form, same p0, same bounds --
+# see _fit_lambda_series's own docstring for the full comparison).
+def _power_law(n, A, lam):
+    return A * np.power(np.asarray(n, dtype=float), -lam)
+
+
+# (task_key, panel title) -- balls/carrabin excluded: neither
+# figure_carrabin_temporal.py nor any other working script fits a decay-rate
+# lambda for that task at all (no lambda panel exists there), so there is
+# nothing to reproduce.
+LAMBDA_TASK_PANELS = [
+    ("snacks", "Snacks task"),
+    ("colors", "Colors task"),
+    ("numbers", "Numbers task"),
+]
+
+# Minimum-observation threshold and n-offset for the lambda fit itself, PER
+# TASK -- copied from each source script's ACTUAL _fit_lambda_curve_fit code
+# (not from DELTA_MIN_OBS above, which is a DIFFERENT threshold used only in
+# the visual |delta response| panel elsewhere in figure_soltani_temporal.py).
+#   snacks (yoo, 1-indexed observation): curve.index >= 2, n = index (no
+#     offset) -- figure_yoo_temporal.py's own _fit_lambda_curve_fit.
+#   colors/numbers (0-indexed observation): curve.index >= 1, n = index + 1
+#     -- figure_soltani_temporal.py's own _fit_lambda_curve_fit, used
+#     IDENTICALLY for both tasks in that file.
+#
+# ONE REAL INCONSISTENCY WAS FOUND (see chat) and is deliberately NOT fixed
+# here, per instruction to default to the colors/numbers method as coded:
+# colors has its own SEPARATE DELTA_MIN_OBS=2 threshold (used only in the
+# visual delta panel) to exclude a documented bimodal/degenerate first delta
+# unique to binary evidence, but figure_soltani_temporal.py's shared lambda-
+# fit function does NOT apply that exclusion -- it uses >=1 for colors and
+# numbers alike. So colors' fitted lambda here may include that same
+# degenerate point its own visual panel elsewhere deliberately drops. This
+# reproduces the ACTUAL lambda-fit code (>=1), not the stricter threshold.
+LAMBDA_MIN_OBS = {"snacks": 2, "colors": 1, "numbers": 1}
+LAMBDA_N_OFFSET = {"snacks": 0, "colors": 1, "numbers": 1}
+
+# lambda is bounded to [0,1.5] here (the fit's own bounds= argument allows
+# up to 2, but no fitted pid/model exceeds ~1.2 in this data, and capping
+# the display range at 1.5 makes better use of the axis) -- shared across
+# every histogram/KDE panel below for comparability across tasks and
+# between the human-only and human+models figures.
+LAMBDA_XLIM = (0.0, 1.5)
+
+
+def _fit_lambda_series(delta_df: pd.DataFrame, n_offset: int) -> pd.Series:
+    """Per-pid decay exponent lambda, fitting A*n^(-lambda) to that pid's own
+    mean |delta response| vs n curve by bounded nonlinear least squares --
+    IDENTICAL estimator (p0=[0.1, 0.5], bounds=([0,0],[2,2]), maxfev=2000)
+    to figure_yoo_temporal.py's/figure_soltani_temporal.py's own
+    _fit_lambda_curve_fit. `delta_df` must already be filtered to this
+    task's own min_obs (see LAMBDA_MIN_OBS) via _abs_delta_long -- this
+    function only adds the n_offset and does the per-pid aggregation/fit.
+    Pids whose fit doesn't converge, or with fewer than 3 defined points,
+    are omitted (matching the working scripts' own behavior) rather than
+    substituted with a degenerate value."""
+    out = {}
+    for pid, g in delta_df.groupby("pid"):
+        curve = g.groupby("observation")["delta"].mean().dropna()
+        if len(curve) < 3:
+            continue
+        n = curve.index.values.astype(float) + n_offset
+        y = curve.values.astype(float)
+        try:
+            popt, _ = curve_fit(_power_law, n, y, p0=[0.1, 0.5],
+                                bounds=([0.0, 0.0], [2.0, 2.0]), maxfev=2000)
+            out[int(pid)] = float(popt[1])
+        except Exception:
+            pass
+    return pd.Series(out, name="lambda_")
+
+
+def _load_lambda_delta(task_key: str, path) -> pd.DataFrame:
+    """Raw response file (human or model) -> filtered |delta response| long
+    frame, ready for _fit_lambda_series. Reuses _abs_delta_long (defined
+    above for make_response_change) with this task's LAMBDA-specific
+    min_obs -- NOT its DELTA_MIN_OBS -- and first_obs_is_response=False
+    (that carrabin-only quirk doesn't apply to any of these three tasks)."""
+    df = pd.read_pickle(path)[["pid", "trial", "observation", "response"]]
+    return _abs_delta_long(df, LAMBDA_MIN_OBS[task_key], False)
+
+
+def _plot_lambda_demo(ax, task_key: str = "numbers") -> None:
+    """Panel 1: illustrates the fitting PROCEDURE itself -- one representative
+    pid's own mean |delta response| vs n curve (points) with its fitted
+    power law overlaid (line), rather than summarizing across pids like the
+    other three panels. The demo pid is whoever's fitted lambda is closest
+    to that task's OWN median -- representative of a typical fit, not
+    cherry-picked for a clean-looking curve."""
+    human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
+    lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
+    if lam.empty:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    demo_pid = (lam - lam.median()).abs().idxmin()
+    g = human_delta[human_delta["pid"] == demo_pid]
+    curve = g.groupby("observation")["delta"].mean().dropna().sort_index()
+    n = curve.index.values.astype(float) + LAMBDA_N_OFFSET[task_key]
+    y = curve.values.astype(float)
+    popt, _ = curve_fit(_power_law, n, y, p0=[0.1, 0.5],
+                        bounds=([0.0, 0.0], [2.0, 2.0]), maxfev=2000)
+    A_fit, lam_fit = popt
+
+    ax.scatter(n, y, color=HUMAN_COLOR, s=45, zorder=3)
+    n_smooth = np.linspace(n.min(), n.max(), 200)
+    ax.plot(n_smooth, _power_law(n_smooth, A_fit, lam_fit),
+            color=HUMAN_COLOR, lw=2.5, zorder=4)
+
+    ax.text(0.95, 0.95, "$A n^{-\\lambda}$\n$\\lambda=%.2f$" % lam_fit,
+            transform=ax.transAxes, ha="right", va="top", fontsize=14)
+    ax.set_xlabel("Observations seen (n)")
+    ax.set_ylabel("Mean |\u0394response|")
+    ax.set_title("Fitting example", color="0.3")
+    ax.set_ylim(bottom=0)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_lambda_distribution(ax, human_lam: pd.Series, task_key: str,
+                              model_lams=None) -> None:
+    """Panels 2-4: normalized KDE of fitted lambda across pids -- SAME
+    convention as figure_soltani_variability.py's own _plot_panel_kde
+    (peak-normalized density + individual rug ticks along the baseline),
+    reused here rather than a bar histogram so multiple overlaid
+    distributions (human + up to 4 models) stay legible. `model_lams`, if
+    given, overlays each model's own lambda distribution the same way
+    make_model_performance/make_response_change overlay models on human
+    data -- omit for the human-only figure. Human is plain gray (HUMAN_COLOR)
+    here, matching make_response_change's own human/model color scheme
+    exactly -- task color lives on the panel TITLE only (see the two
+    make_lambda_* callers), not on the human curve/fill itself."""
+    vals = human_lam.dropna()
+    if len(vals) < 2:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    x = np.linspace(LAMBDA_XLIM[0], LAMBDA_XLIM[1], 400)
+    color = HUMAN_COLOR
+
+    def _norm_kde(v):
+        kde = gaussian_kde(v, bw_method="scott")
+        d = kde(x)
+        d = d / d.max()
+        d[x < float(v.min())] = 0
+        d[x > float(v.max())] = 0
+        return kde, d
+
+    kde, density = _norm_kde(vals)
+    ax.fill_between(x, density, alpha=0.15, color=color, zorder=1)
+    ax.plot(x, density, lw=2.2, color=color, zorder=3)
+    kpeak = float(kde(vals.values).max())
+    for v in vals.values:
+        top = float(kde([v])[0]) / kpeak
+        ax.vlines(v, 0, top, color=color, lw=0.6, alpha=0.5, zorder=2)
+
+    for model, mlam in (model_lams or {}).items():
+        mv = mlam.dropna()
+        if len(mv) < 2:
+            continue
+        _, mdensity = _norm_kde(mv)
+        ax.plot(x, mdensity, lw=2.0, color=MODEL_COLORS[model], zorder=4)
+
+    ax.set_xlabel("Fitted \u03bb")
+    ax.set_ylabel("Normalized density")
+    ax.set_xlim(*LAMBDA_XLIM)
+    ax.set_ylim(bottom=0)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_lambda_human() -> Path:
+    """1x4 panel: panel 1 demos the power-law fitting PROCEDURE on one
+    representative human pid (see _plot_lambda_demo); panels 2-4 are KDEs of
+    the fitted decay exponent lambda across pids, one per task (snacks,
+    colors, numbers -- balls/carrabin excluded, see LAMBDA_TASK_PANELS).
+    Lambda near 0 means little decay (roughly equal weight to every
+    observation, primacy-leaning); lambda near 1 is close to an optimal/
+    running-mean-like weighting; lambda above 1 over-weights early
+    observations even more steeply -- so the SPREAD of a task's histogram
+    is a direct picture of individual differences in integration strategy,
+    and its rug ticks are literally one mark per real participant.
+
+    Fitting procedure (per _fit_lambda_series/LAMBDA_MIN_OBS/
+    LAMBDA_N_OFFSET): the SAME estimator (A*n^(-lambda), bounded nonlinear
+    least squares, identical p0/bounds/maxfev) as
+    figure_yoo_temporal.py's/figure_soltani_temporal.py's own
+    _fit_lambda_curve_fit, with each task's own min_obs/n_offset copied
+    from that task's own source script rather than reinvented. One genuine
+    inconsistency was found between colors' visual delta panel and its
+    lambda fit (see LAMBDA_MIN_OBS's own comment) and is deliberately left
+    as-is, matching this project's own actual code rather than the
+    stricter threshold used elsewhere.
+
+    Carries a "Human"-only legend in the same reserved slot make_lambda_
+    models uses for its full Human+model legend, so the figure's overall
+    size/layout doesn't shift between this slide and the follow-up one --
+    same reasoning as make_response_change's own human-only stage.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+
+    _plot_lambda_demo(axes[0], task_key="numbers")
+
+    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
+        ax = axes[i + 1]
+        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
+        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
+        _plot_lambda_distribution(ax, lam, task_key)
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.set_ylabel("Normalized density" if i == 0 else "")
+        ax.tick_params(axis="y", labelleft=(i == 0))
+
+    # Same legend SLOT reserved as make_lambda_models (same h_pad, same
+    # "outside lower center" placement) -- so the figure DOESN'T resize or
+    # shift when models get added on the follow-up slide; only "Human" is
+    # actually shown yet, matching make_response_change's own human-only
+    # stage convention exactly.
+    fig.get_layout_engine().set(h_pad=0.25)
+    fig.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=3, label="Human")],
+               loc="outside lower center", ncol=1,
+               frameon=True, framealpha=0.9)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "lambda_human.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
+def make_lambda_models() -> Path:
+    """Same 1x4 layout as make_lambda_human (panel 1 unchanged), but panels
+    2-4 now overlay each task's 4 fitted models' own lambda distributions
+    on top of the human one -- same Mean/LeakyIntegrator/PrimacyRecency +
+    NEF-or-RL_lambda roster and MODEL_COLORS as make_model_performance/
+    make_response_change, and the same reasoning for why NEF and RL_lambda
+    share one color (RL_lambda stands in for NEF on colors/numbers, which
+    haven't been fit yet).
+
+    A model's own lambda is fit the SAME way a human pid's is (identical
+    _fit_lambda_series call) against that model's own *_responses.pkl
+    sequence -- not read from any pre-computed model-comparison file.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+
+    _plot_lambda_demo(axes[0], task_key="numbers")
+
+    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
+        ax = axes[i + 1]
+        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
+        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
+
+        ref_label = "RL_lambda" if task_key in ("colors", "numbers") else "NEF"
+        model_lams = {}
+        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
+            path = _delta_responses_path(task_key, model)
+            if not path.exists():
+                print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+                continue
+            model_delta = _load_lambda_delta(task_key, path)
+            model_lams[model] = _fit_lambda_series(model_delta, LAMBDA_N_OFFSET[task_key])
+
+        _plot_lambda_distribution(ax, lam, task_key, model_lams=model_lams)
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.set_ylabel("Normalized density" if i == 0 else "")
+        ax.tick_params(axis="y", labelleft=(i == 0))
+
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=3, label="Human")]
+    legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=3, label=m)
+                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency"]]
+    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=3,
+                                 label="NEF / RL_lambda"))
+    fig.get_layout_engine().set(h_pad=0.25)
+    fig.legend(handles=legend_handles, loc="outside lower center", ncol=5,
+               frameon=True, framealpha=0.9)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "lambda_models.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
+
+# ── Sanity check: split-half reliability of lambda + cross-task comparison ──
+
+# Abbreviated legend labels for the sanity-check panels below, which pack up
+# to 5 sources into one legend per panel -- "Mean"/"NEF" stay full-length
+# (already short), LeakyIntegrator/PrimacyRecency/RL_lambda get shortened so
+# a 5-entry legend stays compact. "Human" is never in this dict (looked up
+# via .get(label, label), so it passes through unchanged).
+MODEL_DISPLAY = {
+    "Mean": "Mean",
+    "LeakyIntegrator": "LI",
+    "PrimacyRecency": "PR",
+    "NEF": "NEF",
+    "RL_lambda": "RL_l",
+}
+
+
+def _fit_lambda_split_half(task_key: str, path: Path) -> pd.DataFrame:
+    """Per-pid lambda fit separately on ODD vs EVEN trial-index halves --
+    the SAME convention figure_soltani_temporal.py's own _fit_lambda_split_half
+    uses for its panels E/K (colors/numbers), NOT figure_yoo_temporal.py's own
+    _fit_lambda_split_half for ITS OWN panel C, which splits trials
+    CHRONOLOGICALLY (first half vs second half) instead.
+
+    THIS IS A REAL METHODOLOGY DIFFERENCE BETWEEN THE TWO SOURCE SCRIPTS (see
+    chat) -- soltani's own docstring explains why odd/even is preferred:
+    interleaving samples both "halves" from the same span of session-time,
+    isolating genuine estimation noise from any systematic drift (learning,
+    fatigue, boredom) that a strict chronological split would confound with
+    unreliability. Per instruction to match panels E/K specifically, this
+    applies the ODD/EVEN split uniformly to all three tasks here, including
+    snacks -- overriding yoo's own chronological convention for this figure
+    rather than importing it.
+
+    Requires >=3 trials in EACH half to attempt a fit (matching both source
+    scripts' own threshold). Returns columns [pid, odd, even] -- renamed from
+    soltani's own [pid, first, second] for clarity, since the split itself is
+    odd/even, not first/second."""
+    raw = pd.read_pickle(path)[["pid", "trial", "observation", "response"]]
+    rows = []
+    for pid, grp in raw.groupby("pid"):
+        trials = sorted(grp["trial"].unique())
+        odd_trials, even_trials = trials[0::2], trials[1::2]
+        if min(len(odd_trials), len(even_trials)) < 3:
+            continue
+        for half_label, trial_set in [("odd", odd_trials), ("even", even_trials)]:
+            sub = grp[grp["trial"].isin(trial_set)]
+            delta_sub = _abs_delta_long(sub, LAMBDA_MIN_OBS[task_key], False)
+            lam = _fit_lambda_series(delta_sub, LAMBDA_N_OFFSET[task_key])
+            if pid in lam.index:
+                rows.append({"pid": pid, "half": half_label, "lambda_": float(lam[pid])})
+    if not rows:
+        return pd.DataFrame(columns=["pid", "odd", "even"])
+    wide = pd.DataFrame(rows).pivot(index="pid", columns="half", values="lambda_").dropna()
+    wide.columns.name = None
+    return wide.reset_index()
+
+
+def _plot_lambda_splithalf_panel(ax, legend_ax, task_key: str, title: str,
+                                 include_models: bool, show_ylabel: bool) -> None:
+    """Panels 1-3: odd-vs-even split-half reliability of fitted lambda, one
+    regplot per source -- matching figure_soltani_temporal.py's own panels
+    E/K exactly (scatter=True for EVERY source, not just Human; that panel is
+    meaningful even for deterministic models, since the split's two curves
+    differ due to different STIMULUS sequences across odd/even trials, no
+    response noise required -- see that panel's own docstring). Human is
+    plain gray; task color lives on the panel title only, same convention as
+    every other lambda/response-change figure in this deck.
+
+    Panels 1-3 share BOTH axes at a fixed [0, 1.5] range (matches LAMBDA_XLIM)
+    -- not autoscaled per task -- so the three tasks' reliability scatter is
+    directly visually comparable rather than each panel silently rescaling to
+    its own data range. show_ylabel controls whether this panel draws its own
+    y-axis label/ticks (only the leftmost of the three needs to, since the
+    scale is now identical across all three).
+
+    LEGEND GOES IN A SEPARATE, DEDICATED `legend_ax` (a second GridSpec row
+    turned off via axis('off'), passed in by the caller), not a bbox_to_anchor
+    placement on `ax` itself. This replaced an earlier bbox_to_anchor approach
+    (`ax.legend(loc='upper center', bbox_to_anchor=(0.5, <negative>))`) that
+    worked for a 1-row legend but became unreliable once FIGURE_SIZE was
+    fixed (see that constant's own comment) and a 5-row Human+4-models
+    legend needed more room than the fixed canvas could grow to provide --
+    constrained_layout shrinks an Axes to make room for a bbox_to_anchor
+    legend placed outside it, but only up to a point, and past that point
+    the legend silently clipped rather than erroring (confirmed directly by
+    rendering and inspecting the actual file, not assumed). A dedicated
+    legend_ax with an explicit height_ratios allocation is deterministic
+    instead: its size is fixed by the GridSpec, not inferred from content."""
+    ref_label = "RL_lambda" if task_key in ("colors", "numbers") else "NEF"
+    sources = [("Human", _human_data_path(task_key), HUMAN_COLOR)]
+    if include_models:
+        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
+            path = _delta_responses_path(task_key, model)
+            if path.exists():
+                sources.append((model, path, MODEL_COLORS[model]))
+            else:
+                print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+
+    handles, labels = [], []
+    for label, path, color in sources:
+        wide = _fit_lambda_split_half(task_key, path)
+        if len(wide) < 2:
+            continue
+        sns.regplot(data=wide, x="odd", y="even", ax=ax, color=color,
+                    ci=95 if len(wide) >= 3 else None, scatter=True,
+                    line_kws={"lw": 1.5}, scatter_kws={"s": 20, "alpha": 0.6})
+        handles.append(Line2D([0], [0], color=color, lw=1.5))
+        disp = MODEL_DISPLAY.get(label, label)
+        if len(wide) >= 3:
+            r, p = pearsonr(wide["odd"], wide["even"])
+            labels.append(f"{disp} r={r:.2f}{pvalue_to_stars(p)}")
+        else:
+            labels.append(f"{disp} n={len(wide)}")
+
+    legend_ax.axis("off")
+    ax.set_title(title, color=TASK_COLORS[task_key])
+    ax.set_xlim(*LAMBDA_XLIM)
+    ax.set_ylim(*LAMBDA_XLIM)
+    if not handles:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
+                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    ax.set_xlabel("\u03bb (odd trials)")
+    ax.set_ylabel("\u03bb (even trials)" if show_ylabel else "")
+    ax.tick_params(axis="y", labelleft=show_ylabel)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_lambda_crosstask_panel(ax, legend_ax, include_models: bool = False) -> None:
+    """Panel 4: cross-task comparison of fitted lambda, colors vs numbers, one
+    point per pid who did BOTH -- matching figure_soltani_temporal.py's own
+    panel L (_plot_panel_lambda_crosstask). That panel is human-only BY
+    DESIGN in the source script (an individual-differences/trait-stability
+    check, not a model-fit panel) -- include_models=True here is a
+    deliberate departure from that convention, per explicit instruction, not
+    an oversight: each model's own colors-lambda and numbers-lambda are
+    fit from that model's own *_responses.pkl sequences (same _fit_lambda_
+    series call as every other lambda panel), showing whether a model's
+    OWN cross-task consistency looks anything like a human's. Legend goes in
+    a dedicated legend_ax, same reasoning as _plot_lambda_splithalf_panel's
+    own docstring."""
+    ref_label = "RL_lambda"  # both colors and numbers use RL_lambda, never NEF
+    sources = [("Human", _human_data_path("colors"), _human_data_path("numbers"), HUMAN_COLOR)]
+    if include_models:
+        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
+            c_path = _delta_responses_path("colors", model)
+            n_path = _delta_responses_path("numbers", model)
+            if c_path.exists() and n_path.exists():
+                sources.append((model, c_path, n_path, MODEL_COLORS[model]))
+            else:
+                print(f"  (missing responses -- skipping {model} for crosstask)")
+
+    legend_ax.axis("off")
+    ax.set_title("Colors vs Numbers", color="0.3", fontsize=14)
+    handles, labels = [], []
+    for label, c_path, n_path, color in sources:
+        lam_colors = _fit_lambda_series(
+            _load_lambda_delta("colors", c_path), LAMBDA_N_OFFSET["colors"])
+        lam_numbers = _fit_lambda_series(
+            _load_lambda_delta("numbers", n_path), LAMBDA_N_OFFSET["numbers"])
+        merged = pd.DataFrame({"colors": lam_colors, "numbers": lam_numbers}).dropna()
+        if len(merged) < 2:
+            continue
+
+        ax.scatter(merged["colors"], merged["numbers"], color=color, s=30,
+                  alpha=0.7, zorder=3)
+        disp = MODEL_DISPLAY.get(label, label)
+        if len(merged) >= 3:
+            sns.regplot(data=merged, x="colors", y="numbers", ax=ax, color=color,
+                       ci=95, scatter=False, line_kws={"lw": 1.5})
+            r, p = pearsonr(merged["colors"], merged["numbers"])
+            handles.append(Line2D([0], [0], color=color, lw=1.5))
+            labels.append(f"{disp} r={r:.2f}{pvalue_to_stars(p)}")
+        else:
+            handles.append(Line2D([0], [0], color=color, lw=1.5))
+            labels.append(f"{disp} n={len(merged)}")
+
+    if not handles:
+        ax.text(0.5, 0.5, "No pids completed both tasks", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
+                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    ax.set_xlabel("\u03bb (colors)")
+    ax.set_ylabel("\u03bb (numbers)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_lambda_sanity_human() -> Path:
+    """1x4 panel: panels 1-3 are odd/even split-half reliability of fitted
+    lambda for snacks/colors/numbers (matching figure_soltani_temporal.py's
+    own panels E/K -- see _fit_lambda_split_half's own docstring for the one
+    real methodology difference found and resolved), sharing a fixed [0,1.5]
+    x/y range (LAMBDA_XLIM) across all three rather than each autoscaling to
+    its own data. Panel 4 is the colors-vs-numbers cross-task comparison
+    (matching that same script's panel L), human only in THIS figure -- see
+    make_lambda_sanity_models for the model-added version of every panel,
+    including panel 4.
+
+    Uses a 2-ROW GridSpec (plots on top, a dedicated legend row underneath)
+    rather than one row of Axes with bbox_to_anchor legends -- see
+    _plot_lambda_splithalf_panel's own docstring for why that approach
+    became unreliable once a 5-source legend needed to fit in this figure's
+    now-fixed canvas size.
+    """
+    _apply_slide_style()
+    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
+    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
+    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
+    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+
+    for i, (ax, lax, (task_key, title)) in enumerate(zip(axes[:3], legend_axes[:3], LAMBDA_TASK_PANELS)):
+        _plot_lambda_splithalf_panel(ax, lax, task_key, title, include_models=False,
+                                     show_ylabel=(i == 0))
+    _plot_lambda_crosstask_panel(axes[3], legend_axes[3], include_models=False)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "lambda_sanity_human.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
+def make_lambda_sanity_models() -> Path:
+    """Same layout as make_lambda_sanity_human, but panels 1-3 now add each
+    task's fitted models' own lambda alongside Human's -- ALL 4 models
+    (deterministic ones too, matching figure_soltani_temporal.py's own E/K,
+    unlike figure_yoo_temporal.py's own panel C which excludes Mean/
+    LeakyIntegrator for reasons not inherited here). Panel 4 (cross-task) is
+    human-only, matching panel L's own design -- models were tried there
+    too but explicitly removed per instruction; UNCHANGED from
+    make_lambda_sanity_human. Same 2-row GridSpec as make_lambda_sanity_
+    human, so the two figures' plot areas stay the same size regardless of
+    legend row count.
+    """
+    _apply_slide_style()
+    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
+    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
+    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
+    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+
+    for i, (ax, lax, (task_key, title)) in enumerate(zip(axes[:3], legend_axes[:3], LAMBDA_TASK_PANELS)):
+        _plot_lambda_splithalf_panel(ax, lax, task_key, title, include_models=True,
+                                     show_ylabel=(i == 0))
+    _plot_lambda_crosstask_panel(axes[3], legend_axes[3], include_models=False)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "lambda_sanity_models.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
+
+# ── Response variability for identical inputs (balls, colors, numbers) ─────
+
+# Matches figure_carrabin_variability.py's own panel A metric exactly;
+# shortened for the axis label itself (narrower panels here, since panel A
+# is reserved-but-blank) -- same reasoning as shortening "odd-indexed
+# trials" to "odd trials" for the lambda sanity-check panels.
+VARIABILITY_NOISE_LABEL = "Response variability"
+
+# (task_key, panel title) -- snacks/yoo excluded: figure_yoo_temporal.py has
+# no variance-growth/within-qid-repeat panel at all for that task (no
+# established methodology to reproduce), unlike carrabin (this metric's own
+# source) and colors/numbers (via figure_soltani_temporal.py's cols 3-4
+# machinery, repurposed here -- see below).
+VARIABILITY_TASK_PANELS = [
+    ("balls", "Balls task"),
+    ("colors", "Colors task"),
+    ("numbers", "Numbers task"),
+]
+
+# The ONE model per task with a genuine noise term -- everything else is
+# exactly deterministic (verified directly: max std 2.3e-16 for Mean/
+# LeakyIntegrator/PrimacyRecency on carrabin, i.e. floating-point zero, not
+# just "small"). NEF for balls (carrabin's own model roster); RL_lambda is
+# deterministic for colors/numbers (see utils/soltani_models.py's own
+# STOCHASTIC_MODELS), so NoisyRL_lambda stands in there instead -- checked
+# directly that its noise did NOT collapse to the zero floor that module's
+# own docstring warns can happen under RMSE fitting (median std 0.33-0.39,
+# not 0), so it is a genuine, non-degenerate stand-in, not a coincidental
+# flat line.
+VARIABILITY_STOCHASTIC_MODEL = {
+    "balls": "NEF",
+    "colors": "NoisyRL_lambda",
+    "numbers": "NoisyRL_lambda",
+}
+
+# Every OTHER model for that task -- all exactly deterministic, plotted as
+# jittered points at x=0 rather than a degenerate zero-width "KDE" (see
+# _plot_variability_panel's own docstring for why).
+VARIABILITY_DETERMINISTIC_MODELS = {
+    "balls": ["Mean", "LeakyIntegrator", "PrimacyRecency"],
+    "colors": ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"],
+    "numbers": ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"],
+}
+
+# colors has no designed qid repeat structure of its own -- utils.colors_
+# quasi_qids empirically derives one (see that module's own docstring for
+# the sweep that settled these defaults). numbers uses its REAL designed
+# prefix (4 -- see figure_soltani_temporal.py's own NUMBERS_PREFIX_LENGTH).
+# Both restrict to the prefix window, where a qid's repeats actually share
+# an identical stimulus; carrabin needs no such restriction; its qid IS the
+# whole 5-observation trial, repeated verbatim.
+VARIABILITY_PREFIX_LENGTH = {"colors": None, "numbers": 4}  # colors' own set below
+
+
+def _qid_response_std(resp_df: pd.DataFrame, qid_map: pd.DataFrame,
+                      min_trials: int = 3) -> pd.Series:
+    """Mean of std(response | pid, observation, qid) per pid -- copied
+    VERBATIM from figure_carrabin_variability.py's own _qid_response_std.
+    One number per pid: how noisy is this person's (or model's) response to
+    a REPEATED, identical stimulus. resp_df needs no `qid` column of its
+    own -- it is merged in from qid_map on (pid, trial, observation), so the
+    same repeat-structure labelling can be applied uniformly to Human and
+    every model's response file."""
+    df = resp_df.drop(columns=["qid"], errors="ignore").merge(
+        qid_map, on=["pid", "trial", "observation"])
+    grp = (df.groupby(["pid", "observation", "qid"])["response"]
+           .apply(lambda x: x.std() if len(x) >= min_trials else np.nan)
+           .dropna().reset_index(name="resp_std"))
+    return grp.groupby("pid")["resp_std"].mean()
+
+
+def _variability_qid_map(task_key: str) -> tuple[pd.DataFrame, int | None]:
+    """(qid_map, prefix_length) for one task -- qid_map has columns [pid,
+    trial, observation, qid], already restricted to the prefix window for
+    colors/numbers (see VARIABILITY_PREFIX_LENGTH's own comment). Built
+    once per task and reused for Human and every model, so the exact same
+    repeat-structure labelling applies to all of them."""
+    if task_key == "balls":
+        human = pd.read_pickle(data_path("carrabin.pkl"))
+        qid_map = human[["pid", "trial", "observation", "qid"]].drop_duplicates()
+        return qid_map, None
+
+    from utils.colors_quasi_qids import (
+        MIN_REPEATS as QQ_MIN_REPEATS,
+        PREFIX_LENGTH as QQ_PREFIX_LENGTH,
+        add_quasi_qids,
+    )
+
+    if task_key == "colors":
+        human = pd.read_pickle(data_path("soltani_colors.pkl"))
+        human = add_quasi_qids(human, prefix_length=QQ_PREFIX_LENGTH,
+                               min_repeats=QQ_MIN_REPEATS)
+        prefix = QQ_PREFIX_LENGTH
+    else:
+        human = pd.read_pickle(data_path("soltani_numbers.pkl"))
+        prefix = VARIABILITY_PREFIX_LENGTH["numbers"]
+
+    qid_map = (human[human["observation"] < prefix]
+               [["pid", "trial", "observation", "qid"]].drop_duplicates())
+    return qid_map, prefix
+
+
+def _variability_series(task_key: str, path: Path, qid_map: pd.DataFrame,
+                        prefix: int | None) -> pd.Series:
+    """Per-pid response-variability series for one (task, source) -- Human
+    or one model's *_responses.pkl. `path` is the raw response file;
+    restricted to the prefix window first for colors/numbers, matching
+    qid_map's own restriction, before computing _qid_response_std."""
+    df = pd.read_pickle(path)[["pid", "trial", "observation", "response"]]
+    if prefix is not None:
+        df = df[df["observation"] < prefix]
+    return _qid_response_std(df, qid_map)
+
+
+def _variability_model_path(task_key: str, model: str) -> Path:
+    """Path to one (task, model)'s *_responses.pkl. balls' NEF specifically
+    uses the MLE-fitted variant (NEF_carrabin_responses_mle.pkl), matching
+    figure_carrabin_variability.py's OWN panels A/C convention -- NOT the
+    RMSE-fitted NEF_carrabin_responses.pkl _delta_responses_path uses for
+    ITS (different) panel B. Every other (task, model) is the plain
+    RMSE-fitted response file."""
+    if task_key == "balls":
+        if model == "NEF":
+            return RUNS_DIR / "carrabin" / "NEF_carrabin_responses_mle.pkl"
+        return RUNS_DIR / "carrabin" / f"{model}_carrabin_responses.pkl"
+    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
+    return RUNS_DIR / "soltani" / f"{model}_{dataset}_responses.pkl"
+
+
+def _plot_variability_panel(ax, legend_ax, task_key: str, title: str,
+                            include_models: bool) -> None:
+    """Panels B-D: normalized KDE of per-pid response variability for
+    identical (repeated-stimulus) inputs -- matching
+    figure_carrabin_variability.py's own panel A (KDE + peak-normalized +
+    individual-pid rug ticks, same convention this deck's other lambda/
+    KDE panels already use), extended to colors/numbers via
+    figure_soltani_temporal.py's own qid/quasi-qid repeat-structure
+    machinery (see _variability_qid_map). Human is plain gray; task color
+    lives on the panel title only, same convention as every other figure
+    in this deck.
+
+    When include_models=True, only ONE model per task gets drawn as a
+    proper KDE line -- whichever one actually has a nonzero noise term
+    (VARIABILITY_STOCHASTIC_MODEL). Every OTHER model is deterministic, so
+    its own per-pid variability is EXACTLY zero (floating-point zero, not
+    "small" -- verified directly, see VARIABILITY_TASK_PANELS's own
+    comment): plotting those as a KDE would be a degenerate zero-width
+    spike, or as a flat line at x=0 would look like an artifact/error
+    rather than a genuine result. Instead each deterministic model is drawn
+    as a small cluster of (x-jittered, y-scattered) points anchored at
+    x=0 -- one marker per pid, honestly showing "this model's variability
+    really is zero for every participant" rather than hiding that fact or
+    faking a distribution that doesn't exist.
+    """
+    qid_map, prefix = _variability_qid_map(task_key)
+    human_path = _human_data_path(task_key)
+    human_vals = _variability_series(task_key, human_path, qid_map, prefix).dropna()
+
+    legend_ax.axis("off")
+    ax.set_title(title, color=TASK_COLORS[task_key])
+
+    if len(human_vals) < 2:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    all_vals = list(human_vals.values)
+    stochastic_model = VARIABILITY_STOCHASTIC_MODEL[task_key]
+    stochastic_vals = None
+    if include_models:
+        spath = _variability_model_path(task_key, stochastic_model)
+        if spath.exists():
+            stochastic_vals = _variability_series(task_key, spath, qid_map, prefix).dropna()
+            if len(stochastic_vals) >= 2:
+                all_vals.extend(stochastic_vals.values)
+        else:
+            print(f"  (missing {spath.name} -- skipping {stochastic_model} for {task_key})")
+
+    x_max = float(np.quantile(all_vals, 0.99)) * 1.15
+    x = np.linspace(0, x_max, 400)
+
+    def _norm_kde(vals):
+        kde = gaussian_kde(vals, bw_method="scott")
+        d = kde(x)
+        d = d / d.max()
+        d[x < float(vals.min())] = 0
+        d[x > float(vals.max())] = 0
+        return kde, d
+
+    handles, labels = [], []
+
+    kde, density = _norm_kde(human_vals.values)
+    ax.fill_between(x, density, alpha=0.15, color=HUMAN_COLOR, zorder=1)
+    ax.plot(x, density, lw=2.2, color=HUMAN_COLOR, zorder=3)
+    kpeak = float(kde(human_vals.values).max())
+    for v in human_vals.values:
+        top = float(kde([v])[0]) / kpeak
+        ax.vlines(v, 0, top, color=HUMAN_COLOR, lw=0.6, alpha=0.5, zorder=2)
+    handles.append(Line2D([0], [0], color=HUMAN_COLOR, lw=2.2))
+    labels.append("Human")
+
+    if include_models:
+        if stochastic_vals is not None and len(stochastic_vals) >= 2:
+            _, mdensity = _norm_kde(stochastic_vals.values)
+            color = MODEL_COLORS[stochastic_model]
+            ax.plot(x, mdensity, lw=2.0, color=color, zorder=4)
+            handles.append(Line2D([0], [0], color=color, lw=2.0))
+            labels.append(MODEL_DISPLAY.get(stochastic_model, stochastic_model))
+
+        rng = np.random.RandomState(0)  # deterministic jitter, not a new draw per render
+        for i, model in enumerate(VARIABILITY_DETERMINISTIC_MODELS[task_key]):
+            mpath = _variability_model_path(task_key, model)
+            if not mpath.exists():
+                print(f"  (missing {mpath.name} -- skipping {model} for {task_key})")
+                continue
+            mvals = _variability_series(task_key, mpath, qid_map, prefix).dropna()
+            if len(mvals) < 1:
+                continue
+            n = len(mvals)
+            x_jit = rng.normal(0, x_max * 0.01, n)
+            y_jit = rng.uniform(0.03, 0.16, n)
+            color = MODEL_COLORS[model]
+            ax.scatter(x_jit, y_jit, color=color, s=14, alpha=0.6, zorder=5,
+                      edgecolors="none")
+            handles.append(Line2D([0], [0], color=color, lw=0, marker="o",
+                                  markersize=5, alpha=0.8))
+            labels.append(MODEL_DISPLAY.get(model, model))
+
+    ax.set_xlabel(VARIABILITY_NOISE_LABEL, fontsize=14)
+    ax.set_ylabel("Normalized density")
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
+    sns.despine(ax=ax, top=True, right=True)
+    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
+                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+
+
+def make_variability_human() -> Path:
+    """1x4 panel, same layout as make_lambda_sanity_human: panel A left
+    BLANK (per instruction -- a hand-made image goes there later), panels
+    B-D are Human-only KDEs of response variability for identical inputs,
+    one per task (balls, colors, numbers -- snacks excluded, see
+    VARIABILITY_TASK_PANELS). Same 2-row GridSpec (plots + a dedicated
+    legend row) as the lambda sanity-check figures, for the same reason:
+    a bbox_to_anchor legend became unreliable once FIGURE_SIZE was fixed.
+    """
+    _apply_slide_style()
+    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
+    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
+    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
+    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+
+    axes[0].axis("off")
+    legend_axes[0].axis("off")
+
+    for ax, lax, (task_key, title) in zip(axes[1:], legend_axes[1:], VARIABILITY_TASK_PANELS):
+        _plot_variability_panel(ax, lax, task_key, title, include_models=False)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "variability_human.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
+def make_variability_models() -> Path:
+    """Same layout as make_variability_human, but panels B-D add each
+    task's ONE genuinely-stochastic model as a proper KDE, plus every
+    other (deterministic) model as a jittered cluster of points at x=0 --
+    see _plot_variability_panel's own docstring for why. Panel A is still
+    left blank.
+    """
+    _apply_slide_style()
+    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
+    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
+    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
+    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+
+    axes[0].axis("off")
+    legend_axes[0].axis("off")
+
+    for ax, lax, (task_key, title) in zip(axes[1:], legend_axes[1:], VARIABILITY_TASK_PANELS):
+        _plot_variability_panel(ax, lax, task_key, title, include_models=True)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "variability_models.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
 FIGURES = {
     "temporal_performance": make_temporal_performance,
     "model_performance": make_model_performance,
+    "response_change": make_response_change,
+    "lambda_human": make_lambda_human,
+    "lambda_models": make_lambda_models,
+    "lambda_sanity_human": make_lambda_sanity_human,
+    "lambda_sanity_models": make_lambda_sanity_models,
+    "variability_human": make_variability_human,
+    "variability_models": make_variability_models,
 }
 
 

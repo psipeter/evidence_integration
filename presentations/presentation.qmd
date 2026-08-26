@@ -10,6 +10,7 @@ format:
     highlight-style: github
     slide-number: true
     html-math-method: katex
+    include-after-body: include-scripts.html
     # embed-resources: true
 bibliography: "references.bib"
 
@@ -54,34 +55,19 @@ bibliography: "references.bib"
 ## Responses improve with data
 
 ::: {.image-card}
-![](figures/temporal_performance.svg){width="85%"}
+![](figures/temporal_performance.svg){width="90%"}
 :::
 
 ## Theories and Models
 
-::: {.r-stack}
-
 ::: {.image-card}
-![](images/complexity_1.svg){width="90%"}
+![](images/complexity_1.svg){#theories-img width="90%"}
 :::
 
-::: {.fragment .image-card fragment-index="1"}
-![](images/complexity_2.svg){width="90%"}
-:::
-
-::: {.fragment .image-card fragment-index="2"}
-![](images/complexity_3.svg){width="90%"}
-:::
-
-::: {.fragment .image-card fragment-index="3"}
-![](images/complexity_4.svg){width="90%"}
-:::
-
-::: {.fragment .image-card fragment-index="4"}
-![](images/complexity_5.svg){width="90%"}
-:::
-
-:::
+[]{.fragment fragment-index="1" data-swap-target="theories-img" data-swap-src="images/complexity_2.svg" data-swap-prev="images/complexity_1.svg"}
+[]{.fragment fragment-index="2" data-swap-target="theories-img" data-swap-src="images/complexity_3.svg" data-swap-prev="images/complexity_2.svg"}
+[]{.fragment fragment-index="3" data-swap-target="theories-img" data-swap-src="images/complexity_4.svg" data-swap-prev="images/complexity_3.svg"}
+[]{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="images/complexity_5.svg" data-swap-prev="images/complexity_4.svg"}
 
 
 ## Weighted Prediction Error
@@ -114,4 +100,48 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 
 ::: {.image-card}
 ![](figures/model_performance.svg){width="90%"}
+:::
+
+## Smaller Updates Over Time
+
+::: {.image-card}
+![](figures/response_change_human.svg){#response-change-img width="90%"}
+:::
+
+[]{.fragment fragment-index="1" data-swap-target="response-change-img" data-swap-src="figures/response_change_full.svg" data-swap-prev="figures/response_change_human.svg"}
+
+## Individual Differences in $|\Delta R|$
+
+::: {.image-card}
+![](figures/lambda_human.svg){width="90%"}
+:::
+
+## Individual Differences in $|\Delta R|$
+
+::: {.image-card}
+![](figures/lambda_models.svg){width="90%"}
+:::
+
+## Sanity Check
+
+::: {.image-card}
+![](figures/lambda_sanity_human.svg){width="90%"}
+:::
+
+## Sanity Check
+
+::: {.image-card}
+![](figures/lambda_sanity_models.svg){width="90%"}
+:::
+
+## Response Variability
+
+::: {.image-card}
+![](figures/variability_human.svg){width="90%"}
+:::
+
+## Model Response Variability
+
+::: {.image-card}
+![](figures/variability_models.svg){width="90%"}
 :::

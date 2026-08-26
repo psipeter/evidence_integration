@@ -766,82 +766,119 @@ task_backend at all: **`docs/HISTORY.md`**.
 | RL_lambda | Power-law delta rule (explicit equation) | alpha_0, lambda_ |
 | NEF | Spiking NEF integrator (emergent power-law dynamics) | alpha_0, lambda_ |
 
-| NoisyRL_lambda | RL_lambda + tunable state and response noise; soltani only | alpha_0, lambda_, sigma_state, sigma_resp |
+| NoisyRL_lambda | RL_lambda + STATE noise only; all 4 datasets | alpha_0, lambda_, sigma_state |
+| {Mean,LeakyIntegrator,PrimacyRecency,RL_lambda}_resp_noise | base model + i.i.d. RESPONSE noise via `add_noise()`; all 4 datasets | base params + sigma_resp |
 
-### NoisyRL_lambda
+### Two response-noise mechanisms, kept deliberately separate
 
-    alpha(n) = alpha_0 / n^lambda
-    e_n = clip(e_{n-1} + alpha(n)(x_n - e_{n-1}) + xi_n, -1, 1)   xi ~ N(0, sigma_state)
-    r_n = clip(e_n + eta_n, -1, 1)                                eta ~ N(0, sigma_resp)
+    NoisyRL_lambda:
+      alpha(n) = alpha_0 / n^lambda
+      e_n = clip(e_{n-1} + alpha(n)(x_n - e_{n-1}) + xi_n, -1, 1)   xi ~ N(0, sigma_state)
+      response = e_n
 
-Two noise sources doing DIFFERENT jobs, which is the point of the model:
+    <model>_resp_noise (models.math_models.add_noise):
+      mu = run(base_params).response          -- ONE deterministic call
+      response = clip(mu + eta, -1, 1)         eta ~ N(0, sigma_resp), i.i.d. per row
+
+**Originally NoisyRL_lambda had BOTH sigma_state and sigma_resp** (see
+docs/HISTORY.md for that version's results). It was split so the two noise
+MECHANISMS -- compounding vs i.i.d. -- can be compared at EQUAL parameter count (one
+extra param each: NoisyRL_lambda's sigma_state vs
+e.g. RL_lambda_resp_noise's sigma_resp), isolating which mechanism captures human
+data better rather than confounding it with parameter count. This is the
+comparison the NLL infrastructure below exists to run.
+
 - `sigma_state` enters the ESTIMATE, so it persists and compounds -- a perturbation
-  at step j reaches step n with weight `prod_{k=j+1..n}(1-alpha(k))`. This produces
-  residual variance GROWTH and within-trial residual AUTOCORRELATION, i.e. what
-  temporal cols 3-4 measure.
-- `sigma_resp` enters only the REPORTED value, i.i.d. per observation. Raises
-  |Δresponse| by ~`1.128*sigma_resp` uniformly, producing a PLATEAU rather than
-  growth, and contributing zero autocorrelation.
+  at step j reaches step n with weight `prod_{k=j+1..n}(1-alpha(k))`. Produces
+  residual variance GROWTH and within-trial residual AUTOCORRELATION (temporal
+  cols 3-4 for soltani).
+- `sigma_resp` (now via `add_noise`, not a NoisyRL_lambda parameter) enters only
+  the REPORTED value, i.i.d. per row, no persistence. Raises |Δresponse| by
+  ~`1.128*sigma_resp` uniformly -- a PLATEAU rather than growth, zero
+  autocorrelation. `add_noise` needs no per-model branch and no trial-replay
+  logic (i.i.d. noise has no sequential dependency to preserve), so it wraps ANY
+  of Mean/LeakyIntegrator/PrimacyRecency/RL_lambda generically, without depending
+  on a prior RMSE fit -- mu comes fresh from run() every call.
 
-Seeded `_trial_seed(seed, trial)` exactly as NoisyCounting. This is LOAD-BEARING,
-not cosmetic: `_run_soltani_common` re-simulates from scratch for every
-(trial, observation) -- 480 calls per parameter set -- so a TRIAL-scoped seed makes
-observation k+1's call replay the same draws as observation k's for its first k
-steps. Seeding per-observation would give 15 unrelated trajectories and destroy the
-state/response distinction. `eta` is drawn at EVERY step though only the last is
-used, to keep that replay aligned -- do not "optimise" that draw away.
+Both registered for **all four datasets** now (carrabin, yoo, soltani_numbers,
+soltani_colors), not soltani-only as originally built -- extending required fixing
+two real bugs, see "PITFALLS" below.
 
-**Noise parameters have NONZERO LOWER BOUNDS, and must.** RMSE cannot identify
-them: squared error is minimised by the conditional mean, so noise only hurts.
-Measured with floors at 0: `sigma_state` median 0.0000 (24/35 exactly zero),
-`sigma_resp` median 0.0000 (25/35 zero), largest value anywhere 0.026 against a
-measured human within-qid residual SD of ~0.055. Same collapse documented below for
-NoisyCounting's `sigma_c`. Current floors: `sigma_state` 0.02 (both tasks),
-`sigma_resp` 0.04 (numbers) / 0.055 (colors), chosen by sweeping both against human
-prefix response variability and RMSE-vs-running-mean. With floors in place
-essentially every pid sits AT them (numbers 35/35 both), so the fitted values are
-not evidence about the noise level -- the floors are.
+### Fitting noise: RMSE cannot, NLL can (`--loss {rmse,nll}` on fitting.fit)
 
-**THE RESULT THIS BUYS.** Fitted `alpha_0`/`lambda_` barely move (numbers lambda
-0.704 -> 0.662, r=0.964 with RL_lambda's), but the temporal profile changes
-decisively:
+**RMSE cannot identify a noise parameter, ever.** Squared error is minimised by
+the conditional mean, so noise only adds cost. Measured directly: an unbounded
+RMSE fit of the original two-sigma NoisyRL_lambda gave `sigma_state` median 0.0000
+(24/35 exactly zero) and `sigma_resp` median 0.0000 (25/35 zero) for soltani
+numbers -- the same collapse documented below for NoisyCounting's `sigma_c` under
+RMSE. A floor forces a nonzero value but does not mean the DATA chose it.
 
-| numbers | \|Δ\| first→last | ratio | plateau | descriptive λ | gap vs human |
-|---------|------------------|-------|---------|---------------|--------------|
-| HUMAN | 0.1506 → 0.0613 | 2.46 | 0.0633 | 0.294 | -- |
-| RL_lambda | 0.1317 → 0.0182 | 7.24 | 0.0223 | 0.921 | +0.382, p<0.0001 |
-| NoisyRL_lambda | 0.1475 → 0.0590 | **2.50** | 0.0537 | 0.405 | **+0.035, p=0.62** |
+**`fitting.losses.compute_nll`** (Gaussian NLL of the observed response under the
+model's simulated predictive distribution) is a proper scoring rule -- it
+penalises a wrong mean AND a wrong variance, so it CAN find a genuine interior
+optimum. Verified directly, unconstrained (floor 0.001, effectively no floor): on
+soltani_numbers pid 1, NLL fell from 389 at sigma_resp=0.001 to -2.46 at the
+optimum (~0.04-0.05) and rose again beyond it -- a real U-shape, not a monotone
+pull toward zero.
 
-The decay ratio goes from ~3x too steep to essentially exact, and the descriptive-λ
-gap becomes statistically indistinguishable from zero. For colors the plateau match
-becomes exact (0.0853 vs human 0.0854, from 0.0615) and the per-pid λ correlation
-improves 0.782 -> 0.894.
+`fitting.fit(..., loss_fn="nll", n_sims=100)`. Dispatches on `model_type`:
+genuinely stochastic models (`_STOCHASTIC_ENSEMBLE_MODELS`, currently
+`{NoisyRL_lambda}`) go through `simulate_ensemble`; `<model>_resp_noise` names go
+through `add_noise`. Checked BEFORE the Optuna study is created, so a bad
+combination (e.g. `--loss nll` on plain `Mean`) fails immediately with the valid
+alternatives listed, not on the first trial.
 
-**What is and is not circular here.** σ_resp's floor was CALIBRATED to the measured
-within-qid residual SD, and the plateau is largely a function of that same
-quantity -- so "noise reproduces the plateau" is partly by construction. What is
-NOT circular: nothing tied σ to the DECAY RATIO or to the descriptive λ, and both
-landed on target. Two independent quantities came right from one calibrated input.
-State it that way, not as "the noisy model fits better".
+`n_sims=100` is verified stable: 5 reseeded reps of a sigma_resp sweep all picked
+the identical argmin (n_sims=25 already agreed). Cost ~0.45s/eval, so a 300-trial
+fit is ~2.3 min/pid.
 
-**Known limitations, both real.**
-- The human prefix-variability PROFILE is 0.0093, 0.0515, 0.0511, 0.0491 -- a
-  near-zero floor at observation 0 then a 5.5x step. The model always produces its
-  HIGHEST variability at observation 0 and flat-to-declining after, because
-  `alpha(1) = alpha_0 ~ 0.95` means it jumps almost fully to x_1 and both noise
-  terms are expressed immediately. No value in this family fixes it. Plausibly the
-  human pattern is task structure (after one observation the answer is obvious;
-  integration only begins at observation 1), so judge the match on observations 1-3.
-- Identical noise for every pid gives human-SCALE variability but not human
-  INDIVIDUAL DIFFERENCES in it. The variability figure shows this directly:
-  NoisyRL_lambda's prefix-variability distribution is a narrow spike (~0.04-0.05)
-  against the human's broad right-skewed 0.2-0.5, and its split-half reliability is
-  much weaker (numbers r=0.49** vs human 0.81****; colors r=0.23 ns vs 0.59***).
-  The numbers λ CORRELATION also drops (0.644 -> 0.524) even as the level matches.
-  Next step is per-participant σ_resp fixed at each pid's own measured value, which
-  should preserve the level match and recover the correlation. `MODEL_PARAMS`
-  supports a `fixed` dict but not per-participant values -- that is the plumbing
-  needed.
+**NLL output files get a `_nll` suffix** inserted before `{pid}` --
+`{model_type}_{stem}_nll_{pid}_*.pkl` -- so an NLL fit can NEVER silently overwrite
+an RMSE fit of the same model_type in the same run_folder (their loss scales
+differ; NLL can be negative, RMSE cannot).
+
+### PITFALLS when extending a model to a new dataset, learned the hard way
+
+Two real bugs surfaced extending NoisyRL_lambda from soltani-only to all four
+datasets, both invisible to `py_compile` and to exercising branches in isolation --
+caught only by comparing `simulate_ensemble`/`add_noise` against `run()` directly:
+
+1. An unguarded string-replace on an anchor that exists once per dataset
+   (`_run_carrabin`, `_run_yoo`, `_run_soltani_common`) silently TRIPLICATED a
+   model's branch into all three instead of the one intended. Dormant until the
+   model was actually registered for the other datasets.
+2. `simulate_ensemble` labelled ensemble columns with a synthetic `range(n_obs)`
+   instead of the dataset's REAL observation values. Harmless for soltani
+   (0-indexed, coincidentally identical) but WRONG for carrabin (1-indexed),
+   silently feeding the wrong exponent into the Laplace-shrinkage formula and
+   biasing the ensemble by up to 0.167.
+
+**Run `scripts/verify_ensemble_invariant.py` after touching `simulate_ensemble`,
+`add_noise`, any `_run_*` dispatcher, or `_validate_model_dataset`'s allowlists,
+and before trusting any `--loss nll` fit on a dataset/model combination it has not
+been checked against before.** It checks, per dataset x model: `simulate_ensemble`
+matches `run(seed=i)` exactly; `add_noise` reduces exactly to `run()` at sigma=0;
+its empirical mean/SD track the requested values away from the +-1 clipping
+boundary (clipping bias there is CORRECT behaviour, not a bug -- confirmed
+directly on soltani_colors' Mean model, which legitimately outputs exactly +-1 on
+15.6% of rows); and the bare model name and the `_resp_noise`-suffixed name
+produce IDENTICAL output (the exact seam that broke silently once already).
+There is no pytest suite in this project; do not add a docstring claiming
+otherwise.
+
+### Earlier result (pre-split model; superseded, see docs/HISTORY.md for full detail)
+
+With BOTH sigma_state and sigma_resp fit by RMSE with hand-calibrated floors
+(soltani only), adding calibrated response noise to RL_lambda's fitted output
+moved the temporal decay ratio from 7.24 (RL_lambda alone, ~3x too steep) to 2.50
+against a human 2.46, and the descriptive-lambda gap from +0.382 (p<0.0001) to
++0.035 (p=0.62, indistinguishable). That finding used add_noise-style
+post-hoc noise on RL_lambda's OUTPUT, not a NoisyRL_lambda parameter, so it is
+UNAFFECTED by the sigma_resp removal and still reproduces. Known limitation,
+still real: identical noise for every pid gives human-SCALE variability but not
+human INDIVIDUAL DIFFERENCES in it (numbers lambda correlation dropped 0.644 ->
+0.524 even as the level matched) -- resolving this needs either the NLL fits
+above (which let sigma vary per participant) or per-participant fixed sigma.
 
 NoisyCounting applies to carrabin only. Two fitted versions:
 - RMSE-fitted: sigma_c collapses to ~0 (response-noise artefact; methodologically revealing)

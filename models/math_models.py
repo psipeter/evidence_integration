@@ -43,9 +43,9 @@ from utils.run_params import trial_seed as _trial_seed
 
 
 _CARRABIN_MODELS = frozenset(
-    {"Mean", "NoisyCounting", "RL", "RL_lambda", "LeakyIntegrator", "PrimacyRecency"}
+    {"Mean", "NoisyCounting", "RL", "RL_lambda", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"}
 )
-_YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_lambda"})
+_YOO_MODELS = frozenset({"Mean", "LeakyIntegrator", "PrimacyRecency", "RL", "RL_lambda", "NoisyRL_lambda"})
 # Deliberately narrower than carrabin/yoo: these four together are meant to
 # capture recency-biased (non-shrinking-learning-rate) behavior, which is
 # what this task's human data actually looks like (see the conversation that
@@ -60,6 +60,79 @@ _SOLTANI_COLORS_MODELS = frozenset(
     {"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NoisyRL_lambda"})
 _SOLTANI_NUMBERS_MODELS = frozenset(
     {"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NoisyRL_lambda"})
+
+
+# Base models that add_noise() knows how to wrap. Any model whose run() output
+# is a deterministic function of (dataset, pid, its own params) qualifies --
+# add_noise never touches per-model branches, it only calls run() once and adds
+# i.i.d. noise on top.
+_NOISE_WRAPPABLE_BASE_MODELS = frozenset(
+    {"Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"})
+
+# model_type suffix -> base model name, and back. "_resp_noise" is the ONLY
+# mechanism add_noise implements (i.i.d. per observation); it is not a stand-in
+# for arbitrary noise types, so do not overload this suffix for anything else.
+_RESP_NOISE_SUFFIX = "_resp_noise"
+
+
+def base_model_of(model_type: str) -> str:
+    """Strip the _resp_noise suffix, if present. 'RL_lambda' -> 'RL_lambda';
+    'RL_lambda_resp_noise' -> 'RL_lambda'."""
+    if model_type.endswith(_RESP_NOISE_SUFFIX):
+        return model_type[: -len(_RESP_NOISE_SUFFIX)]
+    return model_type
+
+
+def is_resp_noise_model(model_type: str) -> bool:
+    return model_type.endswith(_RESP_NOISE_SUFFIX)
+
+
+def add_noise(params: dict, n_sims: int, sigma_resp: float,
+             return_index: bool = False):
+    """Ensemble for a DETERMINISTIC base model plus i.i.d. response noise.
+
+    `params["model_type"]` must be one of _NOISE_WRAPPABLE_BASE_MODELS (the bare
+    name, e.g. "RL_lambda" -- NOT "RL_lambda_resp_noise"; the suffix is a
+    fitting-time label, this function only needs the base model to run). Calls
+    run() ONCE to get the deterministic mean trajectory mu (length n_rows), then
+
+        ens = clip(mu + N(0, sigma_resp), -1, 1)     for n_sims draws
+
+    No trial-structure or replay logic is needed, unlike simulate_ensemble's
+    state-noise loop: i.i.d. noise has no sequential dependency to preserve, so
+    this is a single vectorised draw rather than a per-observation Python loop --
+    cheaper than simulating a real state-noise model.
+
+    This is what lets a deterministic model enter an NLL comparison on equal
+    footing with a genuinely stochastic one (e.g. NoisyRL_lambda's remaining
+    sigma_state) for exactly ONE extra parameter, without any dependency on a
+    prior RMSE fit -- mu comes fresh from run(), not from a saved _responses.pkl.
+    `params["model_type"]` may be either the bare base name ("RL_lambda") or the
+    fitting-time suffixed name ("RL_lambda_resp_noise") -- base_model_of() strips
+    the suffix if present, so both work identically. The stripped name is what
+    gets passed to run() and to _validate_model_dataset; sigma_resp is always
+    removed from base_params before that call, since run() has no such parameter
+    on a deterministic model.
+    """
+    model_type = base_model_of(params["model_type"])
+    if model_type not in _NOISE_WRAPPABLE_BASE_MODELS:
+        raise ValueError(
+            f"add_noise wraps a deterministic base model; {params['model_type']!r} "
+            f"is not in {sorted(_NOISE_WRAPPABLE_BASE_MODELS)} (after stripping any "
+            f"_resp_noise suffix). If it is already stochastic (e.g. "
+            f"NoisyRL_lambda), use simulate_ensemble instead.")
+
+    base_params = {k: v for k, v in params.items() if k != "sigma_resp"}
+    base_params["model_type"] = model_type
+    mu_df = run(base_params).sort_values(["trial", "observation"])
+    mu = mu_df["response"].to_numpy(float)
+
+    rng = np.random.RandomState(int(params.get("seed", 0)))
+    ens = np.clip(mu[np.newaxis, :] + rng.normal(0.0, sigma_resp, (n_sims, len(mu))),
+                 -1.0, 1.0)
+    if return_index:
+        return ens, mu_df[["trial", "observation"]].reset_index(drop=True)
+    return ens
 
 
 def simulate_ensemble(params: dict, n_sims: int,
@@ -77,10 +150,18 @@ def simulate_ensemble(params: dict, n_sims: int,
 
     SEEDING MATCHES run(): sim i uses _trial_seed(i, trial), so
     `simulate_ensemble(params, n)[i]` is identical to
-    `run({**params, "seed": i}).response`. There is a test for this invariant in
-    tests/ -- it is the guard against this function drifting from _model_response,
-    which is exactly what happened between math_models.py and
-    scripts/build_sim_db.py's hand-written NoisyCounting copy.
+    `run({**params, "seed": i}).response`. VERIFY WITH
+    scripts/verify_ensemble_invariant.py before trusting this function on a new
+    dataset or after editing it -- there is no automated test (this project has
+    no test suite; do not add a comment claiming otherwise). This check is not
+    optional: extending NoisyRL_lambda to carrabin surfaced two real bugs that
+    only this invariant caught -- (1) an editing accident that silently deleted
+    _run_carrabin's RL_lambda/LeakyIntegrator/PrimacyRecency branches, and (2)
+    this function labelling ensemble columns with a synthetic range(n_obs)
+    instead of the dataset's REAL (possibly 1-indexed) observation values, which
+    silently fed the wrong `t` into the carrabin shrinkage formula below. Neither
+    was caught by py_compile or by exercising individual model branches in
+    isolation -- only by comparing simulate_ensemble against run() directly.
 
     Only implemented for models whose response is a stochastic function of the
     stimulus. Deterministic models raise: their ensemble is a delta function, so a
@@ -107,7 +188,12 @@ def simulate_ensemble(params: dict, n_sims: int,
     alpha_0 = float(params["alpha_0"])
     lambda_ = float(params["lambda_"])
     sigma_state = float(params["sigma_state"])
-    sigma_resp = float(params["sigma_resp"])
+    # sigma_resp REMOVED from NoisyRL_lambda -- it is now state-noise-only. The
+    # i.i.d.-noise comparison lives in add_noise()'s generic "<model>_resp_noise"
+    # wrapper instead, applied to a plain (deterministic) RL_lambda, so the two
+    # noise MECHANISMS can be compared at equal parameter count (1 extra param
+    # each) rather than NoisyRL_lambda alone carrying both. See CLAUDE.md /
+    # docs/HISTORY.md for why this split was made.
 
     per_trial = []
     index_rows = []
@@ -121,17 +207,44 @@ def simulate_ensemble(params: dict, n_sims: int,
             for n, x in enumerate(vals, start=1):
                 e = float(np.clip(e + (alpha_0 / n ** lambda_) * (x - e)
                                   + rng.normal(0.0, sigma_state), -1, 1))
-                out[sim, n - 1] = float(np.clip(e + rng.normal(0.0, sigma_resp),
-                                                -1, 1))
+                out[sim, n - 1] = e
         per_trial.append(out)
-        if return_index:
-            n_obs = len(vals)
-            index_rows.append(pd.DataFrame(
-                {"trial": [int(trial)] * n_obs, "observation": range(n_obs)}))
+        # Use the REAL observation labels from the data, not a synthetic
+        # range(n_obs). For soltani these coincide (0-indexed, contiguous), which
+        # is why this was not caught immediately -- but carrabin's observations
+        # are 1-indexed (1..5), and the shrinkage formula below needs the ACTUAL
+        # value, not a renumbering that happens to have the same length.
+        obs_labels = g["observation"].to_numpy()
+        index_rows.append(pd.DataFrame(
+            {"trial": [int(trial)] * len(obs_labels), "observation": obs_labels}))
 
     ens = np.concatenate(per_trial, axis=1)
+    index_df = pd.concat(index_rows, ignore_index=True)
+
+    # CARRABIN'S LAPLACE SHRINKAGE, applied here because run() applies it via
+    # apply_binary_transform AFTER _run() returns, and this function bypasses
+    # _run()/run() entirely for speed (see the module-level docstring above).
+    # Skipping it would silently break two things: the `simulate_ensemble(...)[i]
+    # == run({**params, "seed": i}).response` invariant (verified only for
+    # soltani so far, where the transform is identity), and -- more seriously --
+    # it would bias every downstream NLL for carrabin, since the ensemble's
+    # (mu, sigma) would be on the UNSHRUNK scale while human responses are
+    # compared against the shrunk convention every other carrabin model uses.
+    #
+    # NoisyRL_lambda is NOT in binary_transform._EXEMPT_MODELS (matching
+    # RL_lambda, which also is not), so it gets shrunk like every other carrabin
+    # model except NoisyCounting. The formula is inlined rather than calling
+    # apply_binary_transform, because that function expects a long DataFrame with
+    # one row per observation, not an (n_sims, n_rows) array -- but it MUST stay
+    # in sync with utils/binary_transform.py's formula. There is an equivalence
+    # test against run() covering exactly this.
+    if dataset == "carrabin":
+        t = index_df["observation"].to_numpy(float) + 1.0   # 1-indexed count
+        shrink = t / (t + 2.0)                               # (n_rows,)
+        ens = ens * shrink[np.newaxis, :]
+
     if return_index:
-        return ens, pd.concat(index_rows, ignore_index=True)
+        return ens, index_df
     return ens
 
 
@@ -250,6 +363,68 @@ def _run_primacy_recency(
     return float(np.dot(weights, values) / np.sum(weights))
 
 
+def _noisy_rl_lambda_response(params: dict, values: np.ndarray, trial: int) -> float:
+    """RL_lambda plus two SEPARATE noise sources. The distinction is the point of
+    the model, not a detail:
+
+      sigma_state  perturbs the internal ESTIMATE, so it PERSISTS and compounds
+                   into every later update. This is what produces state-
+                   persistent response variability -- residual variance growth
+                   across observations, and within-trial residual autocorrelation
+                   (temporal cols 3-4 for soltani). A deterministic model has
+                   none, which is why those panels exclude the deterministic math
+                   models by construction.
+
+    sigma_resp (i.i.d. response noise) is DELIBERATELY NOT a parameter of this
+    model any more -- it was removed so the two noise MECHANISMS (compounding
+    state noise vs i.i.d. response noise) can be compared at EQUAL parameter
+    count. The i.i.d. comparison now lives in add_noise()'s generic
+    "<model>_resp_noise" wrapper, applied to a plain deterministic RL_lambda:
+    that gives RL_lambda_resp_noise one extra parameter (sigma_resp) and this
+    model one extra parameter (sigma_state), so an NLL comparison between them
+    isolates the MECHANISM rather than one model simply having more parameters
+    than the other. See CLAUDE.md / docs/HISTORY.md for the fuller rationale.
+
+    (The earlier two-noise version measured a real |delta response| plateau,
+    reconciling RL_lambda's fitted lambda with its descriptive lambda on soltani
+    numbers -- deterministic 0.921 vs human 0.294; with added response noise
+    0.369, paired gap +0.008, p=0.668. That finding is unaffected: it used
+    add_noise on RL_lambda's OUTPUT after the fact, not this model's own
+    sigma_resp, so it still reproduces under the new split.)
+
+    ONE DEFINITION, called identically from _run_carrabin, _run_yoo and
+    _run_soltani_common -- this used to be triplicated by an accidental
+    find-and-replace across all three (see the note above _run_carrabin), which
+    is exactly the drift risk a shared helper avoids.
+
+    NOTE: the carrabin Laplace-shrinkage post-processing (apply_binary_transform)
+    is applied to run()'s output AFTER this function returns, by run() itself --
+    this function must stay UNSHRUNK, matching RL_lambda's own convention (it is
+    not in binary_transform._EXEMPT_MODELS). simulate_ensemble applies the same
+    shrinkage vectorised, separately -- see its own docstring.
+    """
+    alpha_0 = float(params["alpha_0"])
+    lambda_ = float(params["lambda_"])
+    sigma_state = float(params["sigma_state"])
+    if len(values) == 0:
+        return 0.0
+    # Seeded by (seed, trial) exactly as NoisyCounting is. This matters for
+    # coherence, not just reproducibility: run() re-simulates from scratch for
+    # every (trial, observation), so a trial-scoped seed makes observation k+1's
+    # simulation REPLAY the same draws as observation k's for its first k steps.
+    # Without it the "trajectory" would be a set of unrelated noise realisations
+    # and the state noise would not persist in any meaningful sense.
+    seed = _trial_seed(int(params.get("seed", 0)), int(trial))
+    rng = np.random.RandomState(seed)
+    expectation = 0.0
+    for n, value in enumerate(values, start=1):
+        alpha = alpha_0 / (n ** lambda_)
+        error = value - expectation
+        expectation += alpha * error + rng.normal(0.0, sigma_state)
+        expectation = float(np.clip(expectation, -1, 1))
+    return expectation
+
+
 def _run_carrabin(
     params: dict, human_pid: pd.DataFrame, trial: int, observation: int
 ) -> float:
@@ -288,58 +463,7 @@ def _run_carrabin(
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
     if model_type == "NoisyRL_lambda":
-        # RL_lambda plus two SEPARATE noise sources. The distinction is the point
-        # of the model, not a detail:
-        #
-        #   sigma_state  perturbs the internal ESTIMATE, so it PERSISTS and
-        #                compounds into every later update. This is what produces
-        #                state-persistent response variability -- the quantity
-        #                temporal cols 3-4 measure (residual variance growth
-        #                across observations, and within-trial residual
-        #                autocorrelation). A deterministic model has none, which
-        #                is why those panels currently exclude all four math
-        #                models by construction.
-        #   sigma_resp   perturbs only the REPORTED response, i.i.d. per
-        #                observation, leaving the estimate untouched. This is
-        #                slider/motor/lapse noise. It raises |delta response|
-        #                uniformly WITHOUT accumulating, which is what produces a
-        #                PLATEAU in |delta| -- measured on real participants at a
-        #                within-qid residual SD of ~0.055, and shown to reconcile
-        #                RL_lambda's fitted lambda with its descriptive lambda
-        #                (deterministic 0.921 vs human 0.294; with measured
-        #                response noise 0.369, paired gap +0.008, p=0.668).
-        #
-        # So sigma_resp is expected to account for the |delta| plateau and
-        # sigma_state for the cols 3-4 signatures. Fitting both lets the data
-        # decide the split rather than us adding noise post hoc.
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        sigma_state = float(params["sigma_state"])
-        sigma_resp = float(params["sigma_resp"])
-        if len(values) == 0:
-            return 0.0
-        # Seeded by (seed, trial) exactly as NoisyCounting is. This matters for
-        # coherence, not just reproducibility: _run_soltani_common re-simulates
-        # from scratch for every (trial, observation), so a trial-scoped seed
-        # makes observation k+1's simulation REPLAY the same draws as observation
-        # k's for its first k steps. Without it the "trajectory" would be a set of
-        # unrelated noise realisations and the state noise would not persist in
-        # any meaningful sense.
-        seed = _trial_seed(int(params.get("seed", 0)), int(trial))
-        rng = np.random.RandomState(seed)
-        expectation = 0.0
-        response = 0.0
-        for n, value in enumerate(values, start=1):
-            alpha = alpha_0 / (n ** lambda_)
-            error = value - expectation
-            # State noise enters the estimate and is carried forward.
-            expectation += alpha * error + rng.normal(0.0, sigma_state)
-            expectation = float(np.clip(expectation, -1, 1))
-            # Response noise is drawn fresh and discarded -- note it is drawn
-            # EVERY step, not only the reported one, so the draw sequence (and
-            # hence the replay above) stays deterministic.
-            response = float(np.clip(expectation + rng.normal(0.0, sigma_resp), -1, 1))
-        return response
+        return _noisy_rl_lambda_response(params, values, trial)
     if model_type == "RL_lambda":
         alpha_0 = float(params["alpha_0"])
         lambda_ = float(params["lambda_"])
@@ -381,58 +505,7 @@ def _run_yoo(
             expectation = float(np.clip(expectation, -1, 1))
         return expectation
     if model_type == "NoisyRL_lambda":
-        # RL_lambda plus two SEPARATE noise sources. The distinction is the point
-        # of the model, not a detail:
-        #
-        #   sigma_state  perturbs the internal ESTIMATE, so it PERSISTS and
-        #                compounds into every later update. This is what produces
-        #                state-persistent response variability -- the quantity
-        #                temporal cols 3-4 measure (residual variance growth
-        #                across observations, and within-trial residual
-        #                autocorrelation). A deterministic model has none, which
-        #                is why those panels currently exclude all four math
-        #                models by construction.
-        #   sigma_resp   perturbs only the REPORTED response, i.i.d. per
-        #                observation, leaving the estimate untouched. This is
-        #                slider/motor/lapse noise. It raises |delta response|
-        #                uniformly WITHOUT accumulating, which is what produces a
-        #                PLATEAU in |delta| -- measured on real participants at a
-        #                within-qid residual SD of ~0.055, and shown to reconcile
-        #                RL_lambda's fitted lambda with its descriptive lambda
-        #                (deterministic 0.921 vs human 0.294; with measured
-        #                response noise 0.369, paired gap +0.008, p=0.668).
-        #
-        # So sigma_resp is expected to account for the |delta| plateau and
-        # sigma_state for the cols 3-4 signatures. Fitting both lets the data
-        # decide the split rather than us adding noise post hoc.
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        sigma_state = float(params["sigma_state"])
-        sigma_resp = float(params["sigma_resp"])
-        if len(values) == 0:
-            return 0.0
-        # Seeded by (seed, trial) exactly as NoisyCounting is. This matters for
-        # coherence, not just reproducibility: _run_soltani_common re-simulates
-        # from scratch for every (trial, observation), so a trial-scoped seed
-        # makes observation k+1's simulation REPLAY the same draws as observation
-        # k's for its first k steps. Without it the "trajectory" would be a set of
-        # unrelated noise realisations and the state noise would not persist in
-        # any meaningful sense.
-        seed = _trial_seed(int(params.get("seed", 0)), int(trial))
-        rng = np.random.RandomState(seed)
-        expectation = 0.0
-        response = 0.0
-        for n, value in enumerate(values, start=1):
-            alpha = alpha_0 / (n ** lambda_)
-            error = value - expectation
-            # State noise enters the estimate and is carried forward.
-            expectation += alpha * error + rng.normal(0.0, sigma_state)
-            expectation = float(np.clip(expectation, -1, 1))
-            # Response noise is drawn fresh and discarded -- note it is drawn
-            # EVERY step, not only the reported one, so the draw sequence (and
-            # hence the replay above) stays deterministic.
-            response = float(np.clip(expectation + rng.normal(0.0, sigma_resp), -1, 1))
-        return response
+        return _noisy_rl_lambda_response(params, values, trial)
     if model_type == "RL_lambda":
         alpha_0 = float(params["alpha_0"])
         lambda_ = float(params["lambda_"])
@@ -479,58 +552,7 @@ def _run_soltani_common(
     if model_type == "Mean":
         return float(np.mean(values))
     if model_type == "NoisyRL_lambda":
-        # RL_lambda plus two SEPARATE noise sources. The distinction is the point
-        # of the model, not a detail:
-        #
-        #   sigma_state  perturbs the internal ESTIMATE, so it PERSISTS and
-        #                compounds into every later update. This is what produces
-        #                state-persistent response variability -- the quantity
-        #                temporal cols 3-4 measure (residual variance growth
-        #                across observations, and within-trial residual
-        #                autocorrelation). A deterministic model has none, which
-        #                is why those panels currently exclude all four math
-        #                models by construction.
-        #   sigma_resp   perturbs only the REPORTED response, i.i.d. per
-        #                observation, leaving the estimate untouched. This is
-        #                slider/motor/lapse noise. It raises |delta response|
-        #                uniformly WITHOUT accumulating, which is what produces a
-        #                PLATEAU in |delta| -- measured on real participants at a
-        #                within-qid residual SD of ~0.055, and shown to reconcile
-        #                RL_lambda's fitted lambda with its descriptive lambda
-        #                (deterministic 0.921 vs human 0.294; with measured
-        #                response noise 0.369, paired gap +0.008, p=0.668).
-        #
-        # So sigma_resp is expected to account for the |delta| plateau and
-        # sigma_state for the cols 3-4 signatures. Fitting both lets the data
-        # decide the split rather than us adding noise post hoc.
-        alpha_0 = float(params["alpha_0"])
-        lambda_ = float(params["lambda_"])
-        sigma_state = float(params["sigma_state"])
-        sigma_resp = float(params["sigma_resp"])
-        if len(values) == 0:
-            return 0.0
-        # Seeded by (seed, trial) exactly as NoisyCounting is. This matters for
-        # coherence, not just reproducibility: _run_soltani_common re-simulates
-        # from scratch for every (trial, observation), so a trial-scoped seed
-        # makes observation k+1's simulation REPLAY the same draws as observation
-        # k's for its first k steps. Without it the "trajectory" would be a set of
-        # unrelated noise realisations and the state noise would not persist in
-        # any meaningful sense.
-        seed = _trial_seed(int(params.get("seed", 0)), int(trial))
-        rng = np.random.RandomState(seed)
-        expectation = 0.0
-        response = 0.0
-        for n, value in enumerate(values, start=1):
-            alpha = alpha_0 / (n ** lambda_)
-            error = value - expectation
-            # State noise enters the estimate and is carried forward.
-            expectation += alpha * error + rng.normal(0.0, sigma_state)
-            expectation = float(np.clip(expectation, -1, 1))
-            # Response noise is drawn fresh and discarded -- note it is drawn
-            # EVERY step, not only the reported one, so the draw sequence (and
-            # hence the replay above) stays deterministic.
-            response = float(np.clip(expectation + rng.normal(0.0, sigma_resp), -1, 1))
-        return response
+        return _noisy_rl_lambda_response(params, values, trial)
     if model_type == "RL_lambda":
         alpha_0 = float(params["alpha_0"])
         lambda_ = float(params["lambda_"])

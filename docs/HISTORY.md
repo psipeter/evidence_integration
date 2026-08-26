@@ -5284,3 +5284,151 @@ separation and a firm decision would want ~10 pids. The ordering was consistent
 across all four pids at every n_hidden, which is why the thread was stopped here
 rather than powered up.
 
+## NLL fitting infrastructure; response noise split into two mechanisms (this session)
+
+Continuation of the NoisyRL_lambda thread. Goal: a loss function that can
+actually IDENTIFY a noise parameter (RMSE cannot -- it collapses every noise
+parameter to its floor, since squared error is minimised by the conditional
+mean regardless of variance), and a design that lets the noise MECHANISM be
+compared rather than just its presence.
+
+### The NLL loss
+
+`fitting.losses.compute_nll` / `nll_from_ensemble`: Gaussian NLL of the single
+observed human response at each (pid, trial, observation) under the model's
+simulated predictive distribution (mean + SD from n_sims independent draws). A
+proper scoring rule -- the quadratic term punishes a wrong mean AND an
+understated variance, log(sigma) punishes an overstated one -- so unlike RMSE it
+has a genuine interior optimum. Verified directly and unconstrained (floor
+0.001, i.e. effectively no floor): NLL fell from 389 at sigma_resp=0.001 to
+-2.46 at the optimum (~0.04-0.05) and rose again beyond it. A real U-shape.
+
+`models.math_models.simulate_ensemble(params, n_sims, return_index=False)`: for
+a genuinely stochastic model, n_sims realisations without re-simulating from
+scratch per (trial, observation) the way run() does (which would cost ~48k
+pandas queries per Optuna trial at n_sims=100 on soltani -- not viable). Each
+(trial, sim) is ONE forward pass; seeded `_trial_seed(sim, trial)` so
+`simulate_ensemble(params, n)[i] == run({**params, "seed": i}).response`
+exactly (verified to floating point, <=3.3e-16, across all four datasets).
+
+Wired into `fitting.fit` via `--loss {rmse,nll}` and `--n_sims`. n_sims=100
+verified stable (5 reseeded reps of a sigma sweep all picked the identical
+argmin; n_sims=25 already agreed) at ~0.45s/eval, ~2.3 min per 300-trial fit.
+NLL output files get a `_nll` suffix before `{pid}` so they can never silently
+overwrite an RMSE fit of the same model_type -- the two loss scales differ (NLL
+can be negative) and a silent overwrite would be a correctness hazard, not a
+naming inconvenience.
+
+### The noise mechanism was split into two, at the user's suggestion
+
+Original NoisyRL_lambda had both sigma_state (compounds into the estimate) and
+sigma_resp (i.i.d. on the report). Splitting was proposed to avoid depending on
+a prior RMSE fit for the deterministic-model comparison, and to isolate the
+noise MECHANISM (compounding vs i.i.d.) at EQUAL parameter count rather than one
+model simply having more parameters than another:
+
+  NoisyRL_lambda            RL_lambda + sigma_state ONLY (compounding)
+  <model>_resp_noise        {Mean,LeakyIntegrator,PrimacyRecency,RL_lambda}
+                            + sigma_resp ONLY (i.i.d.), via a NEW generic
+                            add_noise() wrapper
+
+`add_noise(params, n_sims, sigma_resp, return_index=False)`: calls the base
+model's run() ONCE for its deterministic mean trajectory, then draws n_sims
+i.i.d. Gaussian perturbations on top, clipped to [-1,1]. No per-observation loop
+needed (i.i.d. noise has no sequential structure to replay), so it is cheaper
+than simulate_ensemble's state-noise loop and is entirely generic -- it never
+touches per-model branches in math_models.py, so it wraps any of the four
+deterministic models without new code per model. Accepts either the bare base
+name ("RL_lambda") or the fitting-time suffixed name ("RL_lambda_resp_noise")
+identically (base_model_of() strips the suffix), since fit.py's objective
+passes the suffixed name.
+
+Verified: reduces EXACTLY to run()'s output at sigma_resp=0 (0.00e+00, all
+four datasets x four base models); empirical mean/SD track the requested
+values away from the +-1 clipping boundary; bare and suffixed names produce
+identical output.
+
+Registered for ALL FOUR DATASETS (carrabin, yoo, soltani_numbers,
+soltani_colors) in MODEL_PARAMS, not soltani-only as NoisyRL_lambda originally
+was. Floor 0.001 on every noise parameter -- TECHNICAL only, not calibrated,
+since NLL was shown to find its own interior optimum unconstrained.
+
+### Extending to carrabin/yoo surfaced two real bugs, both invisible to
+### py_compile and to exercising individual branches in isolation
+
+1. **Triplicated code, dormant until now.** Adding NoisyRL_lambda earlier this
+   session used an unguarded string-replace on the anchor
+   `if model_type == "RL_lambda":`, which appears once in EACH of
+   `_run_carrabin`, `_run_yoo`, `_run_soltani_common` (RL_lambda is valid for
+   all three). With no occurrence limit, the replace silently duplicated the
+   entire branch into all three instead of the intended one. Harmless while
+   unreachable (carrabin/yoo never had the model registered); activated the
+   moment this request registered it there.
+
+2. **Deduplicating the triplication introduced a WORSE bug.** Refactoring the
+   three copies into one shared helper by inserting a top-level `def` string at
+   the text position of the FIRST occurrence -- which sat inside
+   `_run_carrabin`'s indented body -- caused the bare `def` to dedent out of
+   that function. Everything textually after it, including `_run_carrabin`'s
+   remaining RL_lambda/LeakyIntegrator/PrimacyRecency branches, became
+   unreachable dead code swallowed into the new helper's body.
+   `_run_carrabin(..., model_type="RL_lambda", ...)` would have returned None.
+   Caught only by testing every carrabin branch directly, not by py_compile.
+   Fixed by locating the exact corrupted text and reconstructing both pieces
+   (the standalone helper, and _run_carrabin's restored tail) explicitly.
+
+3. **simulate_ensemble labelled columns wrong for 1-indexed datasets.** It used
+   a synthetic `range(n_obs)` for the observation index rather than the
+   dataset's real values. Coincidentally correct for soltani (0-indexed,
+   0..14) but WRONG for carrabin (1-indexed, 1..5): the carrabin Laplace-
+   shrinkage formula (t = observation + 1) then received the wrong t, biasing
+   the ensemble vs run() by up to 0.167 -- caught only by the direct
+   equivalence check, not by any per-branch test.
+
+All three fixed; `scripts/verify_ensemble_invariant.py` (see below) passes
+clean on all combinations after the fixes.
+
+### A fourth bug, in the FIX for the model-params update
+
+Adding the split MODEL_PARAMS entries for all four datasets used a
+find-and-replace loop that recomputed `s.find('"NoisyRL_lambda": {')` from
+scratch after each insertion. The replacement text itself CONTAINS that exact
+substring (it is inserting a dict literal whose key is that name), so the loop
+kept re-finding the text it had just inserted and never advanced -- a genuine
+infinite loop, not a slow computation (confirmed via `timeout`, exit code
+124). Fixed by locating all four match positions on the ORIGINAL string before
+any insertion, then replacing right-to-left so earlier offsets stay valid.
+
+### scripts/verify_ensemble_invariant.py (new)
+
+Not a pytest suite -- this project has none, and an earlier docstring falsely
+claimed one existed in `tests/`; corrected. Run manually after touching
+simulate_ensemble, add_noise, any _run_* dispatcher, or
+_validate_model_dataset's allowlists, and before trusting a --loss nll fit on
+a dataset/model combination not previously checked. Two check families:
+
+- simulate_ensemble vs run(seed=i), for _STOCHASTIC_ENSEMBLE_MODELS.
+- add_noise vs run(): sigma=0 exact equality; empirical mean/SD near the
+  requested values AWAY FROM THE +-1 BOUNDARY (clip(mu + noise, -1, 1) is
+  CORRECTLY biased near the boundary -- confirmed directly on soltani_colors'
+  Mean model, which legitimately outputs exactly +-1 on 15.6% of rows: mean
+  gap 0.0035 away from the boundary vs 0.0257 on boundary rows, and the
+  boundary-row gap does NOT shrink with more sims, confirming bias rather than
+  Monte Carlo noise -- so the check correctly excludes those rows rather than
+  loosening its tolerance globally); and bare-name vs suffixed-name identity.
+
+All checks currently pass (exit 0) locally across all dataset x model
+combinations. NOT yet run on the cluster -- required before trusting any
+cluster --loss nll fit, given how many of the above were invisible until
+directly tested.
+
+### Not yet done
+
+- No jobs submitted to the cluster.
+- The actual NoisyRL_lambda vs RL_lambda_resp_noise NLL comparison -- the
+  scientific payoff of this whole thread -- has not been run at real
+  n_trials/n_sims on any dataset.
+- Response variability (qid-based) as the parallel individual-differences
+  metric for carrabin/numbers/colors (yoo has no qid repeats) is planned but
+  not implemented as a figure or comparison.
+
