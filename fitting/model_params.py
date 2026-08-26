@@ -91,6 +91,20 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "lambda_": (0.01, 1.0, 0.001),
             "sigma_resp": (0.001, 0.30, 0.001),
         },
+        # Same add_noise() wrapper, applied to the other three deterministic
+        # base models. Bounds mirror each base model's own entry exactly.
+        "Mean_resp_noise": {
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "LeakyIntegrator_resp_noise": {
+            "gamma": (0.001, 0.999, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "PrimacyRecency_resp_noise": {
+            "eps_p": (0.001, 1.0, 0.001),
+            "eps_r": (0.001, 1.0, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
         "NEF": {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 5},  # 5 obs/trial
@@ -132,6 +146,20 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        # Same add_noise() wrapper, applied to the other three deterministic
+        # base models. Bounds mirror each base model's own entry exactly.
+        "Mean_resp_noise": {
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "LeakyIntegrator_resp_noise": {
+            "gamma": (0.001, 0.999, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "PrimacyRecency_resp_noise": {
+            "eps_p": (0.001, 1.0, 0.001),
+            "eps_r": (0.001, 1.0, 0.001),
             "sigma_resp": (0.001, 0.30, 0.001),
         },
         "PrimacyRecency": {
@@ -182,6 +210,20 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "lambda_": (0.01, 1.0, 0.001),
             "sigma_resp": (0.001, 0.30, 0.001),
         },
+        # Same add_noise() wrapper, applied to the other three deterministic
+        # base models. Bounds mirror each base model's own entry exactly.
+        "Mean_resp_noise": {
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "LeakyIntegrator_resp_noise": {
+            "gamma": (0.001, 0.999, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "PrimacyRecency_resp_noise": {
+            "eps_p": (0.001, 1.0, 0.001),
+            "eps_r": (0.001, 1.0, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
         "NEF": {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
@@ -224,6 +266,20 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        # Same add_noise() wrapper, applied to the other three deterministic
+        # base models. Bounds mirror each base model's own entry exactly.
+        "Mean_resp_noise": {
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "LeakyIntegrator_resp_noise": {
+            "gamma": (0.001, 0.999, 0.001),
+            "sigma_resp": (0.001, 0.30, 0.001),
+        },
+        "PrimacyRecency_resp_noise": {
+            "eps_p": (0.001, 1.0, 0.001),
+            "eps_r": (0.001, 1.0, 0.001),
             "sigma_resp": (0.001, 0.30, 0.001),
         },
         "NEF": {

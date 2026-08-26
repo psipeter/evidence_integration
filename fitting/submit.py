@@ -92,6 +92,8 @@ def _resolve_jobs(
     k: int,
     optuna_seed: int,
     datafile: str | None = None,
+    loss_fn: str = "rmse",
+    n_sims: int = 100,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -120,6 +122,13 @@ def _resolve_jobs(
                         "n_trials": effective_n_trials,
                         "k": k,
                         "optuna_seed": optuna_seed,
+                        # Recorded even at the rmse default, so run_config.json
+                        # (and hence resubmit/dedup) always distinguishes an NLL
+                        # job from an RMSE job of the same model_type/pid -- the
+                        # two are NOT the same fit and must never be treated as
+                        # duplicates of each other.
+                        "loss_fn": loss_fn,
+                        "n_sims": n_sims,
                     }
                 )
     return jobs
@@ -161,6 +170,8 @@ def _submit_job(
     k = int(job.get("k", 5))
     seed = job.get("optuna_seed", 42)
     datafile = job.get("datafile")
+    loss_fn = job.get("loss_fn", "rmse")
+    n_sims = job.get("n_sims", 100)
     stem = dataset_stem(ds, datafile)
     cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} --n_trials {n_trials} "
@@ -168,8 +179,15 @@ def _submit_job(
     )
     if datafile:
         cmd += f" --datafile {datafile}"
+    if loss_fn != "rmse":
+        cmd += f" --loss {loss_fn} --n_sims {n_sims}"
+    # file_stem (with the _nll suffix fitting.fit inserts for loss_fn='nll')
+    # matters for the job SCRIPT name too, exactly as it does for fit.py's own
+    # output filenames -- otherwise an NLL job and an RMSE job for the same
+    # model_type/pid would collide on the SAME jobs/*.sh script name.
+    file_stem = f"{stem}_nll" if loss_fn == "nll" else stem
     _submit_command(
-        script_name=f"{mt}_{stem}_{pid}.sh",
+        script_name=f"{mt}_{file_stem}_{pid}.sh",
         command=cmd,
         time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
         mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
@@ -187,13 +205,16 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     n_trials = job["n_trials"]
     k = int(job.get("k", 5))
     datafile = job.get("datafile")
+    loss_fn = job.get("loss_fn", "rmse")
+    n_sims = job.get("n_sims", 100)
     stem = dataset_stem(ds, datafile)
+    file_stem = f"{stem}_nll" if loss_fn == "nll" else stem
 
     if dry_run:
-        print(f"[dry_run] would run locally: {mt} {stem} pid={pid}")
+        print(f"[dry_run] would run locally: {mt} {file_stem} pid={pid}")
         return
 
-    print(f"Running {mt} {stem} pid={pid}...")
+    print(f"Running {mt} {file_stem} pid={pid}...")
     fit(
         ds,
         mt,
@@ -203,6 +224,8 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         run_folder=run_folder,
         optuna_seed=job.get("optuna_seed", 42),
         datafile=datafile,
+        loss_fn=loss_fn,
+        n_sims=n_sims,
     )
 
 
@@ -363,6 +386,19 @@ def main() -> None:
     parser.add_argument("--n_trials", type=int, default=200)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--optuna_seed", type=int, default=42)
+    parser.add_argument(
+        "--loss", dest="loss", choices=("rmse", "nll"), default="rmse",
+        help="Loss fitting.fit minimises -- see that module's docstring. 'nll' "
+             "only for models in models.math_models._STOCHASTIC_ENSEMBLE_MODELS "
+             "or a '<model>_resp_noise' name; fitting.fit itself validates this "
+             "before creating an Optuna study, so an invalid combination fails "
+             "per-job rather than blocking the whole submit call.",
+    )
+    parser.add_argument(
+        "--n_sims", type=int, default=100,
+        help="Ensemble size per NLL evaluation (ignored for --loss rmse). See "
+             "fitting.fit's own --n_sims help for the stability/cost tradeoff.",
+    )
     parser.add_argument("--run_folder", type=str, default=None)
     parser.add_argument(
         "--datafile",
@@ -404,6 +440,8 @@ def main() -> None:
         args.k,
         args.optuna_seed,
         datafile=args.datafile,
+        loss_fn=args.loss,
+        n_sims=args.n_sims,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder
