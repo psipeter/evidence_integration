@@ -244,7 +244,7 @@ field to point at the GitHub Pages URL above.
 
 ### Data pipeline
 
-`scripts/build_task_backend_inputs.py` pulls real, finished participants
+`scripts/pull_soltani_data.py` pulls real, finished participants
 directly from Supabase for an explicit pid list per pilot round (not
 "everyone finished so far" -- different pilots are different people with
 different generative parameters) into `data/soltani_numbers_<name>.pkl`/

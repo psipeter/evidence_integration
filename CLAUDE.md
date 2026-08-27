@@ -191,7 +191,7 @@ keyed 1..n) needs an explicit guard. The known cases are already handled:
 `_fit_lambda_curve_fit`'s `n = observation + 1` for the power-law λ fit, and
 `apply_binary_transform`'s `t = observation + 1`.
 
-`scripts/build_task_backend_inputs.py` flags worth knowing:
+`scripts/pull_soltani_data.py` flags worth knowing:
 - `--complete_pairs` derives the pid set with a `finished` row in BOTH tasks live
   from Supabase, instead of passing `--numbers_pids`/`--colors_pids` by hand. No
   cohort pid lists are recorded in this repo, so this is the only reproducible
@@ -209,9 +209,15 @@ keyed 1..n) needs an explicit guard. The known cases are already handled:
   excluded group roughly doubles both the mean and the SD of performance error
   (numbers 0.107 -> 0.201 mean, 0.074 -> 0.141 SD), and the MEDIAN moves as much
   as the mean, i.e. they are systematically worse rather than a noisy tail.
-- Integer pids are derived from whoever SURVIVES filtering, so a filtered and an
-  unfiltered build assign different pids to the same people. The two are
-  comparable in aggregate only, never pid-by-pid.
+- Integer pids come from the PERSISTENT registry (`utils/pid_registry.py`),
+  keyed on prolific_pid identity alone -- so a filtered and an unfiltered
+  build now assign the SAME integer pid to the same real person (this
+  used to be false: an earlier from-scratch `sorted(...).unique()` mapping
+  depended on who else was in that specific call's batch; see
+  utils/pid_registry.py's own docstring for the real bug this fixed --
+  growing the pool from 35 to 45 pids silently reassigned most existing
+  participants' pids, breaking every model fit's join against current
+  human data).
 
 Archived (do not reactivate): diederen, jiang, usher.
 
@@ -460,7 +466,7 @@ earlier version of this section: pilot 4 (5 real participants, both
 tasks, `NUMBERS_STD_FIXED=15`) and pilot 5 (numbers only, std=10,
 ongoing as of the last check -- see `docs/HISTORY.md`'s task_backend
 section for the count as of when that history was folded in, or query
-Supabase directly via `build_task_backend_inputs.py --list_candidates`
+Supabase directly via `pull_soltani_data.py --list_candidates`
 for the current live count). Both used Prolific's own Study URL field pointed
 directly at `https://psipeter.github.io/evidence_integration/
 index-{numbers,colors}.html?PROLIFIC_PID={{%PROLIFIC_PID%}}`, exactly
@@ -472,7 +478,7 @@ against real Prolific submissions, not just in tests.
 
 ### Data pipeline: Supabase -> analysis (built, explicit-pid-list based)
 
-`scripts/build_task_backend_inputs.py` pulls real, finished participant
+`scripts/pull_soltani_data.py` pulls real, finished participant
 data directly from Supabase's `events` table for an EXPLICIT list of
 `prolific_pid`s (not "everyone finished so far" -- different pilot
 rounds are different people with different generative parameters, e.g.
@@ -503,12 +509,22 @@ pipeline). See each figure's own module docstring for exactly how a future
 model-loading function would slot back in.
 
 Anonymization: `build_from_df()` maps `prolific_pid` (string) -> a small
-sequential int `pid`, computed fresh per pilot (no persistent mapping
-across pilots -- different pilots are different people, so there's no
-need for `pid=3` to mean the same person in two different pilots' files,
-unlike the cross-TASK consistency within one pilot that this same
-mapping does guarantee). The real `prolific_pid` never appears in the
-saved pkl.
+sequential int `pid` via the PERSISTENT registry `utils/pid_registry.py`
+-- NOT computed fresh per call. An existing participant keeps the SAME
+pid forever, across every future pull/pilot/build, no matter how the pool
+grows; new prolific_pids only ever get new integers appended after the
+current max. The registry file itself (`data/pid_registry.json`) contains
+real prolific_pids and must NEVER be committed or pushed through GitHub
+-- see that module's own docstring for the full rationale (including the
+real bug this replaced) and for how to keep it in sync with the cluster
+(copy the one file directly, scp/rsync, never git). The real `prolific_pid`
+never appears in the saved canonical pkl.
+
+`data/soltani_numbers.pkl`/`data/soltani_colors.pkl` are now TRACKED in
+git (an `!`-override in `.gitignore`, matching carrabin.pkl/yoo.pkl) --
+GitHub is the sync channel for these two files specifically between this
+machine and the cluster. `data/pid_registry.json` is the one exception:
+always gitignored, always moved by hand.
 
 ### Participant exclusion criteria (`utils/participant_filters.py`)
 
@@ -1242,6 +1258,10 @@ evidence_integration/
     aggregate.py     — SHARED aggregation for all three temporal figures'
                        error and |Δresponse| curves; see "Cols 1-2 aggregation"
     paths.py
+    pid_registry.py  — persistent, append-only prolific_pid -> anonymized
+                       pid registry (data/pid_registry.json, gitignored,
+                       never through GitHub); replaces build_from_df's old
+                       from-scratch sorted(...).unique() mapping
     plot_style.py    — apply_style, get_palette, pvalue_to_stars, fit_power_law_params
     slurm.py
     carrabin_transform.py
@@ -1270,7 +1290,7 @@ evidence_integration/
     figure_soltani_variability.py    — task_backend real pilot data (human only for now); V group
     build_model_inputs.py            — shared build_from_df() filter/rescale/anonymize/save pipeline;
                                         build() wraps it for the old JATOS-pilot-file path
-    build_task_backend_inputs.py     — Supabase -> build_from_df(), explicit pid lists per pilot
+    pull_soltani_data.py     — Supabase -> build_from_df(), explicit pid lists per pilot
                                         round (--pilot/--numbers_pids/--colors_pids/--list_candidates)
     inspect_participant.py           — one real finished participant's raw responses vs 2 untuned
                                         reference agents (Bayes/RL), pulled directly from Supabase
@@ -1814,7 +1834,7 @@ change (e.g. "change X to Y", "add Z", "remove W").
 - Do not read soltani human data from `task/sequences/` — that branch was
   removed from `models/NEF.py` and the only source of human data is
   `data/soltani_*[_datafile].pkl`, built by
-  `scripts/build_task_backend_inputs.py`
+  `scripts/pull_soltani_data.py`
 - Do not add loss_type, shape_loss, joint_loss, beta hooks
 - Do not use trial_seed / base_seed for NEF — seed = int(trial) directly
 - Do not read cv_loss_mean directly — use _get_loss

@@ -111,16 +111,10 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 
 []{.fragment fragment-index="1" data-swap-target="response-change-img" data-swap-src="figures/response_change_full.svg" data-swap-prev="figures/response_change_human.svg"}
 
-## Individual Differences
+## Individual Differences in $\lambda$
 
 ::: {.image-card}
 ![](figures/lambda_human.svg){width="90%"}
-:::
-
-## Individual Differences in $|\Delta R|$
-
-::: {.image-card}
-![](figures/lambda_models.svg){width="90%"}
 :::
 
 ## Consistent Across Trials & Tasks
@@ -129,10 +123,10 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/lambda_sanity_human.svg){width="90%"}
 :::
 
-## Sanity Check
+## Do Models Track Individual Differences?
 
 ::: {.image-card}
-![](figures/lambda_sanity_models.svg){width="90%"}
+![](figures/lambda_model_correlation.svg){width="90%"}
 :::
 
 ## Response Noise

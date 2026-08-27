@@ -79,7 +79,7 @@ rather than erroring.)
 DATA SOURCE AND SCALE
 ----------------------
 Human data comes from data/soltani_{numbers,colors}[_<datafile>].pkl -- built
-by scripts/build_task_backend_inputs.py (pulls real, finished participants
+by scripts/pull_soltani_data.py (pulls real, finished participants
 directly from task_backend's Supabase `events` table) via
 scripts/build_model_inputs.py's own build_from_df() (shared
 filter+rescale+anonymize+save pipeline -- participant filtering and the
@@ -248,7 +248,7 @@ def _load_human(task: str, datafile: str | None) -> pd.DataFrame | None:
     datafile: optional suffix (e.g. 'pilot4', 'pilot5') appended to the dataset
     stem -- data/soltani_{numbers,colors}_{datafile}.pkl instead of the
     canonical data/soltani_{numbers,colors}.pkl. Lets this figure point at any
-    round's own files (built by scripts/build_task_backend_inputs.py's --pilot
+    round's own files (built by scripts/pull_soltani_data.py's --pilot
     flag) without a round-specific concept baked into this script -- it's just
     a filename suffix, so it works the same way for the real production
     dataset. Returns None if that task has no file at all for this datafile

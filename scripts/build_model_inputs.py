@@ -15,10 +15,15 @@ Steps (see the conversation that produced this script for full rationale):
      per (prolific_pid, task, trial, observation).
   3. Map prolific_pid (str) -> a stable integer `pid`, since every
      downstream piece of fitting/* (fit.py, submit.py, losses.py) assumes
-     `pid` is an int and queries with `==`. The mapping is built ONCE
-     across both tasks together (sorted prolific_pid -> 1, 2, 3, ...) so a
-     participant who did both tasks keeps the same integer pid in both
-     output files.
+     `pid` is an int and queries with `==`. Resolved via the PERSISTENT,
+     append-only registry in utils/pid_registry.py -- NOT a fresh sort-
+     and-enumerate over whichever prolific_pids happen to be in THIS
+     call's data, which silently reassigns existing participants' pids
+     the moment the pool changes size (confirmed as a real bug this
+     session: growing from 35 to 45 pids broke every existing model fit's
+     join against the human data). A participant who did both tasks
+     still keeps the same integer pid in both output files, and now also
+     keeps that SAME pid across every future build, forever.
   4. Rescale value/response from this task's native [0, 100] scale to the
      canonical [-1, 1] scale carrabin.pkl and yoo.pkl both already use
      (verified directly: both files' value/response columns range exactly
@@ -51,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path
 from utils.participant_filters import DEFAULT_EXCLUSION_METHOD, filter_participants
+from utils.pid_registry import get_or_assign_pids
 
 
 def _dedup_successful(df: pd.DataFrame, task: str) -> pd.DataFrame:
@@ -66,7 +72,7 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
                   apply_filters=True, exclusion_method=DEFAULT_EXCLUSION_METHOD,
                   require_both_tasks=True):
     """Core logic, extracted from build() so a different raw-data SOURCE
-    (e.g. scripts/build_task_backend_inputs.py, pulling from Supabase
+    (e.g. scripts/pull_soltani_data.py, pulling from Supabase
     instead of a parsed JATOS-era task_results pilot file) can reuse this
     exact filter+rescale+anonymize+save pipeline without duplicating it --
     the only thing that differs between sources is how `df` itself gets
@@ -85,10 +91,11 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
     apply_filters=False skips utils.participant_filters entirely, keeping every
     participant. Intended for diagnosing how much the exclusion criteria
     actually change a result -- build both versions under different out_names
-    and compare. NOTE the pid mapping is derived from whoever survives
-    filtering, so an unfiltered build assigns DIFFERENT integer pids to the
-    same people than a filtered build does; the two are not comparable
-    pid-by-pid, only in aggregate.
+    and compare. The pid mapping comes from the persistent registry
+    (utils/pid_registry.py), keyed on prolific_pid identity alone -- unlike
+    the old from-scratch version, a filtered and an unfiltered build now
+    assign the SAME integer pid to the same real person, so the two ARE
+    comparable pid-by-pid, not just in aggregate.
     """
     if apply_filters:
         kw = {"method": exclusion_method}
@@ -100,11 +107,13 @@ def build_from_df(df, out_name_numbers="soltani_numbers", out_name_colors="solta
               f"({len(df)} rows). Do NOT use this build for published results. ***")
 
     # One pid mapping shared across both tasks, so a participant who did
-    # both tasks gets the same integer pid in both output files.
-    all_pids = sorted(df["prolific_pid"].unique())
-    pid_map = {p: i + 1 for i, p in enumerate(all_pids)}
-    print(f"\nBuilt pid mapping for {len(pid_map)} prolific_pids "
-          f"(1..{len(pid_map)})")
+    # both tasks gets the same integer pid in both output files. Resolved
+    # via the PERSISTENT, append-only registry (utils/pid_registry.py) --
+    # NOT a fresh sorted(...).unique() enumeration -- so an existing
+    # participant's pid never changes across builds, even as the pool
+    # grows. See that module's own docstring for why the old from-scratch
+    # version was a real bug, not just a cosmetic difference.
+    pid_map = get_or_assign_pids(df["prolific_pid"].unique())
 
     # ── numbers -> data/soltani_numbers.pkl ──────────────────────────
     cont = _dedup_successful(df, "numbers").copy()

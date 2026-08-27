@@ -31,6 +31,8 @@ data/
 !data/jiang.pkl
 !data/yoo.pkl
 !data/jiang_networks.npy
+!data/soltani_numbers.pkl
+!data/soltani_colors.pkl
 data/runs/
 figures/*
 !figures/*.py
@@ -114,12 +116,27 @@ task/sequences_pool/
 # that needs to live in git history to be recoverable.
 task/sequences_pool_binary_prefix_backup/
 
-# Canonical production datasets, built by scripts/build_task_backend_inputs.py
-# (complete_pairs + the non_integrator exclusion criterion). Gitignored like all
-# of data/ -- rebuild with:
-#   venv/bin/python scripts/build_task_backend_inputs.py --complete_pairs
-data/soltani_numbers.pkl
-data/soltani_colors.pkl
+# Canonical production datasets, built by scripts/pull_soltani_data.py
+# (complete_pairs + the non_integrator exclusion criterion). TRACKED (not
+# gitignored, per instruction) -- unlike an earlier version of this file,
+# which gitignored them; that was the inconsistent choice, since
+# carrabin.pkl/yoo.pkl (the un-ignore overrides above) are already tracked
+# the same way. Github is now the sync channel between this machine and the
+# cluster for these two files specifically -- rebuild with:
+#   venv/bin/python scripts/pull_soltani_data.py --complete_pairs
+
+# Private prolific_pid -> anonymized-pid registry (utils/pid_registry.py).
+# Contains REAL Prolific participant IDs, unlike soltani_numbers.pkl/
+# soltani_colors.pkl just above (or any canonical data/*.pkl), which only
+# ever get the anonymized integer -- must NEVER be tracked, and specifically
+# must NEVER go through GitHub even though the two files above now do.
+# Already covered by the wholesale data/ ignore at the top of this section
+# (no !-override exists for it), but called out explicitly here too, since
+# its sensitivity is categorically higher than the rest of data/. If a build
+# needs to run somewhere else (e.g. the cluster), copy this one file there
+# directly (scp/rsync, never git) so both places assign the same integer
+# pid to the same real person.
+data/pid_registry.json
 
 # Vite build output and npm dependencies
 task/node_modules/

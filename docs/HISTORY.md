@@ -5432,3 +5432,149 @@ directly tested.
   metric for carrabin/numbers/colors (yoo has no qid repeats) is planned but
   not implemented as a figure or comparison.
 
+---
+
+## Persistent pid registry; pull_soltani_data.py rename; pilot-4 contamination found and removed (this session)
+
+### The pid-instability bug
+
+`build_model_inputs.py`'s `build_from_df()` used to compute the integer
+`pid` fresh on every call:
+
+    all_pids = sorted(df["prolific_pid"].unique())
+    pid_map = {p: i + 1 for i, p in enumerate(all_pids)}
+
+That recomputes the mapping from scratch, by alphabetically sorting
+whichever `prolific_pid`s are in THAT call's data, every time. The moment
+the participant pool changes size, inserting new `prolific_pid` strings
+into that sort generally shifts the alphabetical rank of most of the
+EXISTING participants too -- not just appends new ones at the end.
+Confirmed as a live, not hypothetical, bug this session: `data/
+soltani_numbers.pkl` grew from 35 to 45 pids between two builds, and the
+model-fit response files (still only pids 1-35, from the older build)
+could no longer be safely joined on `pid` against the current human data
+-- pid=5 in one file and pid=5 in the other were very likely different
+real people. This is exactly what made a new `lambda_model_correlation`
+figure's colors/numbers panels come back with near-zero, non-significant
+correlations despite `make_response_change`'s own median curves showing
+models tracking human decay closely: a MEDIAN is a population statistic,
+invariant to which label is attached to which value, so it stayed correct
+under the mislabeling; a per-pid CORRELATION depends entirely on the
+labels being right, so it was destroyed by it.
+
+**Fix: `utils/pid_registry.py`**, a persistent, append-only
+`prolific_pid -> pid` mapping stored at `data/pid_registry.json`. Loads
+the existing registry, keeps every known `prolific_pid`'s integer
+unchanged, assigns new ones only to genuinely new `prolific_pid`s (sorted
+for determinism, continuing from `max(existing) + 1`), then saves the
+updated registry back before returning. `build_from_df()` now calls
+`get_or_assign_pids()` instead of the from-scratch enumeration. Verified
+with a synthetic test that deliberately inserted new IDs alphabetically
+BETWEEN existing ones, confirming they don't get reshuffled. Side benefit
+noted but not separately tested for: a filtered and an unfiltered build
+now assign the SAME pid to the same person, which was also false before
+(the old mapping depended on who else was in that specific call's batch).
+
+The registry file contains REAL Prolific participant IDs, unlike every
+canonical `data/*.pkl` file, which only ever gets the anonymized integer
+-- it must never be committed, and specifically must never go through
+GitHub even now that the canonical soltani files do (see below). It's
+gitignored explicitly (on top of already being covered by the wholesale
+`data/` rule), and syncing it to another machine (e.g. the cluster) is a
+manual, non-git responsibility -- copy the one file directly.
+
+### `build_task_backend_inputs.py` renamed to `pull_soltani_data.py`
+
+The old name sounded like it BUILDS INPUTS FOR task_backend (i.e.
+configures the task); it does the opposite -- pulls results OUT of
+task_backend/Supabase. Renamed to say what it does, and its own module
+docstring now explicitly walks through the pipeline's steps 1-3 (pull
+from Supabase -> filter to an explicit/derived pid list -> resolve via
+the persistent registry), with step 4 (rescale/anonymize/save) staying in
+`build_model_inputs.py`'s `build_from_df`, called into rather than
+duplicated. Every cross-reference updated (`build_model_inputs.py`,
+`figure_soltani_performance.py`, `figure_soltani_variability.py`,
+`CLAUDE.md`, `README.md`, `.gitignore`) -- a plain rename, no logic
+change in this step.
+
+### `--complete_pairs` was pulling in a stale pilot round
+
+Supabase's `events` table is append-only, so an OLDER pilot round's
+participants are STILL present with a perfectly genuine `'finished'` row
+long after that round ended. `--complete_pairs`, as originally written,
+had no date cutoff and no check that a participant's session used the
+CURRENT generative parameters -- it just intersected "everyone finished in
+both tasks," for all time. Confirmed directly: an actual pull returned 51
+pids, 5 of which had `true_std=15` (pilot 4's fixed numbers-task std) sitting
+alongside 46 with the current `true_std=10` -- exactly the failure mode the
+module's own docstring already warned about for the explicit-pid-list path,
+but never actually guarded against for `--complete_pairs`. Those 5 pids
+(`670bd903349d5d24bc92dcb0`, `69163607e65df2b5dbe294fa`,
+`697b8bbd3f4ddf0f4e102d42`, `69af34e771ce9d065c0d9d80`,
+`6a11c6a18ea3cad18626f8b4`) are literally the same ones the module's own
+usage example under `--pilot pilot4` already named -- independent
+confirmation this was genuinely pilot 4, not some other anomaly.
+
+Checked whether colors has an equivalent risk: it does not. Every pid's
+`true_p` range (including all 5 pilot-4 pids) is identical,
+`[0.1333, 0.8667]`, regardless of round -- colors' generative parameters
+have apparently never changed, unlike numbers' (`NUMBERS_STD_FIXED`
+history: 10 -> 15 -> 10, per `task_backend/generate_sequences.py`'s own
+comment).
+
+**Fixed at two levels, deliberately not just one:**
+
+1. Code: `--complete_pairs` now excludes any pid whose numbers session used
+   a `true_std` other than `CURRENT_NUMBERS_STD_FIXED` (10, duplicated from
+   `generate_sequences.py`'s own constant rather than imported --
+   `task_backend/` is a JS/Vite app with that script as its one standalone
+   Python utility, not a package this analysis pipeline otherwise reaches
+   into; must be kept in sync by hand if that constant ever changes again).
+   Intentionally `--complete_pairs`-only, not applied to the explicit
+   `--numbers_pids`/`--colors_pids` path, since that path is how a SPECIFIC
+   pilot round gets rebuilt on purpose. This is a safety net for the NEXT
+   time a generative parameter changes and an old round lingers in the same
+   table, not what actually removed the contamination this time (see below).
+2. Data: the 5 pilot-4 prolific_pids' rows were deleted directly from
+   Supabase's `events` table (both tasks, all phases) after a preview
+   `SELECT` confirmed the exact rows affected -- a full, complete session
+   each (consent -> tutorial -> ~480 trial rows -> finished), nothing
+   unexpected caught. Safe to do irreversibly because pilot 4's data was
+   already separately archived (`data/task_results_pilot4.pkl`,
+   `data/soltani_{numbers,colors}_pilot4.pkl`) before this session, so
+   nothing unique was lost. Re-running `--complete_pairs` afterward found
+   nothing to exclude (Supabase itself is clean now), producing the final
+   46-pid canonical files directly.
+
+Final state: `data/soltani_numbers.pkl`/`soltani_colors.pkl`, 46 pids
+(`complete_pairs` + `non_integrator` exclusion), pid range 1-51 with
+`{11, 14, 19, 34, 48}` now absent -- confirmed to be exactly the 5 removed
+pilot-4 pids, and confirmed every one of the other 46 kept their pre-
+existing registry pid (46 already known, 0 newly assigned).
+
+### Canonical soltani files now tracked in git
+
+`data/soltani_numbers.pkl`/`soltani_colors.pkl` were gitignored; now
+tracked, matching `carrabin.pkl`/`yoo.pkl`'s own existing treatment --
+GitHub is now the sync channel for these two files specifically between
+this machine and the cluster. `data/pid_registry.json` is the deliberate
+exception, per above.
+
+**A real git gotcha surfaced doing this, worth remembering.** Per
+`gitignore(5)`: "It is not possible to re-include a file if a parent
+directory of that file is excluded." `data/` (trailing slash) excludes the
+whole directory as a unit, so git never even looks inside it to evaluate a
+later `!data/soltani_numbers.pkl` override -- for any file not ALREADY
+tracked, that negation line is a silent no-op. `carrabin.pkl`/`yoo.pkl`'s
+own identical-looking negation lines were never actually doing anything
+either -- those files were already in the git index from before this
+wholesale rule existed, and an already-tracked file is immune to
+`.gitignore` regardless of any rule. Confirmed directly: `git check-ignore
+-v` returns clean (exit 1, untracked-and-not-ignored) for `carrabin.pkl`
+but reports the wholesale `data/` rule as still matching for the brand-new
+`soltani_numbers.pkl`, and a plain `git add` refuses it with "ignored by
+one of your .gitignore files." Fixed with a one-time `git add -f`; after
+that, exactly like `carrabin.pkl`, both files are permanently tracked and
+immune to the `data/` rule for every future `git add`, no `-f` needed
+again.
+

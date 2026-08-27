@@ -45,7 +45,7 @@ hardcoding it here, same as this file's own earlier pass already did).
 
 DATA SOURCE
 -----------
-data/soltani_numbers.pkl -- built by scripts/build_task_backend_inputs.py
+data/soltani_numbers.pkl -- built by scripts/pull_soltani_data.py
 (pulls real, finished participants directly from task_backend's Supabase
 `events` table) via scripts/build_model_inputs.py's own build_from_df().
 Participant filtering and the prolific_pid -> int pid mapping already

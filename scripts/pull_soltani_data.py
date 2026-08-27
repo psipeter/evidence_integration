@@ -1,13 +1,32 @@
 #!/usr/bin/env python3
-"""scripts/build_task_backend_inputs.py
+"""scripts/pull_soltani_data.py
 =========================================
+Steps 1-3 of the soltani data pipeline (step 4 -- rescale + anonymize +
+save the canonical .pkl -- lives in scripts/build_model_inputs.py's
+build_from_df, which this script calls into rather than duplicating):
+
+  1. PULL the full raw event log for a task straight from Supabase's
+     `events` table (_fetch_all_events) -- every phase, every attempt, not
+     pre-filtered in any way.
+  2. FILTER to an explicit list of finished prolific_pids (either passed by
+     hand via --numbers_pids/--colors_pids, or auto-derived by
+     --complete_pairs -- see that flag's own comment for why it's derived
+     live rather than from a stored list), then hand off to build_from_df,
+     which applies the REAL statistical exclusion criteria
+     (utils/participant_filters.py) on top of that -- currently 45 pids
+     survive both stages for --complete_pairs.
+  3. Persistent PID REGISTRY: build_from_df resolves each surviving
+     prolific_pid to its stable integer pid via utils/pid_registry.py
+     (append-only -- an existing participant's pid never changes, no
+     matter how many times this script runs or how the pool grows; see
+     that module's own docstring for the bug this replaced).
+
 Downloads real, finished task_backend participant data directly from
-Supabase's `events` table for an EXPLICIT list of prolific_pids, reformats
-it to match exactly what scripts/build_model_inputs.py's build_from_df()
-expects, then calls that SAME shared filter+rescale+anonymize+save
-pipeline carrabin/yoo/the old JATOS-pilot data all already go through --
-see build_model_inputs.py's own build_from_df docstring for why this is
-reused rather than reimplemented.
+Supabase for an EXPLICIT list of prolific_pids, reformats it to match
+exactly what build_from_df() expects, then calls that SAME shared
+filter+rescale+anonymize+save pipeline carrabin/yoo/the old JATOS-pilot
+data all already go through -- see build_model_inputs.py's own
+build_from_df docstring for why this is reused rather than reimplemented.
 
 WHY AN EXPLICIT PID LIST, NOT "everyone finished so far"
 -----------------------------------------------------------
@@ -19,16 +38,19 @@ to compare pilot 4 against pilot 5 if they're silently merged into the
 same file every time this runs. Different pilots are different PEOPLE
 (no participant did both), so there's no need for cross-pilot pid-number
 consistency the way cross-TASK consistency matters within one pilot
-(build_from_df's own pid mapping already handles that correctly, is
-unchanged, and is computed fresh -- and independently -- for each call
-this script makes).
+(build_from_df's own pid mapping already handles that correctly -- and,
+via the persistent registry, now also stays consistent ACROSS separate
+runs of this script, not just within one call).
 
 Usage:
     # Probe which real, finished pids exist right now (for building a list):
-    python scripts/build_task_backend_inputs.py --list_candidates numbers
+    python scripts/pull_soltani_data.py --list_candidates numbers
 
-    # Build one pilot's files from an explicit pid list:
-    python scripts/build_task_backend_inputs.py --pilot pilot4 \\
+    # Canonical production build (steps 1-4 end to end):
+    python scripts/pull_soltani_data.py --complete_pairs
+
+    # Build one PILOT's files from an explicit pid list instead:
+    python scripts/pull_soltani_data.py --pilot pilot4 \\
         --numbers_pids 670bd903349d5d24bc92dcb0,69163607e65df2b5dbe294fa,... \\
         --colors_pids 670bd903349d5d24bc92dcb0,69163607e65df2b5dbe294fa,...
 """
@@ -52,6 +74,30 @@ from utils.participant_filters import (
 
 TASK_BACKEND_DIR = Path(__file__).resolve().parents[1] / "task_backend"
 TASK_INTERNAL = {"numbers": "numbers", "colors": "colors"}
+
+# CURRENT numbers-task generative std, mirroring task_backend/
+# generate_sequences.py's own NUMBERS_STD_FIXED -- duplicated here rather
+# than imported (task_backend/ is primarily a JS/Vite app with
+# generate_sequences.py as its one standalone Python utility, not a
+# package this analysis pipeline otherwise reaches into; no other script
+# under scripts/ or utils/ imports from task_backend/ either). MUST be
+# kept in sync BY HAND if that constant ever changes again -- it already
+# has, twice (see that file's own history comment: 10 -> 15 -> 10).
+#
+# --complete_pairs uses this to exclude any pid whose numbers session used
+# a DIFFERENT std -- an older pilot round's participants, still sitting in
+# Supabase's append-only `events` table with a perfectly genuine 'finished'
+# row. Confirmed as a REAL bug this session, not hypothetical:
+# --complete_pairs (before this check existed) pulled in 5 pilot-4
+# participants (true_std=15) alongside 46 current-round ones (true_std=10)
+# into ONE canonical file, silently mixing two incompatible generative-
+# parameter regimes. colors has no equivalent risk -- checked directly:
+# every pid's true_p range is identical ([0.1333, 0.8667]) regardless of
+# round, so no analogous filter is applied there. This check is intentionally
+# --complete_pairs-only, not applied to the explicit --numbers_pids/
+# --colors_pids path: that path is how a SPECIFIC pilot round (e.g. pilot 4
+# itself) gets rebuilt on purpose, where every pid SHOULD have the old std.
+CURRENT_NUMBERS_STD_FIXED = 10.0
 
 # Real Prolific IDs are 24-character lowercase hex strings -- used only by
 # --list_candidates (a probing aid), never to silently decide who's
@@ -251,9 +297,28 @@ def main():
         finished = {}
         for task in ("numbers", "colors"):
             rows = _fetch_all_events(pool_root, task)
-            finished[task] = {r["prolific_pid"] for r in rows
-                              if r["phase"] == "finished"
-                              and REAL_PID_PATTERN.match(r["prolific_pid"])}
+            task_finished = {r["prolific_pid"] for r in rows
+                             if r["phase"] == "finished"
+                             and REAL_PID_PATTERN.match(r["prolific_pid"])}
+
+            if task == "numbers":
+                # See CURRENT_NUMBERS_STD_FIXED's own module-level comment
+                # for why this exists -- excludes anyone whose numbers
+                # session used a DIFFERENT std (a stale pilot round still
+                # sitting in Supabase's append-only events table).
+                std_by_pid: dict[str, set] = {}
+                for r in rows:
+                    if r["phase"] == "trial" and r.get("true_std") is not None:
+                        std_by_pid.setdefault(r["prolific_pid"], set()).add(r["true_std"])
+                stale = {pid for pid in task_finished
+                        if std_by_pid.get(pid, set()) != {CURRENT_NUMBERS_STD_FIXED}}
+                if stale:
+                    print(f"  numbers: excluding {len(stale)} pid(s) with a stale/"
+                          f"mismatched true_std (not {CURRENT_NUMBERS_STD_FIXED}, "
+                          f"e.g. an older pilot round): {sorted(stale)}")
+                task_finished -= stale
+
+            finished[task] = task_finished
             print(f"  {task}: {len(finished[task])} finished real pids")
         both = sorted(finished["numbers"] & finished["colors"])
         print(f"  -> {len(both)} pids finished BOTH tasks")

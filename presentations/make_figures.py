@@ -925,10 +925,11 @@ def make_lambda_human() -> Path:
     as-is, matching this project's own actual code rather than the
     stricter threshold used elsewhere.
 
-    Carries a "Human"-only legend in the same reserved slot make_lambda_
-    models uses for its full Human+model legend, so the figure's overall
-    size/layout doesn't shift between this slide and the follow-up one --
-    same reasoning as make_response_change's own human-only stage.
+    Y-AXIS LEGEND: none -- with only "Human" plotted (models were removed
+    from this deck per instruction), a single-entry legend saying "Human"
+    is redundant clutter, same reasoning as make_variability_human's own
+    dropped legend; the panel titles already name each task. No reserved
+    legend slot either, so there's no leftover empty margin at the bottom.
     """
     _apply_slide_style()
     fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
@@ -944,16 +945,6 @@ def make_lambda_human() -> Path:
         ax.set_ylabel("Normalized density" if i == 0 else "")
         ax.tick_params(axis="y", labelleft=(i == 0))
 
-    # Same legend SLOT reserved as make_lambda_models (same h_pad, same
-    # "outside lower center" placement) -- so the figure DOESN'T resize or
-    # shift when models get added on the follow-up slide; only "Human" is
-    # actually shown yet, matching make_response_change's own human-only
-    # stage convention exactly.
-    fig.get_layout_engine().set(h_pad=0.25)
-    fig.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=3, label="Human")],
-               loc="outside lower center", ncol=1,
-               frameon=True, framealpha=0.9)
-
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = FIGURES_DIR / "lambda_human.svg"
     fig.savefig(out_path)
@@ -961,60 +952,6 @@ def make_lambda_human() -> Path:
     print(f"Saved {out_path}")
     return out_path
 
-
-def make_lambda_models() -> Path:
-    """Same 1x4 layout as make_lambda_human (panel 1 unchanged), but panels
-    2-4 now overlay each task's 4 fitted models' own lambda distributions
-    on top of the human one -- same Mean/LeakyIntegrator/PrimacyRecency +
-    NEF-or-RL_lambda roster and MODEL_COLORS as make_model_performance/
-    make_response_change, and the same reasoning for why NEF and RL_lambda
-    share one color (RL_lambda stands in for NEF on colors/numbers, which
-    haven't been fit yet).
-
-    A model's own lambda is fit the SAME way a human pid's is (identical
-    _fit_lambda_series call) against that model's own *_responses.pkl
-    sequence -- not read from any pre-computed model-comparison file.
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-
-    _plot_lambda_demo(axes[0], task_key="numbers")
-
-    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
-        ax = axes[i + 1]
-        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
-        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
-
-        ref_label = "RL_lambda" if task_key in ("colors", "numbers") else "NEF"
-        model_lams = {}
-        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
-            path = _delta_responses_path(task_key, model)
-            if not path.exists():
-                print(f"  (missing {path.name} -- skipping {model} for {task_key})")
-                continue
-            model_delta = _load_lambda_delta(task_key, path)
-            model_lams[model] = _fit_lambda_series(model_delta, LAMBDA_N_OFFSET[task_key])
-
-        _plot_lambda_distribution(ax, lam, task_key, model_lams=model_lams)
-        ax.set_title(title, color=TASK_COLORS[task_key])
-        ax.set_ylabel("Normalized density" if i == 0 else "")
-        ax.tick_params(axis="y", labelleft=(i == 0))
-
-    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=3, label="Human")]
-    legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=3, label=m)
-                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency"]]
-    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=3,
-                                 label="NEF / RL_lambda"))
-    fig.get_layout_engine().set(h_pad=0.25)
-    fig.legend(handles=legend_handles, loc="outside lower center", ncol=5,
-               frameon=True, framealpha=0.9)
-
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = FIGURES_DIR / "lambda_models.svg"
-    fig.savefig(out_path)
-    plt.close(fig)
-    print(f"Saved {out_path}")
-    return out_path
 
 
 
@@ -1076,16 +1013,14 @@ def _fit_lambda_split_half(task_key: str, path: Path) -> pd.DataFrame:
     return wide.reset_index()
 
 
-def _plot_lambda_splithalf_panel(ax, legend_ax, task_key: str, title: str,
-                                 include_models: bool, show_ylabel: bool) -> None:
-    """Panels 1-3: odd-vs-even split-half reliability of fitted lambda, one
-    regplot per source -- matching figure_soltani_temporal.py's own panels
-    E/K exactly (scatter=True for EVERY source, not just Human; that panel is
-    meaningful even for deterministic models, since the split's two curves
-    differ due to different STIMULUS sequences across odd/even trials, no
-    response noise required -- see that panel's own docstring). Human is
-    plain gray; task color lives on the panel title only, same convention as
-    every other lambda/response-change figure in this deck.
+def _plot_lambda_splithalf_panel(ax, task_key: str, title: str,
+                                 show_ylabel: bool) -> None:
+    """Panels 1-3: odd-vs-even split-half reliability of fitted lambda,
+    Human only -- matching figure_soltani_temporal.py's own panels E/K
+    (scatter + regression line), reduced to a single source per instruction
+    (models were tried in an earlier version of this figure and removed).
+    Human is plain gray; task color lives on the panel title only, same
+    convention as every other lambda/response-change figure in this deck.
 
     Panels 1-3 share BOTH axes at a fixed [0, 1.5] range (matches LAMBDA_XLIM)
     -- not autoscaled per task -- so the three tasks' reliability scatter is
@@ -1094,118 +1029,73 @@ def _plot_lambda_splithalf_panel(ax, legend_ax, task_key: str, title: str,
     y-axis label/ticks (only the leftmost of the three needs to, since the
     scale is now identical across all three).
 
-    LEGEND GOES IN A SEPARATE, DEDICATED `legend_ax` (a second GridSpec row
-    turned off via axis('off'), passed in by the caller), not a bbox_to_anchor
-    placement on `ax` itself. This replaced an earlier bbox_to_anchor approach
-    (`ax.legend(loc='upper center', bbox_to_anchor=(0.5, <negative>))`) that
-    worked for a 1-row legend but became unreliable once FIGURE_SIZE was
-    fixed (see that constant's own comment) and a 5-row Human+4-models
-    legend needed more room than the fixed canvas could grow to provide --
-    constrained_layout shrinks an Axes to make room for a bbox_to_anchor
-    legend placed outside it, but only up to a point, and past that point
-    the legend silently clipped rather than erroring (confirmed directly by
-    rendering and inspecting the actual file, not assumed). A dedicated
-    legend_ax with an explicit height_ratios allocation is deterministic
-    instead: its size is fixed by the GridSpec, not inferred from content."""
-    ref_label = "RL_lambda" if task_key in ("colors", "numbers") else "NEF"
-    sources = [("Human", _human_data_path(task_key), HUMAN_COLOR)]
-    if include_models:
-        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
-            path = _delta_responses_path(task_key, model)
-            if path.exists():
-                sources.append((model, path, MODEL_COLORS[model]))
-            else:
-                print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+    LEGEND IS DRAWN INSIDE `ax` ITSELF, not a dedicated legend_ax row --
+    with only one source, "r=0.xx*" is short enough to fit directly in the
+    corner without needing a reserved row (the multi-source GridSpec+legend_
+    ax approach this panel used before is no longer needed once there's
+    only one line to label)."""
+    path = _human_data_path(task_key)
+    wide = _fit_lambda_split_half(task_key, path)
 
-    handles, labels = [], []
-    for label, path, color in sources:
-        wide = _fit_lambda_split_half(task_key, path)
-        if len(wide) < 2:
-            continue
-        sns.regplot(data=wide, x="odd", y="even", ax=ax, color=color,
-                    ci=95 if len(wide) >= 3 else None, scatter=True,
-                    line_kws={"lw": 1.5}, scatter_kws={"s": 20, "alpha": 0.6})
-        handles.append(Line2D([0], [0], color=color, lw=1.5))
-        disp = MODEL_DISPLAY.get(label, label)
-        if len(wide) >= 3:
-            r, p = pearsonr(wide["odd"], wide["even"])
-            labels.append(f"{disp} r={r:.2f}{pvalue_to_stars(p)}")
-        else:
-            labels.append(f"{disp} n={len(wide)}")
-
-    legend_ax.axis("off")
     ax.set_title(title, color=TASK_COLORS[task_key])
     ax.set_xlim(*LAMBDA_XLIM)
     ax.set_ylim(*LAMBDA_XLIM)
-    if not handles:
+    if len(wide) < 2:
         ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
 
-    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
-                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    sns.regplot(data=wide, x="odd", y="even", ax=ax, color=HUMAN_COLOR,
+                ci=95 if len(wide) >= 3 else None, scatter=True,
+                line_kws={"lw": 1.5}, scatter_kws={"s": 20, "alpha": 0.6})
+    if len(wide) >= 3:
+        r, p = pearsonr(wide["odd"], wide["even"])
+        label = f"r={r:.2f}{pvalue_to_stars(p)}"
+    else:
+        label = f"n={len(wide)}"
+    ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5, label=label)],
+              fontsize=10, loc="upper right", frameon=True, framealpha=0.9)
+
     ax.set_xlabel("\u03bb (odd trials)")
     ax.set_ylabel("\u03bb (even trials)" if show_ylabel else "")
     ax.tick_params(axis="y", labelleft=show_ylabel)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_lambda_crosstask_panel(ax, legend_ax, include_models: bool = False) -> None:
-    """Panel 4: cross-task comparison of fitted lambda, colors vs numbers, one
-    point per pid who did BOTH -- matching figure_soltani_temporal.py's own
-    panel L (_plot_panel_lambda_crosstask). That panel is human-only BY
-    DESIGN in the source script (an individual-differences/trait-stability
-    check, not a model-fit panel) -- include_models=True here is a
-    deliberate departure from that convention, per explicit instruction, not
-    an oversight: each model's own colors-lambda and numbers-lambda are
-    fit from that model's own *_responses.pkl sequences (same _fit_lambda_
-    series call as every other lambda panel), showing whether a model's
-    OWN cross-task consistency looks anything like a human's. Legend goes in
-    a dedicated legend_ax, same reasoning as _plot_lambda_splithalf_panel's
-    own docstring."""
-    ref_label = "RL_lambda"  # both colors and numbers use RL_lambda, never NEF
-    sources = [("Human", _human_data_path("colors"), _human_data_path("numbers"), HUMAN_COLOR)]
-    if include_models:
-        for model in ["Mean", "LeakyIntegrator", "PrimacyRecency", ref_label]:
-            c_path = _delta_responses_path("colors", model)
-            n_path = _delta_responses_path("numbers", model)
-            if c_path.exists() and n_path.exists():
-                sources.append((model, c_path, n_path, MODEL_COLORS[model]))
-            else:
-                print(f"  (missing responses -- skipping {model} for crosstask)")
+def _plot_lambda_crosstask_panel(ax) -> None:
+    """Panel 4: cross-task comparison of fitted lambda, colors vs numbers,
+    one point per pid who did BOTH -- matching figure_soltani_temporal.py's
+    own panel L (_plot_panel_lambda_crosstask), human-only by design in that
+    source script (an individual-differences/trait-stability check, not a
+    model-fit panel) -- and reduced to human-only here too, matching the
+    single-figure simplification applied to panels 1-3.
 
-    legend_ax.axis("off")
+    LEGEND IS DRAWN INSIDE `ax` ITSELF, same reasoning as
+    _plot_lambda_splithalf_panel's own docstring."""
+    lam_colors = _fit_lambda_series(
+        _load_lambda_delta("colors", _human_data_path("colors")), LAMBDA_N_OFFSET["colors"])
+    lam_numbers = _fit_lambda_series(
+        _load_lambda_delta("numbers", _human_data_path("numbers")), LAMBDA_N_OFFSET["numbers"])
+    merged = pd.DataFrame({"colors": lam_colors, "numbers": lam_numbers}).dropna()
+
     ax.set_title("Colors vs Numbers", color="0.3", fontsize=14)
-    handles, labels = [], []
-    for label, c_path, n_path, color in sources:
-        lam_colors = _fit_lambda_series(
-            _load_lambda_delta("colors", c_path), LAMBDA_N_OFFSET["colors"])
-        lam_numbers = _fit_lambda_series(
-            _load_lambda_delta("numbers", n_path), LAMBDA_N_OFFSET["numbers"])
-        merged = pd.DataFrame({"colors": lam_colors, "numbers": lam_numbers}).dropna()
-        if len(merged) < 2:
-            continue
-
-        ax.scatter(merged["colors"], merged["numbers"], color=color, s=30,
-                  alpha=0.7, zorder=3)
-        disp = MODEL_DISPLAY.get(label, label)
-        if len(merged) >= 3:
-            sns.regplot(data=merged, x="colors", y="numbers", ax=ax, color=color,
-                       ci=95, scatter=False, line_kws={"lw": 1.5})
-            r, p = pearsonr(merged["colors"], merged["numbers"])
-            handles.append(Line2D([0], [0], color=color, lw=1.5))
-            labels.append(f"{disp} r={r:.2f}{pvalue_to_stars(p)}")
-        else:
-            handles.append(Line2D([0], [0], color=color, lw=1.5))
-            labels.append(f"{disp} n={len(merged)}")
-
-    if not handles:
+    if len(merged) < 2:
         ax.text(0.5, 0.5, "No pids completed both tasks", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
 
-    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
-                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    ax.scatter(merged["colors"], merged["numbers"], color=HUMAN_COLOR, s=30,
+              alpha=0.7, zorder=3)
+    if len(merged) >= 3:
+        sns.regplot(data=merged, x="colors", y="numbers", ax=ax, color=HUMAN_COLOR,
+                   ci=95, scatter=False, line_kws={"lw": 1.5})
+        r, p = pearsonr(merged["colors"], merged["numbers"])
+        label = f"r={r:.2f}{pvalue_to_stars(p)}"
+    else:
+        label = f"n={len(merged)}"
+    ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5, label=label)],
+              fontsize=10, loc="upper right", frameon=True, framealpha=0.9)
+
     ax.set_xlabel("\u03bb (colors)")
     ax.set_ylabel("\u03bb (numbers)")
     sns.despine(ax=ax, top=True, right=True)
@@ -1218,26 +1108,23 @@ def make_lambda_sanity_human() -> Path:
     real methodology difference found and resolved), sharing a fixed [0,1.5]
     x/y range (LAMBDA_XLIM) across all three rather than each autoscaling to
     its own data. Panel 4 is the colors-vs-numbers cross-task comparison
-    (matching that same script's panel L), human only in THIS figure -- see
-    make_lambda_sanity_models for the model-added version of every panel,
-    including panel 4.
+    (matching that same script's panel L). Human only throughout -- a
+    models version was tried and then removed per instruction, so this is
+    now the only lambda-reliability figure/slide in the deck.
 
-    Uses a 2-ROW GridSpec (plots on top, a dedicated legend row underneath)
-    rather than one row of Axes with bbox_to_anchor legends -- see
-    _plot_lambda_splithalf_panel's own docstring for why that approach
-    became unreliable once a 5-source legend needed to fit in this figure's
-    now-fixed canvas size.
+    PLAIN 1x4 plt.subplots -- NOT the 2-row GridSpec (plots + a dedicated
+    legend row) this figure used before. With only one source per panel,
+    each legend is now just "r=0.xx*" or "n=N", short enough to sit inside
+    its own axes (see _plot_lambda_splithalf_panel/_plot_lambda_crosstask_
+    panel's own docstrings) -- the reserved legend row is no longer needed
+    and left a lot of empty space at the bottom once removed.
     """
     _apply_slide_style()
-    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
-    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
-    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
 
-    for i, (ax, lax, (task_key, title)) in enumerate(zip(axes[:3], legend_axes[:3], LAMBDA_TASK_PANELS)):
-        _plot_lambda_splithalf_panel(ax, lax, task_key, title, include_models=False,
-                                     show_ylabel=(i == 0))
-    _plot_lambda_crosstask_panel(axes[3], legend_axes[3], include_models=False)
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[:3], LAMBDA_TASK_PANELS)):
+        _plot_lambda_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
+    _plot_lambda_crosstask_panel(axes[3])
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = FIGURES_DIR / "lambda_sanity_human.svg"
@@ -1247,31 +1134,116 @@ def make_lambda_sanity_human() -> Path:
     return out_path
 
 
-def make_lambda_sanity_models() -> Path:
-    """Same layout as make_lambda_sanity_human, but panels 1-3 now add each
-    task's fitted models' own lambda alongside Human's -- ALL 4 models
-    (deterministic ones too, matching figure_soltani_temporal.py's own E/K,
-    unlike figure_yoo_temporal.py's own panel C which excludes Mean/
-    LeakyIntegrator for reasons not inherited here). Panel 4 (cross-task) is
-    human-only, matching panel L's own design -- models were tried there
-    too but explicitly removed per instruction; UNCHANGED from
-    make_lambda_sanity_human. Same 2-row GridSpec as make_lambda_sanity_
-    human, so the two figures' plot areas stay the same size regardless of
-    legend row count.
+# ── How well does each model's own fitted lambda track a person's? ───────
+
+# Same per-task model roster as DELTA_TASK_PANELS/make_lambda_sanity_human's
+# own predecessor (Mean/LeakyIntegrator/PrimacyRecency + NEF-or-RL_lambda) --
+# reused for the identical reason (NEF not yet fit for colors/numbers).
+LAMBDA_CORR_MODELS = {
+    "snacks": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"],
+    "colors": ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"],
+    "numbers": ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"],
+}
+
+
+def _plot_lambda_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> None:
+    """One panel: EACH model's own fitted lambda (y) vs that SAME pid's
+    fitted human lambda (x), for one task -- a genuinely different question
+    from every other lambda panel in this deck (those ask "how is lambda
+    distributed" or "is a pid's own lambda stable"; this one asks "does a
+    model that fits pid X's OVERALL responses well also correctly track
+    THAT PARTICULAR PERSON'S decay rate, relative to everyone else's"). A
+    model whose points hug the y=x line, or at least trend upward with
+    Human's own lambda, is capturing genuine individual differences in
+    integration strategy -- not just an average curve shape.
+
+    Both lambdas are fit the SAME way (identical _fit_lambda_series call,
+    same LAMBDA_MIN_OBS/LAMBDA_N_OFFSET) -- Human's from _human_data_path,
+    each model's from that model's own *_responses.pkl (_delta_responses_
+    path, the same file every other model-lambda panel in this deck reads).
+    Merged on pid (inner join) before fitting the regression, so only pids
+    with a DEFINED fit for both sources contribute to that model's r.
+
+    LEGEND GOES IN A SEPARATE, DEDICATED `legend_ax` BELOW the panel (a
+    second GridSpec row, passed in by the caller) -- with up to 4 models
+    per panel, each needing its own "r=0.xx*" line, this is the same
+    multi-source situation the OLD (now-removed) lambda_sanity_models
+    figure had, so it gets the same fix: a dedicated row is deterministic
+    (fixed by the GridSpec, not inferred from content), unlike a
+    bbox_to_anchor legend that silently clips past a certain size (see
+    _plot_lambda_splithalf_panel's git history for that failure mode).
+    """
+    human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
+    lam_human = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
+
+    legend_ax.axis("off")
+    ax.set_title(title, color=TASK_COLORS[task_key])
+    ax.set_xlim(*LAMBDA_XLIM)
+    ax.set_ylim(*LAMBDA_XLIM)
+
+    handles, labels = [], []
+    for model in LAMBDA_CORR_MODELS[task_key]:
+        path = _delta_responses_path(task_key, model)
+        if not path.exists():
+            print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+            continue
+        model_delta = _load_lambda_delta(task_key, path)
+        lam_model = _fit_lambda_series(model_delta, LAMBDA_N_OFFSET[task_key])
+
+        merged = pd.DataFrame({"human": lam_human, "model": lam_model}).dropna()
+        if len(merged) < 2:
+            continue
+        color = MODEL_COLORS[model]
+        disp = MODEL_DISPLAY.get(model, model)
+        sns.regplot(data=merged, x="human", y="model", ax=ax, color=color,
+                    ci=95 if len(merged) >= 3 else None, scatter=True,
+                    line_kws={"lw": 1.5}, scatter_kws={"s": 20, "alpha": 0.6})
+        handles.append(Line2D([0], [0], color=color, lw=1.5))
+        if len(merged) >= 3:
+            r, p = pearsonr(merged["human"], merged["model"])
+            labels.append(f"{disp} r={r:.2f}{pvalue_to_stars(p)}")
+        else:
+            labels.append(f"{disp} n={len(merged)}")
+
+    if not handles:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
+                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    ax.set_xlabel("\u03bb (human)")
+    ax.set_ylabel("\u03bb (model)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_lambda_model_correlation() -> Path:
+    """1x3 panel (snacks, colors, numbers -- balls excluded, no lambda fit
+    exists for it, see LAMBDA_TASK_PANELS's own comment): for each task,
+    each fitted model's own lambda (y) plotted against that SAME pid's
+    human lambda (x), one regplot per model, sharing a fixed [0,1.5] x/y
+    range (LAMBDA_XLIM) for direct comparability across panels. The point
+    of this figure is to visualize how well each model captures each
+    participant's OWN decay-rate/recency-bias, not just the population
+    average -- see _plot_lambda_model_corr_panel's own docstring.
+
+    2-ROW GridSpec (plots on top, a dedicated legend row underneath) --
+    same reasoning as the (now-removed) lambda_sanity_models figure: up to
+    4 models per panel each need their own "r=0.xx*" line, too many for a
+    compact in-corner legend the way the single-source lambda_sanity_human
+    panels now use.
     """
     _apply_slide_style()
     fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
-    gs = fig.add_gridspec(2, 4, height_ratios=[3.2, 1.0])
-    axes = [fig.add_subplot(gs[0, i]) for i in range(4)]
-    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(4)]
+    gs = fig.add_gridspec(2, 3, height_ratios=[3.2, 1.0])
+    axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
+    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(3)]
 
-    for i, (ax, lax, (task_key, title)) in enumerate(zip(axes[:3], legend_axes[:3], LAMBDA_TASK_PANELS)):
-        _plot_lambda_splithalf_panel(ax, lax, task_key, title, include_models=True,
-                                     show_ylabel=(i == 0))
-    _plot_lambda_crosstask_panel(axes[3], legend_axes[3], include_models=False)
+    for ax, lax, (task_key, title) in zip(axes, legend_axes, LAMBDA_TASK_PANELS):
+        _plot_lambda_model_corr_panel(ax, lax, task_key, title)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = FIGURES_DIR / "lambda_sanity_models.svg"
+    out_path = FIGURES_DIR / "lambda_model_correlation.svg"
     fig.savefig(out_path)
     plt.close(fig)
     print(f"Saved {out_path}")
@@ -2227,9 +2199,8 @@ FIGURES = {
     "model_performance_nll": make_model_performance_nll,
     "response_change": make_response_change,
     "lambda_human": make_lambda_human,
-    "lambda_models": make_lambda_models,
     "lambda_sanity_human": make_lambda_sanity_human,
-    "lambda_sanity_models": make_lambda_sanity_models,
+    "lambda_model_correlation": make_lambda_model_correlation,
     "variability_human": make_variability_human,
     "variability_models": make_variability_models,
     "variance_autocorr_human": make_variance_autocorr_human,
