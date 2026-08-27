@@ -246,14 +246,23 @@ MODEL_COLORS = {
 }
 
 # (task_key, panel title, model list). Model lists intentionally differ in
-# their last entry: carrabin/yoo have real fitted NEF; colors/numbers do not
-# (task_backend model fitting against real data hasn't been run yet -- see
-# CLAUDE.md), so RL_lambda's own fit stands in for it there -- the same
-# substitution figure_soltani_performance.py's own SIG_REFERENCE historically
-# used while NEF was unwired for these two datasets (see that script's module
+# their last entry: snacks (yoo) has real fitted NEF; balls (carrabin) uses
+# RL_lambda in that slot instead -- NOT because NEF hasn't been fit there
+# (it has), but because carrabin's own current NEF fit is INCOMPLETE (16 of
+# 21 pids -- confirmed directly this session) and something changed in that
+# fit between an earlier render of this exact figure and now, silently
+# erasing a previously-significant NEF-vs-others result. Deliberately a
+# temporary stand-in, per instruction, until the carrabin NEF fit itself
+# gets sorted out and refit -- RL_lambda was chosen because it already has a
+# complete, real 21-pid carrabin fit on disk (unlike NEF's own current 16),
+# not because it's a permanent substitute the way it is for colors/numbers,
+# where task_backend model fitting against real data hasn't been run yet at
+# all for NEF (see CLAUDE.md) -- the same substitution
+# figure_soltani_performance.py's own SIG_REFERENCE historically used while
+# NEF was unwired for those two datasets (see that script's module
 # docstring).
 TASK_PANELS = [
-    ("balls", "Balls task", ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]),
+    ("balls", "Balls task", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]),
     ("snacks", "Snacks task", ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]),
     ("colors", "Colors task", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]),
     ("numbers", "Numbers task", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]),
@@ -269,8 +278,13 @@ def _model_fit_path(task_key: str, model: str) -> Path:
       snacks (yoo)       -> data/runs/yoo/{model}_yoo_performance.pkl, except
                             NEF which lives in data/runs/refit/ (matching this
                             project's own default --nef_folder refit)
-      colors/numbers     -> data/runs/soltani/{model}_soltani_{task}_performance.pkl
-                            (one shared run folder for both soltani tasks)
+      colors/numbers     -> data/runs/rmse/{model}_soltani_{task}_performance.pkl
+                            -- the run folder fit against the CORRECTED,
+                            contamination-free 46-pid canonical data (see
+                            chat: the pilot-4/pid-registry fixes). NOT
+                            data/runs/soltani/, which holds the earlier,
+                            stale fits against the pre-fix data and is no
+                            longer read by any function in this file.
     """
     if task_key == "balls":
         return RUNS_DIR / "carrabin" / f"{model}_carrabin_performance.pkl"
@@ -278,7 +292,7 @@ def _model_fit_path(task_key: str, model: str) -> Path:
         run_dir = RUNS_DIR / ("refit" if model == "NEF" else "yoo")
         return run_dir / f"{model}_yoo_performance.pkl"
     dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "soltani" / f"{model}_{dataset}_performance.pkl"
+    return RUNS_DIR / "rmse" / f"{model}_{dataset}_performance.pkl"
 
 
 def _get_loss(perf: pd.DataFrame) -> pd.Series:
@@ -359,15 +373,18 @@ def make_model_performance() -> Path:
     writing this, despite that module's own docstring mentioning an earlier,
     now-reverted percent-scale version. No rescaling applied.
 
-    NEF has not been fit yet for colors/numbers (task_backend data -- see
-    CLAUDE.md's "Data pipeline" section) -- RL_lambda's own fitted loss is
-    shown in that slot instead, colored identically to NEF (MODEL_COLORS)
-    rather than mislabeled as NEF: the x-axis stays honest about which model
-    actually produced each box.
+    NEF has not been fit yet for colors/numbers at all (task_backend data --
+    see CLAUDE.md's "Data pipeline" section), and carrabin's own current NEF
+    fit is INCOMPLETE (16 of 21 pids -- see TASK_PANELS' own comment) --
+    RL_lambda's own fitted loss is shown in NEF's usual slot for BOTH balls
+    and colors/numbers, colored identically to NEF (MODEL_COLORS) rather
+    than mislabeled as NEF: the x-axis stays honest about which model
+    actually produced each box. snacks (yoo) is the one task still showing
+    a genuine, complete NEF fit.
 
     Significance bars (paired Wilcoxon, via _compute_sig_lines) are drawn
-    from NEF (balls/snacks) or RL_lambda (colors/numbers) outward to each
-    other model, ONLY where the reference is significantly better -- a
+    from NEF (snacks only) or RL_lambda (balls, colors, numbers) outward to
+    each other model, ONLY where the reference is significantly better -- a
     one-sided version of utils.plot_style.annotate_nef_comparisons, since
     this talk's point is narrower than the working figures' ("is our model
     better", not "does it differ").
@@ -448,7 +465,7 @@ def make_model_performance() -> Path:
     per_panel_sig_lines = []
     max_bars = 0
     for ax, task_key, title, order, plot_df in panel_data:
-        ref_label = "NEF" if task_key in ("balls", "snacks") else "RL_lambda"
+        ref_label = "NEF" if task_key == "snacks" else "RL_lambda"
         sig_lines = (_compute_sig_lines(plot_df, "model", "rmse", order, ref_label)
                     if ref_label in order else [])
         per_panel_sig_lines.append((ax, sig_lines))
@@ -541,7 +558,7 @@ def _delta_responses_path(task_key: str, model: str) -> Path:
         run_dir = RUNS_DIR / ("refit" if model == "NEF" else "yoo")
         return run_dir / f"{model}_yoo_responses.pkl"
     dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "soltani" / f"{model}_{dataset}_responses.pkl"
+    return RUNS_DIR / "rmse" / f"{model}_{dataset}_responses.pkl"
 
 
 def _abs_delta_long(df: pd.DataFrame, min_obs: int,
@@ -1376,7 +1393,7 @@ def _variability_model_path(task_key: str, model: str) -> Path:
             return RUNS_DIR / "carrabin" / "NEF_carrabin_responses_mle.pkl"
         return RUNS_DIR / "carrabin" / f"{model}_carrabin_responses.pkl"
     dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "soltani" / f"{model}_{dataset}_responses.pkl"
+    return RUNS_DIR / "rmse" / f"{model}_{dataset}_responses.pkl"
 
 
 def _plot_variability_panel(ax, task_key: str, title: str,
@@ -1672,6 +1689,389 @@ def make_variability_models() -> Path:
     return out_path
 
 
+# ── Consistent Across Trials & Tasks, for response noise (σ) ───────────────
+
+# Axis-label text per task -- NOT uniform, because the split itself is NOT
+# uniform (see _fit_sigma_split_half's own docstring: balls uses a median
+# first/second-half split, colors/numbers use odd/even trial indices).
+# _fit_sigma_split_half always returns generic "odd"/"even" COLUMN names
+# regardless of task (for one shared plotting code path), but the AXIS TEXT
+# must say what the split actually was, per task, or it would misdescribe
+# balls' own split.
+SIGMA_SPLIT_LABELS = {
+    "balls": ("first half of trials", "second half of trials"),
+    "colors": ("odd trials", "even trials"),
+    "numbers": ("odd trials", "even trials"),
+}
+
+
+def _fit_sigma_split_half(task_key: str, path: Path, qid_map: pd.DataFrame,
+                          prefix: int | None, min_trials: int = 3) -> pd.DataFrame:
+    """Per-pid response noise (sigma), computed separately on two halves of
+    that pid's own trials -- but NOT the same split for every task, because
+    the two real established scripts this deck otherwise copies from use
+    TWO DIFFERENT split conventions for this exact metric, confirmed by
+    reading both directly (see chat):
+
+      balls (carrabin): figure_carrabin_variability.py's own panel C
+        (`half_split_std`) splits by trial MEDIAN (first half / second
+        half), NOT odd/even, and enforces min_trials=3 per (observation,
+        qid) cell before trusting its std. Reproduced verbatim here.
+
+      colors/numbers: figure_soltani_variability.py's own col-2
+        (`_prefix_response_std_split`) splits by ODD/EVEN trial index
+        instead (that script's own module docstring explains why: odd/
+        even samples both halves from the same span of session-time,
+        isolating estimation noise from drift), and applies NO min_trials
+        threshold at all beyond pandas' own std() (needs n>=2). Reproduced
+        verbatim here too -- INCLUDING the lack of a threshold, which is
+        NOT an oversight to "fix": adding one is exactly the bug this
+        function used to have (see below).
+
+    THIS FUNCTION PREVIOUSLY USED balls' OWN CONVENTION (median split,
+    min_trials=3) FOR ALL THREE TASKS, uniformly, on the wrong assumption
+    that _fit_lambda_split_half's own odd/even convention generalized
+    directly to sigma too. For colors specifically, that min_trials=3
+    threshold -- stacked on top of an ALSO-wrong outer per-half trial-count
+    gate this function used to have -- destroyed the sample: verified
+    directly, colors dropped from 46 pids (full, unsplit data) to just 14
+    with both halves defined, versus 45/46 under figure_soltani_
+    variability.py's own real, no-threshold convention. Confirmed against
+    that script's ACTUAL code before fixing, not guessed.
+
+    Returns columns [pid, odd, even] for EVERY task, as generic column
+    names for one shared plotting code path -- for balls, "odd" holds the
+    FIRST half and "even" holds the SECOND half; see SIGMA_SPLIT_LABELS
+    for the axis text that describes each task's split correctly.
+    """
+    raw = pd.read_pickle(path)[["pid", "trial", "observation", "response"]]
+    if prefix is not None:
+        raw = raw[raw["observation"] < prefix]
+    df = raw.merge(qid_map, on=["pid", "trial", "observation"])
+
+    rows = []
+    if task_key == "balls":
+        for pid, g in df.groupby("pid"):
+            mid = g["trial"].median()
+            for half_label, hdf in [("odd", g[g["trial"] <= mid]),
+                                    ("even", g[g["trial"] > mid])]:
+                grp = (hdf.groupby(["observation", "qid"])["response"]
+                       .apply(lambda x: x.std() if len(x) >= min_trials else np.nan)
+                       .dropna())
+                if len(grp) > 0:
+                    rows.append({"pid": pid, "half": half_label, "sigma": float(grp.mean())})
+    else:
+        for pid, g in df.groupby("pid"):
+            trials = sorted(g["trial"].unique())
+            halves = {"odd": trials[0::2], "even": trials[1::2]}
+            for half_label, tset in halves.items():
+                gg = g[g["trial"].isin(tset)]
+                pv = gg.groupby(["qid", "observation"])["response"].std().dropna()
+                if len(pv) > 0:
+                    rows.append({"pid": pid, "half": half_label, "sigma": float(pv.mean())})
+
+    if not rows:
+        return pd.DataFrame(columns=["pid", "odd", "even"])
+    wide = pd.DataFrame(rows).pivot(index="pid", columns="half", values="sigma").dropna()
+    wide.columns.name = None
+    return wide.reset_index()
+
+
+def _plot_sigma_splithalf_panel(ax, task_key: str, title: str,
+                                show_ylabel: bool) -> None:
+    """Panels 1-3: odd-vs-even split-half reliability of response noise
+    (sigma), Human only -- the SAME structure as
+    _plot_lambda_splithalf_panel (mirrored per instruction), for the
+    response-noise metric instead of fitted lambda. Tasks are
+    VARIABILITY_TASK_PANELS (balls, colors, numbers) -- snacks excluded,
+    same reasoning as the main response-noise figure
+    (figure_yoo_temporal.py has no qid-repeat structure to compute sigma
+    from at all, so there is no established methodology to reproduce).
+
+    UNLIKE lambda's own splithalf panel, this one does NOT share one
+    fixed x/y range across all three tasks -- sigma's natural scale
+    varies far more across balls/colors/numbers than lambda's own bounded
+    [0,1.5] fit range does (same per-panel-autoscale decision
+    _plot_variability_panel's own docstring already made for this exact
+    metric, and for the identical reason: a shared range left a lot of
+    empty space in the narrower-scale tasks). Each panel's x and y axes DO
+    share the same range as EACH OTHER, computed from that task's own
+    odd+even values combined, so the diagonal comparison within one panel
+    stays meaningful -- just not comparable in absolute terms ACROSS
+    panels the way lambda's shared-range panels are.
+
+    LEGEND IS DRAWN INSIDE `ax` ITSELF, matching the (now-simplified)
+    lambda splithalf panel's own convention -- a single-source "r=0.xx*"
+    fits directly in the corner with no dedicated legend row needed.
+    """
+    qid_map, prefix = _variability_qid_map(task_key)
+    path = _human_data_path(task_key)
+    wide = _fit_sigma_split_half(task_key, path, qid_map, prefix)
+
+    ax.set_title(title, color=TASK_COLORS[task_key])
+    if len(wide) < 2:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    hi = float(max(wide["odd"].max(), wide["even"].max())) * 1.1
+    ax.set_xlim(0, hi)
+    ax.set_ylim(0, hi)
+
+    sns.regplot(data=wide, x="odd", y="even", ax=ax, color=HUMAN_COLOR,
+                ci=95 if len(wide) >= 3 else None, scatter=True,
+                line_kws={"lw": 1.5}, scatter_kws={"s": 20, "alpha": 0.6})
+    if len(wide) >= 3:
+        r, p = pearsonr(wide["odd"], wide["even"])
+        label = f"r={r:.2f}{pvalue_to_stars(p)}"
+    else:
+        label = f"n={len(wide)}"
+    ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5, label=label)],
+              fontsize=10, loc="upper right", frameon=True, framealpha=0.9)
+
+    odd_label, even_label = SIGMA_SPLIT_LABELS[task_key]
+    ax.set_xlabel(f"\u03c3 ({odd_label})")
+    ax.set_ylabel(f"\u03c3 ({even_label})" if show_ylabel else "")
+    ax.tick_params(axis="y", labelleft=show_ylabel)
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_sigma_crosstask_panel(ax) -> None:
+    """Panel 4: cross-task comparison of response noise (sigma), colors vs
+    numbers, one point per pid who did BOTH -- same convention as
+    _plot_lambda_crosstask_panel, for sigma instead of lambda. Balls/
+    carrabin has NO overlapping population with colors/numbers at all (a
+    completely separate study with different participants, not just a
+    different task within the same pilot), so it cannot participate in a
+    cross-task comparison the way it can in the split-half panels above --
+    this panel is colors-vs-numbers only, matching the lambda figure's own
+    equivalent panel exactly.
+
+    LEGEND IS DRAWN INSIDE `ax` ITSELF, same reasoning as
+    _plot_sigma_splithalf_panel's own docstring."""
+    qid_map_c, prefix_c = _variability_qid_map("colors")
+    qid_map_n, prefix_n = _variability_qid_map("numbers")
+    sigma_colors = _variability_series("colors", _human_data_path("colors"), qid_map_c, prefix_c)
+    sigma_numbers = _variability_series("numbers", _human_data_path("numbers"), qid_map_n, prefix_n)
+    merged = pd.DataFrame({"colors": sigma_colors, "numbers": sigma_numbers}).dropna()
+
+    ax.set_title("Colors vs Numbers", color="0.3", fontsize=14)
+    if len(merged) < 2:
+        ax.text(0.5, 0.5, "No pids completed both tasks", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    ax.scatter(merged["colors"], merged["numbers"], color=HUMAN_COLOR, s=30,
+              alpha=0.7, zorder=3)
+    if len(merged) >= 3:
+        sns.regplot(data=merged, x="colors", y="numbers", ax=ax, color=HUMAN_COLOR,
+                   ci=95, scatter=False, line_kws={"lw": 1.5})
+        r, p = pearsonr(merged["colors"], merged["numbers"])
+        label = f"r={r:.2f}{pvalue_to_stars(p)}"
+    else:
+        label = f"n={len(merged)}"
+    ax.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=1.5, label=label)],
+              fontsize=10, loc="upper right", frameon=True, framealpha=0.9)
+
+    ax.set_xlabel("\u03c3 (colors)")
+    ax.set_ylabel("\u03c3 (numbers)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_sigma_sanity_human() -> Path:
+    """1x4 panel: mirrors make_lambda_sanity_human exactly, for response
+    noise (sigma) instead of fitted lambda -- per instruction, using
+    "sigma"/"\u03c3" as the shorthand throughout this figure's own labels.
+    Panels 1-3 are odd/even split-half reliability of sigma for balls/
+    colors/numbers (VARIABILITY_TASK_PANELS -- snacks excluded, same
+    reasoning as the main response-noise figure). Panel 4 is the
+    colors-vs-numbers cross-task comparison. Human only, matching the
+    lambda figure's own human-only convention (a models version was tried
+    for lambda and then removed per instruction; not attempted here at
+    all for that same reason).
+
+    UNLIKE lambda's own splithalf panels, sigma's panels 1-3 do NOT share
+    one fixed range across all three tasks -- see
+    _plot_sigma_splithalf_panel's own docstring for why (sigma's natural
+    scale varies far more across tasks than lambda's bounded fit range
+    does; each panel is autoscaled to its OWN combined odd+even data, same
+    convention already established for the main response-noise figure).
+
+    PLAIN 1x4 plt.subplots -- NOT a 2-row GridSpec -- matching
+    make_lambda_sanity_human's own current (simplified) layout: a single-
+    source "r=0.xx*"/"n=N" legend fits inside each panel with no reserved
+    row needed.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
+
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[:3], VARIABILITY_TASK_PANELS)):
+        _plot_sigma_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
+    _plot_sigma_crosstask_panel(axes[3])
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "sigma_sanity_human.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
+# ── How well does each model's own fitted sigma track a person's? ──────
+
+# Per-task model roster -- Mean/LeakyIntegrator/PrimacyRecency now included
+# (per instruction), since their OWN "_resp_noise" NLL fit -- unlike their
+# bare-name RMSE fit, which is exactly deterministic (sigma=0 for every
+# pid) -- adds a genuine, per-pid-fitted sigma_resp term. Confirmed
+# directly before wiring this in: all three vary meaningfully across pids
+# in every task (e.g. numbers' Mean_resp_noise ranges 0.028-0.459 across
+# 46 pids), not pinned at a shared floor. NEF (balls) / NoisyRL_lambda
+# (colors/numbers) fill the 4th slot, matching SIGMA_CORR's own
+# VARIABILITY_STOCHASTIC_MODEL choice elsewhere in this deck.
+SIGMA_CORR_MODELS = {
+    "balls": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"],
+    "colors": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"],
+    "numbers": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"],
+}
+
+# Local color override for THIS figure only -- MODEL_COLORS itself is left
+# untouched (NoisyRL_lambda's own tan still applies everywhere else, e.g.
+# make_variability_models). Same reasoning as make_model_performance_nll's
+# own NLL_MODEL_COLORS override, per instruction: NoisyRL_lambda plays
+# RL_lambda's own conceptual role here (the "our model" 4th slot), so it
+# takes RL_lambda's established red-orange rather than its usual tan.
+SIGMA_CORR_COLORS = {m: MODEL_COLORS[m] for m in
+                    ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF", "NoisyRL_lambda"]}
+SIGMA_CORR_COLORS["NoisyRL_lambda"] = MODEL_COLORS["RL_lambda"]
+
+
+def _sigma_model_source_path(task_key: str, model: str) -> Path:
+    """Where to read one model's own response file for THIS figure.
+
+    Mean/LeakyIntegrator/PrimacyRecency: their "_resp_noise" NLL fit, via
+    _nll_responses_path -- which already adds that suffix internally and
+    already routes balls to data/runs/carrabin/ vs colors/numbers to
+    data/runs/nll/, so no extra branching is needed here. NOT their
+    bare-name RMSE fit (exactly deterministic, sigma=0 for every pid).
+
+    NEF (balls only): the MLE-fitted variant
+    (NEF_carrabin_responses_mle.pkl, via _variability_model_path) --
+    matching figure_carrabin_variability.py's own panels A/C convention.
+    No NLL fit exists for NEF at all (see make_model_performance_nll's own
+    module comment), so this is the only real option for balls' 4th slot.
+
+    NoisyRL_lambda (colors/numbers only): the fresh NLL fit, also via
+    _nll_responses_path -- deliberately NOT _variability_model_path's own
+    path for these two tasks, which points at NoisyRL_lambda's OLDER,
+    stale pre-quasi-MLE RMSE fit (see make_variability_models' own
+    docstring for why that fit was never trustworthy).
+    """
+    if model == "NEF":
+        return _variability_model_path(task_key, model)
+    return _nll_responses_path(task_key, model)
+
+
+def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> None:
+    """One panel: EACH model's own response noise (sigma, y) vs that SAME
+    pid's human sigma (x), for one task -- the sigma analogue of
+    _plot_lambda_model_corr_panel, per instruction. Up to 4 models per
+    panel now (SIGMA_CORR_MODELS), matching lambda's own structure --
+    Mean/LeakyIntegrator/PrimacyRecency's "_resp_noise" NLL fits genuinely
+    vary per pid, unlike their bare-name RMSE fits (exactly zero for every
+    pid), so this is no longer the single-model-per-panel situation an
+    earlier version of this figure had.
+
+    LEGEND GOES IN A SEPARATE, DEDICATED `legend_ax` BELOW the panel (a
+    second GridSpec row, passed in by the caller) -- same reasoning as
+    _plot_lambda_model_corr_panel's own docstring: up to 4 "r=0.xx*" lines
+    per panel is too many for a compact in-corner legend.
+
+    AXIS RANGE IS PER-PANEL, shared between x and y within that panel
+    (computed from human + every model's own values combined) but NOT
+    across panels -- same reasoning as every other sigma figure in this
+    deck.
+    """
+    qid_map, prefix = _variability_qid_map(task_key)
+    human_sigma = _variability_series(task_key, _human_data_path(task_key), qid_map, prefix)
+
+    legend_ax.axis("off")
+    ax.set_title(title, color=TASK_COLORS[task_key])
+
+    handles, labels = [], []
+    all_vals = list(human_sigma.dropna().values)
+    plotted = []  # (model, merged) pairs, plotted after axis range is known
+    for model in SIGMA_CORR_MODELS[task_key]:
+        path = _sigma_model_source_path(task_key, model)
+        if not path.exists():
+            print(f"  (missing {path.name} -- skipping {model} for {task_key})")
+            continue
+        model_sigma = _variability_series(task_key, path, qid_map, prefix)
+        merged = pd.DataFrame({"human": human_sigma, "model": model_sigma}).dropna()
+        if len(merged) < 2:
+            continue
+        all_vals.extend(merged["human"].values)
+        all_vals.extend(merged["model"].values)
+        plotted.append((model, merged))
+
+    if not plotted:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+
+    hi = float(max(all_vals)) * 1.1
+    ax.set_xlim(0, hi)
+    ax.set_ylim(0, hi)
+
+    for model, merged in plotted:
+        color = SIGMA_CORR_COLORS[model]
+        disp = MODEL_DISPLAY.get(model, model)
+        sns.regplot(data=merged, x="human", y="model", ax=ax, color=color,
+                    ci=95 if len(merged) >= 3 else None, scatter=True,
+                    line_kws={"lw": 1.5}, scatter_kws={"s": 20, "alpha": 0.6})
+        handles.append(Line2D([0], [0], color=color, lw=1.5))
+        if len(merged) >= 3:
+            r, p = pearsonr(merged["human"], merged["model"])
+            labels.append(f"{disp} r={r:.2f}{pvalue_to_stars(p)}")
+        else:
+            labels.append(f"{disp} n={len(merged)}")
+
+    legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
+                     ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
+    ax.set_xlabel("\u03c3 (human)")
+    ax.set_ylabel("\u03c3 (model)")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_sigma_model_correlation() -> Path:
+    """1x3 panel (balls, colors, numbers -- VARIABILITY_TASK_PANELS; snacks
+    excluded, same reasoning as every other sigma figure in this deck, no
+    qid-repeat structure to compute sigma from at all): for each task, up
+    to 4 models' own response noise plotted against that SAME pid's human
+    response noise (SIGMA_CORR_MODELS) -- the sigma analogue of
+    make_lambda_model_correlation, per instruction.
+
+    2-ROW GridSpec (plots on top, a dedicated legend row underneath) --
+    same reasoning as make_lambda_model_correlation: up to 4 models per
+    panel each need their own "r=0.xx*" line, too many for a compact
+    in-corner legend.
+    """
+    _apply_slide_style()
+    fig = plt.figure(figsize=FIGURE_SIZE, constrained_layout=True)
+    gs = fig.add_gridspec(2, 3, height_ratios=[3.2, 1.0])
+    axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
+    legend_axes = [fig.add_subplot(gs[1, i]) for i in range(3)]
+
+    for ax, lax, (task_key, title) in zip(axes, legend_axes, VARIABILITY_TASK_PANELS):
+        _plot_sigma_model_corr_panel(ax, lax, task_key, title)
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FIGURES_DIR / "sigma_model_correlation.svg"
+    fig.savefig(out_path)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+    return out_path
+
+
 
 # -- Model performance under the new NLL/quasi-MLE metric (all four tasks) --
 
@@ -1780,7 +2180,7 @@ def _nll_perf_path(task_key: str, model: str) -> Path:
     if task_key == "snacks":
         return RUNS_DIR / "yoo" / f"{file_model}_yoo_nll_performance.pkl"
     dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "soltani" / f"{file_model}_{dataset}_nll_performance.pkl"
+    return RUNS_DIR / "nll" / f"{file_model}_{dataset}_nll_performance.pkl"
 
 
 def make_model_performance_nll() -> Path:
@@ -1794,9 +2194,15 @@ def make_model_performance_nll() -> Path:
 
     Y-AXIS IS SHARED (sharey=True) but NOT forced to start at 0 -- unlike
     make_model_performance's RMSE (which is non-negative by construction),
-    NLL can be, and often is, negative (confirmed directly: loss ranges as
-    low as -3.03 for numbers/NoisyRL_lambda), so clamping the bottom would
+    NLL can be, and often is, negative, so clamping the bottom would
     misrepresent the actual data.
+
+    Colors/numbers now read from data/runs/nll/ (46 pids, fit against the
+    corrected, contamination-free canonical data -- see chat: the pilot-4/
+    pid-registry fixes), not the earlier data/runs/soltani/ fits this
+    figure used to read (35, then 45, pids against progressively stale
+    data). balls (carrabin, 21) and snacks (yoo, 38) are unaffected --
+    those two datasets were never contaminated.
     """
     _apply_slide_style()
     fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
@@ -2100,7 +2506,7 @@ def _nll_responses_path(task_key: str, model: str) -> Path:
     if task_key == "balls":
         return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_responses.pkl"
     dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "soltani" / f"{file_model}_{dataset}_nll_responses.pkl"
+    return RUNS_DIR / "nll" / f"{file_model}_{dataset}_nll_responses.pkl"
 
 
 def make_variance_autocorr_models() -> Path:
@@ -2203,6 +2609,8 @@ FIGURES = {
     "lambda_model_correlation": make_lambda_model_correlation,
     "variability_human": make_variability_human,
     "variability_models": make_variability_models,
+    "sigma_sanity_human": make_sigma_sanity_human,
+    "sigma_model_correlation": make_sigma_model_correlation,
     "variance_autocorr_human": make_variance_autocorr_human,
     "variance_autocorr_models": make_variance_autocorr_models,
 }

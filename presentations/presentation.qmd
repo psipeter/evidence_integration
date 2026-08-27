@@ -103,7 +103,7 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 :::
 
 
-## Smaller Updates Over Time
+## Smaller Updates Over Time ($\lambda$)
 
 ::: {.image-card}
 ![](figures/response_change_human.svg){#response-change-img width="90%"}
@@ -117,22 +117,34 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/lambda_human.svg){width="90%"}
 :::
 
-## Consistent Across Trials & Tasks
+## $\lambda$ Consistent Over Trials/Tasks
 
 ::: {.image-card}
 ![](figures/lambda_sanity_human.svg){width="90%"}
 :::
 
-## Do Models Track Individual Differences?
+## Models Capture $\lambda$ Differences
 
 ::: {.image-card}
 ![](figures/lambda_model_correlation.svg){width="90%"}
 :::
 
-## Response Noise
+## Response Noise ($\sigma$)
 
 ::: {.image-card}
 ![](figures/variability_human.svg){width="90%"}
+:::
+
+## $\sigma$ Consistent Over Trials/Tasks
+
+::: {.image-card}
+![](figures/sigma_sanity_human.svg){width="90%"}
+:::
+
+## Models Capture $\sigma$ Differences
+
+::: {.image-card}
+![](figures/sigma_model_correlation.svg){width="90%"}
 :::
 
 ## Model Performance (NLL)
@@ -151,4 +163,75 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 
 ::: {.image-card}
 ![](figures/variance_autocorr_models.svg){width="90%"}
+:::
+
+## Prediction Error & Neural Activity
+
+::: {.image-card}
+![](figures/PE_dynamics.svg){width="50%"}
+:::
+
+## PE variance drives $\sigma$
+
+::: {.image-card}
+![](figures/PE_drives_sigma.svg){width="100%"}
+:::
+
+## $\lambda$ drives discounting
+
+::: {.image-card}
+![](figures/lambda_drives_discounting.svg){width="100%"}
+:::
+
+## Conclusions
+
+:::: {.columns style="display: flex; gap: 2em;"}
+
+::: {.column width="50%"}
+#### Evidence Integration
+* Error-driven learning
+* Four cognitive tasks
+* Individual differences
+:::
+
+::: {.column width="50%"}
+#### Spiking Neural Network
+* Captures human data
+* Explains neural mechanisms
+* Makes novel predictions
+:::
+
+::::
+
+::: {.image-card style="margin: 1em auto 0 auto;"}
+![](images/snn.svg){style="height: 200px; width: auto; display: block; margin: 0 auto;"}
+:::
+
+
+## Acknowledgments {.smaller}
+
+::: {style="display: flex; justify-content: space-evenly; width: 100%; min-width: 100%; box-sizing: border-box;"}
+![Alireza Soltani](images/alireza.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Peter Duggins](images/peter.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Dartmouth logo](images/logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![NSF logo](images/nsf_logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+:::
+
+
+Neural Engineering Framework
+
+::: {style="font-size: 0.6em;"}
+Eliasmith, Chris, and Charles H Anderson. 2003. Neural Engineering: Computation, Representation, and Dynamics in Neurobiological Systems. Cambridge, MA: MIT press.
+:::
+
+Balls Task / Data
+
+::: {style="font-size: 0.6em;"}
+Prat-Carrabin, Arthur, and Michael Woodford. 2024. “Imprecise Probabilistic Inference from Sequential Data.” Psychological Review 131.
+:::
+
+Snacks Task / Data
+
+::: {style="font-size: 0.6em;"}
+Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Display Consistent Recency and Primacy Effects in Behavior and Neural Activity Across Perceptual and Value-Based Judgments.” Cognitive, Affective, & Behavioral Neuroscience 25. 
 :::
