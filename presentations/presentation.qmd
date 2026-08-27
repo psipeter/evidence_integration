@@ -12,6 +12,8 @@ format:
     html-math-method: katex
     include-after-body: include-scripts.html
     # embed-resources: true
+    revealjs-plugins:
+      - pointer
 bibliography: "references.bib"
 
 ---
@@ -52,7 +54,7 @@ bibliography: "references.bib"
 ![](images/new_tasks.svg){width="90%"}
 :::
 
-## Responses improve with data
+## People Learn as they Gather Data
 
 ::: {.image-card}
 ![](figures/temporal_performance.svg){width="90%"}
@@ -72,7 +74,7 @@ bibliography: "references.bib"
 
 ## Weighted Prediction Error
 
-People update beliefs using *prediction error*
+HYP: People update beliefs using *prediction error*
 
 ::: {.fragment}
 $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I_n)$$
@@ -96,7 +98,7 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](images/spikes.svg){width="90%"}
 :::
 
-## Model Performance
+## Model Captures Behavior (rmse)
 
 ::: {.image-card}
 ![](figures/model_performance.svg){width="90%"}
@@ -129,7 +131,7 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/lambda_model_correlation.svg){width="90%"}
 :::
 
-## Response Noise ($\sigma$)
+## People have Noisy Responses ($\sigma$)
 
 ::: {.image-card}
 ![](figures/variability_human.svg){width="90%"}
@@ -147,22 +149,22 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ![](figures/sigma_model_correlation.svg){width="90%"}
 :::
 
-## Model Performance (NLL)
-
-::: {.image-card}
-![](figures/model_performance_nll.svg){width="90%"}
-:::
-
-## Response Noise Dynamics
+## Noise is Autocorrelated
 
 ::: {.image-card}
 ![](figures/variance_autocorr_human.svg){width="90%"}
 :::
 
-## Response Noise Dynamics
+## Noise is Autocorrelated
 
 ::: {.image-card}
 ![](figures/variance_autocorr_models.svg){width="90%"}
+:::
+
+## Model Captures Behavior (nll)
+
+::: {.image-card}
+![](figures/model_performance_nll.svg){width="90%"}
 :::
 
 ## Prediction Error & Neural Activity
@@ -189,16 +191,22 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 
 ::: {.column width="50%"}
 #### Evidence Integration
+
+::: {.nonincremental}
 * Error-driven learning
 * Four cognitive tasks
 * Individual differences
 :::
+:::
 
 ::: {.column width="50%"}
 #### Spiking Neural Network
+
+::: {.nonincremental}
 * Captures human data
 * Explains neural mechanisms
 * Makes novel predictions
+:::
 :::
 
 ::::

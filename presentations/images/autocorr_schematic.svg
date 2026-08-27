@@ -1,80 +1,364 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="300" height="360" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg" font-family="Inter, Arial, sans-serif">
-
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="300"
+   height="360"
+   viewBox="0 0 300 360"
+   font-family="Inter, Arial, sans-serif"
+   version="1.1"
+   id="svg39920"
+   sodipodi:docname="autocorr_schematic.svg"
+   inkscape:version="1.1.2 (0a00cf5339, 2022-02-04)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview39922"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     showgrid="false"
+     inkscape:zoom="1.545814"
+     inkscape:cx="234.50428"
+     inkscape:cy="198.60087"
+     inkscape:window-width="1920"
+     inkscape:window-height="1043"
+     inkscape:window-x="1920"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg39920" />
   <!-- Title -->
-  <text x="150" y="16" font-size="13" font-weight="bold" fill="#1a1a1a" text-anchor="middle">
-    Within-trial residual autocorrelation
-  </text>
-  <text x="150" y="29" font-size="9" fill="#666666" text-anchor="middle">
-    deviation from that trial's own average
-  </text>
-
+  <text
+     x="150.41356"
+     y="17.373798"
+     font-size="9px"
+     fill="#666666"
+     text-anchor="middle"
+     id="text39855"
+     style="font-size:16px"><tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16px;font-family:Inter;-inkscape-font-specification:Inter;fill:#000000"
+       id="tspan40703">deviation from that sequence's average</tspan></text>
   <!-- lag bracket between obs t and obs t+1 (drawn first, well clear of subtitle above) -->
-  <text x="90" y="48" font-size="9" font-weight="bold" fill="#333333" text-anchor="middle">lag = 1</text>
-  <path d="M 60,68 C 60,55 120,55 120,58" fill="none" stroke="#333333" stroke-width="1.2"
-        marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-
+  <text
+     x="82.709549"
+     y="48.729874"
+     font-size="9px"
+     font-weight="bold"
+     fill="#333333"
+     text-anchor="middle"
+     id="text39857"
+     style="font-size:13.3333px;fill:#029e73;fill-opacity:1"><tspan
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.3333px;font-family:Inter;-inkscape-font-specification:'Inter Bold';fill:#029e73;fill-opacity:1"
+       id="tspan53839">lag = 1</tspan></text>
   <!-- ============ Top: one example trial's residual trace ============ -->
   <!-- baseline (zero) -->
-  <line x1="35" y1="105" x2="265" y2="105" stroke="#999999" stroke-width="1" stroke-dasharray="3,3"/>
-  <text x="30" y="108" font-size="9" fill="#999999" text-anchor="end">0</text>
-
+  <line
+     x1="35"
+     y1="105"
+     x2="265"
+     y2="105"
+     stroke="#999999"
+     stroke-width="1"
+     stroke-dasharray="3,3"
+     id="line39861" />
+  <text
+     x="30"
+     y="108"
+     font-size="9"
+     fill="#999999"
+     text-anchor="end"
+     id="text39863">0</text>
   <!-- trace -->
-  <polyline points="60,82 120,72 180,112 240,126" fill="none" stroke="#4c4c4c" stroke-width="2"/>
-  <circle cx="60" cy="82" r="4" fill="#4c4c4c"/>
-  <circle cx="120" cy="72" r="4" fill="#4c4c4c"/>
-  <circle cx="180" cy="112" r="4" fill="#4c4c4c"/>
-  <circle cx="240" cy="126" r="4" fill="#4c4c4c"/>
-
+  <polyline
+     points="60,82 120,72 180,112 240,126"
+     fill="none"
+     stroke="#4c4c4c"
+     stroke-width="2"
+     id="polyline39865" />
+  <circle
+     cx="60"
+     cy="82"
+     r="4"
+     fill="#4c4c4c"
+     id="circle39867" />
+  <circle
+     cx="120"
+     cy="72"
+     r="4"
+     fill="#4c4c4c"
+     id="circle39869" />
+  <circle
+     cx="180"
+     cy="112"
+     r="4"
+     fill="#4c4c4c"
+     id="circle39871" />
+  <circle
+     cx="240"
+     cy="126"
+     r="4"
+     fill="#4c4c4c"
+     id="circle39873" />
   <!-- observation labels -->
-  <text x="60" y="142" font-size="9" fill="#333333" text-anchor="middle">obs t</text>
-  <text x="120" y="142" font-size="9" fill="#333333" text-anchor="middle">obs t+1</text>
-  <text x="180" y="142" font-size="9" fill="#333333" text-anchor="middle">obs t+2</text>
-  <text x="240" y="142" font-size="9" fill="#333333" text-anchor="middle">obs t+3</text>
-
-  <text x="150" y="160" font-size="9" fill="#666666" text-anchor="middle" font-style="italic">
-    r( residual at t , residual at t+lag ) — one value per person, per lag
-  </text>
-
+  <text
+     x="60"
+     y="150"
+     font-size="9px"
+     fill="#333333"
+     text-anchor="middle"
+     id="text39875"
+     style="font-size:18.6667px">t</text>
+  <text
+     x="120"
+     y="150"
+     font-size="9px"
+     fill="#333333"
+     text-anchor="middle"
+     id="text39877"
+     style="font-size:18.6667px">t+1</text>
+  <text
+     x="180"
+     y="150"
+     font-size="9px"
+     fill="#333333"
+     text-anchor="middle"
+     id="text39879"
+     style="font-size:18.6667px">t+2</text>
+  <text
+     x="240"
+     y="150"
+     font-size="9px"
+     fill="#333333"
+     text-anchor="middle"
+     id="text39881"
+     style="font-size:18.6667px">t+3</text>
   <!-- divider -->
-  <line x1="20" y1="175" x2="280" y2="175" stroke="#dddddd" stroke-width="1"/>
-
+  <line
+     x1="20"
+     y1="175"
+     x2="280"
+     y2="175"
+     stroke="#dddddd"
+     stroke-width="1"
+     id="line39885" />
   <!-- ============ Bottom: two contrasting patterns ============ -->
-
   <!-- LEFT: persisting / correlated -->
-  <text x="80" y="195" font-size="11" font-weight="bold" fill="#4c4c4c" text-anchor="middle">
-    Persisting noise
-  </text>
-  <line x1="30" y1="260" x2="130" y2="260" stroke="#bbbbbb" stroke-width="1" stroke-dasharray="2,2"/>
-  <polyline points="30,235 63,225 97,280 130,292" fill="none" stroke="#4c4c4c" stroke-width="2" opacity="1"/>
-  <polyline points="30,242 63,248 97,265 130,272" fill="none" stroke="#4c4c4c" stroke-width="2" opacity="0.55"/>
-  <polyline points="30,228 63,220 97,278 130,288" fill="none" stroke="#4c4c4c" stroke-width="2" opacity="0.3"/>
-  <text x="80" y="310" font-size="8.5" fill="#4c4c4c" text-anchor="middle">
-    same sign nearby →
-  </text>
-  <text x="80" y="321" font-size="8.5" font-weight="bold" fill="#4c4c4c" text-anchor="middle">
-    correlated
-  </text>
-
+  <text
+     x="80"
+     y="195"
+     font-size="11"
+     font-weight="bold"
+     fill="#4c4c4c"
+     text-anchor="middle"
+     id="text39887"
+     style="font-size:16px;fill:#d55e00;fill-opacity:1"><tspan
+       style="font-weight:normal;font-size:16px;fill:#d55e00;fill-opacity:1"
+       id="tspan78549">Persisting noise</tspan></text>
+  <line
+     x1="30"
+     y1="260"
+     x2="130"
+     y2="260"
+     stroke="#bbbbbb"
+     stroke-width="1"
+     stroke-dasharray="2,2"
+     id="line39889" />
+  <polyline
+     points="30,235 63,225 97,280 130,292"
+     fill="none"
+     stroke="#4c4c4c"
+     stroke-width="2"
+     opacity="1"
+     id="polyline39891"
+     style="stroke:#d55e00;stroke-opacity:1" />
+  <polyline
+     points="30,242 63,248 97,265 130,272"
+     fill="none"
+     stroke="#4c4c4c"
+     stroke-width="2"
+     opacity="0.55"
+     id="polyline39893"
+     style="stroke:#d55e00;stroke-opacity:1" />
+  <polyline
+     points="30,228 63,220 97,278 130,288"
+     fill="none"
+     stroke="#4c4c4c"
+     stroke-width="2"
+     opacity="0.3"
+     id="polyline39895"
+     style="stroke:#d55e00;stroke-opacity:1" />
+  <text
+     x="80"
+     y="336"
+     font-size="8.5"
+     fill="#4c4c4c"
+     text-anchor="middle"
+     id="text39897"
+     style="font-size:13.3333px;-inkscape-font-specification:Inter;font-family:Inter;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;fill:#d55e00;fill-opacity:1">same sign nearby →</text>
+  <text
+     x="77.342239"
+     y="355.0383"
+     font-size="8.5"
+     font-weight="bold"
+     fill="#4c4c4c"
+     text-anchor="middle"
+     id="text39899"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.3333px;font-family:Inter;-inkscape-font-specification:Inter;fill:#d55e00;fill-opacity:1"><tspan
+       style="font-weight:bold;fill:#d55e00;fill-opacity:1"
+       id="tspan111691">correlated</tspan></text>
   <!-- RIGHT: independent / uncorrelated -->
-  <text x="220" y="195" font-size="11" font-weight="bold" fill="#0173b2" text-anchor="middle">
-    Independent noise
-  </text>
-  <line x1="170" y1="260" x2="270" y2="260" stroke="#bbbbbb" stroke-width="1" stroke-dasharray="2,2"/>
-  <polyline points="170,230 203,280 237,240 270,270" fill="none" stroke="#0173b2" stroke-width="2" opacity="1"/>
-  <polyline points="170,275 203,235 237,285 270,232" fill="none" stroke="#0173b2" stroke-width="2" opacity="0.55"/>
-  <polyline points="170,250 203,220 237,265 270,290" fill="none" stroke="#0173b2" stroke-width="2" opacity="0.3"/>
-  <text x="220" y="310" font-size="8.5" fill="#0173b2" text-anchor="middle">
-    random sign →
-  </text>
-  <text x="220" y="321" font-size="8.5" font-weight="bold" fill="#0173b2" text-anchor="middle">
-    uncorrelated
-  </text>
-
+  <text
+     x="220"
+     y="195"
+     font-size="11"
+     font-weight="bold"
+     fill="#0173b2"
+     text-anchor="middle"
+     id="text39901"
+     style="font-size:16px;fill:#0173b2;fill-opacity:1"><tspan
+       style="font-weight:normal;font-size:16px;fill:#0173b2;fill-opacity:1"
+       id="tspan79401">Independent noise</tspan></text>
+  <line
+     x1="170"
+     y1="260"
+     x2="270"
+     y2="260"
+     stroke="#bbbbbb"
+     stroke-width="1"
+     stroke-dasharray="2,2"
+     id="line39903" />
+  <polyline
+     points="170,230 203,280 237,240 270,270"
+     fill="none"
+     stroke="#0173b2"
+     stroke-width="2"
+     opacity="1"
+     id="polyline39905" />
+  <polyline
+     points="170,275 203,235 237,285 270,232"
+     fill="none"
+     stroke="#0173b2"
+     stroke-width="2"
+     opacity="0.55"
+     id="polyline39907" />
+  <polyline
+     points="170,250 203,220 237,265 270,290"
+     fill="none"
+     stroke="#0173b2"
+     stroke-width="2"
+     opacity="0.3"
+     id="polyline39909" />
+  <text
+     x="220"
+     y="336"
+     font-size="8.5"
+     fill="#0173b2"
+     text-anchor="middle"
+     id="text39911"
+     style="font-size:13.3333px;-inkscape-font-specification:Inter;font-family:Inter;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;fill:#0173b2;fill-opacity:1">random sign →</text>
+  <text
+     x="220"
+     y="355"
+     font-size="8.5"
+     font-weight="bold"
+     fill="#0173b2"
+     text-anchor="middle"
+     id="text39913"
+     style="font-size:13.3333px;-inkscape-font-specification:Inter;font-family:Inter;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;fill:#0173b2;fill-opacity:1"><tspan
+       style="font-weight:bold;fill:#0173b2;fill-opacity:1"
+       id="tspan112421">uncorrelated</tspan></text>
   <!-- arrow marker def -->
-  <defs>
-    <marker id="arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-      <path d="M0,0 L6,3 L0,6 Z" fill="#333333"/>
+  <defs
+     id="defs39918">
+    <marker
+       style="overflow:visible"
+       id="Arrow2Lstart"
+       refX="0.0"
+       refY="0.0"
+       orient="auto"
+       inkscape:stockid="Arrow2Lstart"
+       inkscape:isstock="true">
+      <path
+         transform="scale(1.1) translate(1,0)"
+         d="M 8.7185878,4.0337352 L -2.2072895,0.016013256 L 8.7185884,-4.0017078 C 6.9730900,-1.6296469 6.9831476,1.6157441 8.7185878,4.0337352 z "
+         style="stroke:context-stroke;fill-rule:evenodd;fill:context-stroke;stroke-width:0.62500000;stroke-linejoin:round"
+         id="path58548" />
+    </marker>
+    <marker
+       style="overflow:visible;"
+       id="Arrow2Lend"
+       refX="0.0"
+       refY="0.0"
+       orient="auto"
+       inkscape:stockid="Arrow2Lend"
+       inkscape:isstock="true">
+      <path
+         transform="scale(1.1) rotate(180) translate(1,0)"
+         d="M 8.7185878,4.0337352 L -2.2072895,0.016013256 L 8.7185884,-4.0017078 C 6.9730900,-1.6296469 6.9831476,1.6157441 8.7185878,4.0337352 z "
+         style="stroke:context-stroke;fill-rule:evenodd;fill:context-stroke;stroke-width:0.62500000;stroke-linejoin:round;"
+         id="path58551" />
+    </marker>
+    <marker
+       style="overflow:visible;"
+       id="Arrow2Send"
+       refX="0.0"
+       refY="0.0"
+       orient="auto"
+       inkscape:stockid="Arrow2Send"
+       inkscape:isstock="true">
+      <path
+         transform="scale(0.3) rotate(180) translate(-2.3,0)"
+         d="M 8.7185878,4.0337352 L -2.2072895,0.016013256 L 8.7185884,-4.0017078 C 6.9730900,-1.6296469 6.9831476,1.6157441 8.7185878,4.0337352 z "
+         style="stroke:context-stroke;fill-rule:evenodd;fill:context-stroke;stroke-width:0.62500000;stroke-linejoin:round;"
+         id="path58563" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Arrow2Mstart"
+       refX="0.0"
+       refY="0.0"
+       orient="auto"
+       inkscape:stockid="Arrow2Mstart"
+       inkscape:isstock="true">
+      <path
+         transform="scale(0.6) translate(0,0)"
+         d="M 8.7185878,4.0337352 L -2.2072895,0.016013256 L 8.7185884,-4.0017078 C 6.9730900,-1.6296469 6.9831476,1.6157441 8.7185878,4.0337352 z "
+         style="stroke:context-stroke;fill-rule:evenodd;fill:context-stroke;stroke-width:0.62500000;stroke-linejoin:round"
+         id="path58554" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="TriangleInL"
+       refX="0.0"
+       refY="0.0"
+       orient="auto"
+       inkscape:stockid="TriangleInL"
+       inkscape:isstock="true">
+      <path
+         transform="scale(-0.8)"
+         style="fill-rule:evenodd;fill:context-stroke;stroke:context-stroke;stroke-width:1.0pt"
+         d="M 5.77,0.0 L -2.88,5.0 L -2.88,-5.0 L 5.77,0.0 z "
+         id="path58663" />
+    </marker>
+    <marker
+       id="arrow"
+       markerWidth="6"
+       markerHeight="6"
+       refX="3"
+       refY="3"
+       orient="auto">
+      <path
+         d="M0,0 L6,3 L0,6 Z"
+         fill="#333333"
+         id="path39915" />
     </marker>
   </defs>
+  <path
+     style="fill:none;stroke:#029e73;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-start:url(#Arrow2Lstart);marker-end:url(#Arrow2Lend)"
+     d="m 57.436295,72.90813 c 0,0 14.259015,-13.761124 23.471433,-15.353837 10.894382,-1.883504 32.241652,7.784093 32.241652,7.784093"
+     id="path58357"
+     sodipodi:nodetypes="cac" />
 </svg>

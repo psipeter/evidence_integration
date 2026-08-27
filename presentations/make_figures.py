@@ -1163,7 +1163,8 @@ LAMBDA_CORR_MODELS = {
 }
 
 
-def _plot_lambda_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> None:
+def _plot_lambda_model_corr_panel(ax, legend_ax, task_key: str, title: str,
+                                  show_ylabel: bool) -> None:
     """One panel: EACH model's own fitted lambda (y) vs that SAME pid's
     fitted human lambda (x), for one task -- a genuinely different question
     from every other lambda panel in this deck (those ask "how is lambda
@@ -1189,6 +1190,10 @@ def _plot_lambda_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> N
     (fixed by the GridSpec, not inferred from content), unlike a
     bbox_to_anchor legend that silently clips past a certain size (see
     _plot_lambda_splithalf_panel's git history for that failure mode).
+
+    show_ylabel controls whether this panel draws its own y-axis label/
+    ticks -- only the leftmost of the three needs to, since x/y are
+    already shared across all three panels via LAMBDA_XLIM.
     """
     human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
     lam_human = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
@@ -1230,7 +1235,8 @@ def _plot_lambda_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> N
     legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
                      ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
     ax.set_xlabel("\u03bb (human)")
-    ax.set_ylabel("\u03bb (model)")
+    ax.set_ylabel("\u03bb (model)" if show_ylabel else "")
+    ax.tick_params(axis="y", labelleft=show_ylabel)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -1244,6 +1250,10 @@ def make_lambda_model_correlation() -> Path:
     participant's OWN decay-rate/recency-bias, not just the population
     average -- see _plot_lambda_model_corr_panel's own docstring.
 
+    Only the leftmost panel draws its own y-axis label/ticks (per
+    instruction) -- the other two share the identical LAMBDA_XLIM scale,
+    so repeating the label added no information.
+
     2-ROW GridSpec (plots on top, a dedicated legend row underneath) --
     same reasoning as the (now-removed) lambda_sanity_models figure: up to
     4 models per panel each need their own "r=0.xx*" line, too many for a
@@ -1256,8 +1266,8 @@ def make_lambda_model_correlation() -> Path:
     axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
     legend_axes = [fig.add_subplot(gs[1, i]) for i in range(3)]
 
-    for ax, lax, (task_key, title) in zip(axes, legend_axes, LAMBDA_TASK_PANELS):
-        _plot_lambda_model_corr_panel(ax, lax, task_key, title)
+    for i, (ax, lax, (task_key, title)) in enumerate(zip(axes, legend_axes, LAMBDA_TASK_PANELS)):
+        _plot_lambda_model_corr_panel(ax, lax, task_key, title, show_ylabel=(i == 0))
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = FIGURES_DIR / "lambda_model_correlation.svg"
@@ -1934,6 +1944,15 @@ SIGMA_CORR_MODELS = {
     "numbers": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"],
 }
 
+# Fixed, SHARED x/y range across ALL THREE panels (not per-task anymore) --
+# set explicitly per instruction, matching lambda_model_correlation's own
+# shared LAMBDA_XLIM convention. With one shared 0.6 cap, nothing is
+# actually cropped: confirmed directly, the max plotted (human + model)
+# value in any task is 0.523 (colors) -- well under 0.6 -- so unlike the
+# earlier per-task version of this constant, this range comfortably
+# contains every point in every panel.
+SIGMA_CORR_XLIM = 0.6
+
 # Local color override for THIS figure only -- MODEL_COLORS itself is left
 # untouched (NoisyRL_lambda's own tan still applies everywhere else, e.g.
 # make_variability_models). Same reasoning as make_model_performance_nll's
@@ -1971,7 +1990,8 @@ def _sigma_model_source_path(task_key: str, model: str) -> Path:
     return _nll_responses_path(task_key, model)
 
 
-def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> None:
+def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str,
+                                 show_ylabel: bool) -> None:
     """One panel: EACH model's own response noise (sigma, y) vs that SAME
     pid's human sigma (x), for one task -- the sigma analogue of
     _plot_lambda_model_corr_panel, per instruction. Up to 4 models per
@@ -1986,10 +2006,12 @@ def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> No
     _plot_lambda_model_corr_panel's own docstring: up to 4 "r=0.xx*" lines
     per panel is too many for a compact in-corner legend.
 
-    AXIS RANGE IS PER-PANEL, shared between x and y within that panel
-    (computed from human + every model's own values combined) but NOT
-    across panels -- same reasoning as every other sigma figure in this
-    deck.
+    AXIS RANGE IS FIXED AND SHARED ACROSS ALL THREE PANELS (SIGMA_CORR_XLIM
+    = 0.6), matching lambda_model_correlation's own shared-LAMBDA_XLIM
+    convention -- NOT per-panel autoscaled the way most other sigma figures
+    in this deck are, per instruction. show_ylabel controls whether this
+    panel draws its own y-axis label/ticks (only the leftmost of the three
+    needs to, since the scale is now identical across all three).
     """
     qid_map, prefix = _variability_qid_map(task_key)
     human_sigma = _variability_series(task_key, _human_data_path(task_key), qid_map, prefix)
@@ -1998,8 +2020,7 @@ def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> No
     ax.set_title(title, color=TASK_COLORS[task_key])
 
     handles, labels = [], []
-    all_vals = list(human_sigma.dropna().values)
-    plotted = []  # (model, merged) pairs, plotted after axis range is known
+    plotted = []  # (model, merged) pairs
     for model in SIGMA_CORR_MODELS[task_key]:
         path = _sigma_model_source_path(task_key, model)
         if not path.exists():
@@ -2009,8 +2030,6 @@ def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> No
         merged = pd.DataFrame({"human": human_sigma, "model": model_sigma}).dropna()
         if len(merged) < 2:
             continue
-        all_vals.extend(merged["human"].values)
-        all_vals.extend(merged["model"].values)
         plotted.append((model, merged))
 
     if not plotted:
@@ -2018,9 +2037,8 @@ def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> No
                 transform=ax.transAxes, color="0.5", style="italic")
         return
 
-    hi = float(max(all_vals)) * 1.1
-    ax.set_xlim(0, hi)
-    ax.set_ylim(0, hi)
+    ax.set_xlim(0, SIGMA_CORR_XLIM)
+    ax.set_ylim(0, SIGMA_CORR_XLIM)
 
     for model, merged in plotted:
         color = SIGMA_CORR_COLORS[model]
@@ -2038,7 +2056,8 @@ def _plot_sigma_model_corr_panel(ax, legend_ax, task_key: str, title: str) -> No
     legend_ax.legend(handles=handles, labels=labels, fontsize=9, loc="center",
                      ncol=1, labelspacing=0.4, frameon=True, framealpha=0.9)
     ax.set_xlabel("\u03c3 (human)")
-    ax.set_ylabel("\u03c3 (model)")
+    ax.set_ylabel("\u03c3 (model)" if show_ylabel else "")
+    ax.tick_params(axis="y", labelleft=show_ylabel)
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -2049,6 +2068,11 @@ def make_sigma_model_correlation() -> Path:
     to 4 models' own response noise plotted against that SAME pid's human
     response noise (SIGMA_CORR_MODELS) -- the sigma analogue of
     make_lambda_model_correlation, per instruction.
+
+    Y-AXIS (AND X-AXIS) IS SHARED ACROSS ALL THREE PANELS, fixed at
+    [0, 0.6] (SIGMA_CORR_XLIM) -- per instruction, matching
+    make_lambda_model_correlation's own shared [0, 1.5] LAMBDA_XLIM
+    convention. Only the leftmost panel draws its own y-axis label/ticks.
 
     2-ROW GridSpec (plots on top, a dedicated legend row underneath) --
     same reasoning as make_lambda_model_correlation: up to 4 models per
@@ -2061,8 +2085,8 @@ def make_sigma_model_correlation() -> Path:
     axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
     legend_axes = [fig.add_subplot(gs[1, i]) for i in range(3)]
 
-    for ax, lax, (task_key, title) in zip(axes, legend_axes, VARIABILITY_TASK_PANELS):
-        _plot_sigma_model_corr_panel(ax, lax, task_key, title)
+    for i, (ax, lax, (task_key, title)) in enumerate(zip(axes, legend_axes, VARIABILITY_TASK_PANELS)):
+        _plot_sigma_model_corr_panel(ax, lax, task_key, title, show_ylabel=(i == 0))
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = FIGURES_DIR / "sigma_model_correlation.svg"
@@ -2403,63 +2427,144 @@ def _resid_autocorr(resid_df: pd.DataFrame, lags: list[int]):
 AUTOCORR_SCHEMATIC = Path(__file__).resolve().parent / "images" / "autocorr_schematic.svg"
 
 
+def _nll_responses_path(task_key: str, model: str) -> Path:
+    """Path to one (task, model)'s *_nll_responses.pkl -- same "_resp_noise"
+    file-naming quirk as _nll_perf_path (see that function's own
+    docstring), just pointing at the actual per-observation response
+    SEQUENCE (needed to compute a residual) rather than the scalar
+    performance loss."""
+    file_model = model if model == "NoisyRL_lambda" else f"{model}_resp_noise"
+    if task_key == "balls":
+        return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_responses.pkl"
+    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
+    return RUNS_DIR / "nll" / f"{file_model}_{dataset}_nll_responses.pkl"
+
+
+def _load_variance_autocorr_data() -> dict:
+    """task_key -> (human_res, model_results, lags). Loaded ONCE and shared
+    between the human-only and human+models figure functions below -- same
+    established pattern as _load_response_change_data -- so both read the
+    EXACT same underlying numbers. Model roster is NLL_MODEL_ORDER (Mean/
+    LeakyIntegrator/PrimacyRecency's own "_resp_noise" fits + NoisyRL_lambda)
+    -- RL_lambda's own bare fit is deliberately NOT included, per
+    instruction, matching make_model_performance_nll's own roster."""
+    out = {}
+    for task_key, title in RESID_TASK_PANELS:
+        qid_map, prefix = _variability_qid_map(task_key)
+        human_path = _human_data_path(task_key)
+        human_resid = _resid_frame(task_key, human_path, qid_map, prefix)
+        lags = RESID_LAGS[task_key]
+        human_res = _resid_autocorr(human_resid, lags)
+
+        model_results = {}
+        for m in NLL_MODEL_ORDER:
+            mpath = _nll_responses_path(task_key, m)
+            if not mpath.exists():
+                print(f"  (missing {mpath.name} -- skipping {m} for {task_key})")
+                continue
+            mresid = _resid_frame(task_key, mpath, qid_map, prefix)
+            mres = _resid_autocorr(mresid, lags)
+            if not isinstance(mres, str):
+                model_results[m] = mres
+
+        out[task_key] = (human_res, model_results, lags)
+    return out
+
+
+def _draw_variance_autocorr_panel(ax_ac, task_key: str, title: str, human_res,
+                                  model_results: dict, lags: list[int],
+                                  include_models: bool, show_ylabel: bool) -> None:
+    """Draws ONE autocorrelation panel -- the SAME function, called
+    identically by both make_variance_autocorr_human and
+    make_variance_autocorr_models, so the two figures differ ONLY in
+    include_models (whether model curves get drawn) and in the
+    figure-level legend each caller builds afterward -- per instruction.
+    Human is always drawn; models only when include_models=True."""
+    ax_ac.set_title(title, color=TASK_COLORS[task_key])
+    ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
+    if isinstance(human_res, str):
+        msg = ("Insufficient data\n(no qid repeats for this task)"
+              if human_res == "no_repeats" else "Insufficient data")
+        ax_ac.text(0.5, 0.5, msg, ha="center", va="center",
+                  transform=ax_ac.transAxes, color="0.5", style="italic")
+    else:
+        _, means, sems = human_res
+        ax_ac.plot(lags, means, "-", color=HUMAN_COLOR, lw=2.2, zorder=6)
+        ax_ac.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR,
+                          alpha=0.2, zorder=1)
+    if include_models:
+        for j, m in enumerate(NLL_MODEL_ORDER):
+            if m not in model_results:
+                continue
+            _, mmeans, msems = model_results[m]
+            color = NLL_MODEL_COLORS[m]
+            ax_ac.plot(lags, mmeans, "-", color=color, lw=2.0, zorder=5 - j)
+            ax_ac.fill_between(lags, mmeans - msems, mmeans + msems, color=color,
+                              alpha=0.15, zorder=1)
+    ax_ac.set_xlabel("Lag (observations)")
+    ax_ac.set_ylabel("Autocorrelation" if show_ylabel else "")
+    ax_ac.tick_params(axis="y", labelleft=show_ylabel)
+    ax_ac.set_xticks(lags)
+    ax_ac.margins(x=0.15)
+    sns.despine(ax=ax_ac, top=True, right=True)
+
+
 def make_variance_autocorr_human() -> Path:
     """1x4 panel: panel A holds AUTOCORR_SCHEMATIC (a hand-made diagram of
     the metric itself), composited in via _embed_svg_into_rect -- same
     convention as make_variability_human's own panel A; panels B-D are
     Human-only within-trial lag-k residual autocorrelation, one per task
     [balls, colors, numbers] -- snacks excluded, same reasoning as
-    VARIABILITY_TASK_PANELS. Y-AXIS IS SHARED across B-D (sharey=True), so
-    the three tasks' decay is directly comparable rather than each panel
-    autoscaling to its own range.
+    VARIABILITY_TASK_PANELS.
 
-    VARIANCE GROWTH (the OLD top row) WAS DROPPED, per instruction, after
-    checking the actual numbers directly rather than relying on the
+    IDENTICAL TO make_variance_autocorr_models EXCEPT FOR THE ADDED MODEL
+    DATA AND LEGEND, per instruction -- both call the exact same
+    _draw_variance_autocorr_panel for every panel, with include_models the
+    only thing that differs (False here). Y-AXIS RANGE IS ALSO SHARED
+    ACROSS BOTH FIGURES, not just within this one's own 4 panels: a
+    throwaway PROBE pass (drawn with include_models=True on a scratch
+    figure, never saved) establishes the SAME y-limits
+    make_variance_autocorr_models' own real run would produce, then that
+    range is applied here explicitly -- mirroring make_response_change's
+    own two-pass shared-ylim mechanism, adapted for two independent
+    top-level functions (callable in either order) rather than one
+    combined function returning both paths.
+
+    VARIANCE GROWTH (an earlier top row) WAS DROPPED, per instruction,
+    after checking the actual numbers directly rather than relying on the
     earlier visual read (which was wrong -- see chat): only Human and
     NoisyRL_lambda show a genuine, substantial DECAYING autocorrelation
     (starting well above zero, decaying toward/past it); every
-    "_resp_noise" model (Mean/LeakyIntegrator/PrimacyRecency/RL_lambda)
-    stays within about +-0.09 of zero at EVERY lag in EVERY task -- noise
-    scatter around zero, not a real signal. Autocorrelation alone is the
-    metric that actually distinguishes state-persistent noise from pure
-    i.i.d. response noise; variance growth did not (it grew inconsistently
-    for the resp_noise models too, likely just sampling noise around a
-    flat truth).
+    "_resp_noise" model stays within about +-0.09 of zero at EVERY lag in
+    EVERY task -- noise scatter around zero, not a real signal.
+    Autocorrelation alone is the metric that actually distinguishes
+    state-persistent noise from pure i.i.d. response noise; variance
+    growth did not.
     """
     _apply_slide_style()
+    data = _load_variance_autocorr_data()
+
+    fig_probe, axes_probe = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                                         constrained_layout=True)
+    for i, (ax_ac, (task_key, title)) in enumerate(zip(axes_probe[1:], RESID_TASK_PANELS)):
+        human_res, model_results, lags = data[task_key]
+        _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
+                                      model_results, lags, include_models=True,
+                                      show_ylabel=(i == 0))
+    shared_ylim = axes_probe[0].get_ylim()
+    plt.close(fig_probe)
+
     fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
                              constrained_layout=True)
-
     axes[0].axis("off")
     axes[0].set_title("Metric Definition", color="0.3")
 
     for i, (ax_ac, (task_key, title)) in enumerate(zip(axes[1:], RESID_TASK_PANELS)):
-        qid_map, prefix = _variability_qid_map(task_key)
-        human_path = _human_data_path(task_key)
-        resid_df = _resid_frame(task_key, human_path, qid_map, prefix)
-
-        lags = RESID_LAGS[task_key]
-        res = _resid_autocorr(resid_df, lags)
-        ax_ac.set_title(title, color=TASK_COLORS[task_key])
-        if isinstance(res, str):
-            msg = ("Insufficient data\n(no qid repeats for this task)"
-                  if res == "no_repeats" else "Insufficient data")
-            ax_ac.text(0.5, 0.5, msg, ha="center", va="center",
-                      transform=ax_ac.transAxes, color="0.5", style="italic")
-        else:
-            _, means, sems = res
-            ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
-            ax_ac.plot(lags, means, "-", color=HUMAN_COLOR, lw=2.2, zorder=3)
-            ax_ac.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR,
-                              alpha=0.2, zorder=1)
-        ax_ac.set_xlabel("Lag (observations)")
-        ax_ac.set_ylabel("Autocorrelation" if i == 0 else "")
-        ax_ac.tick_params(axis="y", labelleft=(i == 0))
-        ax_ac.set_xticks(lags)
-        ax_ac.margins(x=0.15)  # keeps the rightmost tick label from
-        # clipping against the canvas edge in the last column -- there's
-        # no neighboring panel there to absorb the overflow.
-        sns.despine(ax=ax_ac, top=True, right=True)
+        human_res, model_results, lags = data[task_key]
+        _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
+                                      model_results, lags, include_models=False,
+                                      show_ylabel=(i == 0))
+    axes[0].set_ylim(*shared_ylim)  # identical to the models figure, not autoscaled
 
     panel_a_rect = _panel_a_rect(fig, axes[0])
 
@@ -2486,104 +2591,56 @@ def make_variance_autocorr_human() -> Path:
     return out_path
 
 
-# The full 5-model roster for the models figure -- unlike
-# make_model_performance_nll's boxplot (which dropped RL_lambda's own box
-# as redundant with NoisyRL_lambda at that single x-position), both
-# RL_lambda and NoisyRL_lambda are kept here with their own established
-# MODEL_COLORS: their CURVES can look genuinely different (RL_lambda's own
-# added sigma_resp vs NoisyRL_lambda's own sigma_state mechanism), so
-# showing both is informative rather than redundant.
-RESID_MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NoisyRL_lambda"]
-
-
-def _nll_responses_path(task_key: str, model: str) -> Path:
-    """Path to one (task, model)'s *_nll_responses.pkl -- same "_resp_noise"
-    file-naming quirk as _nll_perf_path (see that function's own
-    docstring), just pointing at the actual per-observation response
-    SEQUENCE (needed to compute a residual) rather than the scalar
-    performance loss."""
-    file_model = model if model == "NoisyRL_lambda" else f"{model}_resp_noise"
-    if task_key == "balls":
-        return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_responses.pkl"
-    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "nll" / f"{file_model}_{dataset}_nll_responses.pkl"
-
-
 def make_variance_autocorr_models() -> Path:
-    """Same 1x4 layout as make_variance_autocorr_human (panel A unchanged),
-    now overlaying each of the 5 NLL-fitted models on panels B-D's
-    autocorrelation. Confirms directly (not just visually -- the earlier
-    visual read of the 2x3 version was wrong, see chat) that only
-    NoisyRL_lambda shows genuine decaying autocorrelation resembling
-    Human's own pattern; the four "_resp_noise" models stay within noise
-    of zero at every lag in every task, matching what their own math
-    predicts (i.i.d. response noise, added AFTER the clean deterministic
-    trajectory per models/math_models.py's own add_noise(), has no
-    mechanism to produce lag correlation).
+    """Same 1x4 layout as make_variance_autocorr_human (panel A unchanged) --
+    IDENTICAL except for the added model data and legend, per instruction:
+    panels B-D now also overlay Mean/LeakyIntegrator/PrimacyRecency's own
+    "_resp_noise" NLL fits plus NoisyRL_lambda (NLL_MODEL_ORDER -- RL_lambda's
+    own bare/deterministic fit is NOT shown, matching model_performance_nll's
+    own roster exactly, per instruction; it was in an earlier version of
+    this figure and has been dropped). NoisyRL_lambda is recolored to
+    RL_lambda's own established red-orange (NLL_MODEL_COLORS) and labeled
+    "RL_lambda*" in the legend (NLL_LABELS) -- same convention as
+    make_model_performance_nll's own legend, reused here rather than
+    reinvented, per instruction that the last label be "RL_lambda*".
+    Legend uses FULL model names throughout (NLL_LABELS), not
+    MODEL_DISPLAY's abbreviated "LI"/"PR" -- per instruction.
+
+    Confirms directly (not just visually -- an earlier visual read was
+    wrong, see chat) that only NoisyRL_lambda shows genuine decaying
+    autocorrelation resembling Human's own pattern; the three
+    "_resp_noise" models stay within noise of zero at every lag in every
+    task, matching what their own math predicts (i.i.d. response noise,
+    added AFTER the clean deterministic trajectory per
+    models/math_models.py's own add_noise(), has no mechanism to produce
+    lag correlation).
     """
     _apply_slide_style()
+    data = _load_variance_autocorr_data()
+
     fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
                              constrained_layout=True)
-
     axes[0].axis("off")
     axes[0].set_title("Metric Definition", color="0.3")
 
-    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2.2)]
-    legend_labels = ["Human"]
-    for m in RESID_MODEL_ORDER:
-        legend_handles.append(Line2D([0], [0], color=MODEL_COLORS[m], lw=2.2))
-        legend_labels.append(MODEL_DISPLAY.get(m, m))
-
     for i, (ax_ac, (task_key, title)) in enumerate(zip(axes[1:], RESID_TASK_PANELS)):
-        qid_map, prefix = _variability_qid_map(task_key)
-        human_path = _human_data_path(task_key)
-        human_resid = _resid_frame(task_key, human_path, qid_map, prefix)
-
-        model_resids = {}
-        for m in RESID_MODEL_ORDER:
-            mpath = _nll_responses_path(task_key, m)
-            if not mpath.exists():
-                print(f"  (missing {mpath.name} -- skipping {m} for {task_key})")
-                continue
-            model_resids[m] = _resid_frame(task_key, mpath, qid_map, prefix)
-
-        lags = RESID_LAGS[task_key]
-        ax_ac.set_title(title, color=TASK_COLORS[task_key])
-        ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
-        res = _resid_autocorr(human_resid, lags)
-        if isinstance(res, str):
-            msg = ("Insufficient data\n(no qid repeats for this task)"
-                  if res == "no_repeats" else "Insufficient data")
-            ax_ac.text(0.5, 0.5, msg, ha="center", va="center",
-                      transform=ax_ac.transAxes, color="0.5", style="italic")
-        else:
-            _, means, sems = res
-            ax_ac.plot(lags, means, "-", color=HUMAN_COLOR, lw=2.2, zorder=6)
-            ax_ac.fill_between(lags, means - sems, means + sems, color=HUMAN_COLOR,
-                              alpha=0.2, zorder=1)
-        for j, m in enumerate(RESID_MODEL_ORDER):
-            if m not in model_resids:
-                continue
-            mres = _resid_autocorr(model_resids[m], lags)
-            if isinstance(mres, str):
-                continue
-            _, mmeans, msems = mres
-            color = MODEL_COLORS[m]
-            ax_ac.plot(lags, mmeans, "-", color=color, lw=2.0, zorder=5 - j)
-            ax_ac.fill_between(lags, mmeans - msems, mmeans + msems, color=color,
-                              alpha=0.15, zorder=1)
-        ax_ac.set_xlabel("Lag (observations)")
-        ax_ac.set_ylabel("Autocorrelation" if i == 0 else "")
-        ax_ac.tick_params(axis="y", labelleft=(i == 0))
-        ax_ac.set_xticks(lags)
-        ax_ac.margins(x=0.15)
-        sns.despine(ax=ax_ac, top=True, right=True)
+        human_res, model_results, lags = data[task_key]
+        _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
+                                      model_results, lags, include_models=True,
+                                      show_ylabel=(i == 0))
+    # sharey autoscales to human+models here -- this IS the range
+    # make_variance_autocorr_human's own probe pass independently
+    # reconstructs and reuses (see that function's own docstring).
 
     panel_a_rect = _panel_a_rect(fig, axes[0])
 
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")]
+    for m in NLL_MODEL_ORDER:
+        legend_handles.append(Line2D([0], [0], color=NLL_MODEL_COLORS[m], lw=2.2,
+                                     label=NLL_LABELS.get(m, m)))
     fig.get_layout_engine().set(h_pad=0.25)
-    fig.legend(handles=legend_handles, labels=legend_labels,
-               loc="outside lower center", ncol=6, frameon=True, framealpha=0.9)
+    fig.legend(handles=legend_handles, loc="outside lower center", ncol=5,
+               frameon=True, framealpha=0.9)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out_path = FIGURES_DIR / "variance_autocorr_models.svg"
