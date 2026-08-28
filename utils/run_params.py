@@ -2,8 +2,12 @@
 Shared utility for loading fitted parameters from a run folder,
 merging with MODEL_PARAMS fixed values and NEF PARAM_DEFAULTS.
 
-Used by save_responses, save_activities, dynamics_NEF, and
-iti_perturbation to avoid duplicating the same loading pattern.
+Used by save_responses and save_activities to avoid duplicating the same
+loading pattern. (Two other historical callers are gone: scripts/
+check_NEF_pipeline.py -- formerly dynamics_NEF.py -- dropped its
+--run_folder path entirely in favour of always-explicit params, so it no
+longer reads a completed fit at all; and iti_perturbation.py is archived,
+not live.)
 """
 
 from __future__ import annotations

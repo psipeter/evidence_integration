@@ -5578,3 +5578,358 @@ that, exactly like `carrabin.pkl`, both files are permanently tracked and
 immune to the `data/` rule for every future `git add`, no `-f` needed
 again.
 
+---
+
+## Soltani math-model RMSE/NLL fits; presentation deck finished; NEF refit planned next (this session)
+
+### Fresh math-model fits against the corrected 46-pid data
+
+With the pid-registry and pilot-4 fixes above in place, refit Mean/
+LeakyIntegrator/PrimacyRecency/RL_lambda for soltani_numbers/soltani_colors
+under RMSE (`data/runs/rmse/`, `--n_trials 300 --k 5`), and
+Mean_resp_noise/LeakyIntegrator_resp_noise/PrimacyRecency_resp_noise/
+NoisyRL_lambda under NLL (`data/runs/nll/`, same n_trials/k, `--loss nll`)
+-- exact commands now in `CLAUDE.md`'s own "soltani math-model fits"
+section. These are the FIRST fits against the contamination-free 46-pid
+canonical data; every earlier soltani fit in `data/runs/soltani/` was
+made against progressively stale data (35, then 45, pids) and is no
+longer read by anything.
+
+### carrabin's NEF fit found to be incomplete, mid-session
+
+While reviewing `presentations/make_figures.py`'s own "Model Performance"
+figure, the balls (carrabin) panel had silently lost its significance
+bars relative to an earlier render the person had on hand. Traced
+directly (not guessed): `NEF_carrabin_performance.pkl` (the plain
+RMSE-fitted file that figure reads) has only 16 of 21 pids, though
+NEF_carrabin_responses_mle.pkl (the MLE-fitted variant other panels
+read) has all 21 -- confirmed via the file's own pid column, and via
+direct comparison against an uploaded copy of the earlier SVG (its own
+embedded `<dc:date>` metadata dates it to earlier the same day, before
+the current carrabin fit files' own mtime). Something regenerated
+carrabin's NEF fit, incompletely, sometime that day, before this
+session started -- not caused by anything done in this session, since
+the carrabin path resolvers were never touched.
+
+Given a genuine refit was already the acknowledged next step (see
+below), this was treated as a KNOWN, temporary gap rather than
+re-running the old fit: `presentations/make_figures.py`'s "Model
+Performance" figure now shows `RL_lambda` in balls' "our model" slot
+instead of NEF (RL_lambda has a complete, real 21-pid carrabin fit on
+disk) -- documented explicitly in that file's own `TASK_PANELS` comment
+as a stand-in pending the NEF refit, not a permanent substitution the
+way RL_lambda already stands in for colors/numbers (where NEF has never
+been fit at all).
+
+### Presentation deck: response-noise (sigma) figures added, alongside real bugs found and fixed
+
+The Dartmouth talk gained a full sigma (response-noise) track mirroring
+the existing lambda track, plus corrections to figures already in the
+deck:
+
+- **`sigma_sanity_human.svg`** ("Consistent Across Trials & Tasks (sigma)")
+  and **`sigma_model_correlation.svg`** ("Models Capture sigma
+  Differences") -- split-half reliability and human-vs-model correlation
+  for response noise, mirroring the existing lambda_sanity_human/
+  lambda_model_correlation figures.
+- **A real bug found and fixed while building the split-half sigma
+  figure**: an early version applied balls' own median-split,
+  min_trials=3 convention (figure_carrabin_variability.py's own
+  `half_split_std`) uniformly to colors/numbers too, on the wrong
+  assumption that lambda's own uniform odd/even convention generalized
+  directly to sigma. It does not -- figure_soltani_variability.py's own
+  split-half convention for THIS metric uses odd/even splitting with NO
+  min_trials threshold at all. Stacked together, the wrong convention
+  destroyed the colors sample: 46 pids (full data) down to just 14 with
+  both halves defined, several of them degenerate exact zeros, versus
+  45/46 under the real script's own convention. Confirmed against both
+  real scripts' actual code before fixing, not guessed. Fixed by
+  dispatching per task on each real script's own convention rather than
+  applying one uniformly.
+- **`sigma_model_correlation.svg` was extended past its own first version**:
+  initially built with only the ONE genuinely-stochastic model per task
+  (NEF/NoisyRL_lambda), on the reasoning that every OTHER model's sigma
+  is exactly zero under RMSE fitting. That reasoning holds for the
+  bare-name RMSE fits but not for Mean/LeakyIntegrator/PrimacyRecency's
+  own "_resp_noise" NLL fits, which add a genuine per-pid sigma_resp term
+  -- confirmed directly (e.g. numbers' Mean_resp_noise ranges 0.028-0.459
+  across 46 pids, not pinned at a floor) before adding all three. Result:
+  NoisyRL_lambda/NEF track human sigma more consistently across all three
+  tasks (r=0.67-0.95, all p<0.001) than the resp_noise models do (some
+  non-significant, e.g. balls' Mean r=0.28 ns) -- a genuinely interesting,
+  clean finding for the talk.
+- **Shared axis ranges added to both model-correlation figures**, per
+  instruction: lambda_model_correlation already had a shared [0,1.5]
+  x/y range across its 3 panels; sigma_model_correlation's own per-panel
+  autoscaling was replaced with one shared [0,0.6] range. Both figures'
+  y-axis label is now drawn on the leftmost panel only.
+- **`variance_autocorr_human.svg`/`variance_autocorr_models.svg` refactored**
+  to share one data-loader and one panel-drawing function, so the two
+  images are now identical apart from the added model data and legend
+  (per instruction) -- including a synchronized y-axis range across the
+  two separately-saved SVGs (a throwaway probe pass reconstructs the
+  same range the models figure would produce, mirroring
+  make_response_change's own established two-pass pattern, since two
+  separate top-level functions have no shared Axes object to sharey=True
+  together). Model roster dropped RL_lambda (per instruction, matching
+  model_performance_nll's own 4-model roster) in favor of
+  Mean_resp_noise/LeakyIntegrator_resp_noise/PrimacyRecency_resp_noise +
+  NoisyRL_lambda (colored as RL_lambda, labeled "RL_lambda*" in the
+  legend, full model names throughout).
+- **Conclusions slide fixed to show all bullets at once** rather than
+  stepping in one at a time -- wrapped each column's list in a
+  `.nonincremental` div, overriding the deck's global `incremental: true`
+  default for just that one slide.
+
+### Presentation: DONE for now. Next planned step: NEF refit
+
+The deck is considered complete as of this session. The person's own
+stated next step, to be picked up in a NEW chat (a prompt for that chat
+was written directly into the person's own message/response at the end
+of this session): refit NEF for soltani_numbers/soltani_colors under
+BOTH losses, matching the math-model fits above --
+
+- **RMSE pass**: a highly accurate network (large `n_neurons`) purely for
+  behavioral fidelity -- faithfully reproducing RL_lambda's own
+  input-output behavior, not yet concerned with noise sources.
+- **NLL pass**: `n_neurons` itself as an OPTUNA-FIT parameter (not fixed),
+  since n_neurons is the architectural lever that controls how much
+  genuine spiking noise (response noise, PE noise, etc.) the network
+  produces -- letting Optuna choose it directly targets fitting the
+  amount of variance the noise sources should produce, rather than
+  guessing a fixed value and hoping it lands in a reasonable regime.
+
+Once both fits land, the plan is to (a) add NEF into every existing
+presentation figure that currently substitutes RL_lambda/NoisyRL_lambda
+in its place (model_performance, response_change, lambda/sigma
+correlation, variance_autocorr), and (b) revisit the neural-comparison
+figures (figure_carrabin_neural.py/figure_yoo_neural.py's own N-group
+panels), not touched in some time, extending them to soltani where that
+makes sense.
+
+
+---
+
+## Shared-database/cross-pid Optuna sim_db: revisited and re-confirmed tabled; NEF multi-seed activity files + NLL ensemble branch built (this session)
+
+### Shared simulation database: why it stays tabled
+
+Revisited the `fit_mle.py`/`build_sim_db.py` shared-database architecture
+(cross-pid Optuna cross-reporting, see this file's earlier session on that
+topic) as a candidate for NEF's NLL fitting. Re-confirmed it does not transfer:
+the cross-pid caching benefit it exists for depends on SEQUENCES REPEATING
+across pids/trials, true for carrabin's small repeating pool but false for
+yoo/soltani's mostly-unique per-participant sequences -- exactly the earlier
+"Tabled" note above, re-derived from first principles before remembering it was
+already written down. Still live for NoisyCounting/carrabin only; not adopted
+for NEF or for the production RMSE/NLL pipeline (`fitting/fit.py`), which has
+no shared database and never will for this reason.
+
+### n_sims calibration via cheap math-model proxies (`scripts/calibrate_nll_nsims.py`)
+
+Built to answer "how many sims does NEF's NLL ensemble need" WITHOUT paying
+NEF's own Nengo cost -- runs on `NoisyRL_lambda`/`RL_lambda_resp_noise` only
+(seconds, not hours), against REAL human data (no synthetic ground truth,
+matching `fitting/fit.py`'s own established validation convention: check
+whether independent Monte Carlo reps AGREE, not whether they recover a known
+truth). Two views: NLL-value convergence at a fixed (alpha_0, lambda_, sigma)
+point (mean +/- spread across reps vs a large-n_sims reference), and
+argmin-sigma recovery stability (does repeated fitting land on the same
+answer).
+
+**Real finding, not assumed**: the noise MECHANISM changes how many sims are
+needed. On soltani_numbers pid 13, `RL_lambda_resp_noise` (i.i.d. response
+noise) gave a perfectly stable argmin from n_sims=10; `NoisyRL_lambda`
+(compounding state noise) needed n_sims=40 to stabilise, having genuinely
+wobbled at n_sims=10-20. NEF's recurrent value ensemble means a sim's
+tuning-curve idiosyncrasies persist and compound through a trial -- structurally
+closer to the state-noise mechanism -- so `RL_lambda_resp_noise`'s cheaper
+number would be a falsely optimistic stand-in for NEF; `NoisyRL_lambda`'s is
+the honest one.
+
+**Also real: required n_sims is NOT uniform across pids.** Ran 4 soltani_numbers
+pids (10, 13, 16, 22) through `NoisyRL_lambda`. 3 of 4 were stable from
+n_sims=10 already; pid 13 -- the one that also needed the LARGEST recovered
+sigma (0.25 vs 0.10 for the other three) -- needed n_sims=40 to stabilise and
+n_sims=160-320 to fully settle. Not a coincidence: a noisier fit needs more
+samples to pin down its own variance precisely. Settled on **n_sims=50** as a
+working default for NEF -- covers the typical case with margin, short of the
+worst case's full 320 -- explicitly a ballpark to raise later once a direct NEF
+measurement exists, not a validated number the way NoisyRL_lambda's own
+n_sims=100 (measured against REAL NEF-adjacent data, in `fitting/fit.py`'s own
+docstring) is.
+
+One early pitfall worth recording: the first `argmin_stability` run pinned at
+the EDGE of the tested sigma grid (0.02-0.1) with zero spread at every n_sims --
+not genuine stability, just the search hitting a wall because the fixed
+(alpha_0, lambda_) point (RL_lambda's own RMSE optimum, held fixed rather than
+jointly refit under NLL) needed more residual variance explained than a narrow
+grid could supply. Widening the grid iteratively (to 0.05-0.8, then a properly
+resolved 0.1-0.4) is what produced the genuine interior optimum reported above.
+A boundary-pinned argmin with zero cross-rep spread is a red flag for "grid too
+narrow," not evidence of stability.
+
+### Multi-seed counting-activity files: the actual disk-cost realization
+
+Initial framing (activity files could be reused across trials for different
+sims, since the Gram matrix depends only on n_neurons_counting/seed, not on
+pid or trial) was WRONG, caught by the person before any code was written: NEF's
+network (error, value, AND the counting subnetwork) is seeded once per
+simulated trial, so reusing a seed across DIFFERENT trials would give both
+trials the literal same neural substrate -- correlating, not independently
+sampling, whatever idiosyncratic bias that seed's tuning curves carry. A
+genuine ensemble needs `n_trials * n_sims` distinct seeds, not `n_sims`.
+
+Measured (not estimated) the resulting disk-cost model directly against every
+activity file already on disk before trusting it: size is driven almost
+entirely by `n_neurons_counting^2 * n_trials_precomputed`, and NOT by
+`n_neurons` at all (the file only stores the counting subnetwork's `memory`
+ensemble). Consequence: carrabin (200 trial-seeds) is ~5-7x more expensive per
+unit of `n_neurons_counting` than yoo (30) or soltani (40) at the same size --
+an `n_neurons_counting=2000` file is ~1-1.3GB for yoo/soltani but would be
+~6.4GB for carrabin, BEFORE any `n_sims>1` multiplication (which scales
+linearly on top of that). See CLAUDE.md's "NEF architecture" section for the
+full cost table and the resulting recommendation to size carrabin's own NLL
+activity files smaller than yoo/soltani's.
+
+### Architecture built: `sim`-aware seeding, resumable precompute, NEF's own ensemble
+
+Three pieces, each backward compatible (verified directly, not just reasoned
+about):
+
+1. **`counting_integrator.activity_key_for_trial(dataset, trial, sim=1)`** --
+   `sim` defaults to 1 and reproduces the exact original key/seed for every
+   existing caller. For `sim>1`, offsets by a full dataset-sized block:
+   `(sim-1)*_DATASET_N_TRIALS[dataset] + base`. Verified directly: sim=1 output
+   matches the pre-change function exactly for all 4 datasets; 5 sims x every
+   real trial for all 4 datasets produces zero key collisions.
+
+2. **`counting_integrator.precompute_activities(..., n_sims=1)`** -- generates
+   `n_trials*n_sims` keys instead of just `n_trials`. RESUMABLE: loads any
+   existing file first and only simulates missing keys, so growing an
+   `n_sims=1` file up to `n_sims=50` does not re-pay for the keys it already
+   has. Verified directly (Nengo calls stubbed, real function exercised
+   end-to-end): fresh generation produces the right key set; a second call
+   with a larger `n_sims` adds exactly the new keys and leaves the old ones'
+   values byte-identical; a third call with nothing new to do is a correct
+   no-op.
+
+3. **`models.NEF.simulate_ensemble(params, n_sims, return_index=False)`** --
+   the NEF analogue of `math_models.simulate_ensemble`: same `(n_sims, n_rows)`
+   shape, same row order, so `fitting/fit.py`'s NLL dispatch (`_cross_validate_nll`)
+   works identically regardless of which one produced the ensemble. Applies
+   `run()`'s own post-processing (`nef_response_to_model_scale`, then
+   `apply_binary_transform`) ONCE on the full stacked frame rather than
+   re-deriving carrabin's Laplace-shrinkage formula by hand (the risk
+   `math_models.simulate_ensemble`'s own docstring flags). Verified directly
+   (Nengo call stubbed): ensemble shape and row-ordering are correct; different
+   sims produce different values for the same row; the transform applied
+   inside `simulate_ensemble` matches `apply_binary_transform` called by hand
+   on the same raw output, exactly.
+
+   The required-activity-file check (`_require_activity_map`) was factored out
+   of `run()` into a shared helper used by both `run()` (n_sims=1) and
+   `simulate_ensemble()` (n_sims=n_sims), so the two paths' requirements can't
+   drift apart the way a second hand-written copy eventually would.
+
+`fitting/fit.py` now accepts `NEF` for `--loss nll`: validation extended
+(`is_nef_model = model_type == "NEF"`), and the objective's ensemble dispatch
+gets a third branch (`model_type == "NEF" -> NEF.simulate_ensemble`, ahead of
+the existing `_STOCHASTIC_ENSEMBLE_MODELS`/`_resp_noise` branches). Verified
+directly: `fit("carrabin", "NEF", ..., loss_fn="nll")`'s validation now passes
+where it used to be rejected; `fit("carrabin", "Mean", ..., loss_fn="nll")`
+still correctly raises, with an updated message listing NEF among the valid
+alternatives.
+
+`models.NEF.NEF_DEFAULT_N_SIMS = 50` added as a documented, discoverable
+constant -- deliberately NOT wired into `fitting/fit.py`'s own shared
+`--n_sims` CLI default (100), which stays at its own validated value for
+NoisyRL_lambda/`_resp_noise`; pass `--n_sims 50` explicitly for NEF fits.
+
+**Known gap, stated explicitly rather than left implicit**:
+`scripts/verify_ensemble_invariant.py` (the existing real-Nengo-free equivalence
+check for math models' ensemble paths) does not cover `NEF.simulate_ensemble` --
+it only imports `models.math_models`. The stubbed-Nengo checks done this
+session are a real but lesser guarantee (structure/transform correctness, not a
+true Nengo-level comparison against `run()` at matching seeds). A proper NEF
+equivalent -- comparing `simulate_ensemble`'s per-sim output against `run()`
+called once per seed, with REAL Nengo -- has not been built yet and should be
+before the first real NEF NLL fit is trusted, the same way the math-model side
+required exactly this check to catch two real bugs when NoisyRL_lambda was
+extended to new datasets.
+
+
+---
+
+## NEF RMSE fits: n_neurons/n_neurons_counting bumped for all 4 datasets (yoo/soltani to 500/2000, carrabin to 500/500); weekend submit planned (this session)
+
+### The decision
+
+Settled on large `n_neurons=500` for all 4 datasets, explicitly erring on the
+side of too many neurons rather than a precisely-justified number. But NOT a
+uniform `n_neurons_counting` across all 4: yoo/soltani_numbers/soltani_colors
+went to 2000, while carrabin went to 500 (not 2000) -- because activity-file
+size scales with `n_neurons_counting^2 * trial-seeds precomputed`, and
+carrabin precomputes 200 trial-seeds against yoo's 30/soltani's 40, so
+`nc=2000` there would cost ~6.4GB against ~1-1.3GB for the other three at the
+same `nc`. `nc=500` for carrabin also meant reusing a file already on disk
+from an earlier session, rather than generating anything new.
+
+`fitting/model_params.py`'s NEF `fixed` dicts were updated accordingly
+(previously carrabin ran at 100/100 via `_NEF_FIXED`'s own untouched
+defaults; yoo/soltani ran at 200/1000). This is the ONLY mechanism that
+controls submit-time size -- `fitting.fit`/`fitting.submit` have no CLI
+override for it -- so this file change IS the actual decision, not a
+convenience default sitting alongside a real override.
+
+This also settles something left open earlier in the session: carrabin and
+yoo's NEF fits are being redone FRESH at these new sizes, not just soltani's.
+Their existing fits (`data/runs/carrabin/`, `data/runs/yoo/`, `data/runs/
+refit/`) are now the OLD, smaller-`n_neurons` baseline -- every current figure
+script still defaults to reading those folders, so nothing breaks
+automatically; repointing figures at the new fits is a deliberate later step,
+not automatic.
+
+### What's actually ready, and what isn't
+
+Generated locally and verified this session: `counting_activities_n500_
+nc2000_{yoo,soltani_numbers,soltani_colors}.pkl` -- correct key counts/ranges
+for each dataset's own trial count, soltani_numbers/soltani_colors confirmed
+byte-identical via checksum (as the disk-cost model predicts, since they
+share radius_c/timing). Carrabin needed NO new generation at all --
+`counting_activities_n500_nc500_carrabin.pkl` already existed on disk from an
+earlier session's n==nc scan, and was re-verified this session (200/200 keys,
+correct MtM shape).
+
+Two things NOT confirmed before a weekend-long unattended submit, flagged
+explicitly rather than assumed:
+
+1. Whether these files have actually been scp'd to the cluster.
+2. Real per-trial Nengo timing at the NEW sizes, for ANY dataset. The only
+   real timing measured this session was carrabin at the OLD 100/100 size
+   (~2s/trial, via `scripts/check_NEF_pipeline.py`'s real Nengo run). A
+   relevant prior exists from a much earlier session (the shared-database/
+   MLE exploration): NEF's per-point cost there was found to be dominated by
+   fixed Nengo build/simulate overhead rather than scaling much with
+   `n_neurons` across 50-500 -- but that was a DIFFERENT code path (the
+   fit_mle.py loop, which also includes database-scan overhead), so it's a
+   prior worth weighing, not a substitute for measuring this pipeline
+   directly at 500/500 (carrabin) or 500/2000 (yoo/soltani). A cheap
+   `check_NEF_pipeline.py --n_trials 2 --plot_trials 0` call per dataset, at
+   each dataset's own configured size, would close this gap before
+   committing a 72h SLURM job to it.
+
+### Submit plan, once both are confirmed
+
+    for ds in carrabin yoo soltani_numbers soltani_colors; do
+      venv/bin/python -m fitting.submit $ds NEF --n_trials 100 --k 5 --run_folder rmse
+    done
+    venv/bin/python -m fitting.collect rmse --type params
+    venv/bin/python -m fitting.collect rmse --type responses
+
+`run_folder rmse` reused deliberately (already holds soltani's math-model RMSE
+fits) rather than inventing a new folder name -- `dataset_stem` keeps every
+dataset's filenames distinct within it, so there's no collision risk, and
+carrabin/yoo's NEF fits landing there for the first time doesn't touch
+anything already using `data/runs/carrabin/`, `data/runs/yoo/`, or `data/runs/
+refit/`.

@@ -17,7 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.model_params import _NEF_FIXED
 
-# Number of trials per dataset — precompute one activity set per trial seed
+# Number of trials per dataset -- precompute one activity set per (trial, sim)
+# seed. Also used as the per-sim BLOCK SIZE in activity_key_for_trial's
+# sim-offset formula (added for NEF's NLL branch -- see docs/HISTORY.md):
+# sim s's keys occupy [(s-1)*N + 1, s*N], so this value must stay in sync
+# with how many trial seeds precompute_activities actually generates per sim.
 _DATASET_N_TRIALS = {"carrabin": 200, "yoo": 30, "soltani_numbers": 40, "soltani_colors": 40}
 
 # Datasets whose `trial` column is 0-indexed. carrabin and yoo are 1-indexed
@@ -28,14 +32,14 @@ _DATASET_N_TRIALS = {"carrabin": 200, "yoo": 30, "soltani_numbers": 40, "soltani
 _ZERO_INDEXED_DATASETS = frozenset({"soltani_numbers", "soltani_colors"})
 
 
-def activity_key_for_trial(dataset: str, trial: int) -> int:
-    """Map a dataset's `trial` value to its counting-activity key AND seed.
+def activity_key_for_trial(dataset: str, trial: int, sim: int = 1) -> int:
+    """Map a (dataset, trial, sim) triple to its counting-activity key AND seed.
 
-    precompute_activities() above builds entry `k` by simulating a network with
-    ``seed = k``, for k in 1..n_trials. So an activity key is not an arbitrary
-    index -- it IDENTIFIES A SEED. Its stored MtM is the Gram matrix of that
-    network's filtered memory activity, and decoders solved from it via
-    fast_decode() are valid ONLY for a network built with the same seed.
+    precompute_activities() builds entry `k` by simulating a network with
+    ``seed = k``. So an activity key is not an arbitrary index -- it
+    IDENTIFIES A SEED. Its stored MtM is the Gram matrix of that network's
+    filtered memory activity, and decoders solved from it via fast_decode()
+    are valid ONLY for a network built with the same seed.
 
     That makes this function the single source of truth for both halves of the
     pairing: callers must use the returned value as the activity-map key AND as
@@ -43,15 +47,40 @@ def activity_key_for_trial(dataset: str, trial: int) -> int:
     silently mismatches the decoders against different tuning curves, which
     produces plausible-looking but meaningless output rather than an error.
 
-    For 1-indexed datasets (carrabin, yoo) this is the identity. For 0-indexed
-    datasets (soltani_*) it returns trial+1, so trials 0..31 use keys/seeds
+    For 1-indexed datasets (carrabin, yoo) the base key is the identity. For
+    0-indexed datasets (soltani_*) it is trial+1, so trials 0..31 use keys/seeds
     1..32 -- all within the 40 precomputed entries. The alternative, leaving
     trial 0 to miss the map, sends it down the ~300x slower _pretrain path and
     gives that one trial decoders derived by a different procedure than its 31
     siblings.
+
+    `sim` (added for NEF's NLL branch -- see docs/HISTORY.md and
+    models.NEF.simulate_ensemble). For sim=1 (the default) this is IDENTICAL
+    to the original single-seed-per-trial behaviour above -- a pure
+    extension, not a format change. For sim>1, the key is offset by a full
+    dataset-sized BLOCK per sim: (sim-1)*_DATASET_N_TRIALS[dataset] + base.
+    This gives every (trial, sim) pair a GENUINELY DISTINCT seed, and
+    therefore genuinely distinct neural tuning curves, rather than reusing
+    one seed across different trials -- reusing a seed across trials would
+    silently CORRELATE supposedly-independent ensemble members, since that
+    seed's idiosyncratic tuning-curve bias would show up identically in
+    every trial that reused it rather than as independent noise per trial.
+    This is why a genuine NLL ensemble for NEF needs n_trials * n_sims
+    precomputed entries, not just n_sims -- see precompute_activities' own
+    n_sims parameter.
+
+    NEVER hand-derive a key with this formula inline, for either the
+    activity-map lookup or the seed passed to the simulation -- always call
+    this function for both. The two have already drifted apart once in this
+    codebase's history (a bare `_activity_map.get(trial)` silently missing
+    0-indexed trial 0); a second, hand-rolled copy of the sim-offset
+    arithmetic is the same class of risk.
     """
     t = int(trial)
-    return t + 1 if str(dataset) in _ZERO_INDEXED_DATASETS else t
+    base = t + 1 if str(dataset) in _ZERO_INDEXED_DATASETS else t
+    if sim <= 1:
+        return base
+    return (int(sim) - 1) * _DATASET_N_TRIALS[str(dataset)] + base
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -401,6 +430,13 @@ def parse_args() -> argparse.Namespace:
                    help="Precompute and save decoder sets for N trial seeds")
     p.add_argument("--precompute_activities", action="store_true",
                    help="Precompute and save counting network activity Gram matrices")
+    p.add_argument("--n_sims", type=int, default=1,
+                   help="Distinct seeds PER TRIAL to precompute (default 1, the "
+                        "original single-seed-per-trial behaviour). >1 is for "
+                        "NEF's NLL branch, where an ensemble needs n_trials*n_sims "
+                        "genuinely distinct seeds -- see activity_key_for_trial's "
+                        "own docstring for why reusing seeds across trials would "
+                        "silently correlate supposedly-independent ensemble members.")
     p.add_argument("--plot_activities", action="store_true",
                    help="Load saved activities, decode, and plot ideal vs decoded")
     p.add_argument("--dataset", type=str, default=None,
@@ -501,15 +537,37 @@ def precompute_activities(
     params: dict,
     out_path: str | Path | None = None,
     verbose: bool = True,
+    n_sims: int = 1,
 ) -> Path:
-    """Simulate counting network for each trial seed and save Gram matrices.
+    """Simulate the counting network for each (sim, trial) seed and save
+    Gram matrices -- one entry per DISTINCT NETWORK REALIZATION, keyed by
+    activity_key_for_trial(dataset, trial, sim).
 
-    Saves per-trial: MtM (Gram matrix), Mty_count, ideal_count_filt.
-    These are sufficient to recompute W_count and W_weight for any
-    (alpha_0, lambda_) without re-running the Nengo simulation.
+    n_sims (added for NEF's NLL branch -- see docs/HISTORY.md and
+    models.NEF.simulate_ensemble): a genuine ensemble of NEF responses for
+    one trial needs n_sims DIFFERENT seeds simulating that trial's stimulus,
+    not n_sims copies of one seed -- see activity_key_for_trial's own
+    docstring for why reusing a seed across trials would silently correlate
+    supposedly-independent ensemble members. n_sims=1 (the default)
+    reproduces the exact original single-seed-per-trial behaviour and file
+    contents -- this is a pure extension, not a format change.
 
-    File: data/counting_activities_n{n}_nc{nc}.pkl
-    Key:  trial number (1..n_trials)
+    RESUMABLE: if out_path already exists, its entries are loaded first and
+    only MISSING keys are simulated. This matters because these files are
+    genuinely expensive: at n_neurons_counting=2000, a carrabin file (200
+    trials) at n_sims=50 is on the order of tens of GB and real compute --
+    growing an existing n_sims=1 file up to n_sims=50 must not re-pay the
+    cost of the keys it already has.
+
+    Saves per key: MtM (Gram matrix), Mty_count, ideal_count_filt. These are
+    sufficient to recompute W_count and W_weight for any (alpha_0, lambda_)
+    without re-running the Nengo simulation.
+
+    File: data/counting_activities_n{n}_nc{nc}_{dataset}.pkl
+    Keys: activity_key_for_trial(dataset, trial, sim) for trial in
+          1..n_trials, sim in 1..n_sims -- NOT necessarily contiguous with
+          the real dataset's own 0/1-indexed trial numbers; see
+          activity_key_for_trial's own docstring.
     """
     import pickle
     import time
@@ -531,17 +589,42 @@ def precompute_activities(
 
     radius_c = int(params["radius_c"])
     p_base = {**params, "n_obs": radius_c}
-    n  = int(params["n_neurons"])
-    nc = int(params["n_neurons_counting"])
+
+    # Resume: load whatever's already there, skip keys we already have.
+    activities: dict[int, dict] = {}
+    if out_path.exists():
+        try:
+            with open(out_path, "rb") as f:
+                activities = pickle.load(f)
+            if verbose:
+                print(f"Found existing {out_path.name} with {len(activities)} "
+                      f"entries -- resuming, will only simulate missing keys.")
+        except Exception as e:
+            if verbose:
+                print(f"Existing {out_path.name} unreadable ({e}); regenerating from scratch.")
+            activities = {}
+
+    all_keys = [
+        (sim, trial, (sim - 1) * n_trials + trial)
+        for sim in range(1, n_sims + 1)
+        for trial in range(1, n_trials + 1)
+    ]
+    todo = [(sim, trial, key) for sim, trial, key in all_keys if key not in activities]
 
     if verbose:
-        print(f"Precomputing {n_trials} counting activity sets  "
-              f"(n_neurons={n}, n_neurons_counting={nc}, radius_c={radius_c})")
+        print(f"Precomputing counting activity sets  "
+              f"(n_neurons={n}, n_neurons_counting={nc}, radius_c={radius_c}, "
+              f"n_trials={n_trials}, n_sims={n_sims}) -- "
+              f"{len(todo)} of {len(all_keys)} keys needed")
 
-    activities = {}
+    if not todo:
+        if verbose:
+            print(f"Nothing to do -- all {len(all_keys)} keys already present in {out_path.name}")
+        return out_path
+
     t_total = time.time()
-    for trial in range(1, n_trials + 1):
-        p = {**p_base, "seed": trial}
+    for i, (sim, trial, key) in enumerate(todo, start=1):
+        p = {**p_base, "seed": key}
         t0  = time.time()
         net = build_network(p, train=True)
         raw = simulate_network(net, p, train=True)
@@ -574,7 +657,7 @@ def precompute_activities(
         mem_readout = mem_filt[idx_readout, :].T    # (n, n_obs)
         ic_readout  = ic_filt[idx_readout]          # (n_obs,)
 
-        activities[trial] = {
+        activities[key] = {
             "MtM":              MtM,
             "Mty_count":        Mty_count,
             "ideal_count_filt": ic_filt,
@@ -585,14 +668,14 @@ def precompute_activities(
         if verbose:
             t_trial = time.time() - t0
             elapsed_total = time.time() - t_total
-            avg = elapsed_total / trial
-            eta = avg * (n_trials - trial)
-            pct = 100 * trial / n_trials
+            avg = elapsed_total / i
+            eta = avg * (len(todo) - i)
+            pct = 100 * i / len(todo)
             bar_len = 30
-            filled = int(bar_len * trial / n_trials)
+            filled = int(bar_len * i / len(todo))
             bar = "█" * filled + "░" * (bar_len - filled)
-            print(f"  [{bar}] {pct:5.1f}%  trial {trial:3d}/{n_trials}"
-                  f"  {t_trial:.1f}s  avg={avg:.1f}s  ETA={eta/60:.1f}min",
+            print(f"  [{bar}] {pct:5.1f}%  key {key:5d} (sim={sim} trial={trial})  "
+                  f"{i:5d}/{len(todo)}  {t_trial:.1f}s  avg={avg:.1f}s  ETA={eta/60:.1f}min",
                   end="\r", flush=True)
 
     if verbose:
@@ -607,7 +690,7 @@ def precompute_activities(
 
     elapsed = time.time() - t_total
     size_mb = out_path.stat().st_size / 1024**2
-    print(f"Saved {n_trials} activity sets -> {out_path}  "
+    print(f"Saved {len(activities)} activity sets ({len(todo)} newly simulated) -> {out_path}  "
           f"({size_mb:.1f} MB, {elapsed/60:.1f}min)")
     return out_path
 
@@ -824,7 +907,7 @@ if __name__ == "__main__":
         save_decoders(seeds, params_base)
     elif args.precompute_activities:
         params_base["dataset"] = args.dataset or "unknown"
-        precompute_activities(None, params_base)
+        precompute_activities(None, params_base, n_sims=args.n_sims)
     elif args.plot_activities:
         acts = load_activities(
             n_neurons=args.n_neurons,

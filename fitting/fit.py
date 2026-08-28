@@ -3,13 +3,24 @@ Participant-level model fitting via Optuna (TPE) and k-fold CV.
 
 Objective: RMSE from ``fitting.losses.compute_loss`` by default, or Gaussian
 NLL from ``fitting.losses.compute_nll``/``nll_from_ensemble`` via ``--loss nll``.
-NLL applies to STOCHASTIC models only (currently NoisyRL_lambda) -- a
-deterministic model's ensemble is a delta function and its NLL is undefined; see
-``models.math_models.simulate_ensemble``'s docstring. RMSE cannot identify a
-noise parameter at all (it collapses to zero, since squared error only sees the
-mean); NLL was verified on soltani_numbers pid 1 to have a genuine INTERIOR
-optimum (sigma_resp ~0.04-0.05, NLL falling from 389 at sigma_resp=0.001 to
--2.46 at the optimum and rising again beyond it) -- see docs/HISTORY.md.
+NLL applies to STOCHASTIC models only -- the math-model ensemble path
+(models.math_models.simulate_ensemble, currently just NoisyRL_lambda) or NEF's
+own ensemble path (models.NEF.simulate_ensemble, added for NEF's NLL branch --
+see docs/HISTORY.md) -- a deterministic model's ensemble is a delta function
+and its NLL is undefined; see either module's simulate_ensemble docstring.
+RMSE cannot identify a noise parameter at all (it collapses to zero, since
+squared error only sees the mean); NLL was verified on soltani_numbers pid 1
+to have a genuine INTERIOR optimum (sigma_resp ~0.04-0.05, NLL falling from
+389 at sigma_resp=0.001 to -2.46 at the optimum and rising again beyond it) --
+see docs/HISTORY.md.
+
+NEF's own ensemble needs a counting-activity file with n_trials*n_sims
+precomputed seeds, not just n_trials -- see models.counting_integrator.
+precompute_activities' own n_sims parameter and models.NEF.simulate_ensemble.
+Pass --n_sims explicitly for NEF fits (models.NEF.NEF_DEFAULT_N_SIMS=50 is a
+ballpark starting point from cheap-model calibration, not this module's own
+--n_sims default, which stays at its own validated value for NoisyRL_lambda/
+_resp_noise).
 
 Entry point::
 
@@ -216,11 +227,13 @@ def fit(
         is_ensemble_model = model_type in _STOCHASTIC_ENSEMBLE_MODELS
         is_wrapped_model = (is_resp_noise_model(model_type)
                             and base_model_of(model_type) in _NOISE_WRAPPABLE_BASE_MODELS)
-        if not (is_ensemble_model or is_wrapped_model):
+        is_nef_model = model_type == "NEF"
+        if not (is_ensemble_model or is_wrapped_model or is_nef_model):
             raise ValueError(
-                f"--loss nll needs a stochastic model or a '<model>_resp_noise' "
-                f"wrapper; {model_type!r} is neither. Use --loss rmse for this "
-                f"model, or fit one of {sorted(_STOCHASTIC_ENSEMBLE_MODELS)} or "
+                f"--loss nll needs a stochastic model, a '<model>_resp_noise' "
+                f"wrapper, or NEF; {model_type!r} is none of these. Use --loss "
+                f"rmse for this model, or fit one of "
+                f"{sorted(_STOCHASTIC_ENSEMBLE_MODELS)}, 'NEF', or "
                 f"'{{model}}_resp_noise' for model in "
                 f"{sorted(_NOISE_WRAPPABLE_BASE_MODELS)}.")
     if run_folder is None:
@@ -261,10 +274,14 @@ def fit(
         if loss_fn == "nll":
             # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
             # resulting ensemble by trial rather than re-simulating per fold.
-            # Two ensemble sources, dispatched on model_type:
-            #   genuinely stochastic (NoisyRL_lambda)     -> simulate_ensemble
-            #   deterministic + i.i.d. wrapper (*_resp_noise) -> add_noise
-            if model_type in _STOCHASTIC_ENSEMBLE_MODELS:
+            # Three ensemble sources, dispatched on model_type:
+            #   NEF                                        -> NEF.simulate_ensemble
+            #   genuinely stochastic (NoisyRL_lambda)      -> math_models.simulate_ensemble
+            #   deterministic + i.i.d. wrapper (*_resp_noise) -> math_models.add_noise
+            if model_type == "NEF":
+                ens, row_index = NEF.simulate_ensemble(
+                    params, n_sims, return_index=True)
+            elif model_type in _STOCHASTIC_ENSEMBLE_MODELS:
                 ens, row_index = math_models.simulate_ensemble(
                     params, n_sims, return_index=True)
             else:
@@ -417,7 +434,12 @@ if __name__ == "__main__":
              "Verified stable at n_sims=100 -- 5 reseeded reps all picked the "
              "same argmin on a sigma_resp sweep -- with a smaller ensemble "
              "(n_sims=25) already agreeing. Cost is roughly linear: n_sims=100 "
-             "is ~0.45s/eval, i.e. ~2.3 min for a 300-trial fit.",
+             "is ~0.45s/eval, i.e. ~2.3 min for a 300-trial fit. For NEF, this "
+             "default is NOT calibrated -- pass --n_sims 50 explicitly (see "
+             "models.NEF.NEF_DEFAULT_N_SIMS and docs/HISTORY.md for where that "
+             "ballpark comes from: cheap-model calibration, not a direct NEF "
+             "measurement), and note NEF's own activity file must have been "
+             "precomputed with a matching --n_sims.",
     )
     args = parser.parse_args()
 

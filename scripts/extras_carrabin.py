@@ -219,7 +219,20 @@ def _run_n_neurons_scan(
 
         # Load or precompute counting activities
         act_path = data_path(f"counting_activities_n{n_neurons}_nc{n_neurons}_carrabin.pkl")
-        # Load or precompute; detect truncated files from concurrent writes
+        # LEGACY -- DO NOT CARRY THIS PATTERN FORWARD. Unlike models/NEF.py's
+        # run() (which now REQUIRES the activity file and raises a clear error
+        # if it's missing -- see that file's own comment), this helper silently
+        # calls precompute_activities() inline and keeps going. That's not the
+        # seed-mismatch bug run() used to have, but it's the other failure mode
+        # we're trying to kill project-wide: a script quietly kicking off a
+        # real, possibly-long precompute job because a file happened to be
+        # absent, rather than that being a deliberate decision. Feeds
+        # figure_carrabin_neural.py's Panel C (N3, "Response variability and PE
+        # variability vs n_neurons scan"). This whole script (extras_carrabin.py)
+        # is carrabin-specific and predates the generic dataset-agnostic NEF
+        # testing/dynamics tooling -- refactor or retire it once we reach that
+        # stage of the new pipeline (all 4 tasks refit fresh; see CLAUDE.md/
+        # docs/HISTORY.md), rather than patching this fallback in place now.
         def _load_or_precompute():
             if act_path.exists():
                 try:

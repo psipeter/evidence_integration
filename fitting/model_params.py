@@ -12,6 +12,23 @@ and fixed parameter dicts. Structure:
 Set per-dataset: carrabin=5 (5 obs/trial), yoo=30 (30 obs/trial).
 The counting simulation runs for radius_c observations, so neurons are
 tuned to the exact count range needed for each task.
+
+**NEF's n_neurons/n_neurons_counting bumped this session for the RMSE
+pass** -- previously carrabin ran at 100/100 (via _NEF_FIXED's own
+defaults, no override) and yoo/soltani_numbers/soltani_colors at 200/1000.
+Now: yoo/soltani_numbers/soltani_colors at 500/2000; carrabin at 500/500
+(NOT 2000) -- carrabin precomputes 200 trial-seeds vs yoo's 30/soltani's
+40, and activity-file size scales with n_neurons_counting^2 * trial-seeds
+(NOT with n_neurons at all), so nc=2000 would cost carrabin ~6.4GB against
+~1-1.3GB for the other three at the same nc; nc=500 for carrabin reuses a
+file already on disk from an earlier session, needing no new generation.
+See docs/HISTORY.md for the full reasoning and the still-open gap that
+real per-trial timing at these sizes has only been confirmed for carrabin
+at the OLD 100/100 size, not at 500/500 or 500/2000, for any dataset.
+There is NO CLI override for n_neurons/n_neurons_counting anywhere in
+fitting.fit/fitting.submit -- this file's "fixed" dicts are the ONLY place
+that controls what size a real submit runs at, so changing it here IS the
+mechanism, not a convenience default.
 """
 
 from __future__ import annotations
@@ -107,7 +124,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 5},  # 5 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 5, "n_neurons": 500, "n_neurons_counting": 500},  # 5 obs/trial; large-n RMSE pass (this session) -- nc=500 not 2000: carrabin precomputes 200 trial-seeds vs yoo's 30/soltani's 40, so nc=2000 would cost ~6.4GB here vs ~1-1.3GB there
         },
     },
     "yoo": {
@@ -168,7 +185,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons": 200, "n_neurons_counting": 1000},  # 30 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons": 500, "n_neurons_counting": 2000},  # 30 obs/trial; large-n RMSE pass (this session)
         },
     },
     "soltani_numbers": {
@@ -226,7 +243,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 500, "n_neurons_counting": 2000},  # 15 obs/trial; large-n RMSE pass (this session)
         },
     },
     "soltani_colors": {
@@ -284,7 +301,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "NEF": {
             **_NEF_RANGES,
-            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 200, "n_neurons_counting": 1000},  # 15 obs/trial
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 500, "n_neurons_counting": 2000},  # 15 obs/trial; large-n RMSE pass (this session)
         },
     },
 }
