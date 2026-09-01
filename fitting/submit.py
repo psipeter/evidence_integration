@@ -115,6 +115,7 @@ def _resolve_jobs(
     n_sims: int = 100,
     override_from_folder: str | None = None,
     search_n_neurons: bool = False,
+    time_limit: str | None = None,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -152,6 +153,7 @@ def _resolve_jobs(
                         "n_sims": n_sims,
                         "override_from_folder": override_from_folder,
                         "search_n_neurons": search_n_neurons,
+                        "time_limit": time_limit,
                     }
                 )
     return jobs
@@ -218,7 +220,7 @@ def _submit_job(
     _submit_command(
         script_name=f"{mt}_{file_stem}_{pid}.sh",
         command=cmd,
-        time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
+        time_limit=job.get("time_limit") or DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
         mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
         dry_run=dry_run,
     )
@@ -470,6 +472,14 @@ def main() -> None:
              "fitting.fit's own docstring.",
     )
     parser.add_argument(
+        "--time_limit", type=str, default=None,
+        help="Override the SLURM walltime for the main (non-resubmit) "
+             "fitting path, e.g. '2:0:0'. Defaults to "
+             "DEFAULT_TIME_LIMITS.get(model_type, '4:0:0') when omitted -- "
+             "use this to dodge a cluster maintenance reservation for a "
+             "short test job that doesn't need the model's usual walltime.",
+    )
+    parser.add_argument(
         "--datafile",
         type=str,
         default=None,
@@ -514,6 +524,7 @@ def main() -> None:
         n_sims=args.n_sims,
         override_from_folder=args.override_from_folder,
         search_n_neurons=args.search_n_neurons,
+        time_limit=args.time_limit,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder
