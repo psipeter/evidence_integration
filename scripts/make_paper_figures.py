@@ -3496,25 +3496,283 @@ def _plot_neural_pe_dynamics(ax, show_markers: bool = False) -> None:
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_neural_giant() -> Path:
-    """1x3 figure: Act 1's toy/illustrative NEF population-dynamics panels
-    (see chat for the full 5-act narrative plan):
-      Panel 1: spike raster + decoded-PE demo (Act 1.1).
-      Panel 2: alpha_0 x n_neurons cross product, decoded PE vs
-        time-within-observation, first observation only (Act 1.3).
-      Panel 3: lambda sweep, error-neuron activity vs observation (Act 1.2).
+NEURAL_ENCODER_THRESHOLD = 0.5  # matches figure_yoo_neural.py's own ENCODER_THRESHOLD
 
-    All three read neural_experiments.py's own saved sweep/raster_demo
-    pickles for soltani_numbers. Acts 2/3's own panels are not included
-    yet -- more rows will be added here as later data comes in, the same
-    incremental approach lambda_giant/sigma_giant used.
+
+def _neural_weight_on_cols(pid_enc: pd.DataFrame, neuron_cols: list[str]) -> list[str]:
+    """Which of the error ensemble's neurons are tuned to the WEIGHT
+    dimension (enc_dim_0 -- net.error[0] in build_network, fed from the
+    counting memory via W_weight) rather than the PE dimension (enc_dim_1).
+    Direct port of figure_yoo_neural.py's own _weight_on_cols -- same
+    encoders file layout, same threshold.
+    """
+    on_idx = pid_enc[pid_enc["enc_dim_0"] > NEURAL_ENCODER_THRESHOLD]["neuron_idx"].values
+    return [f"n{i}" for i in on_idx if f"n{i}" in neuron_cols]
+
+
+def _load_neural_probe_variability(min_trials: int = 3) -> pd.DataFrame | None:
+    """Per-pid response variability (sigma) and PE variability, from
+    neural_experiments.py's probe simulation -- mean std across repeated
+    qid presentations. Uses the SAME min_trials=3 gate as
+    _qid_response_std (the canonical sigma computation every other figure
+    in this file uses): a (pid, qid, observation) cell with fewer than
+    min_trials repeated presentations has its std discarded (NaN) rather
+    than trusted, before averaging per pid. Confirmed directly this
+    changes nothing NUMERICALLY for the current probe data (every cell has
+    exactly 4 repeats), but the gate is applied explicitly anyway rather
+    than relying on that coincidence -- a future probe run with thinner
+    repeat coverage would otherwise silently include unreliable low-repeat
+    cells that every other sigma figure would correctly exclude.
+
+    NOTE (per instruction): alpha_0/lambda_ here come from the RMSE fit --
+    NEF's own noise-only variant (fixing alpha_0/lambda_, searching
+    n_neurons under NLL) isn't built yet (see CLAUDE.md's own "NEF
+    architecture" note on why). Sigma's absolute scale may not be
+    calibrated against human variability as a result -- trying with what's
+    available now, per instruction, rather than waiting.
+    """
+    path = NEURAL_EXP_DIR / "probe_soltani_numbers.pkl"
+    if not path.exists():
+        return None
+    df = pd.read_pickle(path)
+    agg = (df.groupby(["pid", "qid", "observation"])[["pe", "response"]]
+          .agg(lambda x: x.std() if len(x) >= min_trials else np.nan)
+          .dropna())
+    if agg.empty:
+        return None
+    per_pid = agg.groupby("pid")[["pe", "response"]].mean().reset_index()
+    per_pid = per_pid.rename(columns={"pe": "pe_std", "response": "resp_std"})
+    params = df.groupby("pid")[["alpha_0", "lambda_"]].first().reset_index()
+    return per_pid.merge(params, on="pid")
+
+
+def _load_neural_decay_metrics() -> pd.DataFrame | None:
+    """Per-pid activity decay (mean weight-tuned-neuron activity, first
+    observation minus last) and NEF response-change decay (mean
+    |Delta response|, first 2 observations minus last 2) -- matching
+    figure_yoo_neural.py's own _prepare_per_pid_changes in spirit, adapted
+    to this project's one-file-per-pid activities/encoders layout (vs
+    yoo's own combined files) and to soltani's 0-indexed observations
+    (uses each pid's own sorted-unique observation values rather than
+    hardcoding obs 1/30 the way the carrabin/yoo-specific version does).
+    """
+    resp_path = RUNS_DIR / "rmse" / "NEF_soltani_numbers_responses.pkl"
+    params_path = RUNS_DIR / "rmse" / "NEF_soltani_numbers_params.pkl"
+    if not (resp_path.exists() and params_path.exists()):
+        return None
+    nef_resp = pd.read_pickle(resp_path)
+    params = pd.read_pickle(params_path)[["pid", "alpha_0", "lambda_"]]
+
+    rows = []
+    for pid in params["pid"].unique():
+        acts_path = NEURAL_EXP_DIR / f"activities_error_soltani_numbers_{pid}.pkl"
+        encs_path = NEURAL_EXP_DIR / f"encoders_error_soltani_numbers_{pid}.pkl"
+        if not (acts_path.exists() and encs_path.exists()):
+            continue
+        acts = pd.read_pickle(acts_path)
+        encs = pd.read_pickle(encs_path)
+        neuron_cols = [c for c in acts.columns if c.startswith("n") and c[1:].isdigit()]
+        on_cols = _neural_weight_on_cols(encs, neuron_cols)
+        if not on_cols:
+            continue
+        acts = acts.copy()
+        acts["mean_act"] = acts[on_cols].mean(axis=1)
+        act_by_obs = acts.groupby("observation")["mean_act"].mean()
+        obs_sorted = sorted(act_by_obs.index)
+        if len(obs_sorted) < 2:
+            continue
+        act_decay = float(act_by_obs[obs_sorted[0]]) - float(act_by_obs[obs_sorted[-1]])
+
+        pid_resp = nef_resp[nef_resp["pid"] == pid].sort_values(["trial", "observation"]).copy()
+        obs_sorted_r = sorted(pid_resp["observation"].unique())
+        if len(obs_sorted_r) < 4:
+            continue
+        pid_resp["delta"] = pid_resp.groupby("trial")["response"].diff().abs()
+        first_obs = obs_sorted_r[0]
+        pid_resp.loc[pid_resp["observation"] == first_obs, "delta"] = (
+            pid_resp.loc[pid_resp["observation"] == first_obs, "response"].abs())
+        early = pid_resp[pid_resp["observation"].isin(obs_sorted_r[:2])]["delta"].mean()
+        late = pid_resp[pid_resp["observation"].isin(obs_sorted_r[-2:])]["delta"].mean()
+        resp_decay = float(early) - float(late)
+
+        rows.append({"pid": int(pid), "act_decay": act_decay, "resp_decay": resp_decay})
+
+    if not rows:
+        return None
+    return pd.DataFrame(rows).merge(params, on="pid")
+
+
+def _plot_neural_sigma_vs_pe_variability(ax) -> None:
+    """Panel (Act 2): response variability (sigma) vs PE variability, one
+    point per pid -- both measurable in a real neuroimaging study with no
+    model fitting on either axis. Direct analogue of figure_carrabin_
+    neural.py's own Panel B (partial-correlation control omitted here --
+    not yet needed until Act 4).
+    """
+    df = _load_neural_probe_variability()
+    if df is None or len(df) < 3:
+        ax.text(0.5, 0.5, "No probe variability data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    color = get_palette(6)[0]
+    r, p = pearsonr(df["resp_std"], df["pe_std"])
+    ax.scatter(df["pe_std"], df["resp_std"], color=color, s=35, alpha=0.85, zorder=3)
+    sns.regplot(data=df, x="pe_std", y="resp_std", ax=ax, color=color, ci=95,
+               scatter=False, line_kws={"lw": 1.8},
+               label=f"r={r:.2f}{pvalue_to_stars(p)}")
+    ax.set_xlabel("\u03c3PE")
+    ax.set_ylabel("\u03c3R")
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_neural_resp_vs_act_decay(ax) -> None:
+    """Panel (Act 2): NEF's own |Delta response| decay vs activity decay,
+    one point per pid -- both measurable, no model fitting on either axis.
+    Direct analogue of figure_yoo_neural.py's own Panel C (fitted-lambda
+    line only; the lambda=0 ablation comparison there is Act 4, not built
+    for NEF/numbers yet).
+    """
+    df = _load_neural_decay_metrics()
+    if df is None or len(df) < 3:
+        ax.text(0.5, 0.5, "No activity/response decay data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    color = get_palette(6)[0]
+    r, p = pearsonr(df["act_decay"], df["resp_decay"])
+    ax.scatter(df["act_decay"], df["resp_decay"], color=color, s=35, alpha=0.85, zorder=3)
+    sns.regplot(data=df, x="act_decay", y="resp_decay", ax=ax, color=color, ci=95,
+               scatter=False, line_kws={"lw": 1.8},
+               label=f"r={r:.2f}{pvalue_to_stars(p)}")
+    ax.set_xlabel("\u0394A (Hz)")
+    ax.set_ylabel("\u0394R decay")
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_neural_variability_vs_alpha0(ax) -> None:
+    """Panel (Act 3): response AND PE variability, both vs fitted alpha_0,
+    twin y-axes -- same underlying probe data as the sigma-vs-PE-
+    variability panel, replotted against the parameter hypothesised to
+    jointly control both. Direct analogue of figure_carrabin_neural.py's
+    own Panel C.
+    """
+    df = _load_neural_probe_variability()
+    if df is None or len(df) < 3:
+        ax.text(0.5, 0.5, "No probe variability data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    pal = get_palette(6)
+    c_resp, c_pe = pal[0], pal[1]
+    r_resp, p_resp = pearsonr(df["alpha_0"], df["resp_std"])
+    r_pe, p_pe = pearsonr(df["alpha_0"], df["pe_std"])
+
+    ax.scatter(df["alpha_0"], df["resp_std"], color=c_resp, s=30, alpha=0.7, zorder=3,
+               label=f"r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
+    sns.regplot(data=df, x="alpha_0", y="resp_std", ax=ax, color=c_resp, ci=95,
+               scatter=False, line_kws={"lw": 1.8}, label="_nolegend_")
+    ax.set_xlabel("Fitted \u03b1\u2080")
+    ax.set_ylabel("\u03c3 (response)", color=c_resp)
+    ax.tick_params(axis="y", labelcolor=c_resp)
+
+    ax2 = ax.twinx()
+    ax2.scatter(df["alpha_0"], df["pe_std"], color=c_pe, s=30, alpha=0.7, zorder=3,
+                label=f"r={r_pe:.2f}{pvalue_to_stars(p_pe)}")
+    sns.regplot(data=df, x="alpha_0", y="pe_std", ax=ax2, color=c_pe, ci=95,
+               scatter=False, line_kws={"lw": 1.8}, label="_nolegend_")
+    ax2.set_ylabel("\u03c3 (prediction error)", color=c_pe)
+    ax2.tick_params(axis="y", labelcolor=c_pe)
+    sns.despine(ax=ax2, top=True)
+
+    handles, labels = [], []
+    for a in [ax, ax2]:
+        h, l = a.get_legend_handles_labels()
+        handles += [x for x, y in zip(h, l) if y != "_nolegend_"]
+        labels += [y for y in l if y != "_nolegend_"]
+    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_neural_lambda_decay_twin(ax) -> None:
+    """Panel (Act 3): fitted lambda vs |Delta response| decay AND activity
+    decay, twin y-axes -- same underlying data as the resp-vs-act-decay
+    panel, replotted against the parameter hypothesised to jointly control
+    both. Direct analogue of figure_yoo_neural.py's own Panel B.
+    """
+    df = _load_neural_decay_metrics()
+    if df is None or len(df) < 3:
+        ax.text(0.5, 0.5, "No activity/response decay data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    pal = get_palette(6)
+    c_resp, c_act = pal[0], pal[1]
+    r_resp, p_resp = pearsonr(df["lambda_"], df["resp_decay"])
+    r_act, p_act = pearsonr(df["lambda_"], df["act_decay"])
+
+    ax.scatter(df["lambda_"], df["resp_decay"], color=c_resp, s=35, alpha=0.85, zorder=3,
+               label=f"r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
+    sns.regplot(data=df, x="lambda_", y="resp_decay", scatter=False, color=c_resp,
+               line_kws={"lw": 1.8}, ci=95, ax=ax, label="_nolegend_")
+    ax.set_xlabel("Fitted \u03bb")
+    ax.set_ylabel("decay (\u0394R)", color=c_resp)
+    ax.tick_params(axis="y", labelcolor=c_resp)
+
+    ax2 = ax.twinx()
+    ax2.scatter(df["lambda_"], df["act_decay"], color=c_act, s=35, alpha=0.85, zorder=3,
+                label=f"r={r_act:.2f}{pvalue_to_stars(p_act)}")
+    sns.regplot(data=df, x="lambda_", y="act_decay", scatter=False, color=c_act,
+               line_kws={"lw": 1.8}, ci=95, ax=ax2, label="_nolegend_")
+    ax2.set_ylabel("decay (\u0394A)", color=c_act)
+    ax2.tick_params(axis="y", labelcolor=c_act)
+    sns.despine(ax=ax2, top=True)
+
+    handles, labels = [], []
+    for a in [ax, ax2]:
+        h, l = a.get_legend_handles_labels()
+        handles += [x for x, y in zip(h, l) if y != "_nolegend_"]
+        labels += [y for y in l if y != "_nolegend_"]
+    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_neural_giant() -> Path:
+    """2x4 figure: Acts 1-3 of the neural predictions narrative (see chat
+    for the full 5-act plan):
+      Row 1 (Act 1, toy/illustrative, arbitrary params):
+        Panel 1: spike raster + decoded-PE demo.
+        Panel 2: alpha_0 x n_neurons cross product, decoded PE vs
+          time-within-observation, first observation only.
+        Panel 3: lambda sweep, error-neuron activity vs observation.
+        Panel 4: (empty -- row 1 only has 3 panels).
+      Row 2 (Acts 2-3, real fitted params, both axes measurable):
+        Panel 5: sigma vs PE variability (Act 2).
+        Panel 6: NEF's own |Delta response| decay vs activity decay (Act 2).
+        Panel 7: sigma AND PE variability vs fitted alpha_0 (Act 3).
+        Panel 8: fitted lambda vs |Delta response| decay AND activity
+          decay, twin axes (Act 3).
+
+    Row 2 uses alpha_0/lambda_ from the RMSE fit -- NEF's own noise-only
+    variant (fixing alpha_0/lambda_, searching n_neurons under NLL) isn't
+    built yet (blocked on missing precomputed activity files for any
+    n_neurons other than 500 -- see CLAUDE.md's own "NEF architecture"
+    note), so sigma's absolute scale here may not be calibrated against
+    human variability. Trying with what's available now, per instruction.
+
+    Act 4/5 are not included yet.
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    fig, axes = plt.subplots(2, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
+                             constrained_layout=True)
 
-    _plot_neural_raster_demo(axes[0])
-    _plot_neural_pe_dynamics(axes[1])
-    _plot_neural_lambda_activity(axes[2])
+    _plot_neural_raster_demo(axes[0, 0])
+    _plot_neural_pe_dynamics(axes[0, 1])
+    _plot_neural_lambda_activity(axes[0, 2])
+    axes[0, 3].axis("off")
+
+    _plot_neural_sigma_vs_pe_variability(axes[1, 0])
+    _plot_neural_resp_vs_act_decay(axes[1, 1])
+    _plot_neural_variability_vs_alpha0(axes[1, 2])
+    _plot_neural_lambda_decay_twin(axes[1, 3])
 
     out_path, _ = _save_fig(fig, "neural_giant")
     plt.close(fig)

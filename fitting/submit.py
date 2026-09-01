@@ -114,6 +114,7 @@ def _resolve_jobs(
     loss_fn: str = "rmse",
     n_sims: int = 100,
     override_from_folder: str | None = None,
+    search_n_neurons: bool = False,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -150,6 +151,7 @@ def _resolve_jobs(
                         "loss_fn": loss_fn,
                         "n_sims": n_sims,
                         "override_from_folder": override_from_folder,
+                        "search_n_neurons": search_n_neurons,
                     }
                 )
     return jobs
@@ -194,6 +196,7 @@ def _submit_job(
     loss_fn = job.get("loss_fn", "rmse")
     n_sims = job.get("n_sims", 100)
     override_from_folder = job.get("override_from_folder")
+    search_n_neurons = job.get("search_n_neurons", False)
     stem = dataset_stem(ds, datafile)
     cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} --n_trials {n_trials} "
@@ -205,6 +208,8 @@ def _submit_job(
         cmd += f" --loss {loss_fn} --n_sims {n_sims}"
     if override_from_folder:
         cmd += f" --override_from_folder {override_from_folder}"
+    if search_n_neurons:
+        cmd += " --search_n_neurons"
     # file_stem (with the _nll suffix fitting.fit inserts for loss_fn='nll')
     # matters for the job SCRIPT name too, exactly as it does for fit.py's own
     # output filenames -- otherwise an NLL job and an RMSE job for the same
@@ -232,6 +237,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     loss_fn = job.get("loss_fn", "rmse")
     n_sims = job.get("n_sims", 100)
     override_from_folder = job.get("override_from_folder")
+    search_n_neurons = job.get("search_n_neurons", False)
     stem = dataset_stem(ds, datafile)
     file_stem = f"{stem}_nll" if loss_fn == "nll" else stem
 
@@ -252,6 +258,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         loss_fn=loss_fn,
         n_sims=n_sims,
         override_from_folder=override_from_folder,
+        search_n_neurons=search_n_neurons,
     )
 
 
@@ -456,6 +463,13 @@ def main() -> None:
              "E.g. --override_from_folder rmse.",
     )
     parser.add_argument(
+        "--search_n_neurons", action="store_true",
+        help="NEF only. Add n_neurons (mirrored into n_neurons_counting) as "
+             "a third free dimension alongside alpha_0/lambda_ -- a genuine "
+             "joint search, independent of --override_from_folder. See "
+             "fitting.fit's own docstring.",
+    )
+    parser.add_argument(
         "--datafile",
         type=str,
         default=None,
@@ -499,6 +513,7 @@ def main() -> None:
         loss_fn=args.loss,
         n_sims=args.n_sims,
         override_from_folder=args.override_from_folder,
+        search_n_neurons=args.search_n_neurons,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder

@@ -77,6 +77,7 @@ def _suggest_params(
     pid: int,
     datafile: str | None = None,
     fixed_override: dict | None = None,
+    search_n_neurons: bool = False,
 ) -> dict:
     """Sample model parameters for one Optuna trial.
 
@@ -87,10 +88,16 @@ def _suggest_params(
     built). Applied for EVERY key in `fixed_override`, whether or not that
     key is already a searchable range in `MODEL_PARAMS[dataset][model_type]`
     -- overriding REPLACES the search for a param that's normally free,
-    and ADDS a param that isn't listed in the spec at all (both cases are
-    used: the former for LeakyIntegrator/PrimacyRecency/RL_lambda's own
-    '_resp_noise' variants, the latter for a NEF variant where n_neurons
-    alone is searchable and alpha_0/lambda_ aren't in that spec at all).
+    and ADDS a param that isn't listed in the spec at all.
+
+    `search_n_neurons`, if True, promotes `n_neurons` OUT of the model's own
+    `"fixed"` dict and into an Optuna-searched int in [100, 1000] step 100
+    (matching the precomputed counting-activity grid), then sets
+    `n_neurons_counting` to that SAME value -- the two must move together
+    (see fit()'s own docstring for why). This changes nothing about
+    alpha_0/lambda_, which stay exactly as free/fixed as
+    `MODEL_PARAMS[dataset]["NEF"]` already has them (a plain joint search
+    over alpha_0, lambda_, AND n_neurons together, not a new model variant).
     """
     params = {
         "model_type": model_type,
@@ -105,7 +112,10 @@ def _suggest_params(
             f"Unsupported model_type {model_type!r} for dataset {dataset!r}"
         )
     model_spec = MODEL_PARAMS[dataset][model_type]
-    fixed_params = model_spec.get("fixed", {})
+    fixed_params = dict(model_spec.get("fixed", {}))
+    if search_n_neurons:
+        fixed_params.pop("n_neurons", None)
+        fixed_params.pop("n_neurons_counting", None)
     if fixed_params:
         params.update(fixed_params)
     fixed_override = fixed_override or {}
@@ -129,6 +139,11 @@ def _suggest_params(
     # lists n_neurons.
     for param, value in fixed_override.items():
         params.setdefault(param, value)
+
+    if search_n_neurons:
+        params["n_neurons"] = trial.suggest_int("n_neurons", 100, 1000, step=100)
+        params["n_neurons_counting"] = params["n_neurons"]
+
     return params
 
 
@@ -236,6 +251,7 @@ def fit(
     loss_fn: str = "rmse",
     n_sims: int = 100,
     override_from_folder: str | Path | None = None,
+    search_n_neurons: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs.
 
@@ -258,9 +274,28 @@ def fit(
     `{base_model}_{stem}_{pid}_params.pkl` under `override_from_folder` --
     NOT `{model_type}_...`, since the override source is the UNWRAPPED
     model's own RMSE fit, never an NLL fit of anything.
+
+    `search_n_neurons`, if True, adds `n_neurons` (mirrored into
+    `n_neurons_counting`) as a THIRD free dimension alongside NEF's own
+    existing alpha_0/lambda_ ranges -- a genuine joint (alpha_0, lambda_,
+    n_neurons) search, not a stand-in for `override_from_folder` (the two
+    are independent and were deliberately NOT combined here: pinning
+    alpha_0/lambda_ while also searching n_neurons would silently prevent
+    detecting exactly the kind of alpha_0/n_neurons interaction this joint
+    search exists to reveal -- e.g. RMSE's own fitted alpha_0 compensating
+    for spiking noise in a way a fixed value would hide). Only valid for
+    model_type="NEF" (checked below) -- every precomputed counting-activity
+    file needed for the search range must already exist as
+    data/counting_activities_n{N}_nc{N}_{dataset}.pkl for each N Optuna
+    might pick, or that trial fails loudly via _require_activity_map.
     """
     if loss_fn not in ("rmse", "nll"):
         raise ValueError(f"loss_fn must be 'rmse' or 'nll', got {loss_fn!r}")
+    if search_n_neurons and model_type != "NEF":
+        raise ValueError(
+            f"search_n_neurons=True only makes sense for model_type='NEF', "
+            f"got {model_type!r}"
+        )
     if loss_fn == "nll":
         is_ensemble_model = model_type in _STOCHASTIC_ENSEMBLE_MODELS
         is_wrapped_model = (is_resp_noise_model(model_type)
@@ -346,7 +381,8 @@ def fit(
 
     def objective(trial: optuna.trial.Trial) -> float:
         params = _suggest_params(trial, model_type, dataset, pid, datafile,
-                                  fixed_override=fixed_override)
+                                  fixed_override=fixed_override,
+                                  search_n_neurons=search_n_neurons)
         trial_wall_start = time.time()
         if loss_fn == "nll":
             # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
@@ -528,6 +564,13 @@ if __name__ == "__main__":
              "Optuna to search. See fit()'s own docstring for exactly which "
              "file gets read and how the override set is determined.",
     )
+    parser.add_argument(
+        "--search_n_neurons", action="store_true",
+        help="NEF only. Add n_neurons (mirrored into n_neurons_counting) as "
+             "a third free dimension alongside alpha_0/lambda_ -- a genuine "
+             "joint search, independent of --override_from_folder. See "
+             "fit()'s own docstring.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -543,6 +586,7 @@ if __name__ == "__main__":
         loss_fn=args.loss_fn,
         n_sims=args.n_sims,
         override_from_folder=args.override_from_folder,
+        search_n_neurons=args.search_n_neurons,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")
