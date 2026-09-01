@@ -6142,3 +6142,134 @@ correctly reads params from `rmse/` while writing activities/encoders to
 `neural_experiments/`. No existing caller's behavior changes; this was a
 genuine, small generalization (not a workaround), matching the pattern
 `extras_carrabin.py` already used elsewhere for the same read/write split.
+
+---
+
+## Noise-only NLL fitting adopted as the new default (this session)
+
+### Motivation
+
+The person noticed model-performance RANKING under NLL and RMSE looked
+nearly identical, and asked a sharper question than "are the losses
+similar": are the FITTED PARAMETERS themselves substantially different
+under NLL vs RMSE? If not, NLL fitting is basically just fitting the added
+noise on top of an RMSE-shaped fit, and the joint search could be
+simplified -- directly relevant to NEF, where a joint alpha_0/lambda_/
+n_neurons search under NLL is expensive (real Nengo simulations per trial),
+and fixing alpha_0/lambda_ at their RMSE values while only searching
+n_neurons would need far fewer Optuna iterations to land somewhere good.
+
+### First check: how much do RMSE-fitted and full-joint-NLL-fitted
+parameters actually differ?
+
+Compared LeakyIntegrator (gamma), PrimacyRecency (eps_p, eps_r), and
+RL_lambda (alpha_0, lambda_) across all 4 datasets, RMSE fit vs the
+EXISTING full-joint NLL fit (data/runs/nll/):
+- LeakyIntegrator: r=0.93-1.00, drift 0-4% everywhere -- hypothesis holds
+  strongly.
+- RL_lambda: r=0.71-0.98 everywhere, but drift magnitude varies a lot by
+  task -- carrabin/yoo 17-26%, both soltani tasks 0-5%.
+- PrimacyRecency: r=0.38-0.78, drift up to 38% -- hypothesis does NOT hold
+  for this model; its parameters genuinely move under NLL.
+
+This was suggestive but indirect -- correlation/drift in the PARAMETERS
+doesn't directly answer whether performance or behaviour actually differ.
+
+### The real test: a noise-only fitting branch
+
+Built a genuine "fix the base params, search only noise" fitting mode,
+rather than just reasoning from the parameter comparison above:
+
+- `fitting/fit.py`: `_suggest_params()` gained a `fixed_override: dict`
+  parameter -- pins any listed parameter to an explicit value instead of
+  Optuna-suggesting it, whether or not that parameter is normally free in
+  `MODEL_PARAMS[dataset][model_type]` (replaces a normally-searched range,
+  OR adds a parameter not in that spec at all -- the latter needed for a
+  future NEF variant whose own spec would only list n_neurons, with
+  alpha_0/lambda_ supplied entirely via the override).
+- `fit()` gained `override_from_folder` (CLI: `--override_from_folder`):
+  reads `{base_model}_{stem}_{pid}_params.pkl` from that folder (base
+  model via `base_model_of()`, stripping "_resp_noise"), falls back to the
+  combined `{base_model}_{stem}_params.pkl` filtered by pid if no per-pid
+  file exists (found directly: carrabin's own RMSE folder only has the
+  combined file, not per-pid ones -- the fallback exists because of this,
+  not preemptively), and builds `fixed_override` from whichever of the
+  base model's own free parameters are found there. Also had to fix a real
+  bug caught by this: `best_params` (saved at the end of `fit()`) is built
+  from `study.best_trial.params`, which NEVER contains override-pinned
+  values (Optuna only records what it actually suggested) -- without
+  merging `fixed_override` back in, the saved params/responses would have
+  been missing alpha_0/lambda_/gamma/etc entirely.
+- `fitting/submit.py`: `--override_from_folder` threaded through
+  `_resolve_jobs`/`_submit_job`/`_run_local`, matching how `--datafile`/
+  `--n_sims` already get threaded through.
+
+Smoke-tested directly before any real campaign: RL_lambda_resp_noise on
+soltani_numbers pid 1 (confirmed only sigma_resp varied across trials, and
+the saved alpha_0/lambda_ EXACTLY matched that pid's real RMSE fit) and
+LeakyIntegrator_resp_noise on carrabin pid 1 (confirmed the combined-file
+fallback path also produces an exact match) before trusting either code
+path at scale.
+
+### Running it: n_trials=100, all 3 models x all 4 datasets, into data/runs/nll_noise_only/
+
+First attempt ran locally (`--local`) in the background; killed after
+observing ~1 pid/minute (far slower than a 20-trial smoke test suggested,
+likely per-study Optuna/TPESampler overhead dominating at this trial
+count) -- at that rate the full 453-fit campaign (3 models x 151 pids)
+would have taken 7-8 hours blocking. Resubmitted to the cluster instead
+(one SLURM job per pid, running in parallel, using the SAME
+DEFAULT_TIME_LIMITS/DEFAULT_MEM_LIMITS as every other non-NEF fitting job
+-- nothing NEW requested).
+
+**A real bug in the one-line submit command, caught by checking rather
+than assuming**: the per-dataset RMSE-folder lookup used a chained
+`A && B || C && D || E` bash expression to pick carrabin/yoo/rmse per
+dataset. Confirmed directly (by echoing each branch rather than trusting
+mental tracing of bash operator precedence) that for `ds=carrabin`
+specifically, BOTH the "carrabin" and "yoo" branches fired -- a successful
+`||` short-circuit still leaves exit status 0, which the FOLLOWING `&&`
+then sees as "proceed" -- producing a malformed multi-value
+`--override_from_folder` argument. This is exactly why carrabin's jobs
+never appeared in `jobs/` at all (fitting.submit errored out before
+writing any job script). yoo/soltani_colors/soltani_numbers were
+unaffected (confirmed their own branches resolve correctly). Fixed by
+resubmitting carrabin alone with an explicit if/elif/else instead of the
+chained expression.
+
+### Result: the hypothesis holds, with one real exception
+
+Compared noise_only against the existing full-joint NLL fit
+(data/runs/nll/), on BOTH loss and actual simulated behaviour, across all
+12 model x dataset combinations:
+- Loss: full-joint is statistically significantly better in 11/12 combos
+  (Wilcoxon; large n makes even a tiny shift detectable) but the actual
+  magnitude is negligible in all but one -- 0.001-0.028 NLL units against
+  medians of -0.5 to -2.2 (under 2% of the loss scale).
+- Behaviour: response correlation between the two fits' simulated
+  trajectories is r=0.995-1.000 everywhere; RMSE between them is
+  0.009-0.058 on the [-1,1] response scale.
+- The one real exception: RL_lambda on carrabin, diff=0.116 NLL units,
+  r=0.995 -- still high in absolute terms, but 4-6x every other cell's own
+  diff and the weakest correlation of the 12. Consistent with the
+  parameter-drift comparison earlier in this same entry: RL_lambda's own
+  alpha_0/lambda_ move the MOST under full-joint NLL specifically on
+  carrabin/yoo, so fixing them costs the most exactly there. The soltani
+  tasks -- where the neural work actually runs -- show no such issue.
+
+### Decision
+
+Adopted as the default NLL fitting method going forward for these 3
+models: data/runs/nll_noise_only/ is now the CANONICAL location for new
+NLL fits; data/runs/nll/ (the old full-joint search) is kept as the
+verification baseline this comparison was run against, not deleted, not
+being added to further. See CLAUDE.md's own "Default NLL fitting method"
+section for the current-state summary and exact recipe.
+
+Applying the same approach to NEF (fix alpha_0/lambda_, search only
+n_neurons) remains the motivating end goal but is NOT YET BUILT -- blocked
+on a real prerequisite found while scoping it: every candidate n_neurons
+value needs its own precomputed counting-activity file, and currently only
+the single production value (500) has one, for any of the 4 datasets.
+Generating a real candidate set is a genuine disk/compute cost not yet
+scoped or approved.

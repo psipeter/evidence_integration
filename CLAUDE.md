@@ -981,6 +981,60 @@ fit is ~2.3 min/pid.
 an RMSE fit of the same model_type in the same run_folder (their loss scales
 differ; NLL can be negative, RMSE cannot).
 
+### Default NLL fitting method: noise-only override (this session)
+
+**NLL fits now default to fixing the base model's own free parameters at
+their RMSE-fitted values, and searching ONLY the noise/architecture
+parameter** (`sigma_resp` for `<model>_resp_noise`; `n_neurons` for a future
+NEF variant -- not yet built, see "NEF architecture" below), rather than a
+full joint search over everything. `fitting.fit`'s own `override_from_folder`
+parameter (CLI: `--override_from_folder`) implements this: it reads that
+pid's own RMSE fit (`{base_model}_{stem}_{pid}_params.pkl`, falling back to
+the combined `{base_model}_{stem}_params.pkl` filtered by pid if no per-pid
+file exists -- carrabin/yoo's own RMSE folders only have the combined one),
+and pins every one of the base model's free parameters to those values --
+Optuna's search space then contains only whatever parameter(s) aren't
+listed in that override.
+
+**Why**: verified directly across LeakyIntegrator/PrimacyRecency/RL_lambda x
+all 4 datasets (12 combos) that a full joint NLL search barely improves on
+this restricted one, on EITHER performance or behaviour:
+- Loss: full-joint IS statistically significantly better in 11/12 combos
+  (Wilcoxon, large n makes even tiny shifts detectable) but the actual
+  magnitude is negligible in all but one -- 0.001-0.028 NLL units against
+  medians of -0.5 to -2.2 (under 2% of the loss scale).
+- Behaviour: response correlation between the two fits' simulated
+  trajectories is r=0.995-1.000 everywhere, RMSE 0.009-0.058 on the [-1,1]
+  response scale.
+
+**One real exception**: RL_lambda on carrabin -- diff=0.116 NLL units and
+r=0.995 (still high, but the weakest of all 12 cells), 4-6x every other
+cell's own diff. Consistent with an earlier, separate finding: RL_lambda's
+own alpha_0/lambda_ show the LARGEST RMSE-vs-full-joint-NLL drift on
+carrabin (26%/25%) and yoo (17%/22%), vs 0-5% on both soltani tasks --
+fixing those parameters costs the most precisely where they most want to
+move. Worth re-checking before relying on this simplification for RL_lambda
+on carrabin specifically; the soltani tasks (where the neural work actually
+runs) show no such issue.
+
+**Recipe** (one dataset x model at a time, matching every other multi-
+dataset loop this project uses -- note carrabin/yoo's own RMSE fits live in
+their own folders, not a shared one):
+
+    for m in LeakyIntegrator PrimacyRecency RL_lambda; do
+      venv/bin/python -m fitting.submit carrabin ${m}_resp_noise --loss nll \
+          --n_trials 100 --run_folder nll_noise_only --override_from_folder carrabin
+    done
+    # yoo: --override_from_folder yoo; soltani_colors/soltani_numbers: --override_from_folder rmse
+
+    venv/bin/python -m fitting.collect nll_noise_only --type params
+    venv/bin/python -m fitting.collect nll_noise_only --type responses
+
+`data/runs/nll_noise_only/` is now the CANONICAL location for NEW NLL fits
+of these 3 models going forward. `data/runs/nll/` (the old full-joint
+search) is kept as the verification baseline the comparison above was run
+against -- not deleted, not being actively added to.
+
 ### PITFALLS when extending a model to a new dataset, learned the hard way
 
 Two real bugs surfaced extending NoisyRL_lambda from soltani-only to all four
@@ -1111,6 +1165,19 @@ RNN fits are retained for reference and are not used in active figures.
 ---
 
 ## NEF architecture
+
+**Planned, NOT YET BUILT**: applying the same noise-only override approach
+(above) to NEF -- fixing alpha_0/lambda_ at their RMSE-fitted values and
+letting Optuna search ONLY n_neurons under NLL, instead of the current
+joint alpha_0/lambda_ search at a fixed n_neurons. Blocked on a real
+prerequisite, checked directly rather than assumed: n_neurons can't be an
+arbitrary Optuna range -- each candidate value needs its OWN precomputed
+counting-activity file (`data/counting_activities_n{N}_nc{N}_{dataset}.pkl`),
+and currently only the single production value (n_neurons=500) has one, for
+ANY of the 4 datasets. Generating a real candidate set (e.g. matching the
+existing `NEF_N_NEURONS_VALUES` list used by the old MLE n_neurons scan) is
+a genuine disk/compute cost (the existing n=500 files already run ~1.3GB
+each) that hasn't been scoped or approved yet.
 
 The NEF model implements sequential evidence integration via three interacting
 neural populations:
