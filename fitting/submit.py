@@ -267,7 +267,17 @@ def _resubmit(
     model_type: str | None = None,
     pid: int | None = None,
     datafile: str | None = None,
+    out_folder: Path | None = None,
 ) -> None:
+    # For resubmit_type="activities": WHERE fitted params are READ from
+    # (run_folder) and WHERE activity/encoder files are WRITTEN
+    # (out_folder) can now differ -- defaults to run_folder (identical to
+    # the old behaviour) when not given, so this reserves data/runs/rmse/ /
+    # data/runs/nll/ for pure behavioural fitting output and lets neural
+    # simulation output (activities, encoders) land in its own folder
+    # (e.g. data/runs/neural_experiments/) instead, per instruction.
+    if out_folder is None:
+        out_folder = run_folder
     jobs = _jobs_from_config(run_folder)
     # apply filters
     if dataset is not None:
@@ -312,7 +322,7 @@ def _resubmit(
                 continue
             if timing == "once_per_dt" and ds != "carrabin":
                 continue  # windowed once_per_dt activities only implemented for carrabin
-            out_dir = run_folder
+            out_dir = out_folder
             ens_missing = False
             for ens in ensembles:
                 if timing == "once_per_dt":
@@ -370,7 +380,7 @@ def _resubmit(
 
                     run_activities(
                         int(pid), ds, ensembles, str(run_folder), timing,
-                        dt_sample, mt, job.get("datafile")
+                        dt_sample, mt, job.get("datafile"), str(out_folder)
                     )
             else:
                 ensembles_str = ",".join(ensembles)
@@ -380,6 +390,8 @@ def _resubmit(
                 )
                 if job.get("datafile"):
                     cmd += f" --datafile {job['datafile']}"
+                if out_folder != run_folder:
+                    cmd += f" --out_folder {out_folder}"
                 _submit_command(
                     script_name=f"activities_{mt}_{stem}_{pid}.sh",
                     command=cmd,
@@ -419,6 +431,15 @@ def main() -> None:
     )
     parser.add_argument("--run_folder", type=str, default=None)
     parser.add_argument(
+        "--out_folder", type=str, default=None,
+        help="For --resubmit activities: where activity/encoder files are "
+             "WRITTEN, if different from --run_folder (which is still where "
+             "fitted params are READ from). Defaults to --run_folder, "
+             "matching the old single-folder behaviour. Use this to keep "
+             "neural simulation output out of a behavioural-fits folder "
+             "like rmse/ or nll/, e.g. --out_folder neural_experiments.",
+    )
+    parser.add_argument(
         "--datafile",
         type=str,
         default=None,
@@ -447,6 +468,7 @@ def main() -> None:
             model_type=args.model_type,
             pid=args.pid,
             datafile=args.datafile,
+            out_folder=(RUNS_DIR / args.out_folder) if args.out_folder else None,
         )
         return
 

@@ -6121,3 +6121,24 @@ Neither has actually been run yet. Commands are recorded in CLAUDE.md's own
 ### Act 4/5: not started, deliberately
 
 Per instruction: "we'll explore 4 and 5 once we have 1-3 in hand."
+
+### Follow-up: separating neural output from behavioural fits (rmse/nll)
+
+Caught before it caused a real problem, not after: `fitting.submit
+--resubmit activities` (the mechanism identified above for Act 2/3's
+activities data source) used the SAME `--run_folder` for both READING
+fitted params and WRITING activity/encoder output. Run against
+`--run_folder rmse` as originally planned, this would have written neural
+simulation output directly into `data/runs/rmse/`, mixing it with pure
+behavioural fitting results (params/performance/responses) -- exactly what
+the person wants that folder reserved for.
+
+Fix: `fitting/submit.py`'s `_resubmit()` and `utils/save_activities.py`'s
+`run()` both gained an optional `out_folder` (CLI: `--out_folder`),
+defaulting to `run_folder` when omitted -- verified directly (via
+`--dry_run`) that omitting it produces byte-identical job-script commands
+to before the change, and that passing `--out_folder neural_experiments`
+correctly reads params from `rmse/` while writing activities/encoders to
+`neural_experiments/`. No existing caller's behavior changes; this was a
+genuine, small generalization (not a workaround), matching the pattern
+`extras_carrabin.py` already used elsewhere for the same read/write split.

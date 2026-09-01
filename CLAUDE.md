@@ -226,18 +226,26 @@ rather than splitting it across two tasks that each only show half.
 ### Status
 - **Act 1: DONE.** All 3 panels built, data generated locally (cheap --
   see docs/HISTORY.md for the exact parameter values used).
-- **Act 2/3: PLANNED, not yet run.** Two data sources needed, both already
-  fully supported by existing infrastructure (no new code):
+- **Act 2/3: PLANNED, not yet run.** Two data sources:
   1. Probe simulation -- `neural_experiments.py`'s own `probe` command,
      needs `--mode submit` then `--mode collect` for numbers' 46 pids on
-     the cluster.
+     the cluster. Already writes to its own `data/runs/neural_experiments/`
+     folder, not rmse/nll.
   2. Per-observation ensemble activities/encoders -- NOT something
      `neural_experiments.py` needs to implement; `utils/save_activities.py`
      already handles any dataset generically (the same mechanism that
      produced yoo's own `activities_error_yoo.pkl`), invoked via
-     `fitting.submit --resubmit activities --ensembles error --timing
-     once_per_obs`. `NEF_soltani_numbers_responses.pkl` (needed for the
-     ΔR-decay half) already exists from the original RMSE fit.
+     `fitting.submit --resubmit activities`. That mechanism DID need one
+     small generalization this session: it used to read fitted params AND
+     write activity/encoder output to the SAME `--run_folder`, which would
+     have written neural output straight into `data/runs/rmse/`, mixing it
+     with pure behavioural fitting results. Both `fitting/submit.py` and
+     `utils/save_activities.py` now take an optional `--out_folder`
+     (defaults to `--run_folder`, so every existing caller's behavior is
+     unchanged) so activities can land in `data/runs/neural_experiments/`
+     instead, reserving rmse/nll for behavioural results only.
+     `NEF_soltani_numbers_responses.pkl` (needed for the ΔR-decay half)
+     already exists from the original RMSE fit.
 - **Act 4/5: NOT STARTED.**
 
 ## Central cognitive model
@@ -1500,10 +1508,16 @@ motivation/structure. All commands below target `soltani_numbers`.
     python scripts/neural_experiments.py probe --task soltani_numbers --mode collect
 
     # Act 2/3 data source B -- per-observation activities (cluster, per-pid; NOT YET RUN)
-    # NOT new code -- the existing generic activity-saving mechanism
-    # (utils/save_activities.py), same one that produced yoo's own files above.
+    # Uses the existing generic activity-saving mechanism (utils/save_
+    # activities.py), same one that produced yoo's own files above --
+    # extended this session with an --out_folder flag (defaults to
+    # --run_folder, so every EXISTING caller is unaffected) so activity/
+    # encoder output can land somewhere other than the fitted-params
+    # folder itself, keeping data/runs/rmse/ and data/runs/nll/ reserved
+    # for pure behavioural fitting output.
     python -m fitting.submit soltani_numbers NEF --resubmit activities \
-        --run_folder rmse --ensembles error --timing once_per_obs
+        --run_folder rmse --out_folder neural_experiments \
+        --ensembles error --timing once_per_obs
 
     # Output: data/runs/neural_experiments/
     #   raster_demo_soltani_numbers.pkl

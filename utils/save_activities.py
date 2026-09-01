@@ -203,6 +203,7 @@ def run(
     dt_sample: float = 0.01,
     model_type: str = "NEF",
     datafile: str | None = None,
+    out_folder: str | None = None,
 ) -> None:
     """Simulate one pid from its best-fit params and save per-ensemble activities.
 
@@ -211,12 +212,18 @@ def run(
     {model_type}_{stem}_{pid}_params.pkl -- so it cannot be recovered from
     inside the pkl the way load_run_params can for its other callers.
     Defaults to None for the unsuffixed carrabin/yoo behaviour.
+
+    `out_folder` is where activity/encoder files are WRITTEN, if different
+    from `run_folder` (which is always where fitted params are READ from).
+    Defaults to `run_folder`, matching the old single-folder behaviour --
+    added so neural simulation output can be kept out of a behavioural-fits
+    folder like rmse/ or nll/ (e.g. out_folder="neural_experiments").
     """
     from utils.run_params import load_run_params
 
     params = load_run_params(pid, dataset, model_type, run_folder, datafile)
 
-    out_dir = resolve_run_folder(run_folder)
+    out_dir = resolve_run_folder(out_folder if out_folder is not None else run_folder)
     out_dir.mkdir(parents=True, exist_ok=True)
     simulate_and_save(pid, params, ensembles, timing, out_dir, dt_sample=dt_sample)
 
@@ -238,7 +245,14 @@ if __name__ == "__main__":
         default=None,
         help="Data-version suffix; omit for the canonical unsuffixed dataset.",
     )
+    parser.add_argument(
+        "--out_folder", default=None,
+        help="Where activity/encoder files are written, if different from "
+             "run_folder (which is always where fitted params are read "
+             "from). Defaults to run_folder.",
+    )
     args = parser.parse_args()
     run(args.pid, args.dataset, args.ensembles.split(","), args.run_folder,
-        args.timing, args.dt_sample, args.model_type, args.datafile)
+        args.timing, args.dt_sample, args.model_type, args.datafile,
+        args.out_folder)
     print("JOB_COMPLETE")
