@@ -76,8 +76,22 @@ def _suggest_params(
     dataset: str,
     pid: int,
     datafile: str | None = None,
+    fixed_override: dict | None = None,
 ) -> dict:
-    """Sample model parameters for one Optuna trial."""
+    """Sample model parameters for one Optuna trial.
+
+    `fixed_override`, if given, pins specific parameters to explicit values
+    instead of letting Optuna search them -- e.g. a pid's own RMSE-fitted
+    alpha_0/lambda_, so a '_resp_noise' NLL fit only actually searches
+    sigma_resp (see fit()'s own `override_from_folder` for how this gets
+    built). Applied for EVERY key in `fixed_override`, whether or not that
+    key is already a searchable range in `MODEL_PARAMS[dataset][model_type]`
+    -- overriding REPLACES the search for a param that's normally free,
+    and ADDS a param that isn't listed in the spec at all (both cases are
+    used: the former for LeakyIntegrator/PrimacyRecency/RL_lambda's own
+    '_resp_noise' variants, the latter for a NEF variant where n_neurons
+    alone is searchable and alpha_0/lambda_ aren't in that spec at all).
+    """
     params = {
         "model_type": model_type,
         "dataset": dataset,
@@ -94,9 +108,13 @@ def _suggest_params(
     fixed_params = model_spec.get("fixed", {})
     if fixed_params:
         params.update(fixed_params)
+    fixed_override = fixed_override or {}
 
     for param, spec in model_spec.items():
         if param == "fixed":
+            continue
+        if param in fixed_override:
+            params[param] = fixed_override[param]
             continue
         low, high, step = spec
         # Keep integer-valued hyperparameters discrete in Optuna.
@@ -104,6 +122,13 @@ def _suggest_params(
             params[param] = trial.suggest_int(param, int(low), int(high), step=int(step))
         else:
             params[param] = trial.suggest_float(param, low, high, step=step)
+
+    # Any override key NOT already handled by the loop above (i.e. not a
+    # searchable range in this model_spec at all) still needs to land in
+    # params -- e.g. alpha_0/lambda_ for a NEF variant whose own spec only
+    # lists n_neurons.
+    for param, value in fixed_override.items():
+        params.setdefault(param, value)
     return params
 
 
@@ -210,6 +235,7 @@ def fit(
     datafile: str | None = None,
     loss_fn: str = "rmse",
     n_sims: int = 100,
+    override_from_folder: str | Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs.
 
@@ -220,6 +246,18 @@ def fit(
     models.math_models.add_noise, e.g. "RL_lambda_resp_noise"). Checked up front
     so a bad combination fails before an Optuna study is created, not on the
     first trial.
+
+    `override_from_folder`, if given, pins this pid's base-model parameters
+    (e.g. RL_lambda's alpha_0/lambda_) to their RMSE-fitted values read from
+    that folder, leaving ONLY the noise/architecture parameter (sigma_resp,
+    or n_neurons for a NEF variant with its own such spec) for Optuna to
+    search -- a "does adding noise alone explain the NLL improvement, or do
+    the OTHER parameters need to move too" check. Base model name comes
+    from `base_model_of(model_type)` (strips "_resp_noise"; a bare "NEF"
+    has nothing to strip). The RMSE params file read is
+    `{base_model}_{stem}_{pid}_params.pkl` under `override_from_folder` --
+    NOT `{model_type}_...`, since the override source is the UNWRAPPED
+    model's own RMSE fit, never an NLL fit of anything.
     """
     if loss_fn not in ("rmse", "nll"):
         raise ValueError(f"loss_fn must be 'rmse' or 'nll', got {loss_fn!r}")
@@ -252,6 +290,44 @@ def fit(
     if human.empty:
         raise ValueError(f"No rows for pid={pid} in data/{stem}.pkl")
 
+    fixed_override: dict = {}
+    if override_from_folder is not None:
+        override_dir = resolve_run_folder(override_from_folder)
+        base_model = base_model_of(model_type)
+        # Per-pid file first (soltani's rmse/ folder still has these), falling
+        # back to the combined file filtered by pid (carrabin/yoo's own RMSE
+        # folders only have the combined one) -- same fallback order already
+        # used elsewhere in this codebase for this exact situation (e.g.
+        # extras_carrabin.py's _run_pe_readout/_run_probe_timeseries).
+        per_pid_path = override_dir / f"{base_model}_{stem}_{pid}_params.pkl"
+        combined_path = override_dir / f"{base_model}_{stem}_params.pkl"
+        if per_pid_path.exists():
+            override_row = pd.read_pickle(per_pid_path).iloc[0]
+        elif combined_path.exists():
+            combined_df = pd.read_pickle(combined_path)
+            combined_df = combined_df[combined_df["pid"] == pid]
+            if combined_df.empty:
+                raise ValueError(f"No pid={pid} row in {combined_path}")
+            override_row = combined_df.iloc[0]
+        else:
+            raise FileNotFoundError(
+                f"--override_from_folder given but no RMSE fit found at "
+                f"{per_pid_path} or {combined_path} for base model {base_model!r}"
+            )
+        base_spec = MODEL_PARAMS[dataset].get(base_model, {})
+        free_param_names = [p for p in base_spec if p != "fixed"]
+        fixed_override = {
+            p: float(override_row[p]) for p in free_param_names if p in override_row
+        }
+        if not fixed_override:
+            raise ValueError(
+                f"override_from_folder={override_from_folder!r} resolved no "
+                f"free parameters to override for base model {base_model!r} "
+                f"(checked {free_param_names}) -- check MODEL_PARAMS[{dataset!r}]"
+                f"[{base_model!r}] and the columns in the source file"
+            )
+        logging.info(f"override_from_folder: pinning {fixed_override}")
+
     if not MODEL_PARAMS[dataset][model_type]:
         n_trials = 1
         logging.info(
@@ -269,7 +345,8 @@ def fit(
     trial_records: list[dict] = []
 
     def objective(trial: optuna.trial.Trial) -> float:
-        params = _suggest_params(trial, model_type, dataset, pid, datafile)
+        params = _suggest_params(trial, model_type, dataset, pid, datafile,
+                                  fixed_override=fixed_override)
         trial_wall_start = time.time()
         if loss_fn == "nll":
             # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
@@ -335,6 +412,8 @@ def fit(
     study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
     best_trial = study.best_trial
     best_params = dict(best_trial.params)
+    best_params.update(fixed_override)  # trial.params never has these -- they
+                                        # were pinned directly, not suggested
     best_params.update(
         {
             "model_type": model_type,
@@ -441,6 +520,14 @@ if __name__ == "__main__":
              "measurement), and note NEF's own activity file must have been "
              "precomputed with a matching --n_sims.",
     )
+    parser.add_argument(
+        "--override_from_folder", default=None,
+        help="Pin this pid's base-model parameters (e.g. RL_lambda's "
+             "alpha_0/lambda_) to their RMSE-fitted values read from this "
+             "folder, leaving only the noise/architecture parameter for "
+             "Optuna to search. See fit()'s own docstring for exactly which "
+             "file gets read and how the override set is determined.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -455,6 +542,7 @@ if __name__ == "__main__":
         datafile=args.datafile,
         loss_fn=args.loss_fn,
         n_sims=args.n_sims,
+        override_from_folder=args.override_from_folder,
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")

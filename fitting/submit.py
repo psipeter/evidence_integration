@@ -112,6 +112,7 @@ def _resolve_jobs(
     datafile: str | None = None,
     loss_fn: str = "rmse",
     n_sims: int = 100,
+    override_from_folder: str | None = None,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -147,6 +148,7 @@ def _resolve_jobs(
                         # duplicates of each other.
                         "loss_fn": loss_fn,
                         "n_sims": n_sims,
+                        "override_from_folder": override_from_folder,
                     }
                 )
     return jobs
@@ -190,6 +192,7 @@ def _submit_job(
     datafile = job.get("datafile")
     loss_fn = job.get("loss_fn", "rmse")
     n_sims = job.get("n_sims", 100)
+    override_from_folder = job.get("override_from_folder")
     stem = dataset_stem(ds, datafile)
     cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} --n_trials {n_trials} "
@@ -199,6 +202,8 @@ def _submit_job(
         cmd += f" --datafile {datafile}"
     if loss_fn != "rmse":
         cmd += f" --loss {loss_fn} --n_sims {n_sims}"
+    if override_from_folder:
+        cmd += f" --override_from_folder {override_from_folder}"
     # file_stem (with the _nll suffix fitting.fit inserts for loss_fn='nll')
     # matters for the job SCRIPT name too, exactly as it does for fit.py's own
     # output filenames -- otherwise an NLL job and an RMSE job for the same
@@ -225,6 +230,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     datafile = job.get("datafile")
     loss_fn = job.get("loss_fn", "rmse")
     n_sims = job.get("n_sims", 100)
+    override_from_folder = job.get("override_from_folder")
     stem = dataset_stem(ds, datafile)
     file_stem = f"{stem}_nll" if loss_fn == "nll" else stem
 
@@ -244,6 +250,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         datafile=datafile,
         loss_fn=loss_fn,
         n_sims=n_sims,
+        override_from_folder=override_from_folder,
     )
 
 
@@ -440,6 +447,14 @@ def main() -> None:
              "like rmse/ or nll/, e.g. --out_folder neural_experiments.",
     )
     parser.add_argument(
+        "--override_from_folder", type=str, default=None,
+        help="For the main (non-resubmit) fitting path: pin each pid's "
+             "base-model parameters to their RMSE-fitted values read from "
+             "this folder, leaving only the noise/architecture parameter "
+             "for Optuna to search -- see fitting.fit's own docstring. "
+             "E.g. --override_from_folder rmse.",
+    )
+    parser.add_argument(
         "--datafile",
         type=str,
         default=None,
@@ -482,6 +497,7 @@ def main() -> None:
         datafile=args.datafile,
         loss_fn=args.loss,
         n_sims=args.n_sims,
+        override_from_folder=args.override_from_folder,
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder
