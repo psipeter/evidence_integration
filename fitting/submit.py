@@ -26,6 +26,7 @@ from utils.paths import DATA_DIR, RUNS_DIR, data_path, dataset_stem
 from utils.slurm import (
     DEFAULT_MEM_LIMITS,
     DEFAULT_TIME_LIMITS,
+    SINGLE_PASS_TIME_LIMIT,
     make_job_script,
     submit_script,
 )
@@ -376,7 +377,7 @@ def _resubmit(
                 _submit_command(
                     script_name=f"responses_{mt}_{stem}_{pid}.sh",
                     command=cmd,
-                    time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
+                    time_limit=SINGLE_PASS_TIME_LIMIT,
                     mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
                     dry_run=dry_run,
                 )
@@ -402,7 +403,7 @@ def _resubmit(
                 _submit_command(
                     script_name=f"activities_{mt}_{stem}_{pid}.sh",
                     command=cmd,
-                    time_limit=DEFAULT_TIME_LIMITS.get(mt, "4:0:0"),
+                    time_limit=SINGLE_PASS_TIME_LIMIT,
                     mem=DEFAULT_MEM_LIMITS.get(mt, "8G"),
                     dry_run=dry_run,
                 )

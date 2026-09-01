@@ -32,6 +32,18 @@ DEFAULT_MEM_LIMITS = {
     "NEF": "32G",
 }
 
+# DEFAULT_TIME_LIMITS["NEF"]=72h is sized for a full 200-trial Optuna fit --
+# far too long for utils/save_activities.py's own job, which is ONE forward
+# pass per trial (no hyperparameter search at all), the same shape as
+# utils/save_responses.py's job. Requesting 72h for either causes exactly the
+# problem seen in practice: SLURM's scheduler can't guarantee any node for
+# that long a walltime if a maintenance window falls anywhere inside it,
+# leaving the job stuck pending ("ReqNodeNotAvail, Reserved for maintenance")
+# even though the job itself would finish in minutes. Memory is UNCHANGED
+# (same network, same n_neurons, so the same footprint) -- only walltime
+# scales with "how many total passes", which drops from 200 to 1 here.
+SINGLE_PASS_TIME_LIMIT = "2:0:0"
+
 def make_job_script(
     root: str,
     commands: list[str],
