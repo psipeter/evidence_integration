@@ -85,6 +85,13 @@ error dynamics, and how both scale with architectural parameters (n_neurons,
 α₀, λ). Together these constitute a mechanistically coherent account that is
 testable at multiple levels of analysis.
 
+The current active plan for making this argument concretely, as one
+consolidated figure (the "neural giant" -- see `## Neural predictions figure
+(Acts 1-5)` below for the full motivation/structure), reuses the SAME
+underlying error population across all of its panels rather than the older
+per-task carrabin/yoo neural figures (N1-N8 below), which each only ever
+showed part of the story.
+
 ### Goal 4 — Novel testable predictions
 Spiking noise produces state-persistent variability that differs qualitatively
 from response noise; this prediction distinguishes the NEF from NoisyCounting
@@ -140,7 +147,98 @@ NEF predictions; testable in future empirical experiments.
 | N7 | Fitted λ mediates activity change and mean |Δresponse| (twin-axis) | N | Y |
 | N8 | Late |Δresponse| vs late estimation error (last 10 obs) | N | Y |
 
+N1-N8 above is the OLDER per-task taxonomy (figure_carrabin_neural.py/
+figure_yoo_neural.py, each only covering part of the story on its own task).
+The CURRENT active plan consolidates this into one figure -- see below.
+
 ---
+
+## Neural predictions figure (Acts 1-5)
+
+### Motivation
+The theory's central mechanism is a WEIGHTED prediction error (PE) updating
+an internal estimate. The hypothesis this figure exists to support: many of
+the behavioural phenomena already shown in the P/T figures are driven by the
+dynamics of the neural population that represents this PE. We test this by
+looking at the simulated error population inside the NEF model itself,
+hypothesised to resemble a real neural population somewhere in PFC (or
+possibly striatum/VTA) -- i.e. every claim in this figure is framed as a
+concrete, testable prediction for a real neuroimaging experiment, not just a
+model-internal description.
+
+### Structure -- 5 acts, building in strength of claim
+
+1. **Toy/illustrative population dynamics** (no fitting, no behavioural
+   data -- pure model mechanism, arbitrary parameter values). Shows: a
+   single-trial spike raster of the error population with decoded PE
+   overlaid; error-neuron activity vs observation-within-trial across a few
+   λ values; decoded PE vs time-within-observation across an α₀ x n_neurons
+   grid. Claims: α₀ controls the upswing of decoded PE; n_neurons controls
+   its noise level; λ controls the rate at which error neurons become
+   quiescent (stop responding to new input). These are the measurable-in-
+   the-lab quantities (neural activity, decoded representations) with no
+   model-fitting involved.
+2. **Behaviour <-> PE representation, both axes measurable.** Ties Act 1's
+   predictions back to σ and λ: σ (response variability) vs PE variability;
+   ΔR(early-late) vs ΔA(early-late) [response-change decay vs activity
+   decay]. Both axes on each panel are things a real neuroimaging study
+   could measure directly -- no parametric model comparison needed -- so
+   each panel is its own standalone empirical prediction.
+3. **Both X and Y jointly controlled by the same underlying parameter.**
+   σ AND PE variability vs fitted α₀ (both depend on the same scaling
+   factor); fitted λ vs ΔR-decay AND ΔA-decay (twin axes). Same
+   underlying data as Act 2, replotted against the parameter that drives
+   both measured quantities together.
+4. **Validation via ablation/statistical control** (NOT YET BUILT). For
+   each Act 2/3 relationship: a partial correlation controlling for the
+   other parameter, and, where feasible, a mechanistic ablation (forcing a
+   parameter to a null value and showing the correlation collapses) --
+   matching yoo's own existing λ=0 ablation precedent.
+5. **Optional -- synaptic vs working-memory implementation comparison**
+   (NOT STARTED, separate downstream scope). Different predictions under
+   an ITI manipulation, depending on which implementation of the learning
+   rule is assumed. Deliberately out of scope for now.
+
+### Task choice: soltani_numbers throughout
+Unlike the old N1-N8 table (split across carrabin/yoo, each missing half the
+metrics), Acts 1-3 all run on `soltani_numbers` specifically -- the ONE task
+with both a real fitted σ and a real fitted λ (carrabin has σ but not λ;
+yoo has λ but not σ; both soltani tasks have both, numbers picked
+arbitrarily over colors). This lets one task carry the whole argument
+rather than splitting it across two tasks that each only show half.
+
+### Implementation
+- `scripts/neural_experiments.py` -- NEW script, generalises extras_
+  carrabin.py's pattern (param-grid sweeps, probe simulations) to an
+  arbitrary `--task`, since none of it is actually carrabin-specific under
+  the hood. Three experiments: `raster_demo` (Act 1, one trial, arbitrary
+  params, full per-timestep error-population output for a spike raster),
+  `sweep` (Act 1, one OR two swept parameters -- a cross product if two --
+  full per-timestep resolution), `probe` (Act 2/3's expensive half -- full
+  per-timestep simulation at a pid's own fitted params across their real
+  trials; has a `--mode run/submit/collect` lifecycle since this is
+  cluster-bound). Output: `data/runs/neural_experiments/`.
+- `scripts/make_paper_figures.py`'s `make_neural_giant()` builds the figure
+  itself. Currently 1x3 (Act 1's three panels); more rows/panels will be
+  added as Act 2/3 data comes in, same incremental approach the
+  lambda_giant/sigma_giant combined figures used.
+
+### Status
+- **Act 1: DONE.** All 3 panels built, data generated locally (cheap --
+  see docs/HISTORY.md for the exact parameter values used).
+- **Act 2/3: PLANNED, not yet run.** Two data sources needed, both already
+  fully supported by existing infrastructure (no new code):
+  1. Probe simulation -- `neural_experiments.py`'s own `probe` command,
+     needs `--mode submit` then `--mode collect` for numbers' 46 pids on
+     the cluster.
+  2. Per-observation ensemble activities/encoders -- NOT something
+     `neural_experiments.py` needs to implement; `utils/save_activities.py`
+     already handles any dataset generically (the same mechanism that
+     produced yoo's own `activities_error_yoo.pkl`), invoked via
+     `fitting.submit --resubmit activities --ensembles error --timing
+     once_per_obs`. `NEF_soltani_numbers_responses.pkl` (needed for the
+     ΔR-decay half) already exists from the original RMSE fit.
+- **Act 4/5: NOT STARTED.**
 
 ## Central cognitive model
 
@@ -1244,32 +1342,45 @@ byte-identical via checksum); `counting_activities_n500_nc500_carrabin.pkl`
 already existed from an earlier session and was verified valid (200/200
 keys, correct MtM shape) -- no new generation needed for carrabin at all.
 
-**Two things NOT yet confirmed before submitting a weekend-long run --
+**One thing NOT yet confirmed before submitting a weekend-long run --
 worth checking rather than assuming:**
-1. **scp to the cluster.** These files were generated locally; whether
-   they've actually been copied to `f007qzn@discovery.dartmouth.edu:
-   ~/evidence_integration/data/` this session is not confirmed here.
-2. **Real per-trial timing AT the new sizes, for any dataset.** The only real
-   Nengo timing measured this session was carrabin at the OLD 100/100 size
-   (~2s/trial, via `scripts/check_NEF_pipeline.py`). Per the June session's
-   MLE-loop profiling (a DIFFERENT code path, so not a precise proxy, but a
-   real prior worth weighing), NEF's per-point cost was found to be
-   dominated by fixed Nengo build/simulate overhead rather than scaling
-   much with `n_neurons` in the 50-500 range -- if that holds here too,
-   the new sizes may cost little more than 100/100 did. It has not been
-   confirmed at 500/500 (carrabin) or 500/2000 (yoo/soltani) though, and a
-   bad surprise costs a wasted weekend of cluster time on an unattended
-   run, not a quick local retry. A single `scripts/check_NEF_pipeline.py
-   --n_trials 2 --plot_trials 0` call per dataset, at each dataset's OWN
-   configured size, would close this gap cheaply before committing the
-   full submit.
 
-**Submit** (once both of the above are confirmed), one dataset/model pair
-at a time, run_folder `rmse` (shared with the existing math-model fits
-there -- filenames never collide across datasets, via `dataset_stem`):
+~~scp to the cluster~~ -- DONE (confirmed this session): the local files
+(`counting_activities_n500_nc500_carrabin.pkl`,
+`counting_activities_n500_nc2000_{yoo,soltani_numbers,soltani_colors}.pkl`,
+now including the `--n_sims 2` entries) were generated locally then copied
+to the cluster.
+
+~~Real per-trial timing at the new sizes~~ -- DECIDED AGAINST measuring
+first (informed decision, this session): proceeding straight to a 200-trial
+submit on the strength of the priors already in hand (carrabin's real
+~2s/trial at the OLD 100/100 size; the June session's finding that NEF's
+per-point cost is dominated by fixed Nengo overhead rather than scaling
+much with `n_neurons`), rather than spending the few minutes per dataset to
+confirm directly. Worth being explicit about what this accepts: `fitting.
+fit`'s `study.optimize()` runs with NO persistent Optuna storage (the CLI
+never passes `--storage`), and every output file (`params`/`performance`/
+`folds`/`responses`) is written ONLY after `study.optimize()` returns, i.e.
+only once all `n_trials` trials complete. If SLURM kills a job at the 72h
+wall-clock limit before that, NOTHING is written -- not a partial result,
+the entire 72 hours for that pid produces zero usable output. The 72h
+limit bounds wasted TIME, not wasted OUTPUT. `fitting.submit`'s job count
+for this run: 21 (carrabin) + 38 (yoo) + 46 (soltani_numbers) + 46
+(soltani_colors) = 151 separate SLURM jobs, one per pid, each independently
+subject to this risk.
+
+**Submit** -- one SLURM job per pid, per dataset (151 total this run),
+run_folder `rmse` (shared with the existing math-model fits there --
+filenames never collide across datasets, via `dataset_stem`). `--dry_run`
+first is cheap insurance for something this size (writes the job scripts
+and prints what would be submitted, without calling `sbatch`):
 
     for ds in carrabin yoo soltani_numbers soltani_colors; do
-      venv/bin/python -m fitting.submit $ds NEF --n_trials 100 --k 5 --run_folder rmse
+      venv/bin/python -m fitting.submit $ds NEF --n_trials 200 --k 5 --run_folder rmse --dry_run
+    done
+    # inspect jobs/*.sh, then drop --dry_run to actually submit:
+    for ds in carrabin yoo soltani_numbers soltani_colors; do
+      venv/bin/python -m fitting.submit $ds NEF --n_trials 200 --k 5 --run_folder rmse
     done
     venv/bin/python -m fitting.collect rmse --type params
     venv/bin/python -m fitting.collect rmse --type responses
@@ -1360,6 +1471,48 @@ Never run NEF simulations through MCP tool calls (will time out).
     venv/bin/python -m fitting.collect yoo --type activities \
         --ensembles error --timing once_per_obs
     # Output: data/runs/{folder}/activities_error_yoo.pkl, encoders_error_yoo.pkl
+
+### Neural predictions figure (Acts 1-3 — scripts/neural_experiments.py, make_neural_giant())
+
+See `## Neural predictions figure (Acts 1-5)` above for the full
+motivation/structure. All commands below target `soltani_numbers`.
+
+    # Act 1.1 -- single-trial spike raster + decoded PE demo (arbitrary params)
+    python scripts/neural_experiments.py raster_demo --task soltani_numbers \
+        --alpha_0 0.8 --n_neurons 100 --lambda_ 0.7 --n_obs 15
+
+    # Act 1.2 -- lambda sweep (error-neuron activity vs observation)
+    python scripts/neural_experiments.py sweep --task soltani_numbers \
+        --sweep_param lambda_ --sweep_values 0.1 0.6 \
+        --base_alpha_0 1.0 --base_n_neurons 100 --base_lambda_ 0.5 \
+        --n_obs 15 --n_seeds 10
+
+    # Act 1.3 -- alpha_0 x n_neurons cross product (decoded PE vs time-within-obs)
+    python scripts/neural_experiments.py sweep --task soltani_numbers \
+        --sweep_param alpha_0 --sweep_values 0.1 0.3 \
+        --sweep_param2 n_neurons --sweep_values2 30 300 \
+        --base_alpha_0 0.1 --base_n_neurons 30 --base_lambda_ 0.5 \
+        --n_obs 15 --n_seeds 10
+
+    # Act 2/3 data source A -- probe simulation (cluster, per-pid; NOT YET RUN)
+    python scripts/neural_experiments.py probe --task soltani_numbers \
+        --mode submit --run_folder rmse
+    python scripts/neural_experiments.py probe --task soltani_numbers --mode collect
+
+    # Act 2/3 data source B -- per-observation activities (cluster, per-pid; NOT YET RUN)
+    # NOT new code -- the existing generic activity-saving mechanism
+    # (utils/save_activities.py), same one that produced yoo's own files above.
+    python -m fitting.submit soltani_numbers NEF --resubmit activities \
+        --run_folder rmse --ensembles error --timing once_per_obs
+
+    # Output: data/runs/neural_experiments/
+    #   raster_demo_soltani_numbers.pkl
+    #   sweep_soltani_numbers_lambda_.pkl
+    #   sweep_soltani_numbers_alpha_0_n_neurons.pkl
+    #   probe_soltani_numbers_pid{pid}.pkl (per-pid), probe_soltani_numbers.pkl (collected)
+
+    # Build the figure (reads whatever's currently in data/runs/neural_experiments/):
+    python scripts/make_paper_figures.py neural_giant
 
 ---
 

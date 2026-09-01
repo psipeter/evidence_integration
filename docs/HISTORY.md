@@ -5902,9 +5902,13 @@ earlier session's n==nc scan, and was re-verified this session (200/200 keys,
 correct MtM shape).
 
 Two things NOT confirmed before a weekend-long unattended submit, flagged
-explicitly rather than assumed:
+explicitly rather than assumed at the time:
 
-1. Whether these files have actually been scp'd to the cluster.
+1. Whether these files have actually been scp'd to the cluster. UPDATE
+   (later same session): confirmed done -- the files (regenerated with
+   `--n_sims 2` per the resumable scheme, adding the ensemble-mechanism's
+   extra keys without touching the sim=1 entries already relied on for
+   RMSE) were generated locally then copied to the cluster.
 2. Real per-trial Nengo timing at the NEW sizes, for ANY dataset. The only
    real timing measured this session was carrabin at the OLD 100/100 size
    (~2s/trial, via `scripts/check_NEF_pipeline.py`'s real Nengo run). A
@@ -5914,15 +5918,27 @@ explicitly rather than assumed:
    `n_neurons` across 50-500 -- but that was a DIFFERENT code path (the
    fit_mle.py loop, which also includes database-scan overhead), so it's a
    prior worth weighing, not a substitute for measuring this pipeline
-   directly at 500/500 (carrabin) or 500/2000 (yoo/soltani). A cheap
-   `check_NEF_pipeline.py --n_trials 2 --plot_trials 0` call per dataset, at
-   each dataset's own configured size, would close this gap before
-   committing a 72h SLURM job to it.
+   directly at 500/500 (carrabin) or 500/2000 (yoo/soltani). UPDATE (later
+   same session): the person decided to proceed WITHOUT measuring this,
+   fully informed -- worth recording exactly what was weighed. `fitting.
+   fit`'s `study.optimize()` runs with no persistent Optuna storage (the
+   CLI never passes `--storage`), and every output file is written ONLY
+   after `study.optimize()` returns, i.e. only once all `n_trials` complete.
+   A job killed at the 72h SLURM wall-clock limit produces NOTHING, not a
+   partial result -- the 72h ceiling bounds wasted TIME, not wasted OUTPUT.
+   `fitting.submit` submits one job per pid, so this run is 21 (carrabin) +
+   38 (yoo) + 46 (soltani_numbers) + 46 (soltani_colors) = 151 separate
+   jobs, each independently exposed to this risk. The person's call, made
+   on the strength of the priors above -- not a gap I'm papering over.
 
-### Submit plan, once both are confirmed
+### Submit plan (n_trials=200, per fitting.submit's own default)
 
     for ds in carrabin yoo soltani_numbers soltani_colors; do
-      venv/bin/python -m fitting.submit $ds NEF --n_trials 100 --k 5 --run_folder rmse
+      venv/bin/python -m fitting.submit $ds NEF --n_trials 200 --k 5 --run_folder rmse --dry_run
+    done
+    # inspect jobs/*.sh, then drop --dry_run to actually submit:
+    for ds in carrabin yoo soltani_numbers soltani_colors; do
+      venv/bin/python -m fitting.submit $ds NEF --n_trials 200 --k 5 --run_folder rmse
     done
     venv/bin/python -m fitting.collect rmse --type params
     venv/bin/python -m fitting.collect rmse --type responses
@@ -5933,3 +5949,175 @@ dataset's filenames distinct within it, so there's no collision risk, and
 carrabin/yoo's NEF fits landing there for the first time doesn't touch
 anything already using `data/runs/carrabin/`, `data/runs/yoo/`, or `data/runs/
 refit/`.
+
+---
+
+## scripts/make_paper_figures.py consolidation, and a new consolidated neural predictions figure (Acts 1-5) (this session)
+
+### The bigger picture: one script for every main-paper figure
+
+`scripts/make_paper_figures.py` (new this session, copied from presentations/
+make_figures.py and substantially diverged since) is now the single script
+building every main-paper figure -- RMSE/NLL model performance, best-fit
+fraction, response-change decay, and the lambda/sigma/neural "giant"
+combined figures (`lambda_giant`, `sigma_giant`, `neural_giant`), among
+others. Each giant figure stacks several existing figures' own panels into
+one combined figure by calling their EXACT SAME underlying panel-drawing
+helpers -- never duplicating panel logic -- so the standalone figures stay
+available and unaffected. This entry focuses on the neural predictions work
+specifically (the newest, least-precedented piece); the other figures'
+many individual styling iterations (axis ranges, label wording, legend
+placement, significance-bar conventions, etc.) aren't itemized here.
+
+### Neural predictions figure: motivation and 5-act structure
+
+See CLAUDE.md's own `## Neural predictions figure (Acts 1-5)` section for
+the full, current-state version of this -- summarized here with the
+reasoning behind the key decisions.
+
+The theory's central mechanism is a weighted prediction error (PE) updating
+an internal estimate. The person's framing: many of the behavioural
+phenomena already shown in the P/T figures are hypothesised to be driven by
+the dynamics of the neural population that represents this PE, and the
+NEF's own simulated error population is hypothesised to resemble a real
+neural population somewhere in PFC (or possibly striatum/VTA) -- so every
+claim in this figure is meant to be a concrete, testable prediction for a
+real neuroimaging experiment, not just a description of model internals.
+
+Five acts, escalating in strength of claim:
+1. Toy/illustrative population dynamics (no fitting, no behavioural data) --
+   raster + decoded PE demo; error-neuron activity vs observation across a
+   few lambda values; decoded PE vs time-within-observation across an
+   alpha_0 x n_neurons grid. Claims: alpha_0 controls the PE upswing;
+   n_neurons controls its noise level; lambda controls the rate error
+   neurons go quiescent.
+2. Behaviour <-> PE representation, BOTH axes measurable (no model fitting
+   needed on either axis): sigma vs PE variability; delta-R(early-late) vs
+   delta-A(early-late).
+3. Both X and Y jointly controlled by the same underlying parameter: sigma
+   AND PE variability vs fitted alpha_0; fitted lambda vs delta-R-decay AND
+   delta-A-decay (twin axes) -- same underlying data as Act 2, replotted.
+4. Validation via ablation/statistical control (not yet built) -- partial
+   correlations plus, where feasible, mechanistic ablations, matching
+   yoo's own existing lambda=0 ablation precedent.
+5. Optional -- synaptic vs working-memory implementation comparison under
+   an ITI manipulation (not started; separate downstream scope, explicitly
+   deferred rather than folded into this figure).
+
+**Task choice, and why it's a real simplification over the old N1-N8
+table**: the OLD per-task neural figures (figure_carrabin_neural.py,
+figure_yoo_neural.py) each only ever showed HALF the story, because
+carrabin has a real fitted sigma but no fitted lambda, while yoo has a real
+fitted lambda but no fitted sigma. Both soltani tasks (colors, numbers)
+have real fits for BOTH, discovered only once NEF was actually fit for all
+4 datasets this session -- so Acts 1-3 all run on ONE task (`soltani_
+numbers`, picked arbitrarily over colors) instead of splitting the
+argument across two tasks that each only cover half of it.
+
+### scripts/neural_experiments.py (new)
+
+Generalizes scripts/extras_carrabin.py's own pattern (param-grid sweeps,
+probe simulations) to an arbitrary `--task`, since none of it is actually
+carrabin-specific under the hood -- models/NEF.py's build_network/_pretrain
+are always built on counting_integrator regardless of dataset (confirmed
+directly before assuming this generalized). Three experiments:
+
+- `raster_demo` -- one trial, arbitrary (alpha_0, n_neurons, lambda_), full
+  per-timestep trace of the error population's raw neuron output (for
+  utils/plot_spikes.py's spike-raster machinery) plus decoded value/PE.
+- `sweep` -- vary ONE or TWO of {alpha_0, n_neurons, lambda_} (a cross
+  product if two) across arbitrary values, others at fixed base values,
+  over several seeds, at full per-timestep resolution. Two-parameter mode
+  was added after the person reflected on an initial single-parameter
+  design and preferred the original reference figure's own two-parameter
+  (alpha_0 x n_neurons) convention instead -- required a real code change,
+  not just a replotting, since two single-parameter sweep calls at
+  different base values would otherwise silently overwrite the same output
+  file (the old filename didn't encode which base value the OTHER
+  parameter was held at).
+- `probe` -- full per-timestep simulation at a pid's own fitted params
+  across their real trials, for Act 2/3's within-repeat variability numbers
+  (sigma/PE-variability). Has a `--mode run/submit/collect` lifecycle,
+  reusing utils/slurm.py's existing generic job-script/submit machinery
+  (the same one fitting/submit.py itself uses) rather than inventing new
+  submission plumbing -- this is the expensive piece, cluster-bound,
+  matching carrabin's own 2.36GB probe_pids_carrabin.pkl at only 21 pids
+  (numbers has 46, longer sequences).
+
+Output: data/runs/neural_experiments/. A genuine environment-mismatch bug
+was caught and fixed while first writing this file: the `create_file` tool
+writes to a different (local sandbox) filesystem than `filesystem:write_file`/
+`shell:run_command`/`view` operate on (the actual remote project host) --
+the SAME failure mode as `bash_tool` vs `shell:run_command` earlier in this
+session. Caught immediately (the script simply didn't exist when run), not
+silently.
+
+### Act 1: done and iterated on substantially
+
+All three panels (raster+PE demo, lambda sweep, alpha_0 x n_neurons sweep)
+were built, then iterated on heavily against two hand-drawn reference SVGs
+the person uploaded (PE_dynamics.svg, lambda_drives_discounting.svg) --
+rasterized locally via `wkhtmltoimage` after `cairosvg`/`rsvg-convert` were
+unavailable, so the actual intended visual style could be inspected rather
+than guessed from raw SVG XML. Real bugs found and fixed along the way,
+worth recording:
+
+- The raster's own "active neuron" selection was silently a no-op:
+  utils/plot_spikes.py's `preprocess_spikes` convenience wrapper defaults
+  to `sample_size=200`, which exceeded the raster's own `n_neurons=100`, so
+  its variance-based active-neuron filter never actually filtered anything,
+  and its final `merge` step then block-averaged neurons into synthetic
+  composites. Fixed by calling `sample_by_variance`/`cluster` directly with
+  `num=50` (well under 100) and skipping `merge` -- confirmed by checking
+  check_NEF_pipeline.py and its archived predecessor, the only other
+  NEF-dynamics spike-raster code in the repo, that neither does anything
+  more than the same no-op wrapper call.
+- Swapping the raster/PE-line twin axes to opposite sides (PE on the left,
+  raster's own neuron-count scale on the right, once its label was removed
+  per instruction) required setting `ax`'s own tick-right AFTER calling
+  `ax.twinx()`, not before -- twinx() was found (by rendering) to reset it
+  back to the left otherwise, stacking both axes' tick numbers on top of
+  each other.
+
+Current Act 1 parameter values (arbitrary, chosen for visual separation
+after a few rounds of "does this show a real difference" iteration --
+lambda 0.1 vs 0.5 at alpha_0=0.3/n=500 barely separated at all, so this is a
+genuine finding worth remembering, not just a styling choice):
+- Raster demo: alpha_0=0.8, n_neurons=100, lambda_=0.7, n_obs=15.
+- Lambda sweep: lambda_ in {0.1, 0.6}, base alpha_0=1.0, base n_neurons=100,
+  n_obs=15, n_seeds=10.
+- Alpha_0 x n_neurons sweep: alpha_0 in {0.1, 0.3}, n_neurons in {30, 300},
+  base alpha_0=0.1, base n_neurons=30, base lambda_=0.5, n_obs=15,
+  n_seeds=10.
+
+Final panel-level formatting settled this session: panel 1 (raster) x-axis
+zoomed to 5 observations (10s), y-range 0-50 (no tick labels) for the
+raster and 0.0-0.8 for decoded PE; panel 2 (alpha_0 x n_neurons) y-range
+0.0-0.3 (ticks every 0.1), dashed "PE/Response measured at" markers hidden
+by default (`show_markers=False`, a real parameter, not just removed);
+panel 3 (lambda sweep) x-range 0-15 (ticks every 5), y-range 62-82 (ticks
+every 2).
+
+### Act 2/3: data sources identified, neither run yet
+
+Two data sources, both already fully supported by EXISTING infrastructure
+-- no new code needed for either:
+1. Probe simulation, via neural_experiments.py's own `probe` command.
+2. Per-observation ensemble activities/encoders, via utils/save_activities.py
+   (already dataset-generic -- the same mechanism that produced yoo's own
+   activities_error_yoo.pkl), invoked through fitting.submit's existing
+   `--resubmit activities` mode. This was a real discovery this session --
+   initially assumed this would need new code in neural_experiments.py,
+   until tracing fitting/collect.py's own `_collect_activities` back
+   through fitting/submit.py's `--resubmit activities` branch to
+   utils/save_activities.py, which turned out to already handle any
+   dataset generically. NEF_soltani_numbers_responses.pkl (needed for the
+   delta-R-decay half) already exists from the original RMSE fit -- no
+   regeneration needed there either.
+
+Neither has actually been run yet. Commands are recorded in CLAUDE.md's own
+`### Neural predictions figure` simulation-pipeline recipe.
+
+### Act 4/5: not started, deliberately
+
+Per instruction: "we'll explore 4 and 5 once we have 1-3 in hand."

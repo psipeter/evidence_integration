@@ -144,9 +144,17 @@ def pvalue_to_stars(p: float) -> str:
     return "ns"
 
 
-def draw_sig_line(ax, x1, x2, y, stars, linewidth=0.9, fontsize=7):
-    """Draw a flat horizontal significance line (no end ticks) with stars above."""
-    ax.plot([x1, x2], [y, y], color="black", linewidth=linewidth, clip_on=False)
+def draw_sig_line(ax, x1, x2, y, stars, color="black", linewidth=0.9, fontsize=7):
+    """Draw a flat horizontal significance line (no end ticks) with stars above.
+
+    `color` defaults to "black" -- every existing caller passes positionally
+    through `stars` only, so this default preserves their exact prior output.
+    Added so a caller can color the bar/stars to match a specific reference
+    model (e.g. scripts/make_paper_figures.py's make_model_performance,
+    which draws its bars in RL_lambda's own established color rather than
+    black, since the comparison is specifically FROM that model).
+    """
+    ax.plot([x1, x2], [y, y], color=color, linewidth=linewidth, clip_on=False)
     ax.text(
         (x1 + x2) / 2,
         y,
@@ -154,7 +162,7 @@ def draw_sig_line(ax, x1, x2, y, stars, linewidth=0.9, fontsize=7):
         ha="center",
         va="bottom",
         fontsize=fontsize,
-        color="black",
+        color=color,
     )
 
 

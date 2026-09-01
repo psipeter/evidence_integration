@@ -21,13 +21,13 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      showgrid="false"
-     inkscape:zoom="1.545814"
-     inkscape:cx="234.50428"
-     inkscape:cy="198.60087"
+     inkscape:zoom="2.1861111"
+     inkscape:cx="142.49047"
+     inkscape:cy="88.742058"
      inkscape:window-width="1920"
-     inkscape:window-height="1043"
-     inkscape:window-x="1920"
-     inkscape:window-y="0"
+     inkscape:window-height="939"
+     inkscape:window-x="0"
+     inkscape:window-y="32"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg39920" />
   <!-- Title -->
@@ -39,73 +39,106 @@
      text-anchor="middle"
      id="text39855"
      style="font-size:16px"><tspan
+       id="tspan141540"
+       x="150.41356"
+       y="17.373798"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16px;font-family:Inter;-inkscape-font-specification:Inter;fill:#000000"
-       id="tspan40703">deviation from that sequence's average</tspan></text>
+       sodipodi:role="line"><tspan
+   style="font-weight:bold"
+   id="tspan181035">autocorrelation</tspan> in <tspan
+   style="font-weight:bold"
+   id="tspan183041">deviation</tspan></tspan><tspan
+       x="150.41356"
+       y="37.373798"
+       id="tspan142704"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:16px;font-family:Inter;-inkscape-font-specification:Inter;fill:#000000"
+       sodipodi:role="line">from that sequence's average</tspan><tspan
+       x="150.41356"
+       y="57.373798"
+       style="fill:#000000"
+       id="tspan167584"
+       sodipodi:role="line">at <tspan
+   style="font-weight:bold"
+   id="tspan184669">lag </tspan><tspan
+   style="font-style:italic;font-weight:bold"
+   id="tspan147230">k</tspan></tspan></text>
   <!-- lag bracket between obs t and obs t+1 (drawn first, well clear of subtitle above) -->
-  <text
-     x="82.709549"
-     y="48.729874"
-     font-size="9px"
-     font-weight="bold"
-     fill="#333333"
-     text-anchor="middle"
-     id="text39857"
-     style="font-size:13.3333px;fill:#029e73;fill-opacity:1"><tspan
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.3333px;font-family:Inter;-inkscape-font-specification:'Inter Bold';fill:#029e73;fill-opacity:1"
-       id="tspan53839">lag = 1</tspan></text>
   <!-- ============ Top: one example trial's residual trace ============ -->
   <!-- baseline (zero) -->
   <line
      x1="35"
-     y1="105"
+     y1="115"
      x2="265"
-     y2="105"
+     y2="115"
      stroke="#999999"
      stroke-width="1"
-     stroke-dasharray="3,3"
+     stroke-dasharray="3, 3"
      id="line39861" />
   <text
-     x="30"
-     y="108"
-     font-size="9"
+     x="246.29221"
+     y="97.109856"
+     font-size="9px"
      fill="#999999"
      text-anchor="end"
-     id="text39863">0</text>
+     id="text39863"><tspan
+       sodipodi:role="line"
+       id="tspan175091"
+       x="246.29221"
+       y="97.109856"
+       style="text-align:center;text-anchor:middle">sequence</tspan><tspan
+       sodipodi:role="line"
+       id="tspan175093"
+       x="246.29221"
+       y="108.35986"
+       style="text-align:center;text-anchor:middle">average</tspan></text>
+  <text
+     x="35.949314"
+     y="83.415932"
+     font-size="9px"
+     fill="#999999"
+     text-anchor="end"
+     id="text39863-3"><tspan
+       sodipodi:role="line"
+       x="35.949314"
+       y="83.415932"
+       style="text-align:center;text-anchor:middle;fill:#000000"
+       id="tspan178010">response</tspan></text>
   <!-- trace -->
   <polyline
      points="60,82 120,72 180,112 240,126"
      fill="none"
      stroke="#4c4c4c"
      stroke-width="2"
-     id="polyline39865" />
+     id="polyline39865"
+     transform="translate(0,10)" />
   <circle
      cx="60"
-     cy="82"
+     cy="92"
      r="4"
      fill="#4c4c4c"
      id="circle39867" />
   <circle
      cx="120"
-     cy="72"
+     cy="82"
      r="4"
      fill="#4c4c4c"
      id="circle39869" />
   <circle
      cx="180"
-     cy="112"
+     cy="122"
      r="4"
      fill="#4c4c4c"
      id="circle39871" />
   <circle
      cx="240"
-     cy="126"
+     cy="136"
      r="4"
      fill="#4c4c4c"
      id="circle39873" />
   <!-- observation labels -->
   <text
      x="60"
-     y="150"
+     y="160"
      font-size="9px"
      fill="#333333"
      text-anchor="middle"
@@ -113,28 +146,28 @@
      style="font-size:18.6667px">t</text>
   <text
      x="120"
-     y="150"
+     y="160"
      font-size="9px"
      fill="#333333"
      text-anchor="middle"
      id="text39877"
-     style="font-size:18.6667px">t+1</text>
+     style="font-size:18.6667px">k=1</text>
   <text
      x="180"
-     y="150"
+     y="160"
      font-size="9px"
      fill="#333333"
      text-anchor="middle"
      id="text39879"
-     style="font-size:18.6667px">t+2</text>
+     style="font-size:18.6667px">k=2</text>
   <text
      x="240"
-     y="150"
+     y="160"
      font-size="9px"
      fill="#333333"
      text-anchor="middle"
      id="text39881"
-     style="font-size:18.6667px">t+3</text>
+     style="font-size:18.6667px">k=3</text>
   <!-- divider -->
   <line
      x1="20"
@@ -156,7 +189,7 @@
      id="text39887"
      style="font-size:16px;fill:#d55e00;fill-opacity:1"><tspan
        style="font-weight:normal;font-size:16px;fill:#d55e00;fill-opacity:1"
-       id="tspan78549">Persisting noise</tspan></text>
+       id="tspan78549">persisting noise</tspan></text>
   <line
      x1="30"
      y1="260"
@@ -220,7 +253,7 @@
      id="text39901"
      style="font-size:16px;fill:#0173b2;fill-opacity:1"><tspan
        style="font-weight:normal;font-size:16px;fill:#0173b2;fill-opacity:1"
-       id="tspan79401">Independent noise</tspan></text>
+       id="tspan79401">independent noise</tspan></text>
   <line
      x1="170"
      y1="260"
@@ -356,9 +389,4 @@
          id="path39915" />
     </marker>
   </defs>
-  <path
-     style="fill:none;stroke:#029e73;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-start:url(#Arrow2Lstart);marker-end:url(#Arrow2Lend)"
-     d="m 57.436295,72.90813 c 0,0 14.259015,-13.761124 23.471433,-15.353837 10.894382,-1.883504 32.241652,7.784093 32.241652,7.784093"
-     id="path58357"
-     sodipodi:nodetypes="cac" />
 </svg>
