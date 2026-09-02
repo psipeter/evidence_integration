@@ -56,6 +56,18 @@ from utils.save_responses import save as save_responses
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+# n_neurons values search_n_neurons=True actually searches over -- NOT an
+# evenly-stepped range (100-1000 step 100 was the original plan) because
+# each candidate needs its own precomputed counting-activity file
+# (data/counting_activities_n{N}_nc{N}_{dataset}.pkl), and the FULL 10-value
+# grid at a real n_sims (needed for a non-degenerate ensemble variance --
+# n_sims=1 gives zero degrees of freedom, confirmed directly: NaN loss,
+# "Degrees of freedom <= 0") would run ~67.5GB at n_sims=50, too large for
+# the cluster disk quota. Narrowed to 3 representative values at n_sims=20
+# (~9.2GB total) -- update BOTH this list and the actual precomputed files
+# together if the grid ever changes again.
+NEF_N_NEURONS_CANDIDATES: list[int] = [200, 500, 1000]
+
 
 def _log_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
     """Log progress every 10 trials."""
@@ -91,8 +103,9 @@ def _suggest_params(
     and ADDS a param that isn't listed in the spec at all.
 
     `search_n_neurons`, if True, promotes `n_neurons` OUT of the model's own
-    `"fixed"` dict and into an Optuna-searched int in [100, 1000] step 100
-    (matching the precomputed counting-activity grid), then sets
+    `"fixed"` dict and into an Optuna-searched categorical over
+    NEF_N_NEURONS_CANDIDATES (matching the precomputed counting-activity
+    grid), then sets
     `n_neurons_counting` to that SAME value -- the two must move together
     (see fit()'s own docstring for why). This changes nothing about
     alpha_0/lambda_, which stay exactly as free/fixed as
@@ -141,7 +154,7 @@ def _suggest_params(
         params.setdefault(param, value)
 
     if search_n_neurons:
-        params["n_neurons"] = trial.suggest_int("n_neurons", 100, 1000, step=100)
+        params["n_neurons"] = trial.suggest_categorical("n_neurons", NEF_N_NEURONS_CANDIDATES)
         params["n_neurons_counting"] = params["n_neurons"]
 
     return params
