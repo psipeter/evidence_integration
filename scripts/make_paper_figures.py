@@ -3511,79 +3511,102 @@ def _neural_weight_on_cols(pid_enc: pd.DataFrame, neuron_cols: list[str]) -> lis
 
 
 def _load_neural_probe_variability(min_trials: int = 3) -> pd.DataFrame | None:
-    """Per-pid response variability (sigma) and PE variability, from
-    neural_experiments.py's probe simulation -- mean std across repeated
-    qid presentations. Uses the SAME min_trials=3 gate as
-    _qid_response_std (the canonical sigma computation every other figure
-    in this file uses): a (pid, qid, observation) cell with fewer than
-    min_trials repeated presentations has its std discarded (NaN) rather
-    than trusted, before averaging per pid. Confirmed directly this
-    changes nothing NUMERICALLY for the current probe data (every cell has
-    exactly 4 repeats), but the gate is applied explicitly anyway rather
-    than relying on that coincidence -- a future probe run with thinner
-    repeat coverage would otherwise silently include unreliable low-repeat
-    cells that every other sigma figure would correctly exclude.
+    """Per-virtual-pid response variability (sigma) and PE variability,
+    from neural_experiments.py's `synthetic` experiment (Acts 2/3's actual
+    data source -- see CLAUDE.md's own "Neural predictions figure" Status
+    section for why this replaced the original fitted-pid `probe` data) --
+    mean std across repeated qid presentations. Uses the SAME min_trials=3
+    gate as _qid_response_std (the canonical sigma computation every other
+    figure in this file uses): a (virtual_pid, qid, observation) cell with
+    fewer than min_trials repeated presentations has its std discarded
+    (NaN) rather than trusted, before averaging per virtual pid.
 
-    NOTE (per instruction): alpha_0/lambda_ here come from the RMSE fit --
-    NEF's own noise-only variant (fixing alpha_0/lambda_, searching
-    n_neurons under NLL) isn't built yet (see CLAUDE.md's own "NEF
-    architecture" note on why). Sigma's absolute scale may not be
-    calibrated against human variability as a result -- trying with what's
-    available now, per instruction, rather than waiting.
+    alpha_0/lambda_/n_neurons here are the RANDOM draw for that virtual
+    pid (see neural_experiments.py's own _synthetic_params), not a fitted
+    value -- these are qualitative covariation predictions for future
+    empirical studies, not fits to existing behavioural data, so this is
+    by design, not a limitation to work around.
     """
-    path = NEURAL_EXP_DIR / "probe_soltani_numbers.pkl"
-    if not path.exists():
+    probe_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_probe.pkl"
+    params_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_params.pkl"
+    if not (probe_path.exists() and params_path.exists()):
         return None
-    df = pd.read_pickle(path)
-    agg = (df.groupby(["pid", "qid", "observation"])[["pe", "response"]]
+    df = pd.read_pickle(probe_path)
+    params = pd.read_pickle(params_path)
+    agg = (df.groupby(["virtual_pid", "qid", "observation"])[["pe", "response"]]
           .agg(lambda x: x.std() if len(x) >= min_trials else np.nan)
           .dropna())
     if agg.empty:
         return None
-    per_pid = agg.groupby("pid")[["pe", "response"]].mean().reset_index()
+    per_pid = agg.groupby("virtual_pid")[["pe", "response"]].mean().reset_index()
     per_pid = per_pid.rename(columns={"pe": "pe_std", "response": "resp_std"})
-    params = df.groupby("pid")[["alpha_0", "lambda_"]].first().reset_index()
-    return per_pid.merge(params, on="pid")
+    return per_pid.merge(params[["virtual_pid", "alpha_0", "lambda_"]], on="virtual_pid")
 
 
 def _load_neural_decay_metrics() -> pd.DataFrame | None:
-    """Per-pid activity decay (mean weight-tuned-neuron activity, first
-    observation minus last) and NEF response-change decay (mean
-    |Delta response|, first 2 observations minus last 2) -- matching
-    figure_yoo_neural.py's own _prepare_per_pid_changes in spirit, adapted
-    to this project's one-file-per-pid activities/encoders layout (vs
-    yoo's own combined files) and to soltani's 0-indexed observations
-    (uses each pid's own sorted-unique observation values rather than
-    hardcoding obs 1/30 the way the carrabin/yoo-specific version does).
+    """Per-virtual-pid activity decay (mean weight-tuned-neuron activity,
+    first observation minus last) and response-change decay (mean
+    |Delta response|, first 2 observations minus last 2), from
+    neural_experiments.py's `synthetic` experiment.
+
+    Weight-tuned-neuron identification happens PER (virtual_pid, trial),
+    not per virtual_pid -- confirmed directly (see CLAUDE.md/docs/
+    HISTORY.md) that a trial's own error-ensemble encoders depend on that
+    trial's own seed, so a single pid-level encoders set (the convention
+    the OLD fitted-pid loader used, inherited from utils/save_activities.py)
+    would silently misidentify weight-tuned neurons for every trial but
+    the one its encoders happened to come from.
     """
-    resp_path = RUNS_DIR / "rmse" / "NEF_soltani_numbers_responses.pkl"
-    params_path = RUNS_DIR / "rmse" / "NEF_soltani_numbers_params.pkl"
-    if not (resp_path.exists() and params_path.exists()):
+    probe_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_probe.pkl"
+    act_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_activity.pkl"
+    enc_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_encoders.pkl"
+    params_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_params.pkl"
+    if not all(p.exists() for p in [probe_path, act_path, enc_path, params_path]):
         return None
-    nef_resp = pd.read_pickle(resp_path)
-    params = pd.read_pickle(params_path)[["pid", "alpha_0", "lambda_"]]
+
+    probe = pd.read_pickle(probe_path)
+    act = pd.read_pickle(act_path)
+    enc = pd.read_pickle(enc_path)
+    params = pd.read_pickle(params_path)
+
+    # Weight-tuned neuron indices, per (virtual_pid, trial) -- NOT per
+    # virtual_pid alone, since encoders genuinely differ by trial.
+    weight_tuned = (enc[enc["enc_dim_0"] > NEURAL_ENCODER_THRESHOLD]
+                    .groupby(["virtual_pid", "trial"])["neuron_idx"]
+                    .apply(list))
+
+    act_indexed = act.set_index(["virtual_pid", "trial"]).sort_index()
+    mean_act_rows = []
+    for (vp, trial), idxs in weight_tuned.items():
+        if not idxs:
+            continue
+        cols = [f"n{i}" for i in idxs]
+        try:
+            sub = act_indexed.loc[(vp, trial)]
+        except KeyError:
+            continue
+        if isinstance(sub, pd.Series):
+            sub = sub.to_frame().T
+        mean_vals = sub[cols].mean(axis=1)
+        for obs, val in zip(sub["observation"], mean_vals):
+            mean_act_rows.append({"virtual_pid": vp, "trial": trial,
+                                  "observation": obs, "mean_act": val})
+    if not mean_act_rows:
+        return None
+    mean_act_df = pd.DataFrame(mean_act_rows)
 
     rows = []
-    for pid in params["pid"].unique():
-        acts_path = NEURAL_EXP_DIR / f"activities_error_soltani_numbers_{pid}.pkl"
-        encs_path = NEURAL_EXP_DIR / f"encoders_error_soltani_numbers_{pid}.pkl"
-        if not (acts_path.exists() and encs_path.exists()):
+    for vp in params["virtual_pid"].unique():
+        pid_act = mean_act_df[mean_act_df["virtual_pid"] == vp]
+        if pid_act.empty:
             continue
-        acts = pd.read_pickle(acts_path)
-        encs = pd.read_pickle(encs_path)
-        neuron_cols = [c for c in acts.columns if c.startswith("n") and c[1:].isdigit()]
-        on_cols = _neural_weight_on_cols(encs, neuron_cols)
-        if not on_cols:
-            continue
-        acts = acts.copy()
-        acts["mean_act"] = acts[on_cols].mean(axis=1)
-        act_by_obs = acts.groupby("observation")["mean_act"].mean()
+        act_by_obs = pid_act.groupby("observation")["mean_act"].mean()
         obs_sorted = sorted(act_by_obs.index)
         if len(obs_sorted) < 2:
             continue
         act_decay = float(act_by_obs[obs_sorted[0]]) - float(act_by_obs[obs_sorted[-1]])
 
-        pid_resp = nef_resp[nef_resp["pid"] == pid].sort_values(["trial", "observation"]).copy()
+        pid_resp = probe[probe["virtual_pid"] == vp].sort_values(["trial", "observation"]).copy()
         obs_sorted_r = sorted(pid_resp["observation"].unique())
         if len(obs_sorted_r) < 4:
             continue
@@ -3595,11 +3618,11 @@ def _load_neural_decay_metrics() -> pd.DataFrame | None:
         late = pid_resp[pid_resp["observation"].isin(obs_sorted_r[-2:])]["delta"].mean()
         resp_decay = float(early) - float(late)
 
-        rows.append({"pid": int(pid), "act_decay": act_decay, "resp_decay": resp_decay})
+        rows.append({"virtual_pid": int(vp), "act_decay": act_decay, "resp_decay": resp_decay})
 
     if not rows:
         return None
-    return pd.DataFrame(rows).merge(params, on="pid")
+    return pd.DataFrame(rows).merge(params[["virtual_pid", "alpha_0", "lambda_"]], on="virtual_pid")
 
 
 def _plot_neural_sigma_vs_pe_variability(ax) -> None:

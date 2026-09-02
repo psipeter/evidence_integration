@@ -522,16 +522,23 @@ def _simulate_trial_full(obs_values: np.ndarray, params: dict, decoders: dict,
         activity_trace = sim.data[probe_activity]       # (T, n_neurons)
 
     n_timesteps = len(value_trace)
+    t_arr = np.arange(n_timesteps) * dt
     rows = []
     for n_idx in range(n_obs):
         t_pe = t_iti + n_idx * t_step + READOUT_OFFSET
         t_resp = t_iti + n_idx * t_step + t_obs
         idx_pe = int(np.clip(np.round(t_pe / dt), 0, n_timesteps - 1))
-        idx_resp = int(np.clip(np.round(t_resp / dt), 0, n_timesteps - 1))
+        # Matches models.NEF._extract_responses EXACTLY -- a small averaging
+        # window around the readout time, not a single-point lookup. Found
+        # by direct comparison against the canonical _simulate_trial after
+        # the decay-metric correlations collapsed on real data: max diff
+        # ~0.016 per observation, small individually but large enough
+        # relative to |Delta response| decay's own magnitude to matter.
+        response = float(np.mean(value_trace[np.abs(t_arr - t_resp) < dt * 3]))
         rows.append({
             "observation": n_idx + 1,
             "pe": float(abs(error_trace[idx_pe, 0] * error_trace[idx_pe, 1])),
-            "response": float(value_trace[idx_resp]),
+            "response": response,
             "activity": activity_trace[idx_pe].copy(),
         })
     return rows, encoders
@@ -573,6 +580,19 @@ def _synthetic_worker(task: str, virtual_pid: int) -> dict:
         trial_idx = int(trial_data["trial"])
         qid = trial_data["qid"]
         obs_values = np.array(trial_data["values"], dtype=float)
+        # Pool JSON values are on the RAW 0-100 scale (task_backend's own
+        # native scale) -- NOT the canonical [-1,1] scale NEF expects and
+        # data/soltani_numbers.pkl's own "value" column already has
+        # (scripts/build_model_inputs.py's build_from_df() applies this
+        # exact rescale to real human data upstream, before it ever reaches
+        # NEF). Confirmed directly this was missing here: raw pool values
+        # (e.g. 1-28) fed straight into NEF saturate its ensembles
+        # (radius_e=1.5, radius_v=1.0) almost immediately, producing
+        # plausible-looking but meaningless responses -- exactly what
+        # nef_obs_values()'s own docstring warns about. Colors' own pool
+        # values are already +-1 (blue/red) and must NOT be rescaled again.
+        if task == "soltani_numbers":
+            obs_values = obs_values / 50.0 - 1.0
         seed = trial_idx + 1  # 1-indexed, matching activity_key_for_trial's own
                               # +1 convention for 0-indexed (soltani-style) trials
 
