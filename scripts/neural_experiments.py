@@ -434,7 +434,7 @@ def run_probe(args) -> None:
 # ── synthetic (Acts 2/3's replacement data source) ──────────────────────────────────────
 
 SYNTHETIC_POOL_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic_pool"
-SYNTHETIC_N_NEURONS_CHOICES = list(range(100, 1001, 100))
+SYNTHETIC_N_NEURONS_CHOICES = list(range(500, 1501, 100))
 
 
 def _synthetic_pool_path(task: str) -> Path:
@@ -447,17 +447,28 @@ def _synthetic_pool_path(task: str) -> Path:
 
 
 def _synthetic_params(virtual_pid: int) -> dict:
-    """Deterministic random draw for one virtual pid -- alpha_0/lambda_
-    Uniform(0,1), n_neurons uniform over the precomputed grid
-    {100,...,1000}, per instruction. Seeded by virtual_pid so re-running
-    --mode run for the same pid always reproduces the same draw, matching
-    this project's own established convention elsewhere (e.g.
-    fitting.fit._cross_validate's RandomState(seed=pid)).
+    """Deterministic random draw for one virtual pid -- alpha_0 ~
+    Uniform(0.5,1), lambda_ ~ Uniform(0.1,1), n_neurons uniform over the
+    precomputed grid {500,...,1500}. Narrowed from the original
+    Uniform(0,1)/{100,...,1000} after checking real soltani_numbers RMSE
+    fits directly: alpha_0 never falls below 0.384 there (5th percentile
+    0.481), and alpha_0 below ~0.2-0.4 produces a genuine floor effect in
+    alpha(t)=alpha_0/t^lambda -- lambda has essentially nothing to
+    modulate when alpha_0 is that small, which is why the lambda-vs-decay
+    relationship was floor-limited at the old bounds (confirmed directly:
+    restricting to alpha_0>0.2 alone recovered r=0.36-0.54 from r=0.16-0.38
+    on the unrestricted draw). n_neurons raised to 500-1500 for the same
+    reason sigma-related panels needed n_neurons>=500 to show a clean
+    signal -- see docs/HISTORY.md for the full investigation. Seeded by
+    virtual_pid so re-running --mode run for the same pid always
+    reproduces the same draw, matching this project's own established
+    convention elsewhere (e.g. fitting.fit._cross_validate's
+    RandomState(seed=pid)).
     """
     rng = np.random.RandomState(seed=int(virtual_pid))
     return {
-        "alpha_0": float(rng.uniform(0.0, 1.0)),
-        "lambda_": float(rng.uniform(0.0, 1.0)),
+        "alpha_0": float(rng.uniform(0.5, 1.0)),
+        "lambda_": float(rng.uniform(0.1, 1.0)),
         "n_neurons": int(rng.choice(SYNTHETIC_N_NEURONS_CHOICES)),
     }
 
