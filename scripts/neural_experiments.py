@@ -7,7 +7,7 @@ simulations) to an arbitrary --task, since none of this is actually
 carrabin-specific under the hood -- models/NEF.py's build_network/_pretrain
 are always built on counting_integrator regardless of dataset.
 
-Three experiments:
+Four experiments:
 
   raster_demo  — ONE trial, arbitrary (alpha_0, n_neurons, lambda_), full
                  per-timestep trace of the error population's raw neuron
@@ -26,11 +26,27 @@ Three experiments:
                  convention); lambda_'s own panel stays single-parameter.
 
   probe        — full per-timestep probe simulation at a given pid's own
-                 fitted params, repeated across that pid's real trials, for
-                 the within-repeat variability numbers Acts 2/3 need. Has a
-                 --mode run/submit/collect lifecycle since this is the
-                 expensive piece (~cluster-bound, matching carrabin's own
-                 2.36GB probe_pids_carrabin.pkl at only 21 pids).
+                 FITTED params, repeated across that pid's real trials, for
+                 the within-repeat variability numbers Acts 2/3 originally
+                 used. Has a --mode run/submit/collect lifecycle. Superseded
+                 for the neural giant's row 2 by `synthetic` below (per
+                 instruction: artificial data is just as good as fitted-pid
+                 data for a qualitative covariation prediction, and much
+                 cheaper/more robust to generate) -- kept here, not removed,
+                 since it's still a real, independently-useful experiment.
+
+  synthetic    — Acts 2/3's replacement data source. N "virtual pids", each
+                 an independently-generated real trial sequence (via
+                 task_backend/generate_sequences.py's own pool mechanism --
+                 same generative design as real participants, including the
+                 repeated-prefix/qid structure a real sigma estimate needs)
+                 paired with ONE randomly-drawn (alpha_0, lambda_, n_neurons)
+                 -- NOT a fitted pid's own params. One simulation pass per
+                 virtual pid saves response, decoded PE, per-neuron error-
+                 population activity, AND that trial's own encoders (which
+                 genuinely differ per seed -- see chat) all at once, so no
+                 further commands are needed afterward. Has the same
+                 --mode run/submit/collect lifecycle as `probe`.
 
 Run examples:
     python scripts/neural_experiments.py raster_demo --task soltani_numbers \\
@@ -47,11 +63,20 @@ Run examples:
     python scripts/neural_experiments.py probe --task soltani_numbers \\
         --mode collect
 
+    python scripts/neural_experiments.py synthetic --task soltani_numbers \\
+        --mode run --pid 1
+    python scripts/neural_experiments.py synthetic --task soltani_numbers \\
+        --mode submit --n_pids 200 --dry_run
+    python scripts/neural_experiments.py synthetic --task soltani_numbers \\
+        --mode collect
+
 Output: data/runs/neural_experiments/
     raster_demo_{task}.pkl
     sweep_{task}_{sweep_param}.pkl
     probe_{task}_pid{pid}.pkl        (per-pid, --mode run)
     probe_{task}.pkl                 (combined, --mode collect)
+    synthetic_{task}_{probe,activity,encoders,params}_pid{pid}.pkl  (per-pid)
+    synthetic_{task}_{probe,activity,encoders,params}.pkl           (combined)
 """
 from __future__ import annotations
 
@@ -261,10 +286,20 @@ def _probe_worker(task: str, pid: int, run_folder: str) -> pd.DataFrame:
     across ALL of that pid's real trials -- the within-repeat variability
     data Acts 2/3 need (sigma/lambda vs PE-variability, decay metrics).
     Direct generalization of extras_carrabin.py's probe_timeseries.
+
+    Uses models.counting_integrator.activity_key_for_trial for BOTH the
+    activity-map lookup AND the simulation seed -- NOT the raw trial number
+    directly. That function exists specifically because soltani trials are
+    0-indexed while activity keys start at 1; using the raw trial number for
+    either one (as an earlier version of this function did) either misses
+    the activity map for trial 0 entirely, or -- worse -- silently pairs a
+    trial's simulation with a DIFFERENT trial's own tuning curves for every
+    other trial, since key k's decoders are only valid for a network built
+    with seed=k. See that function's own docstring.
     """
     from fitting.model_params import MODEL_PARAMS
     from models.NEF import PARAM_DEFAULTS, _pretrain, _simulate_trial
-    from models.counting_integrator import fast_decode, load_activities
+    from models.counting_integrator import activity_key_for_trial, fast_decode, load_activities
 
     dataset_stem = TASK_DATAFILE[task]
     human = pd.read_pickle(data_path(dataset_stem))
@@ -312,17 +347,18 @@ def _probe_worker(task: str, pid: int, run_folder: str) -> pd.DataFrame:
     for ti, (trial, trial_data) in enumerate(human_pid.groupby("trial"), 1):
         trial_data = trial_data.sort_values("observation")
         obs_values = trial_data["value"].to_numpy(dtype=float)
-        p = {**params, "seed": int(trial)}
+        akey = activity_key_for_trial(task, int(trial))
+        p = {**params, "seed": akey}
 
         if activity_map is not None:
-            activity = activity_map.get(int(trial))
+            activity = activity_map.get(akey)
             decoders = (
                 fast_decode(activity, alpha_0=float(params["alpha_0"]),
                             lambda_=float(params["lambda_"]))
-                if activity is not None else _pretrain({**p, "base_seed": int(trial)})
+                if activity is not None else _pretrain({**p, "base_seed": akey})
             )
         else:
-            decoders = _pretrain({**p, "base_seed": int(trial)})
+            decoders = _pretrain({**p, "base_seed": akey})
 
         try:
             responses, probe = _simulate_trial(obs_values, p, decoders, return_probes=True)
@@ -395,6 +431,239 @@ def run_probe(args) -> None:
         print(f"Collected {len(files)} file(s), {n_pids} pids -> {out_path}")
 
 
+# ── synthetic (Acts 2/3's replacement data source) ──────────────────────────────────────
+
+SYNTHETIC_POOL_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic_pool"
+SYNTHETIC_N_NEURONS_CHOICES = list(range(100, 1001, 100))
+
+
+def _synthetic_pool_path(task: str) -> Path:
+    """task_backend/generate_sequences.py's own file naming uses the bare
+    task name ("numbers"/"colors"), not this project's "soltani_"-prefixed
+    dataset keys.
+    """
+    bare = task.removeprefix("soltani_")
+    return SYNTHETIC_POOL_DIR / f"sequences_{bare}.json"
+
+
+def _synthetic_params(virtual_pid: int) -> dict:
+    """Deterministic random draw for one virtual pid -- alpha_0/lambda_
+    Uniform(0,1), n_neurons uniform over the precomputed grid
+    {100,...,1000}, per instruction. Seeded by virtual_pid so re-running
+    --mode run for the same pid always reproduces the same draw, matching
+    this project's own established convention elsewhere (e.g.
+    fitting.fit._cross_validate's RandomState(seed=pid)).
+    """
+    rng = np.random.RandomState(seed=int(virtual_pid))
+    return {
+        "alpha_0": float(rng.uniform(0.0, 1.0)),
+        "lambda_": float(rng.uniform(0.0, 1.0)),
+        "n_neurons": int(rng.choice(SYNTHETIC_N_NEURONS_CHOICES)),
+    }
+
+
+def _load_synthetic_trials(task: str, virtual_pid: int) -> list[dict]:
+    """Pool member (virtual_pid - 1) from the pre-generated pool -- a list
+    of trial dicts, each with 'trial', 'qid', and 'values' (the observation
+    sequence), matching the SAME repeated-qid structure real participants
+    see (task_backend/generate_sequences.py's own generative design).
+    """
+    import json
+
+    path = _synthetic_pool_path(task)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No synthetic pool at {path}. Generate it first:\n"
+            f"  venv/bin/python task_backend/generate_sequences.py "
+            f"--task {task.removeprefix('soltani_')} --n_pool 200 "
+            f"--pool_dir {SYNTHETIC_POOL_DIR}"
+        )
+    with open(path) as f:
+        pool = json.load(f)
+    if virtual_pid < 1 or virtual_pid > len(pool):
+        raise ValueError(f"virtual_pid must be in [1, {len(pool)}], got {virtual_pid}")
+    return pool[virtual_pid - 1]
+
+
+def _simulate_trial_full(obs_values: np.ndarray, params: dict, decoders: dict,
+                         seed: int) -> tuple[list[dict], np.ndarray]:
+    """One trial: build+run once, extract (per observation) response and
+    decoded PE at their usual readout points, AND per-neuron error-
+    population activity at the SAME points -- tau_probe-filtered, matching
+    utils/save_activities.py's own convention for this exact quantity (NOT
+    the raw synapse=None probe _simulate_full uses for the spike raster,
+    a different, deliberately unfiltered use case). Also returns this
+    trial's own error-ensemble encoders, which genuinely differ by seed
+    (see chat: net.error is built with seed=seed directly) -- so a caller
+    needing them for weight-tuned-neuron identification must keep them
+    paired with THIS trial, not reuse another trial's.
+    """
+    import nengo
+    from models.NEF import build_network
+
+    p = {**params, "seed": int(seed)}
+    net = build_network(obs_values, p, decoders)
+    tau_probe = float(p["tau_probe"])
+    with net:
+        probe_activity = nengo.Probe(net.error.neurons, synapse=tau_probe)
+
+    dt = float(p["dt"])
+    n_obs = len(obs_values)
+    t_obs = float(p["t_obs"])
+    t_iti = float(p["t_iti"])
+    t_step = t_obs + t_iti
+    t_total = n_obs * t_step
+
+    with nengo.Simulator(net, dt=dt, seed=int(seed), progress_bar=False) as sim:
+        sim.run(t_total)
+        encoders = np.array(sim.data[net.error].encoders, copy=True)
+        value_trace = sim.data[net.probe_value].squeeze()
+        error_trace = sim.data[net.probe_error]        # (T, 2): weight, pe_raw
+        activity_trace = sim.data[probe_activity]       # (T, n_neurons)
+
+    n_timesteps = len(value_trace)
+    rows = []
+    for n_idx in range(n_obs):
+        t_pe = t_iti + n_idx * t_step + READOUT_OFFSET
+        t_resp = t_iti + n_idx * t_step + t_obs
+        idx_pe = int(np.clip(np.round(t_pe / dt), 0, n_timesteps - 1))
+        idx_resp = int(np.clip(np.round(t_resp / dt), 0, n_timesteps - 1))
+        rows.append({
+            "observation": n_idx + 1,
+            "pe": float(abs(error_trace[idx_pe, 0] * error_trace[idx_pe, 1])),
+            "response": float(value_trace[idx_resp]),
+            "activity": activity_trace[idx_pe].copy(),
+        })
+    return rows, encoders
+
+
+def _synthetic_worker(task: str, virtual_pid: int) -> dict:
+    """Full simulation for one virtual pid across ALL of its (synthetic)
+    trials -- one randomly-drawn (alpha_0, lambda_, n_neurons), one
+    generated trial sequence. Returns everything needed for Acts 2/3's
+    panels from this ONE call: probe rows (pe/response per observation,
+    for sigma), activity rows (per-neuron, for activity decay), encoder
+    rows (per trial, for weight-tuned-neuron identification), and the
+    drawn params themselves -- no further commands needed afterward, per
+    instruction.
+    """
+    from fitting.model_params import MODEL_PARAMS
+    from models.NEF import PARAM_DEFAULTS, _pretrain
+    from models.counting_integrator import fast_decode, load_activities
+
+    draw = _synthetic_params(virtual_pid)
+    fixed = MODEL_PARAMS[task]["NEF"].get("fixed", {})
+    params = {
+        **PARAM_DEFAULTS, **fixed,
+        "dataset": task, "model_type": "NEF", "pid": int(virtual_pid),
+        "alpha_0": draw["alpha_0"], "lambda_": draw["lambda_"],
+        "n_neurons": draw["n_neurons"], "n_neurons_counting": draw["n_neurons"],
+    }
+
+    try:
+        activity_map = load_activities(
+            n_neurons=draw["n_neurons"], n_neurons_counting=draw["n_neurons"], dataset=task)
+    except FileNotFoundError:
+        activity_map = None
+
+    trials = _load_synthetic_trials(task, virtual_pid)
+
+    probe_rows, activity_rows, encoder_rows = [], [], []
+    for ti, trial_data in enumerate(trials, 1):
+        trial_idx = int(trial_data["trial"])
+        qid = trial_data["qid"]
+        obs_values = np.array(trial_data["values"], dtype=float)
+        seed = trial_idx + 1  # 1-indexed, matching activity_key_for_trial's own
+                              # +1 convention for 0-indexed (soltani-style) trials
+
+        if activity_map is not None:
+            activity = activity_map.get(seed)
+            decoders = (
+                fast_decode(activity, alpha_0=draw["alpha_0"], lambda_=draw["lambda_"])
+                if activity is not None
+                else _pretrain({**params, "seed": seed, "base_seed": seed})
+            )
+        else:
+            decoders = _pretrain({**params, "seed": seed, "base_seed": seed})
+
+        try:
+            obs_rows, encoders = _simulate_trial_full(obs_values, params, decoders, seed)
+        except Exception as e:
+            print(f"\n  Warning: virtual_pid={virtual_pid} trial {trial_idx} failed ({e}), skipping")
+            continue
+
+        for r in obs_rows:
+            probe_rows.append({
+                "virtual_pid": virtual_pid, "trial": trial_idx, "qid": qid,
+                "observation": r["observation"], "pe": r["pe"], "response": r["response"],
+            })
+            act_row = {"virtual_pid": virtual_pid, "trial": trial_idx,
+                      "observation": r["observation"]}
+            for j, v in enumerate(r["activity"]):
+                act_row[f"n{j}"] = float(v)
+            activity_rows.append(act_row)
+        for neuron_idx in range(encoders.shape[0]):
+            enc_row = {"virtual_pid": virtual_pid, "trial": trial_idx, "neuron_idx": neuron_idx}
+            for d in range(encoders.shape[1]):
+                enc_row[f"enc_dim_{d}"] = float(encoders[neuron_idx, d])
+            encoder_rows.append(enc_row)
+        print(f"\r  virtual_pid={virtual_pid}  trial {ti:3d}/{len(trials)}", end="", flush=True)
+    print()
+
+    return {
+        "params": pd.DataFrame([{"virtual_pid": virtual_pid, **draw}]),
+        "probe": pd.DataFrame(probe_rows),
+        "activity": pd.DataFrame(activity_rows),
+        "encoders": pd.DataFrame(encoder_rows),
+    }
+
+
+def run_synthetic(args) -> None:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    kinds = ["probe", "activity", "encoders", "params"]
+
+    if args.mode == "run":
+        if args.pid is None:
+            raise SystemExit("--pid required for --mode run")
+        out_paths = {k: OUT_DIR / f"synthetic_{args.task}_{k}_pid{args.pid}.pkl" for k in kinds}
+        if all(p.exists() for p in out_paths.values()):
+            print(f"Already exists: virtual_pid={args.pid} -- skipping (delete to rerun)")
+            return
+        result = _synthetic_worker(args.task, args.pid)
+        for k in kinds:
+            result[k].to_pickle(out_paths[k])
+        print(f"Saved virtual_pid={args.pid}: "
+              f"{len(result['probe'])} probe rows, {len(result['activity'])} activity rows, "
+              f"{len(result['encoders'])} encoder rows -> {OUT_DIR}")
+
+    elif args.mode == "submit":
+        root = str(Path(__file__).resolve().parent.parent)
+        print(f"Submitting {args.n_pids} synthetic jobs for task={args.task}")
+        for virtual_pid in range(1, args.n_pids + 1):
+            out_paths = [OUT_DIR / f"synthetic_{args.task}_{k}_pid{virtual_pid}.pkl" for k in kinds]
+            if all(p.exists() for p in out_paths):
+                print(f"  virtual_pid={virtual_pid}: already exists -- skipping")
+                continue
+            cmd = (f"venv/bin/python scripts/neural_experiments.py synthetic "
+                  f"--task {args.task} --mode run --pid {virtual_pid}")
+            script = make_job_script(root, [cmd], time_limit="2:0:0", mem="16G")
+            script_path = OUT_DIR / f"_job_synthetic_{args.task}_pid{virtual_pid}.sh"
+            script_path.write_text(script)
+            submit_script(script_path, dry_run=args.dry_run)
+
+    elif args.mode == "collect":
+        for k in kinds:
+            files = sorted(OUT_DIR.glob(f"synthetic_{args.task}_{k}_pid*.pkl"))
+            if not files:
+                print(f"No synthetic_{args.task}_{k}_pid*.pkl files found in {OUT_DIR}")
+                continue
+            df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
+            out_path = OUT_DIR / f"synthetic_{args.task}_{k}.pkl"
+            df.to_pickle(out_path)
+            n_pids = df["virtual_pid"].nunique()
+            print(f"Collected {len(files)} file(s), {n_pids} virtual pids -> {out_path}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -438,6 +707,16 @@ def main() -> None:
     p_probe.add_argument("--run_folder", type=str, default="rmse")
     p_probe.add_argument("--dry_run", action="store_true")
     p_probe.set_defaults(func=run_probe)
+
+    p_synth = sub.add_parser("synthetic")
+    p_synth.add_argument("--task", required=True)
+    p_synth.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
+    p_synth.add_argument("--pid", type=int, default=None,
+                        help="Virtual pid index, 1-based (--mode run)")
+    p_synth.add_argument("--n_pids", type=int, default=200,
+                        help="Total virtual pids to submit (--mode submit)")
+    p_synth.add_argument("--dry_run", action="store_true")
+    p_synth.set_defaults(func=run_synthetic)
 
     args = parser.parse_args()
     args.func(args)

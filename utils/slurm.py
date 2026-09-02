@@ -72,7 +72,12 @@ def submit_script(script_path: Path, dry_run: bool = False) -> None:
     if dry_run:
         print(f"[dry_run] would submit: {script_path}")
         return
-    result = subprocess.run(["sbatch", str(script_path)], check=False)
+    # --export=ALL is explicit here rather than relying on sbatch's own
+    # cluster-configured default -- this job script already assumes the
+    # submitting shell's conda/venv gets inherited (see its own comment);
+    # making that guaranteed rather than implicit also covers any other
+    # env var a caller sets before submitting.
+    result = subprocess.run(["sbatch", "--export=ALL", str(script_path)], check=False)
     if result.returncode != 0:
         print(f"Warning: sbatch failed for {script_path}", file=sys.stderr)
     time.sleep(0.5)

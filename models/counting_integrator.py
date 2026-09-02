@@ -750,32 +750,14 @@ def load_activities(
     dataset: str = "carrabin",
     path: str | Path | None = None,
 ) -> dict[int, dict]:
-    """Load precomputed activity data from disk.
-
-    Checks the standard data_path() location first; if the file isn't
-    there, falls back to $NEF_ACTIVITY_SCRATCH_DIR (if that env var is
-    set) -- e.g. a cluster scratch filesystem with far more room than a
-    home-directory quota these large files can otherwise exceed (Discovery's
-    own home quota is 50GB; these files individually run into the multi-GB
-    range at a real n_sims). Unset by default, so this changes nothing
-    unless explicitly configured, e.g. on Discovery:
-        export NEF_ACTIVITY_SCRATCH_DIR=/scratch/f007qzn/data
-    """
-    import os
+    """Load precomputed activity data from disk."""
     import pickle
     from utils.paths import data_path
 
     if path is None:
         n  = n_neurons          or _NEF_FIXED["n_neurons"]
         nc = n_neurons_counting or _NEF_FIXED["n_neurons_counting"]
-        filename = f"counting_activities_n{n}_nc{nc}_{dataset}.pkl"
-        path = data_path(filename)
-        if not path.exists():
-            scratch_dir = os.environ.get("NEF_ACTIVITY_SCRATCH_DIR")
-            if scratch_dir:
-                scratch_path = Path(scratch_dir) / filename
-                if scratch_path.exists():
-                    path = scratch_path
+        path = data_path(f"counting_activities_n{n}_nc{nc}_{dataset}.pkl")
     with open(path, "rb") as f:
         return pickle.load(f)
 

@@ -162,10 +162,7 @@ def _require_activity_map(
             f"--n_neurons_counting {n_neurons_counting} --dataset {dataset}"
             f"{cmd_sims}\n"
             f"then scp data/counting_activities_n{n_neurons}_nc"
-            f"{n_neurons_counting}_{dataset}.pkl to the cluster if fitting remotely "
-            f"-- or, if it's already on a scratch filesystem there, set "
-            f"$NEF_ACTIVITY_SCRATCH_DIR to that directory instead of copying it "
-            f"into data/ (see models.counting_integrator.load_activities)."
+            f"{n_neurons_counting}_{dataset}.pkl to the cluster if fitting remotely."
         ) from e
 
 

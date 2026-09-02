@@ -208,44 +208,70 @@ arbitrarily over colors). This lets one task carry the whole argument
 rather than splitting it across two tasks that each only show half.
 
 ### Implementation
-- `scripts/neural_experiments.py` -- NEW script, generalises extras_
-  carrabin.py's pattern (param-grid sweeps, probe simulations) to an
-  arbitrary `--task`, since none of it is actually carrabin-specific under
-  the hood. Three experiments: `raster_demo` (Act 1, one trial, arbitrary
-  params, full per-timestep error-population output for a spike raster),
-  `sweep` (Act 1, one OR two swept parameters -- a cross product if two --
-  full per-timestep resolution), `probe` (Act 2/3's expensive half -- full
-  per-timestep simulation at a pid's own fitted params across their real
-  trials; has a `--mode run/submit/collect` lifecycle since this is
-  cluster-bound). Output: `data/runs/neural_experiments/`.
+- `scripts/neural_experiments.py` -- generalises extras_carrabin.py's
+  pattern (param-grid sweeps, probe simulations) to an arbitrary `--task`,
+  since none of it is actually carrabin-specific under the hood. Four
+  experiments: `raster_demo` (Act 1, one trial, arbitrary params, full
+  per-timestep error-population output for a spike raster), `sweep` (Act 1,
+  one OR two swept parameters -- a cross product if two -- full
+  per-timestep resolution), `probe` (fitted-pid probe simulation -- kept as
+  a real, independently-useful experiment, but superseded for Acts 2/3 by
+  `synthetic` below), `synthetic` (Acts 2/3's actual data source -- see
+  Status below). Output: `data/runs/neural_experiments/`.
 - `scripts/make_paper_figures.py`'s `make_neural_giant()` builds the figure
-  itself. Currently 1x3 (Act 1's three panels); more rows/panels will be
-  added as Act 2/3 data comes in, same incremental approach the
-  lambda_giant/sigma_giant combined figures used.
+  itself. Currently 2x4: row 1 = Act 1's three panels (+1 empty slot); row
+  2 = Act 2/3's four panels, currently sourced from the (buggy, since fixed
+  -- see Status) fitted-pid `probe` data, pending rewiring to `synthetic`'s
+  output.
 
 ### Status
 - **Act 1: DONE.** All 3 panels built, data generated locally (cheap --
   see docs/HISTORY.md for the exact parameter values used).
-- **Act 2/3: PLANNED, not yet run.** Two data sources:
-  1. Probe simulation -- `neural_experiments.py`'s own `probe` command,
-     needs `--mode submit` then `--mode collect` for numbers' 46 pids on
-     the cluster. Already writes to its own `data/runs/neural_experiments/`
-     folder, not rmse/nll.
-  2. Per-observation ensemble activities/encoders -- NOT something
-     `neural_experiments.py` needs to implement; `utils/save_activities.py`
-     already handles any dataset generically (the same mechanism that
-     produced yoo's own `activities_error_yoo.pkl`), invoked via
-     `fitting.submit --resubmit activities`. That mechanism DID need one
-     small generalization this session: it used to read fitted params AND
-     write activity/encoder output to the SAME `--run_folder`, which would
-     have written neural output straight into `data/runs/rmse/`, mixing it
-     with pure behavioural fitting results. Both `fitting/submit.py` and
-     `utils/save_activities.py` now take an optional `--out_folder`
-     (defaults to `--run_folder`, so every existing caller's behavior is
-     unchanged) so activities can land in `data/runs/neural_experiments/`
-     instead, reserving rmse/nll for behavioural results only.
-     `NEF_soltani_numbers_responses.pkl` (needed for the ΔR-decay half)
-     already exists from the original RMSE fit.
+- **Act 2/3: DATA GENERATION IN PROGRESS, figure not yet rewired to it.**
+  Reconsidered from the original fitted-pid `probe`/`save_activities`
+  approach (see docs/HISTORY.md for the full reasoning) to a synthetic
+  forward-simulation approach:
+  - N=200 "virtual pids", each an independently-generated real trial
+    sequence (`task_backend/generate_sequences.py --task numbers --n_pool
+    200`, same generative design real participants get, written to
+    `data/synthetic_pool/`, never touching real experimental data) paired
+    with ONE randomly-drawn (alpha_0, lambda_ ~ Uniform(0,1); n_neurons ~
+    uniform choice over {100,...,1000}) -- NOT a fitted pid's own params.
+    Justification: these are qualitative covariation predictions for
+    future empirical studies to test, not fits to existing behavioural
+    data, so artificial data is exactly as good as real-pid data for this
+    purpose, and avoids two real problems the fitted-pid version hit: (a)
+    soltani_numbers' own fitted alpha_0 is too tightly clustered near
+    ceiling to reveal any alpha_0-driven effect at all, and (b) NEF's own
+    NLL-based n_neurons search (above) was expensive and eventually
+    abandoned.
+  - `scripts/neural_experiments.py synthetic --mode run/submit/collect` --
+    ONE simulation pass per virtual pid saves response, decoded PE,
+    per-neuron error-population activity, AND that trial's own encoders,
+    so no further commands are needed afterward. Encoders are saved PER
+    TRIAL, not per virtual pid -- confirmed directly that `net.error` is
+    built with `seed=seed` (the same seed that varies per trial), so its
+    encoders genuinely differ trial to trial; a single pid-level encoders
+    file (`utils/save_activities.py`'s own convention, which never varies
+    `seed` across trials at all) would silently misidentify weight-tuned
+    neurons for any trial but the one it was captured from.
+  - Along the way, found and fixed a real, previously-uncaught bug in the
+    OLD fitted-pid `_probe_worker`: it looked up `activity_map.get(int(
+    trial))` and seeded simulations with the raw (0-indexed) trial number
+    directly, instead of `models.counting_integrator.
+    activity_key_for_trial(dataset, trial)` (the shared helper that
+    exists specifically for this -- soltani trials are 0-indexed, activity
+    keys start at 1). This either missed the activity map for trial 0
+    entirely, or paired a trial's simulation with a DIFFERENT trial's own
+    tuning curves for every other trial. Fixed; the old (affected)
+    `probe_soltani_numbers*.pkl` files were deleted rather than kept.
+  - Counting-activity files: regenerated at a clean, uniform n_sims=1 for
+    all 10 values (100-1000 step 100, n_neurons=n_neurons_counting) for
+    soltani_numbers -- the earlier NLL-search attempt had left three of
+    these (200/500/1000) inflated to n_sims=20, no longer needed once
+    n_sims=1 was confirmed sufficient for `synthetic`'s own probe-style
+    variability (repeated qids across real/synthetic trials, not an
+    ensemble average).
 - **Act 4/5: NOT STARTED.**
 
 ## Central cognitive model
@@ -1166,18 +1192,19 @@ RNN fits are retained for reference and are not used in active figures.
 
 ## NEF architecture
 
-**Planned, NOT YET BUILT**: applying the same noise-only override approach
-(above) to NEF -- fixing alpha_0/lambda_ at their RMSE-fitted values and
-letting Optuna search ONLY n_neurons under NLL, instead of the current
-joint alpha_0/lambda_ search at a fixed n_neurons. Blocked on a real
-prerequisite, checked directly rather than assumed: n_neurons can't be an
-arbitrary Optuna range -- each candidate value needs its OWN precomputed
-counting-activity file (`data/counting_activities_n{N}_nc{N}_{dataset}.pkl`),
-and currently only the single production value (n_neurons=500) has one, for
-ANY of the 4 datasets. Generating a real candidate set (e.g. matching the
-existing `NEF_N_NEURONS_VALUES` list used by the old MLE n_neurons scan) is
-a genuine disk/compute cost (the existing n=500 files already run ~1.3GB
-each) that hasn't been scoped or approved yet.
+**Tried and abandoned**: a joint (alpha_0, lambda_, n_neurons) NLL search for
+NEF (`fitting.fit`'s own `search_n_neurons` parameter, since removed).
+Built, precompute generated (100-1000 step 100, n_neurons=n_neurons_counting),
+a real smoke test run -- but abandoned before any real campaign, in favor of
+the synthetic forward-simulation approach now used for the neural
+predictions figure's Acts 2/3 (see `## Neural predictions figure` above).
+Two real, unrelated infrastructure problems surfaced along the way and were
+fixed independently of the search itself: `nll_from_ensemble` needs
+n_sims>=2 for a non-degenerate variance estimate (n_sims=1 gives zero
+degrees of freedom -> NaN loss, confirmed directly), and `sbatch` needed
+`--export=ALL` made explicit (see `utils/slurm.py`) since environment
+inheritance for a submitted job wasn't otherwise guaranteed. Neither of
+those fixes was undone when the search itself was abandoned.
 
 The NEF model implements sequential evidence integration via three interacting
 neural populations:
@@ -1569,28 +1596,29 @@ motivation/structure. All commands below target `soltani_numbers`.
         --base_alpha_0 0.1 --base_n_neurons 30 --base_lambda_ 0.5 \
         --n_obs 15 --n_seeds 10
 
-    # Act 2/3 data source A -- probe simulation (cluster, per-pid; NOT YET RUN)
-    python scripts/neural_experiments.py probe --task soltani_numbers \
-        --mode submit --run_folder rmse
-    python scripts/neural_experiments.py probe --task soltani_numbers --mode collect
+    # Act 2/3 data source -- synthetic virtual pids (cluster, per-virtual-pid)
+    # Random (alpha_0, lambda_, n_neurons), NOT a fitted pid's own params --
+    # see docs/HISTORY.md for why the original fitted-pid probe/save_
+    # activities plan was abandoned. Requires a pre-generated pool of
+    # synthetic trial sequences first (task_backend's own generative
+    # design, NOT touching any real experimental data):
+    python task_backend/generate_sequences.py --task numbers --n_pool 200 \
+        --pool_dir data/synthetic_pool
 
-    # Act 2/3 data source B -- per-observation activities (cluster, per-pid; NOT YET RUN)
-    # Uses the existing generic activity-saving mechanism (utils/save_
-    # activities.py), same one that produced yoo's own files above --
-    # extended this session with an --out_folder flag (defaults to
-    # --run_folder, so every EXISTING caller is unaffected) so activity/
-    # encoder output can land somewhere other than the fitted-params
-    # folder itself, keeping data/runs/rmse/ and data/runs/nll/ reserved
-    # for pure behavioural fitting output.
-    python -m fitting.submit soltani_numbers NEF --resubmit activities \
-        --run_folder rmse --out_folder neural_experiments \
-        --ensembles error --timing once_per_obs
+    python scripts/neural_experiments.py synthetic --task soltani_numbers \
+        --mode submit --n_pids 200
+    python scripts/neural_experiments.py synthetic --task soltani_numbers \
+        --mode collect
 
     # Output: data/runs/neural_experiments/
     #   raster_demo_soltani_numbers.pkl
     #   sweep_soltani_numbers_lambda_.pkl
     #   sweep_soltani_numbers_alpha_0_n_neurons.pkl
-    #   probe_soltani_numbers_pid{pid}.pkl (per-pid), probe_soltani_numbers.pkl (collected)
+    #   probe_soltani_numbers_pid{pid}.pkl (per-pid), probe_soltani_numbers.pkl
+    #     (collected) -- from the fitted-pid `probe` experiment, superseded
+    #     for Acts 2/3 by `synthetic` below but kept as its own experiment
+    #   synthetic_soltani_numbers_{probe,activity,encoders,params}_pid{n}.pkl
+    #     (per-virtual-pid), synthetic_soltani_numbers_{...}.pkl (collected)
 
     # Build the figure (reads whatever's currently in data/runs/neural_experiments/):
     python scripts/make_paper_figures.py neural_giant

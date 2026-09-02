@@ -6273,3 +6273,209 @@ value needs its own precomputed counting-activity file, and currently only
 the single production value (500) has one, for any of the 4 datasets.
 Generating a real candidate set is a genuine disk/compute cost not yet
 scoped or approved.
+
+---
+
+## From NEF NLL n_neurons search to synthetic forward simulation for Acts 2/3 (this session)
+
+### The NEF joint-search attempt: built, smoke-tested, abandoned
+
+Following on directly from the entry above: implemented `fitting.fit`'s own
+`search_n_neurons` parameter -- a genuine joint (alpha_0, lambda_, n_neurons)
+NLL search for NEF, promoting n_neurons out of `MODEL_PARAMS`' `"fixed"`
+dict and into an Optuna-searched categorical, mirroring n_neurons into
+n_neurons_counting on every trial (the two must move together -- confirmed
+directly that `models.counting_integrator.build_network` reads BOTH from
+params). Threaded through `fitting/submit.py` identically to how
+`override_from_folder` already was.
+
+Two real infrastructure problems surfaced immediately, unrelated to the
+search design itself:
+- `losses.nll_from_ensemble` computes `ens.std(axis=0, ddof=1)` -- this is
+  UNDEFINED at n_sims=1 (zero degrees of freedom), confirmed directly by a
+  real failed trial ("Degrees of freedom <= 0", NaN loss). The precompute
+  used for search_n_neurons's own candidate n_neurons values therefore
+  needed n_sims>=2, which multiplies file size roughly linearly -- at
+  n_sims=50 (matching NEF_DEFAULT_N_SIMS elsewhere) this would have run
+  ~67.5GB across a 10-value grid (100-1000 step 100), confirmed by
+  measuring the actual n_sims=1 baseline sizes and scaling -- too large
+  for the cluster's home-directory quota (Discovery: 50GB). Narrowed to 3
+  values (200/500/1000) at n_sims=20 (~9.2GB) as a compromise.
+- A cluster-side symptom (`ReqNodeNotAvail, Reserved for maintenance`) led
+  to two SEPARATE, permanent fixes, kept regardless of what happened to
+  the search itself: `utils/slurm.py` gained `SINGLE_PASS_TIME_LIMIT`
+  (2h) for `--resubmit activities`/`responses` jobs, which are one
+  forward pass and were absurdly requesting the same 72h walltime sized
+  for a full 200-trial fit; and `sbatch --export=ALL` was made explicit
+  rather than relying on the cluster's own default for environment
+  inheritance.
+
+A `NEF_ACTIVITY_SCRATCH_DIR` env-var fallback was added to
+`models.counting_integrator.load_activities` (to let the inflated
+n_sims=20 files live on Discovery's `/scratch` instead of the 50GB home
+quota) and then FULLY REVERTED once the search itself was abandoned --
+confirmed no trace of it remains in `load_activities`, `_require_activity_
+map`'s error message, or anywhere else, keeping `sbatch --export=ALL`
+(genuinely useful on its own merits) but nothing scratch-specific.
+
+**Why abandoned**: reconsidering the original motivation (checking whether
+RMSE-fitted alpha_0 might be masking a real alpha_0-n_neurons interaction
+by compensating for noise) against what panel 7 (sigma vs alpha_0) had
+already shown with REAL fitted params -- soltani_numbers' own alpha_0 is
+too tightly clustered near ceiling (median 0.994) to reveal ANY alpha_0
+effect regardless of whether n_neurons is also searched. The person
+reconsidered and asked for all three parameters (alpha_0, lambda_,
+n_neurons) to vary TOGETHER so their individual contributions could be
+teased apart via partial correlations, rather than fixing any one of them
+-- which is exactly what search_n_neurons was building toward. But it was
+never run at scale: the person then proposed synthetic data instead (see
+below), which sidesteps the entire NLL-fitting apparatus.
+
+`search_n_neurons` was then removed entirely from `fitting/fit.py` and
+`fitting/submit.py` (both the parameter and its CLI flag) -- confirmed
+zero remaining references except the docstring note explaining why it's
+gone. `override_from_folder` (the math-model noise-only work, still
+active) was confirmed unaffected by a real dry-run smoke test after the
+removal.
+
+### The pivot: synthetic forward simulation instead of NLL fitting
+
+The person's reframing of what Acts 2/3 actually need to claim: "our model
+predicts that behavioral and neural quantities vary together... this is a
+behavioral/neural prediction we expect to be validated in empirical
+experiments if they are ever run... we can explain the origins of these
+effects through neural parameters." Since this is a prediction for FUTURE
+studies to test, not a fit to existing behavioural data, artificial data is
+exactly as good as real-pid data -- freeing the design from needing NLL
+fitting, real fitted params, or even real trial sequences at all.
+
+Design, settled across several exchanges:
+- N=200 "virtual pids" (more than the real 46, since nothing ties this to
+  actual participants).
+- Each virtual pid = one independently-generated trial sequence (NOT a
+  real participant's) paired with ONE randomly-drawn (alpha_0, lambda_,
+  n_neurons) -- one parameterized NEF model per virtual pid, not shared
+  across several.
+- alpha_0, lambda_ ~ Uniform(0, 1) (chosen after reviewing real RMSE-fit
+  summary statistics across all 4 datasets together and finding raw
+  mean+/-2SD bounds routinely fell outside each parameter's actual [0,1]
+  range -- simpler to just sample the full range directly, especially
+  since the whole point is to escape numbers' own narrow real alpha_0
+  distribution).
+- n_neurons ~ uniform choice over {100, 200, ..., 1000} -- narrowed from
+  an initial 3-value plan (200/500/1000, inherited from the abandoned
+  search) back to the full 10-value grid once n_sims=1 was confirmed
+  sufficient (see below), since disk was no longer the constraint it was
+  under the NLL-search plan.
+
+**Trial sequences**: `task_backend/generate_sequences.py --task numbers
+--n_pool N` already generates independent pool members with the exact
+same repeated-prefix/qid structure real participants get (confirmed
+directly: 200 members, 32 trials each, 8 qids x 4 repeats, 15 observations
+per trial, matching soltani_numbers' own real structure exactly) --
+written to `data/synthetic_pool/`, never touching real experimental data.
+No new generation code needed; this existing script IS the pool-generation
+mechanism, just called with a larger --n_pool than task_backend itself
+ever uses in production.
+
+### A real, previously-uncaught bug found and fixed along the way
+
+While designing the new pipeline, checked how `NEF.run()` (the validated,
+heavily-used fitting pathway) pairs each trial with its own network seed,
+and found `neural_experiments.py`'s OWN `_probe_worker` (used for the
+original fitted-pid Acts 2/3 data, built earlier this session) did it
+differently and wrongly: `activity_map.get(int(trial))` and `p = {**params,
+"seed": int(trial)}`, using the raw 0-indexed trial number directly for
+both the activity-map lookup AND the simulation seed. `NEF.run()` instead
+uses `models.counting_integrator.activity_key_for_trial(dataset, trial)`
+for BOTH -- a shared helper that exists specifically because soltani
+trials are 0-indexed while activity keys start at 1, and because key k's
+decoders are ONLY valid for a network built with seed=k (confirmed
+directly in `build_network`: `net.error = nengo.Ensemble(..., seed=seed,
+...)` -- the error ensemble's own encoders are seeded by the exact same
+value). The bare-trial-number version either missed the activity map for
+trial 0 entirely (falling back to the much slower, seed-mismatched
+_pretrain path) or, for every other trial, silently paired that trial's
+simulation with a DIFFERENT trial's own tuning curves -- plausible-looking
+but wrong output, not an error.
+
+Fixed by switching `_probe_worker` to use `activity_key_for_trial` for
+both the lookup and the seed, matching `NEF.run()` exactly. The affected
+output (`probe_soltani_numbers_pid*.pkl`, `probe_soltani_numbers.pkl` --
+everything the original fitted-pid Acts 2/3 panels were built from) was
+deleted rather than kept, since it's unknown how much any given trial's
+result was actually affected without regenerating. `probe` remains a real,
+working experiment for other uses; it's just no longer what Acts 2/3 draw
+from.
+
+This also raised a question about the SAME per-trial-seed convention for
+the new synthetic pipeline: if each trial's network gets a genuinely
+different seed, its error-ensemble encoders differ too (same code path
+confirmed above) -- so identifying which neurons are weight-tuned (needed
+for the activity-decay panels) can't reuse one pid-level encoders file the
+way `utils/save_activities.py`'s own (seed-never-varies-per-trial)
+convention does. Resolved by saving encoders PER TRIAL for the new
+pipeline, not per virtual pid -- confirmed this is a real requirement, not
+just caution, directly in `build_network`'s own code.
+
+### The new pipeline: scripts/neural_experiments.py's `synthetic` experiment
+
+One new experiment, same `--mode run/submit/collect` shape as `probe`:
+- `_synthetic_params(virtual_pid)`: deterministic RandomState(seed=
+  virtual_pid) draw, so re-running `--mode run` for the same pid always
+  reproduces the same draw.
+- `_load_synthetic_trials`: reads that virtual pid's own pool member from
+  `data/synthetic_pool/sequences_numbers.json` (task_backend's own bare
+  task name, not this project's "soltani_"-prefixed key -- handled via a
+  small path-mapping helper).
+- `_simulate_trial_full`: one build+run per trial, extracting response and
+  decoded PE at their usual readout points AND per-neuron error-population
+  activity at the SAME points (tau_probe-filtered, matching `utils/save_
+  activities.py`'s own convention for this quantity -- deliberately NOT
+  the raw synapse=None probe `_simulate_full` uses for the spike raster,
+  a different use case), plus that trial's own encoders.
+- `_synthetic_worker`: loops a virtual pid's ~32 trials, handles the
+  activity-map lookup (falling back to `_pretrain` if a given seed isn't
+  precomputed), assembles four DataFrames (probe/activity/encoders/params)
+  from ONE simulation pass -- satisfying the requirement that no further
+  commands are needed afterward.
+
+Verified directly before trusting this at scale:
+- `_simulate_trial_full` in isolation: correct shapes (activity (n_neurons,
+  ), encoders (n_neurons, 2)) for a 3-observation toy trial. Caught and
+  fixed one bug in the process -- `value_trace` needed `.squeeze()` (shape
+  (T,1) since net.value has dimensions=1), the same convention `_simulate_
+  full` already used elsewhere in this file but that this new function
+  had omitted.
+- Full `_synthetic_worker` for virtual_pid=6 (drawn n_neurons=100, the
+  cheapest case, for a fast smoke test): 480 probe rows and 480 activity
+  rows (32 trials x 15 observations, exact), 3200 encoder rows (32 x 100,
+  exact), qid repeat counts exactly 4 for all 8 qids, params matching the
+  deterministic draw exactly. This run's own output was KEPT (not deleted
+  as a throwaway) since virtual_pid=6 is legitimately part of the eventual
+  200 -- `--mode submit`'s own existing-file check will skip it
+  automatically when the full campaign runs.
+
+### Counting-activity files: regenerated at a clean, uniform n_sims=1
+
+The abandoned search had left three of the ten files (n=200/500/1000)
+inflated to n_sims=20; the rest were already at n_sims=1 from the original
+precompute. Since `synthetic`'s own probe-style variability comes from
+repeated qids across trials (not an ensemble average), n_sims=1 is
+sufficient -- confirmed this matches the SAME mechanism `_probe_worker`
+already used successfully. Deleted and regenerated all 10 (100-1000 step
+100) at n_sims=1 uniformly, bringing total disk back down from the
+inflated set's multi-GB sizes to the original ~1.35GB total.
+
+### Status
+
+Data generation is running (200 virtual pids, cluster-submitted); the
+figure itself (`make_neural_giant()`'s row 2 panels, currently the
+`_load_neural_probe_variability`/`_load_neural_decay_metrics` functions in
+`scripts/make_paper_figures.py`) has NOT yet been rewired to read from the
+new `synthetic_soltani_numbers_*.pkl` output -- still pointed at the old
+(now-deleted) fitted-pid `probe_soltani_numbers.pkl` and `NEF_soltani_
+numbers_responses.pkl`/`activities_error_soltani_numbers_*.pkl`. That
+rewiring, plus the weight-tuned-neuron filtering logic (needs updating to
+use the new PER-TRIAL encoders rather than the old per-pid ones), is the
+next concrete step once the cluster run finishes.
