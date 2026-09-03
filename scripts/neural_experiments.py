@@ -695,6 +695,165 @@ def run_synthetic(args) -> None:
             print(f"Collected {len(files)} file(s), {n_pids} virtual pids -> {out_path}")
 
 
+# ── oddball (neural_giant2's per-parameter rows) ──────────────────────────────────────
+
+def _oddball_value_tag(val: float) -> str:
+    """Filesystem-safe tag for one numeric value, e.g. 0.2 -> '0p2', -15 -> 'm15'."""
+    return f"{val:g}".replace(".", "p").replace("-", "m")
+
+
+def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
+                    sweep_value: float) -> dict:
+    """One (cluster_center, oddball_deviation, sweep_value) cell of the
+    grid: 3 observations clustered around cluster_center (+-
+    --cluster_spread), then one oddball observation at cluster_center +
+    oddball_deviation. Returns the full per-timestep abs(decoded PE)
+    trace (mean over --n_seeds seeds) plus summary stats (max, end-of-
+    trial value, % decrease) -- abs() throughout per instruction.
+    """
+    cluster_vals = [cluster_center - args.cluster_spread, cluster_center,
+                    cluster_center + args.cluster_spread]
+    oddball_val = cluster_center + oddball_deviation
+    obs_values_raw = np.array(cluster_vals + [oddball_val], dtype=float)
+    obs_values = obs_values_raw / 50.0 - 1.0 if args.task == "soltani_numbers" else obs_values_raw
+
+    base_kwargs = dict(alpha_0=args.base_alpha_0, n_neurons=args.base_n_neurons,
+                       lambda_=args.base_lambda_)
+    base_kwargs[args.sweep_param] = sweep_value
+    params = _base_params(args.task, **base_kwargs)
+
+    pe_traces = []
+    t = None
+    for seed in range(args.n_seeds):
+        result = _simulate_full(params, obs_values, seed=seed)
+        pe_traces.append(np.abs(result["pe_product"]))
+        t = result["t"]
+    pe_mean = np.mean(pe_traces, axis=0)
+
+    max_pe = float(np.max(pe_mean))
+    end_pe = float(pe_mean[-1])
+    pct_decrease = 100.0 * (max_pe - end_pe) / max_pe if max_pe > 0 else np.nan
+
+    return {
+        "cluster_center": cluster_center,
+        "oddball_deviation": oddball_deviation,
+        "sweep_value": sweep_value,
+        "t": t,
+        "pe": pe_mean,
+        "max_pe": max_pe,
+        "end_pe": end_pe,
+        "pct_decrease": pct_decrease,
+        "obs_values_raw": obs_values_raw,
+        "obs_values": obs_values,
+    }
+
+
+def run_oddball(args) -> None:
+    """Toy demo: 3 observations clustered around a center, then one
+    "oddball" observation deviating from it -- across a full grid of
+    (--cluster_centers x --oddball_deviations x --sweep_values), the other
+    two of {alpha_0, lambda_, n_neurons} held fixed at --base_alpha_0/
+    --base_lambda_/--base_n_neurons. Averaged over --n_seeds seeds per
+    cell. Tests directly whether the response to a fixed-magnitude
+    surprise is independent of where the cluster sits (the person's own
+    prediction), rather than assuming it.
+
+    Values are on the RAW 0-100 numbers-task scale -- rescaled via the
+    exact same x/50-1 transform scripts/build_model_inputs.py applies to
+    real human data before NEF ever sees it. Colors' own values are
+    already +-1 and would NOT need this. Keep --cluster_centers
+    comfortably away from 0 and 100 (and --oddball_deviations small
+    enough not to push the oddball itself close to those edges either) --
+    values near the edges of the rescaled [-1,1] range risk exactly the
+    saturation this grid is partly designed to detect as a confound, not
+    a genuine center effect.
+
+    Has the same --mode run/submit/collect lifecycle as probe/synthetic --
+    a real timing check found even a modest single-context run exceeds a
+    reasonable single local call, and the full grid multiplies that by
+    n_centers x n_deviations. One job per (cluster_center,
+    oddball_deviation, sweep_value) triple; --n_seeds worth of
+    simulations run serially within that one job.
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _tag3(c, d, v):
+        return f"c{_oddball_value_tag(c)}_d{_oddball_value_tag(d)}_v{_oddball_value_tag(v)}"
+
+    if args.mode == "run":
+        if args.cluster_center is None or args.oddball_deviation is None or args.sweep_value is None:
+            raise SystemExit("--cluster_center, --oddball_deviation, and --sweep_value "
+                             "all required for --mode run")
+        tag = _tag3(args.cluster_center, args.oddball_deviation, args.sweep_value)
+        out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}_{tag}.pkl"
+        if out_path.exists():
+            print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
+            return
+        result = _oddball_worker(args, args.cluster_center, args.oddball_deviation, args.sweep_value)
+        pd.to_pickle(result, out_path)
+        print(f"Saved center={args.cluster_center} deviation={args.oddball_deviation} "
+              f"{args.sweep_param}={args.sweep_value}: max_pe={result['max_pe']:.4f} "
+              f"end_pe={result['end_pe']:.4f} pct_decrease={result['pct_decrease']:.1f}% "
+              f"-> {out_path}")
+
+    elif args.mode == "submit":
+        root = str(Path(__file__).resolve().parent.parent)
+        combos = [(c, d, v) for c in args.cluster_centers
+                 for d in args.oddball_deviations for v in args.sweep_values]
+        print(f"Submitting {len(combos)} oddball jobs "
+              f"({len(args.cluster_centers)} centers x {len(args.oddball_deviations)} "
+              f"deviations x {len(args.sweep_values)} {args.sweep_param} values) "
+              f"for task={args.task}")
+        for c, d, v in combos:
+            tag = _tag3(c, d, v)
+            out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}_{tag}.pkl"
+            if out_path.exists():
+                print(f"  center={c} deviation={d} {args.sweep_param}={v}: already exists -- skipping")
+                continue
+            cmd = (
+                f"venv/bin/python scripts/neural_experiments.py oddball "
+                f"--task {args.task} --mode run --sweep_param {args.sweep_param} "
+                f"--sweep_value {v} --cluster_center {c} --oddball_deviation {d} "
+                f"--cluster_spread {args.cluster_spread} "
+                f"--base_alpha_0 {args.base_alpha_0} --base_lambda_ {args.base_lambda_} "
+                f"--base_n_neurons {args.base_n_neurons} --n_seeds {args.n_seeds}"
+            )
+            script = make_job_script(root, [cmd], time_limit="1:0:0", mem="16G")
+            script_path = OUT_DIR / f"_job_oddball_{args.sweep_param}_{args.task}_{tag}.sh"
+            script_path.write_text(script)
+            submit_script(script_path, dry_run=args.dry_run)
+
+    elif args.mode == "collect":
+        files = sorted(OUT_DIR.glob(f"oddball_{args.sweep_param}_{args.task}_c*_d*_v*.pkl"))
+        if not files:
+            print(f"No oddball_{args.sweep_param}_{args.task}_c*_d*_v*.pkl files found in {OUT_DIR}")
+            return
+        results = [pd.read_pickle(f) for f in files]
+        grid = pd.DataFrame([
+            {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
+             args.sweep_param: r["sweep_value"], "max_pe": r["max_pe"], "end_pe": r["end_pe"],
+             "pct_decrease": r["pct_decrease"]}
+            for r in results
+        ]).sort_values(["cluster_center", "oddball_deviation", args.sweep_param]).reset_index(drop=True)
+        traces = {
+            (r["cluster_center"], r["oddball_deviation"], r["sweep_value"]): {"t": r["t"], "pe": r["pe"]}
+            for r in results
+        }
+        result_all = {
+            "grid": grid,
+            "traces": traces,
+            "sweep_param": args.sweep_param,
+            "base_alpha_0": args.base_alpha_0,
+            "base_lambda_": args.base_lambda_,
+            "base_n_neurons": args.base_n_neurons,
+            "cluster_spread": args.cluster_spread,
+        }
+        out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}.pkl"
+        pd.to_pickle(result_all, out_path)
+        print(f"Collected {len(files)} cell(s) -> {out_path}")
+        print(grid)
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -748,6 +907,33 @@ def main() -> None:
                         help="Total virtual pids to submit (--mode submit)")
     p_synth.add_argument("--dry_run", action="store_true")
     p_synth.set_defaults(func=run_synthetic)
+
+    p_odd = sub.add_parser("oddball")
+    p_odd.add_argument("--task", required=True)
+    p_odd.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
+    p_odd.add_argument("--sweep_param", required=True, choices=["alpha_0", "lambda_", "n_neurons"])
+    p_odd.add_argument("--sweep_value", type=float, default=None,
+                       help="Single value for --mode run (one cluster job per grid cell).")
+    p_odd.add_argument("--sweep_values", type=float, nargs="+", default=None,
+                       help="Full list of values for --mode submit.")
+    p_odd.add_argument("--cluster_center", type=float, default=None,
+                       help="Single center for --mode run (one cluster job per grid cell).")
+    p_odd.add_argument("--cluster_centers", type=float, nargs="+", default=None,
+                       help="Raw (0-100 scale) cluster centers to test, e.g. 20 40 60 80. "
+                            "Keep comfortably away from 0/100 -- see run_oddball's own docstring.")
+    p_odd.add_argument("--cluster_spread", type=float, required=True,
+                       help="+- offset for the 3 clustered observations around each center, "
+                            "e.g. 1 gives (center-1, center, center+1).")
+    p_odd.add_argument("--oddball_deviation", type=float, default=None,
+                       help="Single deviation for --mode run (one cluster job per grid cell).")
+    p_odd.add_argument("--oddball_deviations", type=float, nargs="+", default=None,
+                       help="Signed deviations from each center to test, e.g. -15 -10 10 15.")
+    p_odd.add_argument("--base_alpha_0", type=float, required=True)
+    p_odd.add_argument("--base_lambda_", type=float, required=True)
+    p_odd.add_argument("--base_n_neurons", type=int, required=True)
+    p_odd.add_argument("--n_seeds", type=int, default=20)
+    p_odd.add_argument("--dry_run", action="store_true")
+    p_odd.set_defaults(func=run_oddball)
 
     args = parser.parse_args()
     args.func(args)

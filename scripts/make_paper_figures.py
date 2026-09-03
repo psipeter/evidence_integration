@@ -3540,7 +3540,7 @@ def _load_neural_probe_variability(min_trials: int = 3) -> pd.DataFrame | None:
         return None
     per_pid = agg.groupby("virtual_pid")[["pe", "response"]].mean().reset_index()
     per_pid = per_pid.rename(columns={"pe": "pe_std", "response": "resp_std"})
-    return per_pid.merge(params[["virtual_pid", "alpha_0", "lambda_"]], on="virtual_pid")
+    return per_pid.merge(params[["virtual_pid", "alpha_0", "lambda_", "n_neurons"]], on="virtual_pid")
 
 
 def _load_neural_decay_metrics() -> pd.DataFrame | None:
@@ -3622,15 +3622,15 @@ def _load_neural_decay_metrics() -> pd.DataFrame | None:
 
     if not rows:
         return None
-    return pd.DataFrame(rows).merge(params[["virtual_pid", "alpha_0", "lambda_"]], on="virtual_pid")
+    return pd.DataFrame(rows).merge(params[["virtual_pid", "alpha_0", "lambda_", "n_neurons"]], on="virtual_pid")
 
 
 def _plot_neural_sigma_vs_pe_variability(ax) -> None:
-    """Panel (Act 2): response variability (sigma) vs PE variability, one
-    point per pid -- both measurable in a real neuroimaging study with no
-    model fitting on either axis. Direct analogue of figure_carrabin_
-    neural.py's own Panel B (partial-correlation control omitted here --
-    not yet needed until Act 4).
+    """Panel: response variability (sigma) vs PE variability, one point per
+    virtual pid -- both measurable in a real neuroimaging study with no
+    model fitting on either axis. Points small and low-alpha, regression
+    line thick with its CI band -- the fit is the point of this panel, not
+    any individual point.
     """
     df = _load_neural_probe_variability()
     if df is None or len(df) < 3:
@@ -3639,22 +3639,22 @@ def _plot_neural_sigma_vs_pe_variability(ax) -> None:
         return
     color = get_palette(6)[0]
     r, p = pearsonr(df["resp_std"], df["pe_std"])
-    ax.scatter(df["pe_std"], df["resp_std"], color=color, s=35, alpha=0.85, zorder=3)
+    ax.scatter(df["pe_std"], df["resp_std"], color=color, s=8, alpha=0.35, zorder=2)
     sns.regplot(data=df, x="pe_std", y="resp_std", ax=ax, color=color, ci=95,
-               scatter=False, line_kws={"lw": 1.8},
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
     ax.set_xlabel("\u03c3PE")
     ax.set_ylabel("\u03c3R")
+    ax.set_xlim(left=0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
 
 def _plot_neural_resp_vs_act_decay(ax) -> None:
-    """Panel (Act 2): NEF's own |Delta response| decay vs activity decay,
-    one point per pid -- both measurable, no model fitting on either axis.
-    Direct analogue of figure_yoo_neural.py's own Panel C (fitted-lambda
-    line only; the lambda=0 ablation comparison there is Act 4, not built
-    for NEF/numbers yet).
+    """Panel: NEF's own |Delta response| decay vs activity decay, one
+    point per virtual pid -- both measurable, no model fitting on either
+    axis. Points small and low-alpha, regression line thick with its CI
+    band -- the fit is the point of this panel, not any individual point.
     """
     df = _load_neural_decay_metrics()
     if df is None or len(df) < 3:
@@ -3663,103 +3663,300 @@ def _plot_neural_resp_vs_act_decay(ax) -> None:
         return
     color = get_palette(6)[0]
     r, p = pearsonr(df["act_decay"], df["resp_decay"])
-    ax.scatter(df["act_decay"], df["resp_decay"], color=color, s=35, alpha=0.85, zorder=3)
+    ax.scatter(df["act_decay"], df["resp_decay"], color=color, s=8, alpha=0.35, zorder=2)
     sns.regplot(data=df, x="act_decay", y="resp_decay", ax=ax, color=color, ci=95,
-               scatter=False, line_kws={"lw": 1.8},
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
     ax.set_xlabel("\u0394A (Hz)")
     ax.set_ylabel("\u0394R decay")
+    ax.set_xlim(left=0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_neural_variability_vs_alpha0(ax) -> None:
-    """Panel (Act 3): response AND PE variability, both vs fitted alpha_0,
-    twin y-axes -- same underlying probe data as the sigma-vs-PE-
-    variability panel, replotted against the parameter hypothesised to
-    jointly control both. Direct analogue of figure_carrabin_neural.py's
-    own Panel C.
-    """
-    df = _load_neural_probe_variability()
-    if df is None or len(df) < 3:
-        ax.text(0.5, 0.5, "No probe variability data", ha="center", va="center",
-                transform=ax.transAxes, color="0.5", style="italic")
-        return
-    pal = get_palette(6)
-    c_resp, c_pe = pal[0], pal[1]
-    r_resp, p_resp = pearsonr(df["alpha_0"], df["resp_std"])
-    r_pe, p_pe = pearsonr(df["alpha_0"], df["pe_std"])
+def _plot_neural_dual_vs_param(
+    ax, df: pd.DataFrame, param_col: str, param_label: str,
+    y1_col: str, y2_col: str, y1_label: str, y2_label: str,
+    include_x_zero: bool = False,
+):
+    """Generic panel: two dependent measures (y1_col, y2_col), twin y-axes,
+    both plotted against ONE parameter (param_col: alpha_0, lambda_, or
+    n_neurons). Reused across all three parameters for both the
+    sigma_R/sigma_PE row and the DeltaR/DeltaA-decay row, so each row
+    shows how much each of the three parameters individually contributes
+    to that row's pair of dependent measures -- a breakdown, not a
+    replacement for the actual (still-pending) multivariate regression.
+    Points small and low-alpha, regression lines thick with their CI
+    bands -- the fits are the point of these panels, not any individual
+    point.
 
-    ax.scatter(df["alpha_0"], df["resp_std"], color=c_resp, s=30, alpha=0.7, zorder=3,
-               label=f"r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
-    sns.regplot(data=df, x="alpha_0", y="resp_std", ax=ax, color=c_resp, ci=95,
-               scatter=False, line_kws={"lw": 1.8}, label="_nolegend_")
-    ax.set_xlabel("Fitted \u03b1\u2080")
-    ax.set_ylabel("\u03c3 (response)", color=c_resp)
-    ax.tick_params(axis="y", labelcolor=c_resp)
+    Returns ax2 (the twin axis) so a caller can apply shared y-limits
+    across a row afterward -- twin axes aren't reachable via plt.subplots'
+    own sharey, since they're created per-panel, not at subplot-creation
+    time.
+
+    include_x_zero=True extends the x-axis to include 0 as a tick/limit
+    (appropriate for a bounded [0,1]-style parameter like alpha_0/lambda_,
+    where 0 is a meaningful reference point) -- left False for n_neurons,
+    where the real data starts at 500 and forcing the axis down to 0 would
+    waste half the panel on empty space.
+    """
+    pal = get_palette(6)
+    c1, c2 = pal[0], pal[1]
+    r1, p1 = pearsonr(df[param_col], df[y1_col])
+    r2, p2 = pearsonr(df[param_col], df[y2_col])
+
+    ax.scatter(df[param_col], df[y1_col], color=c1, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=df, x=param_col, y=y1_col, ax=ax, color=c1, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"r={r1:.2f}{pvalue_to_stars(p1)}")
+    ax.set_xlabel(param_label)
+    ax.set_ylabel(y1_label, color=c1)
+    ax.tick_params(axis="y", labelcolor=c1)
+    if include_x_zero:
+        ax.set_xlim(left=0)
 
     ax2 = ax.twinx()
-    ax2.scatter(df["alpha_0"], df["pe_std"], color=c_pe, s=30, alpha=0.7, zorder=3,
-                label=f"r={r_pe:.2f}{pvalue_to_stars(p_pe)}")
-    sns.regplot(data=df, x="alpha_0", y="pe_std", ax=ax2, color=c_pe, ci=95,
-               scatter=False, line_kws={"lw": 1.8}, label="_nolegend_")
-    ax2.set_ylabel("\u03c3 (prediction error)", color=c_pe)
-    ax2.tick_params(axis="y", labelcolor=c_pe)
+    ax2.scatter(df[param_col], df[y2_col], color=c2, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=df, x=param_col, y=y2_col, ax=ax2, color=c2, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"r={r2:.2f}{pvalue_to_stars(p2)}")
+    ax2.set_ylabel(y2_label, color=c2)
+    ax2.tick_params(axis="y", labelcolor=c2)
     sns.despine(ax=ax2, top=True)
 
-    handles, labels = [], []
-    for a in [ax, ax2]:
-        h, l = a.get_legend_handles_labels()
-        handles += [x for x, y in zip(h, l) if y != "_nolegend_"]
-        labels += [y for y in l if y != "_nolegend_"]
-    ax.legend(handles, labels, fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2, fontsize=7,
+             frameon=True, framealpha=0.9, loc="best")
+    sns.despine(ax=ax, top=True, right=True)
+    return ax2
+
+
+def _oddball_primary_context(grid: pd.DataFrame) -> tuple[float, float]:
+    """Pick one representative (cluster_center, oddball_deviation) for
+    panels that need a single context rather than the full grid -- middle
+    center, smallest-magnitude POSITIVE deviation available (falling back
+    to whatever deviation exists if none are positive).
+    """
+    centers = sorted(grid["cluster_center"].unique())
+    deviations = sorted(grid["oddball_deviation"].unique())
+    center = centers[len(centers) // 2]
+    positive = [d for d in deviations if d > 0]
+    deviation = min(positive) if positive else deviations[-1]
+    return center, deviation
+
+
+def _oddball_base_value(d: dict, sweep_param: str) -> float:
+    return {"alpha_0": d["base_alpha_0"], "lambda_": d["base_lambda_"],
+           "n_neurons": d["base_n_neurons"]}[sweep_param]
+
+
+def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Panel: |decoded PE| vs time across the oddball sequence (3
+    clustered observations, then one surprising observation far away), at
+    ONE representative (cluster_center, oddball_deviation) context, one
+    line per representative value of sweep_param (low/mid/high of
+    whatever was actually run -- 3 REPRESENTATIVE lines, per instruction).
+    No error band: the collected trace is already a mean over --n_seeds
+    seeds with no per-seed variance saved.
+    """
+    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    grid, traces = d["grid"], d["traces"]
+    center, deviation = _oddball_primary_context(grid)
+
+    values = sorted(grid[sweep_param].unique())
+    picks = [values[0], values[len(values) // 2], values[-1]] if len(values) >= 3 else values
+
+    from fitting.model_params import _NEF_FIXED
+
+    label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
+    sym = label_sym.get(sweep_param, sweep_param)
+    pal = get_palette(max(6, len(picks)))
+    n_obs = None
+    for i, val in enumerate(picks):
+        tr = traces.get((center, deviation, val))
+        if tr is None:
+            continue
+        ax.plot(tr["t"], tr["pe"], color=pal[i], lw=1.8, label=f"{sym}={val:g}")
+        n_obs = len(tr["t"])
+
+    if n_obs is not None:
+        t_step = _NEF_FIXED["t_iti"] + _NEF_FIXED["t_obs"]
+        n_obs_actual = 4  # 3 clustered + 1 oddball, always, for this experiment
+        for k in range(1, n_obs_actual):
+            ax.axvline(k * t_step, color="0.7", lw=0.8, ls=":", zorder=0)
+        ax.set_xlim(0, n_obs_actual * t_step)
+
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("|Decoded PE|")
+    ax.set_title(f"center={center:g}, deviation={deviation:+g}", fontsize=8)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_neural_lambda_decay_twin(ax) -> None:
-    """Panel (Act 3): fitted lambda vs |Delta response| decay AND activity
-    decay, twin y-axes -- same underlying data as the resp-vs-act-decay
-    panel, replotted against the parameter hypothesised to jointly control
-    both. Direct analogue of figure_yoo_neural.py's own Panel B.
+def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Panel: sweep_param (x) vs max |decoded PE| (peak error response) AND
+    % decrease from that max by the end of the trial (how much learning/
+    value-updating has shrunk the error), twin y-axes -- mean +- SEM
+    AGGREGATED across every (cluster_center, oddball_deviation) cell in
+    the grid for that sweep_param value, a more robust per-parameter
+    estimate than any single context alone (legitimate BECAUSE
+    _plot_oddball_center_invariance's own check confirms centers are
+    interchangeable for a fixed deviation magnitude -- if that check ever
+    shows real center-dependence, this aggregation stops being
+    appropriate and should be reconsidered).
     """
-    df = _load_neural_decay_metrics()
-    if df is None or len(df) < 3:
-        ax.text(0.5, 0.5, "No activity/response decay data", ha="center", va="center",
+    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
-    pal = get_palette(6)
-    c_resp, c_act = pal[0], pal[1]
-    r_resp, p_resp = pearsonr(df["lambda_"], df["resp_decay"])
-    r_act, p_act = pearsonr(df["lambda_"], df["act_decay"])
+    d = pd.read_pickle(path)
+    grid = d["grid"]
+    agg = (grid.groupby(sweep_param)[["max_pe", "pct_decrease"]]
+          .agg(["mean", "sem"]).reset_index())
+    agg.columns = [sweep_param, "max_pe_mean", "max_pe_sem",
+                  "pct_decrease_mean", "pct_decrease_sem"]
+    agg = agg.sort_values(sweep_param)
 
-    ax.scatter(df["lambda_"], df["resp_decay"], color=c_resp, s=35, alpha=0.85, zorder=3,
-               label=f"r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
-    sns.regplot(data=df, x="lambda_", y="resp_decay", scatter=False, color=c_resp,
-               line_kws={"lw": 1.8}, ci=95, ax=ax, label="_nolegend_")
-    ax.set_xlabel("Fitted \u03bb")
-    ax.set_ylabel("decay (\u0394R)", color=c_resp)
-    ax.tick_params(axis="y", labelcolor=c_resp)
+    label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
+    sym = label_sym.get(sweep_param, sweep_param)
+
+    pal = get_palette(6)
+    c1, c2 = pal[0], pal[1]
+    ax.errorbar(agg[sweep_param], agg["max_pe_mean"], yerr=agg["max_pe_sem"],
+               fmt="o-", color=c1, lw=1.8, ms=5, capsize=3)
+    ax.set_xlabel(sym)
+    ax.set_ylabel("Max |decoded PE|", color=c1)
+    ax.tick_params(axis="y", labelcolor=c1)
+    if sweep_param in ("alpha_0", "lambda_"):
+        ax.set_xlim(left=0)
 
     ax2 = ax.twinx()
-    ax2.scatter(df["lambda_"], df["act_decay"], color=c_act, s=35, alpha=0.85, zorder=3,
-                label=f"r={r_act:.2f}{pvalue_to_stars(p_act)}")
-    sns.regplot(data=df, x="lambda_", y="act_decay", scatter=False, color=c_act,
-               line_kws={"lw": 1.8}, ci=95, ax=ax2, label="_nolegend_")
-    ax2.set_ylabel("decay (\u0394A)", color=c_act)
-    ax2.tick_params(axis="y", labelcolor=c_act)
+    ax2.errorbar(agg[sweep_param], agg["pct_decrease_mean"], yerr=agg["pct_decrease_sem"],
+                fmt="o-", color=c2, lw=1.8, ms=5, capsize=3)
+    ax2.set_ylabel("% decrease by trial end", color=c2)
+    ax2.tick_params(axis="y", labelcolor=c2)
     sns.despine(ax=ax2, top=True)
-
-    handles, labels = [], []
-    for a in [ax, ax2]:
-        h, l = a.get_legend_handles_labels()
-        handles += [x for x, y in zip(h, l) if y != "_nolegend_"]
-        labels += [y for y in l if y != "_nolegend_"]
-    ax.legend(handles, labels, fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Panel: |decoded PE| vs time, one line per cluster_center, all at
+    ONE representative oddball_deviation and sweep_param held at its own
+    --base_* value (whichever sweep value is closest to it) -- a direct
+    visual test of the person's own prediction that a fixed-magnitude
+    surprise produces the same response regardless of where the cluster
+    sits. If these collapse onto each other, that confirms
+    _plot_oddball_param_effect's own cross-center aggregation is
+    legitimate; if they don't, that's a real, informative finding about
+    where the model's behaviour depends on absolute position (e.g.
+    saturation near the edges of the rescaled range), not just relative
+    deviation -- and this panel should stay in the figure rather than be
+    removed as trivial.
+    """
+    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    grid, traces = d["grid"], d["traces"]
+    centers = sorted(grid["cluster_center"].unique())
+    _, deviation = _oddball_primary_context(grid)
+
+    base_val = _oddball_base_value(d, sweep_param)
+    values = sorted(grid[sweep_param].unique())
+    closest_val = min(values, key=lambda v: abs(v - base_val))
+
+    from fitting.model_params import _NEF_FIXED
+
+    pal = get_palette(max(6, len(centers)))
+    n_obs = None
+    for i, c in enumerate(centers):
+        tr = traces.get((c, deviation, closest_val))
+        if tr is None:
+            continue
+        ax.plot(tr["t"], tr["pe"], color=pal[i], lw=1.5, label=f"center={c:g}")
+        n_obs = len(tr["t"])
+
+    if n_obs is not None:
+        t_step = _NEF_FIXED["t_iti"] + _NEF_FIXED["t_obs"]
+        for k in range(1, 4):
+            ax.axvline(k * t_step, color="0.7", lw=0.8, ls=":", zorder=0)
+        ax.set_xlim(0, 4 * t_step)
+
+    label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
+    sym = label_sym.get(sweep_param, sweep_param)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("|Decoded PE|")
+    ax.set_title(f"deviation={deviation:+g}, {sym}={closest_val:g}", fontsize=8)
+    ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_neural_giant2() -> Path:
+    """3x3 figure: a second neural-predictions figure, one row per
+    parameter (alpha_0, lambda_, n_neurons), each investigated via its own
+    fresh grid of oddball simulations (3 observations clustered around a
+    center, then one surprising observation deviating from it, across
+    several centers x deviations x parameter values) rather than the
+    giant's own random-virtual-pid design.
+
+      Row 1 (alpha_0, lambda_=0.7, n_neurons=500/nc=2000 -- the RMSE
+        production default):
+        Col 1: |decoded PE| vs time, one representative context, 3
+          representative alpha_0 values.
+        Col 2: alpha_0 (x) vs max |decoded PE| AND % decrease by trial
+          end, twin axes, mean +- SEM aggregated across the whole grid --
+          the neural prediction this row tests: higher alpha_0 produces a
+          bigger initial response AND more dramatic attenuation from
+          learning/value-updating.
+        Col 3: center-invariance check -- |decoded PE| vs time, one line
+          per cluster_center, same deviation and (near-)base alpha_0 --
+          tests directly whether the response to a fixed-magnitude
+          surprise really is independent of cluster_center, which is what
+          makes col 2's own cross-center aggregation legitimate. Kept
+          even if it shows the expected trivial (fully overlapping)
+          result, per instruction, since it's a real verification, not
+          just decoration -- remove only once confirmed genuinely
+          uninformative across all three rows.
+      Rows 2 (lambda_) and 3 (n_neurons): NOT YET BUILT -- same
+        structure, own fresh oddball grid each, to be added once row 1
+        is confirmed.
+
+    Reads neural_experiments.py's own `oddball` experiment (--mode
+    run/submit/collect, cluster-bound -- a real timing check found even a
+    modest single-context run exceeds a reasonable single local call, and
+    the full grid costs more still).
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75),
+                             constrained_layout=True)
+
+    _plot_oddball_pe_trace(axes[0, 0], "alpha_0")
+    _plot_oddball_param_effect(axes[0, 1], "alpha_0")
+    _plot_oddball_center_invariance(axes[0, 2], "alpha_0")
+
+    for row, label in [(1, "lambda_"), (2, "n_neurons")]:
+        for col in (0, 1, 2):
+            axes[row, col].text(0.5, 0.5, f"{label} row not yet built", ha="center",
+                                va="center", transform=axes[row, col].transAxes,
+                                color="0.5", style="italic")
+
+    out_path, _ = _save_fig(fig, "neural_giant2")
+    plt.close(fig)
+    return out_path
 
 
 def make_neural_giant() -> Path:
-    """2x4 figure: Acts 1-3 of the neural predictions narrative (see chat
+    """3x4 figure: Acts 1-3 of the neural predictions narrative (see chat
     for the full 5-act plan):
       Row 1 (Act 1, toy/illustrative, arbitrary params):
         Panel 1: spike raster + decoded-PE demo.
@@ -3767,24 +3964,33 @@ def make_neural_giant() -> Path:
           time-within-observation, first observation only.
         Panel 3: lambda sweep, error-neuron activity vs observation.
         Panel 4: (empty -- row 1 only has 3 panels).
-      Row 2 (Acts 2-3, real fitted params, both axes measurable):
-        Panel 5: sigma vs PE variability (Act 2).
-        Panel 6: NEF's own |Delta response| decay vs activity decay (Act 2).
-        Panel 7: sigma AND PE variability vs fitted alpha_0 (Act 3).
-        Panel 8: fitted lambda vs |Delta response| decay AND activity
-          decay, twin axes (Act 3).
+      Row 2 (sigma_R and sigma_PE, both measurable, no fitting on either):
+        Panel 5: sigma_R vs sigma_PE.
+        Panels 6-8: sigma_R AND sigma_PE, twin axes, each vs ONE of
+          alpha_0/lambda_/n_neurons -- a breakdown of how much each
+          parameter individually contributes, not a substitute for the
+          still-pending multivariate regression (see chat).
+      Row 3 (DeltaR-decay and DeltaA-decay, same structure):
+        Panel 9: DeltaR-decay vs DeltaA-decay.
+        Panels 10-12: DeltaR-decay AND DeltaA-decay, twin axes, each vs
+          ONE of alpha_0/lambda_/n_neurons.
 
-    Row 2 uses alpha_0/lambda_ from the RMSE fit -- NEF's own noise-only
-    variant (fixing alpha_0/lambda_, searching n_neurons under NLL) isn't
-    built yet (blocked on missing precomputed activity files for any
-    n_neurons other than 500 -- see CLAUDE.md's own "NEF architecture"
-    note), so sigma's absolute scale here may not be calibrated against
-    human variability. Trying with what's available now, per instruction.
+    Rows 2/3 read neural_experiments.py's own `synthetic` experiment --
+    N randomly-parameterized virtual pids (NOT fitted params), per
+    instruction; see CLAUDE.md's own "Neural predictions figure" Status
+    section and docs/HISTORY.md for the full design rationale, including
+    two real bugs found and fixed along the way (a response-readout
+    averaging mismatch, and a raw-vs-canonical-scale mismatch that
+    saturated NEF's ensembles) and the sampling-bounds narrowing that
+    followed (alpha_0 in [0.5,1], lambda_ in [0.1,1], n_neurons in
+    [500,1500] -- avoiding a genuine floor effect in alpha(t)=alpha_0/
+    t^lambda at low alpha_0, and the extra measurement noise at low
+    n_neurons that diluted the sigma-related relationships specifically).
 
     Act 4/5 are not included yet.
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(2, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
+    fig, axes = plt.subplots(3, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.85 * 0.75),
                              constrained_layout=True)
 
     _plot_neural_raster_demo(axes[0, 0])
@@ -3792,10 +3998,71 @@ def make_neural_giant() -> Path:
     _plot_neural_lambda_activity(axes[0, 2])
     axes[0, 3].axis("off")
 
+    sigma_df = _load_neural_probe_variability()
     _plot_neural_sigma_vs_pe_variability(axes[1, 0])
-    _plot_neural_resp_vs_act_decay(axes[1, 1])
-    _plot_neural_variability_vs_alpha0(axes[1, 2])
-    _plot_neural_lambda_decay_twin(axes[1, 3])
+    if sigma_df is not None and len(sigma_df) >= 3:
+        row2_twins = []
+        row2_twins.append(_plot_neural_dual_vs_param(
+            axes[1, 1], sigma_df, "alpha_0", "\u03b1\u2080",
+            "resp_std", "pe_std", "\u03c3 (response)", "\u03c3 (prediction error)",
+            include_x_zero=True))
+        row2_twins.append(_plot_neural_dual_vs_param(
+            axes[1, 2], sigma_df, "lambda_", "\u03bb",
+            "resp_std", "pe_std", "\u03c3 (response)", "\u03c3 (prediction error)",
+            include_x_zero=True))
+        row2_twins.append(_plot_neural_dual_vs_param(
+            axes[1, 3], sigma_df, "n_neurons", "neurons",
+            "resp_std", "pe_std", "\u03c3 (response)", "\u03c3 (prediction error)"))
+
+        # Shared y-axes across the whole row: axes[1,0]'s own y (resp_std)
+        # and every panel's left axis (also resp_std) get one common range;
+        # every panel's twin (right) axis (pe_std) gets another. Twin axes
+        # aren't reachable via plt.subplots' own sharey (they're created
+        # per-panel, not at subplot-creation time), hence doing this
+        # manually here rather than at fig, axes = plt.subplots(...).
+        resp_pad = 0.05 * (sigma_df["resp_std"].max() - sigma_df["resp_std"].min())
+        pe_pad = 0.05 * (sigma_df["pe_std"].max() - sigma_df["pe_std"].min())
+        resp_lim = (sigma_df["resp_std"].min() - resp_pad, sigma_df["resp_std"].max() + resp_pad)
+        pe_lim = (sigma_df["pe_std"].min() - pe_pad, sigma_df["pe_std"].max() + pe_pad)
+        for col in (0, 1, 2, 3):
+            axes[1, col].set_ylim(resp_lim)
+        for ax2 in row2_twins:
+            ax2.set_ylim(pe_lim)
+    else:
+        for col in (1, 2, 3):
+            axes[1, col].text(0.5, 0.5, "No probe variability data", ha="center",
+                              va="center", transform=axes[1, col].transAxes,
+                              color="0.5", style="italic")
+
+    decay_df = _load_neural_decay_metrics()
+    _plot_neural_resp_vs_act_decay(axes[2, 0])
+    if decay_df is not None and len(decay_df) >= 3:
+        row3_twins = []
+        row3_twins.append(_plot_neural_dual_vs_param(
+            axes[2, 1], decay_df, "alpha_0", "\u03b1\u2080",
+            "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)",
+            include_x_zero=True))
+        row3_twins.append(_plot_neural_dual_vs_param(
+            axes[2, 2], decay_df, "lambda_", "\u03bb",
+            "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)",
+            include_x_zero=True))
+        row3_twins.append(_plot_neural_dual_vs_param(
+            axes[2, 3], decay_df, "n_neurons", "neurons",
+            "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)"))
+
+        resp_pad = 0.05 * (decay_df["resp_decay"].max() - decay_df["resp_decay"].min())
+        act_pad = 0.05 * (decay_df["act_decay"].max() - decay_df["act_decay"].min())
+        resp_lim = (decay_df["resp_decay"].min() - resp_pad, decay_df["resp_decay"].max() + resp_pad)
+        act_lim = (decay_df["act_decay"].min() - act_pad, decay_df["act_decay"].max() + act_pad)
+        for col in (0, 1, 2, 3):
+            axes[2, col].set_ylim(resp_lim)
+        for ax2 in row3_twins:
+            ax2.set_ylim(act_lim)
+    else:
+        for col in (1, 2, 3):
+            axes[2, col].text(0.5, 0.5, "No activity/response decay data", ha="center",
+                              va="center", transform=axes[2, col].transAxes,
+                              color="0.5", style="italic")
 
     out_path, _ = _save_fig(fig, "neural_giant")
     plt.close(fig)
@@ -3819,6 +4086,7 @@ FIGURES = {
     "sigma_overview": make_sigma_overview,
     "sigma_giant": make_sigma_giant,
     "neural_giant": make_neural_giant,
+    "neural_giant2": make_neural_giant2,
     "sigma_model_correlation": make_sigma_model_correlation,
     "variance_autocorr_human": make_variance_autocorr_human,
     "variance_autocorr_models": make_variance_autocorr_models,
