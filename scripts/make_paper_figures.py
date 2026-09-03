@@ -3882,6 +3882,42 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Row 1, col 3: max |decoded PE| (x) vs its own decrease by the
+    oddball window's end (y), one point per (cluster_center,
+    oddball_deviation, sweep_param) grid cell -- the SAME full grid
+    _plot_oddball_param_effect aggregates into twin-axis means vs
+    sweep_param, here shown instead as a direct scatter of panel 2's own
+    two dependent variables against each other. Matches the ORIGINAL
+    neural_giant figure's own DV-vs-DV convention exactly
+    (_plot_neural_sigma_vs_pe_variability / _plot_neural_resp_vs_act_decay:
+    single flat color, small low-alpha points, sns.regplot fit line with
+    CI band, pearsonr r + significance stars in the legend) rather than
+    color-coding by sweep_param -- this directly visualizes the row's own
+    claim (higher alpha_0 -> both higher max_pe AND higher decrease) as a
+    single positive correlation across the whole grid.
+    """
+    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    grid = d["grid"]
+
+    color = get_palette(6)[0]
+    r, p = pearsonr(grid["max_pe"], grid["decrease"])
+    ax.scatter(grid["max_pe"], grid["decrease"], color=color, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="max_pe", y="decrease", ax=ax, color=color, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"r={r:.2f}{pvalue_to_stars(p)}")
+    ax.set_xlabel("Max |decoded PE|")
+    ax.set_ylabel("PE decrease (max−end)")
+    ax.set_xlim(left=0)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
     """Panel: |decoded PE| vs time WITHIN THE ODDBALL (4TH) OBSERVATION
     ONLY (see _plot_oddball_pe_trace's own note -- the saved trace is
@@ -3933,23 +3969,24 @@ def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_n
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers",
+                                        targets: tuple = (0.1, 0.7)) -> None:
     """Row 2/3, col 1: weight-tuned error-neuron activity (Hz) vs
-    observation, one line per representative sweep_param value, mean +-
-    SEM across REAL pids -- direct structural port of the ORIGINAL
+    observation, for two representative sweep_param TARGETS -- picking
+    whichever real pid's own randomly-drawn value landed closest to each
+    target (each real pid gets its OWN single value now, not a shared
+    explicit grid -- see param_scan's own docstring for why), mean +-
+    SEM across THAT ONE pid's own 32 real trials (not across pids, since
+    n=1 pid per target). Direct structural port of the ORIGINAL
     neural_giant's own panel 3 (_plot_neural_lambda_activity), reading
     neural_experiments.py's own `param_scan` experiment instead of
     `sweep` (a genuinely different design from row 1's `oddball` --
     every real soltani_numbers pid's own full 32-trial sequence, not an
     arbitrary constant-input toy trial and not a windowed surprise
-    response; see param_scan's own docstring, including the note on why
-    an earlier constant-input version was replaced). Weight-tuned-neuron
-    reduction is ALREADY applied there, per real trial (encoders
-    genuinely differ by trial/seed), so this function only folds the
-    already-reduced per-timestep trace HIERARCHICALLY -- mean over each
-    pid's own trials first, then mean +- SEM across pids -- matching the
-    original panel's own binning convention as closely as real,
-    multi-trial-per-replicate data allows.
+    response). Weight-tuned-neuron reduction is ALREADY applied there,
+    per real trial (encoders genuinely differ by trial/seed), so this
+    function only folds the already-reduced per-timestep trace into
+    per-observation stats for the one selected pid.
     """
     path = NEURAL_EXP_DIR / f"param_scan_{sweep_param}_{task}.pkl"
     if not path.exists():
@@ -3965,37 +4002,30 @@ def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "solta
     df["t_within_obs"] = t_within
     active = df[~np.isnan(df["t_within_obs"])]
 
-    # Hierarchical fold: mean over each real trial's own timesteps within
-    # an observation window, THEN mean across that pid's own 32 real
-    # trials, THEN mean +- SEM across pids -- matching this project's
-    # established trial-then-participant aggregation convention
-    # (utils/aggregate.py's own hier_mean pattern) now that this data is
-    # real (pid, trial) simulations rather than one row per arbitrary
-    # seed (see neural_experiments.py's _param_scan_worker docstring for
-    # why the earlier constant-input toy-trial design was replaced).
-    per_trial = (active.groupby(["sweep_value", "pid", "trial", "observation"])["weight_tuned_activity"]
-                .mean().reset_index())
-    per_pid = (per_trial.groupby(["sweep_value", "pid", "observation"])["weight_tuned_activity"]
-              .mean().reset_index())
-    stats = (per_pid.groupby(["sweep_value", "observation"])["weight_tuned_activity"]
-            .agg(["mean", "sem"]).reset_index())
+    # Since each real pid now has its OWN single sweep_value (a random
+    # draw, not a shared explicit grid -- see param_scan's own
+    # docstring), there's no "low/high of a shared grid" to pick from
+    # anymore. Instead: for each representative target, pick whichever
+    # real pid's own drawn value landed CLOSEST to it, then plot THAT ONE
+    # pid's own activity curve, mean +- SEM computed across THAT PID'S
+    # OWN 32 real trials -- not across pids, since n=1 pid per target here.
+    pid_values = active.groupby("pid")["sweep_value"].first()
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     sym = label_sym.get(sweep_param, sweep_param)
     pal = get_palette(6)
-    values = sorted(stats["sweep_value"].unique())
-    # Two representative values (low/high of whatever grid was actually run),
-    # matching _plot_oddball_pe_trace's own representative-value convention
-    # for its panel (3 there vs 2 here, per instruction) -- avoids both
-    # overcrowding the panel and the get_palette(6) index running out on a
-    # denser sweep_values grid (a real bug this fixed: a 10-value lambda_
-    # grid raised IndexError against a hardcoded 6-color palette).
-    picks = [values[0], values[-1]] if len(values) >= 2 else values
-    for i, val in enumerate(picks):
-        sub = stats[stats["sweep_value"] == val].sort_values("observation")
-        ax.plot(sub["observation"], sub["mean"], color=pal[i], lw=1.8, label=f"{sym}={val:g}")
-        ax.fill_between(sub["observation"], sub["mean"] - sub["sem"],
-                        sub["mean"] + sub["sem"], color=pal[i], alpha=0.18)
+    for i, target in enumerate(targets):
+        nearest_pid = (pid_values - target).abs().idxmin()
+        actual_val = pid_values[nearest_pid]
+        sub = active[active["pid"] == nearest_pid]
+        per_trial_obs = (sub.groupby(["trial", "observation"])["weight_tuned_activity"]
+                        .mean().reset_index())
+        stats = (per_trial_obs.groupby("observation")["weight_tuned_activity"]
+                .agg(["mean", "sem"]).reset_index()).sort_values("observation")
+        ax.plot(stats["observation"], stats["mean"], color=pal[i], lw=1.8,
+               label=f"{sym}={actual_val:.2f} (pid {nearest_pid})")
+        ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
+                        stats["mean"] + stats["sem"], color=pal[i], alpha=0.18)
 
     n_obs_max = int(df["observation"].max())
     ax.set_xlabel("Observation")
@@ -4111,6 +4141,36 @@ def _plot_neural_giant2_decay_vs_param(ax, sweep_param: str, task: str = "soltan
         include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
 
 
+def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Row 2, col 3: NEF's own |Delta response| decay (y) vs weight-tuned
+    activity decay (x), one point per (sweep_param value, real pid) --
+    the SAME per-pid decay metrics _plot_neural_giant2_decay_vs_param
+    twin-axis plots vs sweep_param, here shown instead as a direct
+    scatter of THAT panel's own two dependent variables against each
+    other. This is the row-2 analogue of row 1's _plot_oddball_dv_scatter
+    and of the ORIGINAL neural_giant's own DV-vs-DV panels (panel 5:
+    sigma_R vs sigma_PE; panel 9: DeltaR-decay vs DeltaA-decay) --
+    matching that exact convention (single flat color, small low-alpha
+    points, sns.regplot fit line with CI band, pearsonr r + significance
+    stars in the legend) rather than color-coding by sweep_param.
+    """
+    df = _param_scan_decay_metrics(sweep_param, task)
+    if df is None or len(df) < 3:
+        ax.text(0.5, 0.5, f"No param_scan {sweep_param} decay data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    color = get_palette(6)[0]
+    r, p = pearsonr(df["act_decay"], df["resp_decay"])
+    ax.scatter(df["act_decay"], df["resp_decay"], color=color, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=df, x="act_decay", y="resp_decay", ax=ax, color=color, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"r={r:.2f}{pvalue_to_stars(p)}")
+    ax.set_xlabel("ΔA (Hz)")
+    ax.set_ylabel("ΔR decay")
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def make_neural_giant2() -> Path:
     """3x2 figure: a second neural-predictions figure, one row per
     parameter (alpha_0, lambda_, n_neurons), each investigated via its own
@@ -4128,6 +4188,11 @@ def make_neural_giant2() -> Path:
           aggregated across the whole grid -- the neural prediction this
           row tests: higher alpha_0 produces a bigger initial response
           AND more dramatic attenuation from learning/value-updating.
+        Col 3: max |decoded PE| (x) vs decrease (y) plotted directly
+          against each other, one point per full grid cell -- the same
+          two DVs col 2 twin-axis plots vs alpha_0, here as a direct
+          scatter, matching the ORIGINAL neural_giant's own DV-vs-DV
+          panels (5, 9).
       Row 2 (lambda_ swept 0.1-1.0, alpha_0=0.7, n_neurons=500/nc=2000 --
         neural_experiments.py's own `param_scan` experiment, NOT
         `oddball` -- a different design: every REAL soltani_numbers
@@ -4151,6 +4216,10 @@ def make_neural_giant2() -> Path:
           the "many independent draws" role that `synthetic`'s virtual
           pids played in that figure, since this figure's own design
           scans explicit parameter values rather than random draws.
+        Col 3: decay(deltaA) (x) vs decay(deltaR) (y) plotted directly
+          against each other, one point per (lambda_, real pid) -- the
+          row-2 analogue of row 1's own col-3 panel, and of the ORIGINAL
+          neural_giant's own panel 9 (DeltaR-decay vs DeltaA-decay).
       Row 3 (n_neurons): NOT YET BUILT -- same param_scan structure, own
         fresh scan, once row 2 is confirmed.
 
@@ -4173,16 +4242,18 @@ def make_neural_giant2() -> Path:
     and param_scan's own per-real-pid 32-trial jobs cost similarly).
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(3, 2, figsize=(FIGURE_SIZE[0] * 0.8 * 2 / 3, FIGURE_SIZE[1] * 2.1 * 0.75),
+    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75),
                              constrained_layout=True)
 
     _plot_oddball_pe_trace(axes[0, 0], "alpha_0")
     _plot_oddball_param_effect(axes[0, 1], "alpha_0")
+    _plot_oddball_dv_scatter(axes[0, 2], "alpha_0")
 
     _plot_neural_giant2_activity_vs_obs(axes[1, 0], "lambda_")
     _plot_neural_giant2_decay_vs_param(axes[1, 1], "lambda_")
+    _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
 
-    for col in (0, 1):
+    for col in (0, 1, 2):
         axes[2, col].text(0.5, 0.5, "n_neurons row not yet built", ha="center",
                           va="center", transform=axes[2, col].transAxes,
                           color="0.5", style="italic")
