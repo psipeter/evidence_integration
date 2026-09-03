@@ -3936,16 +3936,20 @@ def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_n
 def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
     """Row 2/3, col 1: weight-tuned error-neuron activity (Hz) vs
     observation, one line per representative sweep_param value, mean +-
-    SEM across seeds -- direct structural port of the ORIGINAL
+    SEM across REAL pids -- direct structural port of the ORIGINAL
     neural_giant's own panel 3 (_plot_neural_lambda_activity), reading
     neural_experiments.py's own `param_scan` experiment instead of
     `sweep` (a genuinely different design from row 1's `oddball` --
-    full 15-observation arbitrary trials, not a windowed surprise
-    response; see param_scan's own docstring). Weight-tuned-neuron
-    reduction is ALREADY applied there, per seed (encoders genuinely
-    differ by seed), so this function only folds the already-reduced
-    per-timestep trace into per-observation stats, matching the original
-    panel's own binning convention exactly.
+    every real soltani_numbers pid's own full 32-trial sequence, not an
+    arbitrary constant-input toy trial and not a windowed surprise
+    response; see param_scan's own docstring, including the note on why
+    an earlier constant-input version was replaced). Weight-tuned-neuron
+    reduction is ALREADY applied there, per real trial (encoders
+    genuinely differ by trial/seed), so this function only folds the
+    already-reduced per-timestep trace HIERARCHICALLY -- mean over each
+    pid's own trials first, then mean +- SEM across pids -- matching the
+    original panel's own binning convention as closely as real,
+    multi-trial-per-replicate data allows.
     """
     path = NEURAL_EXP_DIR / f"param_scan_{sweep_param}_{task}.pkl"
     if not path.exists():
@@ -3961,16 +3965,33 @@ def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "solta
     df["t_within_obs"] = t_within
     active = df[~np.isnan(df["t_within_obs"])]
 
-    per_obs = (active.groupby(["sweep_value", "seed", "observation"])["weight_tuned_activity"]
+    # Hierarchical fold: mean over each real trial's own timesteps within
+    # an observation window, THEN mean across that pid's own 32 real
+    # trials, THEN mean +- SEM across pids -- matching this project's
+    # established trial-then-participant aggregation convention
+    # (utils/aggregate.py's own hier_mean pattern) now that this data is
+    # real (pid, trial) simulations rather than one row per arbitrary
+    # seed (see neural_experiments.py's _param_scan_worker docstring for
+    # why the earlier constant-input toy-trial design was replaced).
+    per_trial = (active.groupby(["sweep_value", "pid", "trial", "observation"])["weight_tuned_activity"]
+                .mean().reset_index())
+    per_pid = (per_trial.groupby(["sweep_value", "pid", "observation"])["weight_tuned_activity"]
               .mean().reset_index())
-    stats = (per_obs.groupby(["sweep_value", "observation"])["weight_tuned_activity"]
+    stats = (per_pid.groupby(["sweep_value", "observation"])["weight_tuned_activity"]
             .agg(["mean", "sem"]).reset_index())
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     sym = label_sym.get(sweep_param, sweep_param)
     pal = get_palette(6)
     values = sorted(stats["sweep_value"].unique())
-    for i, val in enumerate(values):
+    # Two representative values (low/high of whatever grid was actually run),
+    # matching _plot_oddball_pe_trace's own representative-value convention
+    # for its panel (3 there vs 2 here, per instruction) -- avoids both
+    # overcrowding the panel and the get_palette(6) index running out on a
+    # denser sweep_values grid (a real bug this fixed: a 10-value lambda_
+    # grid raised IndexError against a hardcoded 6-color palette).
+    picks = [values[0], values[-1]] if len(values) >= 2 else values
+    for i, val in enumerate(picks):
         sub = stats[stats["sweep_value"] == val].sort_values("observation")
         ax.plot(sub["observation"], sub["mean"], color=pal[i], lw=1.8, label=f"{sym}={val:g}")
         ax.fill_between(sub["observation"], sub["mean"] - sub["sem"],
@@ -4011,32 +4032,56 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
     t_step = t_obs + t_iti
     n_obs = int(np.floor(df["t"].max() / t_step))
 
+    # One point per (sweep_value, pid) -- pooling ACROSS that pid's own 32
+    # real trials before computing decay, exactly mirroring
+    # _load_neural_decay_metrics's own convention (pool-then-decay on the
+    # pid-level per-observation curve, not decay-per-trial-then-averaged).
+    # This project's data is now real (pid, trial) simulations rather than
+    # one row per arbitrary seed -- see neural_experiments.py's
+    # _param_scan_worker docstring for why the earlier constant-input
+    # toy-trial design was replaced.
     rows = []
-    for (sweep_value, seed), g in df.groupby(["sweep_value", "seed"]):
-        g = g.sort_values("t")
-        t_arr = g["t"].to_numpy()
-        value_arr = g["value_decoded"].to_numpy()
-        act_arr = g["weight_tuned_activity"].to_numpy()
+    for (sweep_value, pid), g in df.groupby(["sweep_value", "pid"]):
+        resp_rows, act_rows = [], []
+        for trial, gt in g.groupby("trial"):
+            gt = gt.sort_values("t")
+            t_arr = gt["t"].to_numpy()
+            value_arr = gt["value_decoded"].to_numpy()
+            act_arr = gt["weight_tuned_activity"].to_numpy()
+            for i in range(n_obs):
+                t_resp = t_iti + i * t_step + t_obs
+                resp_mask = np.abs(t_arr - t_resp) < dt * 3
+                resp_val = float(np.mean(value_arr[resp_mask])) if resp_mask.any() else np.nan
+                resp_rows.append({"trial": trial, "observation": i + 1, "response": resp_val})
 
-        responses, activities = [], []
-        for i in range(n_obs):
-            t_resp = t_iti + i * t_step + t_obs
-            resp_mask = np.abs(t_arr - t_resp) < dt * 3
-            responses.append(float(np.mean(value_arr[resp_mask])) if resp_mask.any() else np.nan)
+                t_act = t_iti + i * t_step + NEURAL_READOUT_OFFSET
+                idx_act = int(np.argmin(np.abs(t_arr - t_act)))
+                act_rows.append({"trial": trial, "observation": i + 1,
+                                 "activity": float(act_arr[idx_act])})
 
-            t_act = t_iti + i * t_step + NEURAL_READOUT_OFFSET
-            idx_act = int(np.argmin(np.abs(t_arr - t_act)))
-            activities.append(float(act_arr[idx_act]))
+        resp_df = pd.DataFrame(resp_rows)
+        act_df = pd.DataFrame(act_rows)
+        obs_sorted = sorted(act_df["observation"].unique())
 
-        responses = np.array(responses)
-        activities = np.array(activities)
-        # First observation's own delta convention: |response| (matches
-        # this file's other decay metrics, e.g. _load_neural_decay_metrics).
-        delta = np.concatenate([[abs(responses[0])], np.abs(np.diff(responses))])
+        # Activity: pool across ALL of this pid's trials per observation,
+        # THEN take first-minus-last on that pooled curve.
+        act_by_obs = act_df.groupby("observation")["activity"].mean()
+        act_decay = float(act_by_obs[obs_sorted[0]]) - float(act_by_obs[obs_sorted[-1]])
 
-        resp_decay = float(np.mean(delta[:2]) - np.mean(delta[-2:]))
-        act_decay = float(activities[0] - activities[-1])
-        rows.append({sweep_param: sweep_value, "seed": seed,
+        # Response: per-trial delta (first observation's own delta
+        # convention is |response|, matching this file's other decay
+        # metrics), THEN pool deltas across trials per observation
+        # position, early(first 2) minus late(last 2).
+        resp_df = resp_df.sort_values(["trial", "observation"])
+        resp_df["delta"] = resp_df.groupby("trial")["response"].diff().abs()
+        first_obs = obs_sorted[0]
+        resp_df.loc[resp_df["observation"] == first_obs, "delta"] = (
+            resp_df.loc[resp_df["observation"] == first_obs, "response"].abs())
+        early = resp_df[resp_df["observation"].isin(obs_sorted[:2])]["delta"].mean()
+        late = resp_df[resp_df["observation"].isin(obs_sorted[-2:])]["delta"].mean()
+        resp_decay = float(early) - float(late)
+
+        rows.append({sweep_param: sweep_value, "pid": pid,
                     "resp_decay": resp_decay, "act_decay": act_decay})
 
     return pd.DataFrame(rows)
@@ -4083,24 +4128,29 @@ def make_neural_giant2() -> Path:
           aggregated across the whole grid -- the neural prediction this
           row tests: higher alpha_0 produces a bigger initial response
           AND more dramatic attenuation from learning/value-updating.
-      Row 2 (lambda_=0.1 and 0.7, alpha_0=0.8, n_neurons=500/nc=2000 --
+      Row 2 (lambda_ swept 0.1-1.0, alpha_0=0.7, n_neurons=500/nc=2000 --
         neural_experiments.py's own `param_scan` experiment, NOT
-        `oddball` -- a different design: full 15-observation arbitrary
-        trials (Act 1.2-style, matching the ORIGINAL neural_giant's own
-        row-1 lambda panel), not a windowed surprise response):
-        Col 1: weight-tuned error-neuron activity (Hz) vs observation,
-          one line per lambda_ value, mean +- SEM across --n_seeds --
-          direct structural port of the ORIGINAL neural_giant's own
-          panel 3 (_plot_neural_lambda_activity), just at this figure's
-          own explicit lambda_ values instead of that figure's own base
-          value.
+        `oddball` -- a different design: every REAL soltani_numbers
+        pid's own full 32-trial sequence (CORRECTED this session -- an
+        earlier version used a degenerate constant-input arbitrary toy
+        trial, Act 1.2-style; see param_scan's own docstring for why that
+        was replaced), not a windowed surprise response):
+        Col 1: weight-tuned error-neuron activity (Hz) vs observation, 2
+          representative lambda_ values (low/high of whatever grid was
+          run), mean +- SEM across REAL PIDS -- direct structural port of
+          the ORIGINAL neural_giant's own panel 3
+          (_plot_neural_lambda_activity), just at this figure's own
+          explicit lambda_ values instead of that figure's own base
+          value, and folded hierarchically (trial -> pid) since each
+          replicate is now a real multi-trial participant, not a single
+          arbitrary seed.
         Col 2: decay(deltaR) AND decay(deltaA) vs lambda_, twin axes, one
-          point per (lambda_, seed) -- direct reuse of
+          point per (lambda_, real pid) -- direct reuse of
           _plot_neural_dual_vs_param (the SAME helper the ORIGINAL
-          neural_giant's own row-3 panels use), with seeds standing in
-          for virtual pids as the "many independent draws" axis, since
-          this figure's own design scans explicit parameter values rather
-          than random draws.
+          neural_giant's own row-3 panels use), with real pids playing
+          the "many independent draws" role that `synthetic`'s virtual
+          pids played in that figure, since this figure's own design
+          scans explicit parameter values rather than random draws.
       Row 3 (n_neurons): NOT YET BUILT -- same param_scan structure, own
         fresh scan, once row 2 is confirmed.
 
@@ -4120,7 +4170,7 @@ def make_neural_giant2() -> Path:
     reads its `param_scan` experiment -- both cluster-bound (--mode
     run/submit/collect; a real timing check found even a modest
     single-context oddball run exceeds a reasonable single local call,
-    and param_scan's own full-15-observation trials cost similarly).
+    and param_scan's own per-real-pid 32-trial jobs cost similarly).
     """
     _apply_slide_style()
     fig, axes = plt.subplots(3, 2, figsize=(FIGURE_SIZE[0] * 0.8 * 2 / 3, FIGURE_SIZE[1] * 2.1 * 0.75),

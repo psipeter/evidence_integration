@@ -1059,33 +1059,53 @@ def _simulate_param_scan_trial(params: dict, obs_values: np.ndarray, decoders: d
     }
 
 
-def _param_scan_worker(args, sweep_value: float) -> pd.DataFrame:
-    """One sweep_value's worth of --n_seeds independent arbitrary trials
-    (Act 1.2-style: --n_obs observations, arbitrary --obs_values, no real
-    human data), the other two of {alpha_0, lambda_, n_neurons} held
-    fixed at --base_*. For each seed, reduces the error population's raw
-    per-timestep activity to the WEIGHT-TUNED neurons' own mean (per that
-    seed's own error-ensemble encoders, enc_dim_0 > NEURAL_ENCODER_
-    THRESHOLD) -- matching the ORIGINAL neural_giant figure's own
-    weight-tuned-neuron convention, per instruction, rather than a bulk
-    mean over ALL neurons the way `sweep`'s own mean_error_activity
-    column does.
+def _param_scan_worker(args, sweep_value: float, pid: int) -> pd.DataFrame:
+    """One sweep_value's worth of simulations for ONE REAL pid's own 32
+    real trials from data/soltani_numbers.pkl (TASK_DATAFILE[args.task]
+    generally), the other two of {alpha_0, lambda_, n_neurons} held fixed
+    at --base_*. Each trial uses that trial's own REAL observed sequence
+    and models.counting_integrator.activity_key_for_trial(dataset, trial)
+    for BOTH the activity-map lookup AND the simulation seed -- the exact
+    real-trial convention _probe_worker already uses, NOT an arbitrary
+    toy trial with constant obs_values.
 
-    This reduction happens HERE, not in the figure script, because it
-    needs each seed's own encoders, which only exist inside the live
-    simulation -- storing the full (T, n_neurons) array per seed/
-    sweep_value instead would be prohibitively large (n_seeds x
-    n_sweep_values x ~30000 timesteps x 500 neurons). Downstream
-    per-observation folding and decay-metric computation still happens in
-    make_paper_figures.py, matching this project's convention (compute
-    metrics in figure scripts, not extras scripts) as closely as that
-    constraint allows.
+    CORRECTED this session: an earlier version of this function simulated
+    a single arbitrary constant-input trial (obs_values=ones(n_obs))
+    across --n_seeds independent seeds, per Act 1.2's own toy-demo
+    convention -- appropriate for the ORIGINAL neural_giant's illustrative
+    lambda panel, but never actually reconsidered for THIS use (a
+    quantitative decay-vs-parameter regression), where a flat, unchanging
+    input gives the value ensemble nothing to integrate and produces an
+    activity trend that is an artefact of the degenerate input rather
+    than a real lambda-driven signature -- caught when a decay-metric
+    sign looked flipped relative to the ORIGINAL giant's own (real-trial-
+    based, via `synthetic`) equivalent panel. Every sweep_value now sees
+    every real pid's own full 32-trial sequence, so the "independent
+    replicate" axis for the eventual regression is REAL (pid, trial)
+    data, matching the giant's own original design intent even more
+    directly than that figure's own random-virtual-pid draws did.
+
+    For each trial, reduces the error population's raw per-timestep
+    activity to the WEIGHT-TUNED neurons' own mean (per THAT TRIAL's own
+    error-ensemble encoders, enc_dim_0 > NEURAL_ENCODER_THRESHOLD --
+    encoders genuinely differ per seed/trial, so must be captured per
+    trial, not once per pid) -- matching the ORIGINAL neural_giant
+    figure's own weight-tuned-neuron convention.
+
+    Job granularity is (sweep_value, pid) -- one job per real pid per
+    sweep_value, each running that pid's 32 real trials serially,
+    matching _probe_worker's own per-pid job granularity.
 
     REQUIRED activity file, no _pretrain() fallback -- see this module's
     own top-of-file convention note.
     """
-    obs_values = np.array(args.obs_values, dtype=float) if args.obs_values \
-        else np.ones(args.n_obs)
+    from models.counting_integrator import activity_key_for_trial, fast_decode
+
+    dataset_stem = TASK_DATAFILE[args.task]
+    human = pd.read_pickle(data_path(dataset_stem))
+    human_pid = human[human["pid"] == pid]
+    if human_pid.empty:
+        raise ValueError(f"No human data for pid={pid} in {dataset_stem}")
 
     base_kwargs = dict(alpha_0=args.base_alpha_0, n_neurons=args.base_n_neurons,
                        lambda_=args.base_lambda_)
@@ -1095,102 +1115,126 @@ def _param_scan_worker(args, sweep_value: float) -> pd.DataFrame:
     activity_map = _require_activities(args.task, params["n_neurons"], params["n_neurons_counting"])
 
     rows = []
-    for seed in range(args.n_seeds):
-        key = _toy_activity_key(seed)
-        decoders = _decoders_for_seed(activity_map, key, params["alpha_0"], params["lambda_"])
-        result = _simulate_param_scan_trial(params, obs_values, decoders, seed=key)
+    n_trials = human_pid["trial"].nunique()
+    for ti, (trial, trial_data) in enumerate(human_pid.groupby("trial"), 1):
+        trial_data = trial_data.sort_values("observation")
+        obs_values = trial_data["value"].to_numpy(dtype=float)
+        akey = activity_key_for_trial(args.task, int(trial))
+
+        # REQUIRED, not optional -- a missing key means this activity file
+        # doesn't cover this trial at all; regenerate rather than
+        # silently retraining with mismatched tuning curves. See this
+        # module's own top-of-file convention note.
+        activity = activity_map.get(akey)
+        if activity is None:
+            raise KeyError(
+                f"No precomputed counting activity for key={akey} "
+                f"(dataset={args.task!r}, pid={pid}, trial={int(trial)}). The "
+                f"activity file has keys 1..n_trials -- regenerate with "
+                f"--precompute_activities if this dataset's real trial count "
+                f"has grown."
+            )
+        decoders = fast_decode(activity, alpha_0=params["alpha_0"], lambda_=params["lambda_"])
+
+        result = _simulate_param_scan_trial(params, obs_values, decoders, seed=akey)
 
         weight_idx = np.where(result["encoders"][:, 0] > NEURAL_ENCODER_THRESHOLD)[0]
         if len(weight_idx) == 0:
-            print(f"\n  Warning: sweep_value={sweep_value} seed={seed}: no weight-tuned "
-                  f"neurons found (enc_dim_0 > {NEURAL_ENCODER_THRESHOLD}), skipping")
+            print(f"\n  Warning: pid={pid} trial={trial} {args.sweep_param}={sweep_value}: "
+                  f"no weight-tuned neurons found (enc_dim_0 > {NEURAL_ENCODER_THRESHOLD}), "
+                  f"skipping this trial")
             continue
         weight_tuned_activity = result["error_neurons"][:, weight_idx].mean(axis=1)
 
         rows.append(pd.DataFrame({
             "sweep_value": sweep_value,
-            "seed": seed,
+            "pid": pid,
+            "trial": int(trial),
             "t": result["t"],
             "value_decoded": result["value"],
             "weight_tuned_activity": weight_tuned_activity,
             "n_weight_tuned": len(weight_idx),
         }))
-        print(f"  {args.sweep_param}={sweep_value}  seed {seed + 1}/{args.n_seeds} "
-              f"({len(weight_idx)} weight-tuned neurons)", end="\r", flush=True)
+        print(f"\r  pid={pid} {args.sweep_param}={sweep_value}  trial {ti:3d}/{n_trials}",
+              end="", flush=True)
     print()
 
     if not rows:
         raise RuntimeError(
-            f"No seeds produced weight-tuned neurons for {args.sweep_param}={sweep_value} -- "
-            f"every seed hit the enc_dim_0 > {NEURAL_ENCODER_THRESHOLD} threshold with zero "
-            f"matching neurons; investigate before trusting this sweep_value."
+            f"pid={pid}, {args.sweep_param}={sweep_value}: every real trial hit the "
+            f"enc_dim_0 > {NEURAL_ENCODER_THRESHOLD} threshold with zero matching "
+            f"weight-tuned neurons; investigate before trusting this cell."
         )
     return pd.concat(rows, ignore_index=True)
 
 
 def run_param_scan(args) -> None:
-    """Toy demo (Act 1.2-style): scan ONE of {alpha_0, lambda_, n_neurons}
-    across --sweep_values (other two held fixed at --base_*), --n_seeds
-    independent arbitrary trials per value, reducing to WEIGHT-TUNED
-    neuron activity per seed/timestep (see _param_scan_worker's own
-    docstring) -- built for neural_giant2's row 2 (lambda_) and row 3
-    (n_neurons) panels, which need real per-observation activity AND
-    decay metrics, matching the ORIGINAL neural_giant figure's own row-1/
-    row-3 panels but scanning explicit parameter values (this figure's
-    own convention) rather than random virtual pids (that figure's own
-    convention) -- seeds play the role virtual pids played there.
+    """Scan ONE of {alpha_0, lambda_, n_neurons} across --sweep_values
+    (other two held fixed at --base_*), over REAL soltani_numbers trials
+    -- every swept value sees every real pid's own full 32-trial
+    sequence (per instruction, replacing an earlier degenerate constant-
+    input toy-trial design -- see _param_scan_worker's own docstring),
+    reducing to WEIGHT-TUNED neuron activity per (pid, trial, timestep).
+    Built for neural_giant2's row 2 (lambda_) and row 3 (n_neurons)
+    panels, which need real per-observation activity AND decay metrics.
 
-    Has the same --mode run/submit/collect lifecycle as oddball/probe/
-    synthetic -- one job per sweep_value, --n_seeds trials run serially
-    within that job.
+    Job granularity is (sweep_value, pid) -- --mode run simulates ONE
+    real pid's 32 real trials at ONE sweep_value (matching _probe_
+    worker's own per-pid job granularity); --mode submit loops over
+    every sweep_value x every real pid present in the task's own human
+    data file.
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.mode == "run":
-        if args.sweep_value is None:
-            raise SystemExit("--sweep_value required for --mode run")
+        if args.sweep_value is None or args.pid is None:
+            raise SystemExit("--sweep_value and --pid both required for --mode run")
         tag = _oddball_value_tag(args.sweep_value)
-        out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}_v{tag}.pkl"
+        out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}_v{tag}_pid{args.pid}.pkl"
         if out_path.exists():
             print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
             return
-        df = _param_scan_worker(args, args.sweep_value)
+        df = _param_scan_worker(args, args.sweep_value, args.pid)
         df.to_pickle(out_path)
-        print(f"Saved {len(df):,} rows ({df['seed'].nunique()} seeds) -> {out_path}")
+        print(f"Saved {len(df):,} rows ({df['trial'].nunique()} trials) -> {out_path}")
 
     elif args.mode == "submit":
+        dataset_stem = TASK_DATAFILE[args.task]
+        human = pd.read_pickle(data_path(dataset_stem))
+        pids = sorted(human["pid"].unique().tolist())
         root = str(Path(__file__).resolve().parent.parent)
-        print(f"Submitting {len(args.sweep_values)} param_scan jobs for "
+        print(f"Submitting {len(args.sweep_values)} x {len(pids)} = "
+              f"{len(args.sweep_values) * len(pids)} param_scan jobs for "
               f"sweep_param={args.sweep_param} task={args.task}")
         for v in args.sweep_values:
             tag = _oddball_value_tag(v)
-            out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}_v{tag}.pkl"
-            if out_path.exists():
-                print(f"  {args.sweep_param}={v}: already exists -- skipping")
-                continue
-            cmd = (
-                f"venv/bin/python scripts/neural_experiments.py param_scan "
-                f"--task {args.task} --mode run --sweep_param {args.sweep_param} "
-                f"--sweep_value {v} "
-                f"--base_alpha_0 {args.base_alpha_0} --base_lambda_ {args.base_lambda_} "
-                f"--base_n_neurons {args.base_n_neurons} --n_obs {args.n_obs} "
-                f"--n_seeds {args.n_seeds}"
-            )
-            script = make_job_script(root, [cmd], time_limit="1:0:0", mem="16G")
-            script_path = OUT_DIR / f"_job_param_scan_{args.sweep_param}_{args.task}_v{tag}.sh"
-            script_path.write_text(script)
-            submit_script(script_path, dry_run=args.dry_run)
+            for pid in pids:
+                out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}_v{tag}_pid{pid}.pkl"
+                if out_path.exists():
+                    print(f"  {args.sweep_param}={v} pid={pid}: already exists -- skipping")
+                    continue
+                cmd = (
+                    f"venv/bin/python scripts/neural_experiments.py param_scan "
+                    f"--task {args.task} --mode run --sweep_param {args.sweep_param} "
+                    f"--sweep_value {v} --pid {pid} "
+                    f"--base_alpha_0 {args.base_alpha_0} --base_lambda_ {args.base_lambda_} "
+                    f"--base_n_neurons {args.base_n_neurons}"
+                )
+                script = make_job_script(root, [cmd], time_limit="2:0:0", mem="16G")
+                script_path = OUT_DIR / f"_job_param_scan_{args.sweep_param}_{args.task}_v{tag}_pid{pid}.sh"
+                script_path.write_text(script)
+                submit_script(script_path, dry_run=args.dry_run)
 
     elif args.mode == "collect":
-        files = sorted(OUT_DIR.glob(f"param_scan_{args.sweep_param}_{args.task}_v*.pkl"))
+        files = sorted(OUT_DIR.glob(f"param_scan_{args.sweep_param}_{args.task}_v*_pid*.pkl"))
         if not files:
-            print(f"No param_scan_{args.sweep_param}_{args.task}_v*.pkl files found in {OUT_DIR}")
+            print(f"No param_scan_{args.sweep_param}_{args.task}_v*_pid*.pkl files found in {OUT_DIR}")
             return
         df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
         out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}.pkl"
         df.to_pickle(out_path)
-        print(f"Collected {len(files)} value(s) -> {out_path}")
-        print(df.groupby("sweep_value")["seed"].nunique())
+        print(f"Collected {len(files)} (value, pid) file(s) -> {out_path}")
+        print(df.groupby("sweep_value")["pid"].nunique())
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -1279,15 +1323,14 @@ def main() -> None:
     p_scan.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
     p_scan.add_argument("--sweep_param", required=True, choices=["alpha_0", "lambda_", "n_neurons"])
     p_scan.add_argument("--sweep_value", type=float, default=None,
-                       help="Single value for --mode run (one job per value).")
+                       help="Single value for --mode run (one job per (value, pid)).")
     p_scan.add_argument("--sweep_values", type=float, nargs="+", default=None,
                        help="Full list of values for --mode submit.")
+    p_scan.add_argument("--pid", type=int, default=None,
+                       help="Real pid from the task's own human data file (--mode run).")
     p_scan.add_argument("--base_alpha_0", type=float, required=True)
     p_scan.add_argument("--base_lambda_", type=float, required=True)
     p_scan.add_argument("--base_n_neurons", type=int, required=True)
-    p_scan.add_argument("--n_obs", type=int, default=15)
-    p_scan.add_argument("--obs_values", type=float, nargs="+", default=None)
-    p_scan.add_argument("--n_seeds", type=int, default=10)
     p_scan.add_argument("--dry_run", action="store_true")
     p_scan.set_defaults(func=run_param_scan)
 
