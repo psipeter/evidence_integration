@@ -6479,3 +6479,240 @@ numbers_responses.pkl`/`activities_error_soltani_numbers_*.pkl`. That
 rewiring, plus the weight-tuned-neuron filtering logic (needs updating to
 use the new PER-TRIAL encoders rather than the old per-pid ones), is the
 next concrete step once the cluster run finishes.
+
+---
+
+## Rewiring neural_giant to synthetic data, two real bugs, sampling bounds, and neural_giant2 (this session)
+
+### Rewiring make_paper_figures.py to the synthetic output
+
+`_load_neural_probe_variability`/`_load_neural_decay_metrics` were
+rewritten to read `synthetic_soltani_numbers_{probe,activity,encoders,
+params}.pkl` instead of the old fitted-pid `probe`/`activities_error_*`/
+`NEF_soltani_numbers_responses.pkl` files. The weight-tuned-neuron
+filtering for activity decay had to change shape, not just source: since
+encoders are now saved PER TRIAL (confirmed earlier this session that a
+trial's own seed determines its own encoders), identifying weight-tuned
+neurons is now a groupby-apply over (virtual_pid, trial) pairs rather
+than a single per-pid lookup. Column names (`resp_std`, `pe_std`,
+`act_decay`, `resp_decay`, `alpha_0`, `lambda_`) were kept identical to
+the old loaders' own output, so none of the four downstream plotting
+functions needed any changes at all -- confirmed by checking their source
+directly rather than assuming.
+
+### First real result, and immediate concern
+
+Initial run (old Uniform(0,1)/{100,...,1000} bounds): sigma-vs-PE-
+variability improved (r=0.41->0.55) but the decay-related relationships
+collapsed -- activity-decay-vs-response-decay went from r=0.83 (original
+real-fit figure) to r=-0.13 (null), and lambda-vs-decay from r=0.74/0.84
+to r=-0.02/0.08 (null). The person immediately flagged this as suspicious
+rather than accepting it, specifically suspecting the seed-handling
+change introduced a bug -- which led directly to finding bug #1 below
+(though, as it turned out, bug #2 was the dominant cause of THIS specific
+collapse).
+
+### Bug #1: activity_key_for_trial missing from the new pipeline
+
+Checking whether `scripts/check_NEF_pipeline.py` could detect the
+suspected bug (it couldn't -- confirmed directly that its own checks
+never call anything in neural_experiments.py, only validating consistency
+within models/NEF.py itself) led to comparing `_simulate_trial_full`
+directly against the canonical `models.NEF._simulate_trial` instead. This
+surfaced a REAL, separate bug in the OLDER `_probe_worker` (built earlier
+this session, feeding the ORIGINAL fitted-pid Acts 2/3 data): it used
+`activity_map.get(int(trial))` and `seed=int(trial)` directly, instead of
+`models.counting_integrator.activity_key_for_trial(dataset, trial)` (the
+shared helper `NEF.run()` itself uses, existing specifically because
+soltani trials are 0-indexed while activity keys start at 1, and because
+a network's own encoders are seeded identically to its counting
+subnetwork -- confirmed directly in `build_network`: `net.error =
+nengo.Ensemble(..., seed=seed, ...)`). Fixed by switching to
+`activity_key_for_trial` for both the lookup and the seed; the affected
+old `probe_soltani_numbers*.pkl` files were deleted rather than kept,
+since it's unknown how much any given trial was actually affected without
+regenerating.
+
+### Bug #2: raw vs rescaled observation values (the dominant cause)
+
+Directly comparing `_simulate_trial_full` against `_simulate_trial` on
+identical inputs (same params/seed/obs_values) found the two agreed to
+floating-point precision ONCE a smaller, separate discrepancy in the
+response-readout formula was fixed (`_simulate_trial_full` used a single-
+point lookup; `models.NEF._extract_responses` averages over a small
+window, `|t - readout_time| < dt*3` -- fixed to match exactly). This
+confirmed the SIMULATION machinery itself was correct, which reframed the
+question: why did the person's own observation of "|Delta R| decay values
+5-20x larger than the original figure" still not add up?
+
+The actual answer surfaced from a different direction: the person asked
+for a check-NEF-pipeline comparison at a real (alpha_0, n_neurons=1000)
+combination against RL_lambda, which came back in a sane ballpark (RMSE
+~0.07, growing across the trial as expected) -- ruling out a broken core
+pipeline. Then, comparing an actual virtual pid's own NEF response
+sequence against what RL_lambda would predict for the identical trial
+revealed the real problem directly: `_synthetic_worker` was feeding RAW
+0-100-scale pool values (e.g. "16, 14, 21, ...") straight into NEF. The
+pool JSON (`task_backend/generate_sequences.py`'s own output) is on the
+raw scale; `data/soltani_numbers.pkl`'s own "value" column (what the
+older, correctly-working `_probe_worker` reads) had ALREADY been rescaled
+(x/50-1) by `scripts/build_model_inputs.py`'s `build_from_df()` before
+ever reaching NEF. Feeding raw values saturates NEF's ensembles
+(radius_e=1.5, radius_v=1.0) almost immediately -- confirmed directly: a
+sample trial's NEF response sequence was `[0.22, 0.42, 0.60, 0.76, 0.95,
+0.99, 0.99, ...]`, saturating near +1 rather than tracking a running
+mean, exactly the "plausible-looking but meaningless output" failure mode
+`nef_obs_values()`'s own docstring warns about. Fixed by applying the
+exact same x/50-1 rescale to the pool's raw values before simulating,
+task-aware (numbers needs it; colors' own pool values are already +-1 and
+must NOT be rescaled again). Confirmed directly after the fix: the same
+sample trial's rescaled inputs (all negative, -0.68 to -0.98) produced a
+smooth, sensible NEF response trajectory (-0.32 to -0.76), not saturation.
+
+Regenerating with BOTH fixes recovered activity-decay-vs-response-decay
+to r=0.86 (matching the original r=0.83) and brought lambda-vs-decay from
+null back to real and significant (r=0.16/0.38, still weaker than the
+original r=0.74/0.84 -- which motivated the bounds investigation below).
+Sigma-vs-PE-variability landed at r=0.43, and a new, unexpectedly strong
+finding appeared: alpha_0-vs-PE-variability at r=0.67 (mechanistically
+sensible: PE = alpha(t) x (obs-value), so alpha_0 directly scales the PE
+product's own variance).
+
+### Sampling bounds investigation
+
+The person asked what happens restricting to n_neurons>=500: sigma-vs-PE-
+variability jumped to r=0.81 and alpha_0-vs-sigma(response) went from
+null (r=0.11) to real (r=0.50) -- but the decay-related relationships
+barely moved. This split makes mechanistic sense: sigma is DIRECTLY a
+noise-driven quantity, so it should be most sensitive to n_neurons' own
+role controlling spiking-noise magnitude; decay reflects a systematic
+drift (alpha(t) discounting), a much less noise-dependent signal.
+
+The person was still surprised lambda-vs-response-decay stayed weak, and
+asked to check n_neurons>500 AND lambda_>0.1 AND alpha_0>0.2 together.
+Checking each restriction separately (not just the combination) found
+alpha_0>0.2 ALONE did almost all the work (lambda-vs-decay jumping to
+r=0.36/0.54), while n_neurons>500 alone gave a smaller boost and
+lambda_>0.1 alone actually WEAKENED the correlation slightly (trimming
+only the low end of lambda's own range costs power to detect lambda's own
+slope). This has a clean, direct mechanistic explanation, not just an
+empirical pattern: alpha(t) = alpha_0/t^lambda, and at very low alpha_0,
+alpha(t) is near zero for EVERY t regardless of lambda -- there's no
+updating for lambda to modulate in the first place, a genuine floor
+effect in the equation itself, not a noise problem more neurons could
+ever fix.
+
+Checking the REAL fitted alpha_0 distribution for soltani_numbers
+confirmed this restriction doesn't exclude real behaviour: 0 of 46 real
+pids have alpha_0<0.2, and the true observed minimum is 0.384 (5th
+percentile 0.481) -- so >=0.2 was already safe, just looser than
+necessary; a tighter floor around 0.4-ish would track the real population
+more precisely, though the real distribution is heavily skewed toward 1
+regardless (median 0.994), which a uniform sampling range never fully
+matches.
+
+**Final bounds adopted**: alpha_0 ~ Uniform(0.5, 1), lambda_ ~
+Uniform(0.1, 1), n_neurons ~ uniform choice over {500, 600, ..., 1500}
+(raised from {100,...,1000} for the same n_neurons>=500 reasoning).
+Regenerating with these bounds: EVERY relationship in the figure came out
+real and significant with no post-hoc filtering needed -- sigma-vs-PE-
+variability r=0.80, alpha_0-vs-sigma(response) r=0.31, activity-vs-
+response-decay r=0.67, lambda-vs-decay r=0.52/0.64 (both up substantially
+from the original wide-bounds r=0.16/0.38). The counting-activity
+precompute grid was correspondingly widened to 500-1500 (11 values,
+n_neurons=n_neurons_counting, n_sims=1 -- confirmed sufficient, since
+`synthetic`'s own variability comes from repeated qids across trials, not
+an ensemble average needing n_sims>=2).
+
+### neural_giant layout restructure
+
+Per instruction: row 2 (sigma_R/sigma_PE) and row 3 (DeltaR/DeltaA-decay)
+each now lead with their own scatter-vs-scatter panel, then three twin-
+axis panels (one per alpha_0/lambda_/n_neurons) via a new shared
+`_plot_neural_dual_vs_param` helper -- a genuine breakdown of how much
+each parameter individually contributes, not a substitute for the still-
+pending multivariate regression. Y-axes (including twin axes) are shared
+across each full row, applied manually after plotting since twin axes
+aren't reachable via `plt.subplots`' own `sharey` (they're created per-
+panel, not at subplot-creation time). Point size reduced substantially
+and alpha lowered throughout, emphasizing the regression line and its CI
+band over individual points. Axis labels: "Fitted " prefix dropped,
+"n_neurons" -> "neurons", 0 included as an x-tick where the parameter is
+bounded and 0 is a meaningful reference (alpha_0/lambda_ panels and both
+scatter panels; NOT n_neurons, where real data starts at 500 and forcing
+the axis to 0 would waste half the panel on empty space).
+
+### neural_giant2: a second figure, the oddball paradigm
+
+The person wanted a different angle: isolate each of alpha_0/lambda_/
+n_neurons's own causal contribution to the error population's response to
+a SURPRISING observation, rather than the giant's own random-covariation
+design. Design, settled iteratively:
+
+- 3 observations clustered tightly around a center, then one "oddball"
+  observation deviating from it by a fixed amount -- after the 3
+  clustered observations, the value population should have converged
+  near the center, so the error population's response represents
+  |oddball - center|.
+- The person's own prediction, stated explicitly: for a FIXED deviation
+  MAGNITUDE, the response (in abs(PE)) should be roughly independent of
+  which center it's centered on. Rather than assume this, it's checked
+  directly via a dedicated panel (see below) -- built in per instruction
+  ("it can be a 3rd column... removed if it shows a trivial result"),
+  since a trivial (fully-overlapping) result is itself the thing that
+  justifies aggregating across centers elsewhere in the figure, not
+  wasted verification.
+- Simulated across a full grid: cluster_centers x oddball_deviations x
+  one swept parameter (the other two held fixed at explicit --base_*
+  values), using abs(decoded PE) throughout. One cluster job per grid
+  cell (`--mode run/submit/collect`, same lifecycle as `synthetic`/
+  `probe` -- a real timing check found even a modest single-context run
+  (5 values x 20 seeds) exceeds a reasonable single local call, well
+  before the full grid multiplies that further).
+- Values are on the raw 0-100 scale (matching how a person would
+  describe them, e.g. "60, 59, 61" then "70") -- rescaled via the exact
+  same x/50-1 transform bug #2 above required, applied task-aware inside
+  `_oddball_worker` this time from the start.
+- Deviation magnitude was narrowed from an initial +-15/+-10 to just
+  +-10 (per instruction), halving the grid from 80 to 40 jobs for the
+  first real run.
+
+**Layout** (3x3, one row per parameter): col 1 = |decoded PE| vs time at
+one representative (center, deviation) context, 3 representative values
+of that row's parameter; col 2 = that parameter (x) vs max |decoded PE|
+AND % decrease by trial end, twin axes, mean +- SEM aggregated across the
+WHOLE grid; col 3 = the center-invariance check itself, one line per
+cluster_center at a fixed deviation and (near-)base parameter value.
+
+**Verification before trusting any real run**: built a synthetic grid
+file with KNOWN properties (PE amplitude deliberately made proportional
+to the swept parameter, decay rate deliberately made parameter-
+independent, response deliberately made center-independent) and confirmed
+all three panel functions reproduce exactly what those known properties
+predict -- max PE scaling with the parameter, a flat % decrease line, and
+perfect overlap across centers in the invariance panel. This is a code-
+correctness check, not a result -- the real prediction (whether alpha_0
+genuinely produces bigger AND more-attenuated responses, and whether
+centers genuinely don't matter) is still unconfirmed pending the actual
+cluster run.
+
+**Status**: row 1 (alpha_0) built and code-verified; data submitted to
+the cluster (`--cluster_centers 20 40 60 80 --cluster_spread 1
+--oddball_deviations -10 10 --sweep_values 0.2 0.4 0.6 0.8 1.0
+--base_alpha_0 0.7 --base_lambda_ 0.7 --base_n_neurons 500`, n_neurons=
+500/nc=2000 held fixed -- the RMSE production default) but not yet
+collected. Rows 2 (lambda_) and 3 (n_neurons) are not yet built.
+
+### A real infrastructure caveat, encountered and resolved mid-session
+
+During this session, `view` (filesystem MCP) and bash-tool file reads both
+briefly showed STALE content immediately after a real, successful
+`edit_file` write (confirmed by the tool's own diff output) -- direct
+bash writes were confirmed NOT to persist to the shared file at all,
+while bash READS eventually caught up to a successful edit_file write
+after a short lag, rather than staying permanently stale. Treated as a
+transient consistency delay rather than a split-brain issue going
+forward: `edit_file`/`str_replace` remain the only reliable way to
+persist code changes; bash reads used for verification should be treated
+with a little skepticism immediately after a write, re-checked if a
+result looks unexpectedly stale.

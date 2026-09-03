@@ -210,41 +210,57 @@ rather than splitting it across two tasks that each only show half.
 ### Implementation
 - `scripts/neural_experiments.py` -- generalises extras_carrabin.py's
   pattern (param-grid sweeps, probe simulations) to an arbitrary `--task`,
-  since none of it is actually carrabin-specific under the hood. Four
+  since none of it is actually carrabin-specific under the hood. Five
   experiments: `raster_demo` (Act 1, one trial, arbitrary params, full
   per-timestep error-population output for a spike raster), `sweep` (Act 1,
   one OR two swept parameters -- a cross product if two -- full
   per-timestep resolution), `probe` (fitted-pid probe simulation -- kept as
   a real, independently-useful experiment, but superseded for Acts 2/3 by
   `synthetic` below), `synthetic` (Acts 2/3's actual data source -- see
-  Status below). Output: `data/runs/neural_experiments/`.
-- `scripts/make_paper_figures.py`'s `make_neural_giant()` builds the figure
-  itself. Currently 2x4: row 1 = Act 1's three panels (+1 empty slot); row
-  2 = Act 2/3's four panels, currently sourced from the (buggy, since fixed
-  -- see Status) fitted-pid `probe` data, pending rewiring to `synthetic`'s
-  output.
+  Status below), `oddball` (a SEPARATE figure, `neural_giant2` -- see its
+  own section below, not part of the Acts 1-5 structure). Output:
+  `data/runs/neural_experiments/`.
+- `scripts/make_paper_figures.py`'s `make_neural_giant()` builds the Acts
+  1-3 figure. Currently 3x4: row 1 = Act 1's three panels (+1 empty slot);
+  row 2 = sigma_R/sigma_PE (scatter, then one twin-axis panel per
+  alpha_0/lambda_/n_neurons via a shared `_plot_neural_dual_vs_param`
+  helper); row 3 = the same structure for DeltaR/DeltaA-decay. Y-axes
+  (including twin axes) are shared across each full row, set manually
+  after plotting since `plt.subplots`' own `sharey` doesn't reach
+  per-panel twins.
 
 ### Status
 - **Act 1: DONE.** All 3 panels built, data generated locally (cheap --
   see docs/HISTORY.md for the exact parameter values used).
-- **Act 2/3: DATA GENERATION IN PROGRESS, figure not yet rewired to it.**
-  Reconsidered from the original fitted-pid `probe`/`save_activities`
-  approach (see docs/HISTORY.md for the full reasoning) to a synthetic
-  forward-simulation approach:
+- **Act 2/3: DONE**, via the synthetic forward-simulation approach
+  (reconsidered from the original fitted-pid `probe`/`save_activities`
+  approach -- see docs/HISTORY.md for the full reasoning):
   - N=200 "virtual pids", each an independently-generated real trial
     sequence (`task_backend/generate_sequences.py --task numbers --n_pool
     200`, same generative design real participants get, written to
     `data/synthetic_pool/`, never touching real experimental data) paired
-    with ONE randomly-drawn (alpha_0, lambda_ ~ Uniform(0,1); n_neurons ~
-    uniform choice over {100,...,1000}) -- NOT a fitted pid's own params.
-    Justification: these are qualitative covariation predictions for
-    future empirical studies to test, not fits to existing behavioural
-    data, so artificial data is exactly as good as real-pid data for this
-    purpose, and avoids two real problems the fitted-pid version hit: (a)
-    soltani_numbers' own fitted alpha_0 is too tightly clustered near
-    ceiling to reveal any alpha_0-driven effect at all, and (b) NEF's own
-    NLL-based n_neurons search (above) was expensive and eventually
-    abandoned.
+    with ONE randomly-drawn (alpha_0, lambda_, n_neurons) -- NOT a fitted
+    pid's own params. Justification: these are qualitative covariation
+    predictions for future empirical studies to test, not fits to
+    existing behavioural data, so artificial data is exactly as good as
+    real-pid data for this purpose.
+  - **Sampling bounds, FINAL**: alpha_0 ~ Uniform(0.5, 1), lambda_ ~
+    Uniform(0.1, 1), n_neurons ~ uniform choice over {500, 600, ...,
+    1500}. Narrowed from an initial Uniform(0,1)/{100,...,1000} after
+    directly checking two things: (1) alpha_0 below ~0.2-0.4 produces a
+    genuine floor effect in alpha(t)=alpha_0/t^lambda -- lambda has
+    nothing to modulate when alpha_0 is that small, confirmed by
+    restricting the original wide-range data to alpha_0>0.2 and watching
+    the lambda-vs-decay correlations jump from r=0.16-0.38 to r=0.36-0.54;
+    (2) n_neurons below 500 added enough measurement noise to null out
+    the sigma-related relationships specifically (n_neurons>=500
+    subsetting took sigma-vs-PE-variability from r=0.43 to r=0.81) while
+    barely moving the decay-related ones (already noise-robust, since
+    decay reflects a systematic drift rather than a directly
+    noise-driven quantity). With the final bounds, EVERY relationship in
+    the figure is real and significant with no post-hoc filtering needed
+    (lambda-vs-decay in particular: r=0.52/0.64, up from r=0.16/0.38
+    at the original wide bounds).
   - `scripts/neural_experiments.py synthetic --mode run/submit/collect` --
     ONE simulation pass per virtual pid saves response, decoded PE,
     per-neuron error-population activity, AND that trial's own encoders,
@@ -255,24 +271,90 @@ rather than splitting it across two tasks that each only show half.
     file (`utils/save_activities.py`'s own convention, which never varies
     `seed` across trials at all) would silently misidentify weight-tuned
     neurons for any trial but the one it was captured from.
-  - Along the way, found and fixed a real, previously-uncaught bug in the
-    OLD fitted-pid `_probe_worker`: it looked up `activity_map.get(int(
-    trial))` and seeded simulations with the raw (0-indexed) trial number
-    directly, instead of `models.counting_integrator.
-    activity_key_for_trial(dataset, trial)` (the shared helper that
-    exists specifically for this -- soltani trials are 0-indexed, activity
-    keys start at 1). This either missed the activity map for trial 0
-    entirely, or paired a trial's simulation with a DIFFERENT trial's own
-    tuning curves for every other trial. Fixed; the old (affected)
-    `probe_soltani_numbers*.pkl` files were deleted rather than kept.
+  - **Two real, previously-uncaught bugs found and fixed** while building
+    this (both confirmed directly, not just suspected -- see
+    docs/HISTORY.md for the full diagnostic trail):
+    1. The OLD fitted-pid `_probe_worker` looked up `activity_map.get(
+       int(trial))` and seeded simulations with the raw (0-indexed) trial
+       number directly, instead of `models.counting_integrator.
+       activity_key_for_trial(dataset, trial)` (the shared helper that
+       exists specifically for this -- soltani trials are 0-indexed,
+       activity keys start at 1, and a network's encoders are only valid
+       for the seed they were built with). Fixed; the affected
+       `probe_soltani_numbers*.pkl` files were deleted rather than kept.
+    2. `_synthetic_worker`/`_simulate_trial_full` fed RAW 0-100-scale pool
+       values directly into NEF -- the pool JSON (`task_backend/
+       generate_sequences.py`'s own output) is on the raw scale, unlike
+       `data/soltani_numbers.pkl`'s own "value" column, which
+       `scripts/build_model_inputs.py`'s `build_from_df()` has ALREADY
+       rescaled (x/50-1) before real human data ever reaches NEF. Raw
+       values saturate NEF's ensembles (radius_e=1.5, radius_v=1.0) and
+       produce plausible-looking but meaningless output -- exactly what
+       `nef_obs_values()`'s own docstring warns about. This was the
+       DOMINANT cause of an early, alarming finding (simulated |Delta R|
+       decay values 5-20x larger than the original fitted-pid figure) --
+       fixing it alone recovered the DeltaA-vs-DeltaR-decay correlation
+       from r=-0.13 (null) back to r=0.86, essentially matching the
+       original r=0.83. Fixed by applying the exact same x/50-1 transform
+       to the pool's raw "values" before simulating (numbers-specific;
+       colors' own pool values are already +-1 and must NOT be
+       rescaled again).
   - Counting-activity files: regenerated at a clean, uniform n_sims=1 for
-    all 10 values (100-1000 step 100, n_neurons=n_neurons_counting) for
-    soltani_numbers -- the earlier NLL-search attempt had left three of
-    these (200/500/1000) inflated to n_sims=20, no longer needed once
-    n_sims=1 was confirmed sufficient for `synthetic`'s own probe-style
-    variability (repeated qids across real/synthetic trials, not an
-    ensemble average).
+    all 11 values (500-1500 step 100, n_neurons=n_neurons_counting) for
+    soltani_numbers -- confirmed n_sims=1 is sufficient for `synthetic`'s
+    own probe-style variability (repeated qids across real/synthetic
+    trials, not an ensemble average needing n_sims>=2).
 - **Act 4/5: NOT STARTED.**
+
+### neural_giant2 -- a second, parameter-by-parameter figure (scripts/make_paper_figures.py's own make_neural_giant2())
+
+A separate figure from Acts 1-5, using a different data-generation
+mechanism specifically designed to isolate each of alpha_0/lambda_/
+n_neurons's own causal contribution to the error population's response to
+a SURPRISING observation -- complementary to the giant's own random-
+virtual-pid covariation design, not a replacement for it.
+
+**Design**: an "oddball" paradigm. 3 observations clustered tightly around
+a center value, then one observation deviating from it by a fixed amount
+("the oddball") -- after the first 3 (clustered) observations, the value
+population should have converged near the cluster center, so the error
+population's response to the oddball represents |oddball - center|, which
+should be roughly INDEPENDENT of the center itself for a fixed deviation
+magnitude (this is checked directly, not assumed -- see below). Simulated
+across a full grid of (cluster_centers x oddball_deviations x one swept
+parameter, the other two held fixed), using abs(decoded PE) throughout.
+
+**Layout**: 3x3, one row per parameter. Each row: col 1 = |decoded PE| vs
+time at one representative (center, deviation) context, 3 representative
+values of that row's parameter; col 2 = that parameter (x) vs max |decoded
+PE| AND % decrease by trial end, twin axes, mean +- SEM aggregated across
+the WHOLE grid (legitimate precisely because of the center-invariance
+check in col 3 -- if that check ever showed real center-dependence, this
+aggregation would need reconsidering); col 3 = the center-invariance check
+itself -- |decoded PE| vs time, one line per cluster_center, same
+deviation and (near-)base value of the row's own parameter. Kept in the
+figure even if trivial (fully overlapping lines), per instruction, since
+it's a real verification the aggregation in col 2 depends on, not just
+decoration.
+
+**Status**: Row 1 (alpha_0) built and code-verified (against a synthetic
+grid file with known properties -- confirmed the aggregation and
+invariance-check logic both reproduce correctly). Data generation
+submitted to the cluster (`oddball --mode submit`, one job per grid cell --
+like `synthetic`, a real timing check found even a modest single-context
+run exceeds a reasonable single local call) but not yet collected;
+current grid is `--cluster_centers 20 40 60 80 --cluster_spread 1
+--oddball_deviations -10 10 --sweep_values 0.2 0.4 0.6 0.8 1.0
+--base_alpha_0 0.7 --base_lambda_ 0.7 --base_n_neurons 500`
+(n_neurons=500/nc=2000, the RMSE production default, held fixed for this
+row). Rows 2 (lambda_) and 3 (n_neurons) are NOT YET BUILT -- same
+structure, own fresh oddball grid each, once row 1's real (not just
+synthetic-test) result is confirmed.
+
+Expected prediction for row 1 (not yet confirmed with real data): higher
+alpha_0 produces both a bigger initial response (higher max |decoded PE|)
+AND more dramatic attenuation from learning/value-updating (larger %
+decrease by trial end).
 
 ## Central cognitive model
 
@@ -1599,9 +1681,13 @@ motivation/structure. All commands below target `soltani_numbers`.
     # Act 2/3 data source -- synthetic virtual pids (cluster, per-virtual-pid)
     # Random (alpha_0, lambda_, n_neurons), NOT a fitted pid's own params --
     # see docs/HISTORY.md for why the original fitted-pid probe/save_
-    # activities plan was abandoned. Requires a pre-generated pool of
-    # synthetic trial sequences first (task_backend's own generative
-    # design, NOT touching any real experimental data):
+    # activities plan was abandoned. Sampling bounds are baked into
+    # _synthetic_params itself (alpha_0 ~ U(0.5,1), lambda_ ~ U(0.1,1),
+    # n_neurons ~ choice({500,...,1500}) -- not CLI flags; edit that
+    # function directly if the bounds ever need to change again).
+    # Requires a pre-generated pool of synthetic trial sequences first
+    # (task_backend's own generative design, NOT touching any real
+    # experimental data):
     python task_backend/generate_sequences.py --task numbers --n_pool 200 \
         --pool_dir data/synthetic_pool
 
@@ -1609,6 +1695,22 @@ motivation/structure. All commands below target `soltani_numbers`.
         --mode submit --n_pids 200
     python scripts/neural_experiments.py synthetic --task soltani_numbers \
         --mode collect
+
+    # neural_giant2's own data source -- oddball paradigm (cluster, per grid cell)
+    # 3 clustered observations then one surprising ('oddball') observation,
+    # across a (cluster_centers x oddball_deviations x one swept parameter)
+    # grid, the other two params held fixed. abs(decoded PE) throughout.
+    # Currently only the alpha_0 row (lambda_=0.7, n_neurons=500/nc=2000,
+    # the RMSE production default, held fixed):
+    python scripts/neural_experiments.py oddball --task soltani_numbers \
+        --mode submit --sweep_param alpha_0 \
+        --sweep_values 0.2 0.4 0.6 0.8 1.0 \
+        --cluster_centers 20 40 60 80 --cluster_spread 1 \
+        --oddball_deviations -10 10 \
+        --base_alpha_0 0.7 --base_lambda_ 0.7 --base_n_neurons 500 --n_seeds 20
+    python scripts/neural_experiments.py oddball --task soltani_numbers \
+        --mode collect --sweep_param alpha_0 --cluster_spread 1 \
+        --base_alpha_0 0.7 --base_lambda_ 0.7 --base_n_neurons 500
 
     # Output: data/runs/neural_experiments/
     #   raster_demo_soltani_numbers.pkl
@@ -1619,9 +1721,12 @@ motivation/structure. All commands below target `soltani_numbers`.
     #     for Acts 2/3 by `synthetic` below but kept as its own experiment
     #   synthetic_soltani_numbers_{probe,activity,encoders,params}_pid{n}.pkl
     #     (per-virtual-pid), synthetic_soltani_numbers_{...}.pkl (collected)
+    #   oddball_{sweep_param}_soltani_numbers_c{center}_d{deviation}_v{value}.pkl
+    #     (per grid cell), oddball_{sweep_param}_soltani_numbers.pkl (collected)
 
-    # Build the figure (reads whatever's currently in data/runs/neural_experiments/):
+    # Build the figures (each reads whatever's currently in data/runs/neural_experiments/):
     python scripts/make_paper_figures.py neural_giant
+    python scripts/make_paper_figures.py neural_giant2
 
 ---
 
