@@ -6716,3 +6716,121 @@ forward: `edit_file`/`str_replace` remain the only reliable way to
 persist code changes; bash reads used for verification should be treated
 with a little skepticism immediately after a write, re-checked if a
 result looks unexpectedly stale.
+
+### neural_giant2's param_scan: a degenerate-input bug, then a full redesign
+
+A later session revisited `neural_giant2`'s rows 2/3 (lambda_/n_neurons,
+the `param_scan` experiment) after the oddball/param_scan debugging above
+had settled. Several separable things happened, in order:
+
+**1. A real bug: constant input gives the model nothing to integrate.**
+The original `param_scan` (see above) simulated ONE arbitrary trial with
+`obs_values=ones(n_obs)` -- appropriate for the ORIGINAL neural_giant's
+own illustrative Act 1.2 lambda panel, carried over unexamined into a
+NEW use (a quantitative decay-vs-parameter regression). A flat,
+unchanging input gives the value ensemble nothing to actually integrate,
+so any activity trend across observations was an artefact of the
+degenerate input, not a real lambda-driven signature. Caught when the
+person noticed the resulting deltaA decay metric's sign looked flipped
+relative to the ORIGINAL giant's own (real-trial-based, via `synthetic`)
+equivalent panel. Direct comparison confirmed the two decay formulas were
+IDENTICAL in sign convention (both "start minus end") -- the discrepancy
+was the generative design, not a missing minus sign.
+
+**2. Fix: move to real trials, per-pid.** `param_scan` was rewritten to
+run on REAL soltani_numbers trials -- each replicate is one real pid,
+using that pid's own 32 real trials, with `activity_key_for_trial`
+providing both the activity-map lookup and simulation seed for each
+trial (the same convention `_probe_worker` already uses). Every swept
+parameter value initially still saw every real pid (a (sweep_value, pid)
+full cross-product, ~46 pids x N values = job count multiplying
+quickly).
+
+**3. A design problem, then ANOTHER fix: per-replicate random draws.**
+Once real data was flowing, the person noticed the decay-vs-param
+regression panel (col 2) had an unnatural, discrete-strip appearance --
+every pid landed on the exact same handful of x-positions (the shared
+explicit grid), rather than a genuinely continuous parameter axis. Fixed
+by moving to ONE random draw per replicate: each real pid (or, later,
+each synthetic virtual_pid) gets its OWN single value of the swept
+parameter, drawn uniformly from `[--sweep_low, --sweep_high]`,
+deterministically seeded per (trial_source, sweep_param, pid) via
+`zlib.crc32` on an explicit byte string. Using Python's own built-in
+`hash()` for this was considered and explicitly rejected mid-implementation
+before it ever shipped: `hash()` on `str` is randomized per-process
+(`PYTHONHASHSEED`), so seeding from it would have silently drawn a
+DIFFERENT value for the same pid on every separate cluster job -- a
+reproducibility bug that would have been very hard to notice after the
+fact (each individual run looks fine; only a cross-run comparison would
+reveal the drift). Job granularity dropped from (sweep_value, pid) to
+(pid) alone as a direct consequence -- one job per replicate, not one
+per (value, replicate).
+
+**4. Raising N: the synthetic 200-member pool.** With per-pid random
+draws working, the person asked to increase N past the ~46 real pids
+available by running the same design on the pre-generated synthetic
+pool (`data/synthetic_pool/sequences_numbers.json`, 200 members x 32
+trials each, same structure `synthetic`'s own virtual pids use).
+Confirmed directly before implementing: pool JSON values are on the RAW
+0-100 scale (e.g. `[16, 14, 21, 16, 24]`), NOT canonical [-1,1] -- same
+rescale bug class as bug #2 far above, this time avoided proactively by
+checking `_synthetic_worker`'s own docstring first rather than
+discovering it via saturated ensembles. `--trial_source {real,synthetic}`
+added as an explicit choice on `param_scan`'s own CLI, rather than one
+silently replacing the other.
+
+**5. Col 1's own redesign: threshold groups, not representative values.**
+With every replicate now having its OWN random value rather than sharing
+a fixed grid, `_plot_neural_giant2_activity_vs_obs` (row 2/3 col 1) could
+no longer pick "the low/high value" the way the original grid-based
+version did. First fix: pick whichever single pid's own draw landed
+NEAREST each target (0.1, 0.7) and plot just that one pid's own curve.
+Superseded almost immediately, per instruction, by a group-based version:
+every pid with `sweep_param<=low_thresh` (line 1) and every pid with
+`sweep_param>=high_thresh` (line 2) -- letting EVERY matching replicate
+contribute, not just the single nearest one. Combined with a separate
+instruction to actually use seaborn's own automatic mean+CI aggregation
+here (matching `_plot_oddball_pe_trace`'s already-established convention
+-- hand seaborn a long-format frame at the correct unit-of-independence,
+let it aggregate, rather than manually computing mean/SEM +
+`fill_between`): each matching pid's own trials are pre-folded to ONE row
+per (pid, observation) first (raw per-timestep samples within a trial
+aren't independent draws and would otherwise make seaborn's own CI
+falsely tight), THEN that per-pid frame is handed to
+`sns.lineplot(hue="group")`, which computes the mean and CI band across
+pids itself. N per group now appears directly in its own legend entry.
+
+**6. Two new DV-vs-DV panels (col 3), one per row.** The ORIGINAL
+neural_giant already pairs a "two dependent variables plotted directly
+against each other" panel with every row (panel 5: sigma_R vs sigma_PE;
+panel 9: DeltaR-decay vs DeltaA-decay) -- `neural_giant2` had no
+analogue until this session. Added `_plot_oddball_dv_scatter` (row 1:
+max |decoded PE| vs decrease, one point per grid cell) and
+`_plot_param_scan_dv_scatter` (row 2: reusing `_param_scan_decay_metrics`
+directly, no new data-loading code) -- both matching the ORIGINAL
+giant's own established house style exactly (flat color, small
+low-alpha points, `sns.regplot` fit + CI band, pearsonr r + significance
+stars) rather than color-coding by the swept parameter, since that
+convention was already established elsewhere in this exact file and a
+new one wasn't asked for. Figure grid grew from 3x2 to 3x3 as a direct
+consequence.
+
+**A separate infrastructure discovery, unrelated to any of the above**:
+the machine Claude's own filesystem/shell MCP tools reach (`hydra`) and
+the machine the person's own cluster jobs actually run on/from
+(`discovery-01`, under a different username there) are SEPARATE
+filesystems. Confirmed directly: Claude deleted a truncated collected-
+data file via its own tools, confirmed it gone via a follow-up `ls` --
+but the person's own attempt to rerun the exact same regenerate command
+on `discovery-01` reported the file still present ("Already exists --
+skipping"). This means Claude cannot verify ANY cluster-side file state
+(existence, size, truncation, job queue status) directly going forward
+-- every such claim Claude makes from its own tool calls reflects
+`hydra` only, and needs the person's own terminal output as the real
+ground truth. Recurred at least twice more the same session (a second
+truncated file, from a job that appears to have been killed mid-write
+on the actual compute node) -- diagnosed each time from file SIZE alone
+(one file at ~1/6th the size of every sibling file, all others
+identical to each other), without needing to inspect cluster job logs
+directly.
+

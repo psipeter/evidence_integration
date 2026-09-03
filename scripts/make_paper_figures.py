@@ -3970,23 +3970,30 @@ def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_n
 
 
 def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers",
-                                        targets: tuple = (0.1, 0.7)) -> None:
+                                        low_thresh: float = 0.2, high_thresh: float = 0.7) -> None:
     """Row 2/3, col 1: weight-tuned error-neuron activity (Hz) vs
-    observation, for two representative sweep_param TARGETS -- picking
-    whichever real pid's own randomly-drawn value landed closest to each
-    target (each real pid gets its OWN single value now, not a shared
-    explicit grid -- see param_scan's own docstring for why), mean +-
-    SEM across THAT ONE pid's own 32 real trials (not across pids, since
-    n=1 pid per target). Direct structural port of the ORIGINAL
+    observation, for two GROUPS of replicates -- every pid/virtual_pid
+    with sweep_param <= low_thresh (line 1) and every one with
+    sweep_param >= high_thresh (line 2) -- each pid gets its OWN single
+    randomly-drawn value now, not a shared explicit grid (see param_
+    scan's own docstring for why), so this groups BY VALUE RANGE rather
+    than picking one representative value/pid. Each matching pid's own
+    trials are pre-folded to ONE row per (pid, observation) -- raw
+    per-timestep samples within a trial aren't independent, so they must
+    be collapsed before handing off -- then that per-pid frame is passed
+    to sns.lineplot with hue=group, which computes mean + its own default
+    CI band ACROSS PIDS itself, matching _plot_oddball_pe_trace's own
+    established convention (hand seaborn a long-format frame at the
+    correct unit-of-independence, let it aggregate) rather than manually
+    computing mean/SEM + fill_between. N per group = the pid count shown
+    in its own legend entry. Direct structural port of the ORIGINAL
     neural_giant's own panel 3 (_plot_neural_lambda_activity), reading
     neural_experiments.py's own `param_scan` experiment instead of
-    `sweep` (a genuinely different design from row 1's `oddball` --
-    every real soltani_numbers pid's own full 32-trial sequence, not an
-    arbitrary constant-input toy trial and not a windowed surprise
-    response). Weight-tuned-neuron reduction is ALREADY applied there,
-    per real trial (encoders genuinely differ by trial/seed), so this
-    function only folds the already-reduced per-timestep trace into
-    per-observation stats for the one selected pid.
+    `sweep` (a genuinely different design from row 1's `oddball` -- every
+    replicate's own full 32-trial sequence, not an arbitrary constant-
+    input toy trial and not a windowed surprise response). Weight-tuned-
+    neuron reduction is ALREADY applied there, per trial (encoders
+    genuinely differ by trial/seed).
     """
     path = NEURAL_EXP_DIR / f"param_scan_{sweep_param}_{task}.pkl"
     if not path.exists():
@@ -4002,30 +4009,54 @@ def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "solta
     df["t_within_obs"] = t_within
     active = df[~np.isnan(df["t_within_obs"])]
 
-    # Since each real pid now has its OWN single sweep_value (a random
-    # draw, not a shared explicit grid -- see param_scan's own
-    # docstring), there's no "low/high of a shared grid" to pick from
-    # anymore. Instead: for each representative target, pick whichever
-    # real pid's own drawn value landed CLOSEST to it, then plot THAT ONE
-    # pid's own activity curve, mean +- SEM computed across THAT PID'S
-    # OWN 32 real trials -- not across pids, since n=1 pid per target here.
+    # Since each pid now has its OWN single sweep_value (a random draw,
+    # not a shared explicit grid -- see param_scan's own docstring),
+    # group by VALUE RANGE (<=low_thresh, >=high_thresh) rather than
+    # picking one representative pid -- lets every matching pid
+    # contribute (particularly useful with --trial_source synthetic,
+    # where N=200 makes multi-pid bins routine rather than the exception).
     pid_values = active.groupby("pid")["sweep_value"].first()
+    low_pids = pid_values[pid_values <= low_thresh].index
+    high_pids = pid_values[pid_values >= high_thresh].index
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     sym = label_sym.get(sweep_param, sweep_param)
+    groups = [("\u2264", low_thresh, low_pids), ("\u2265", high_thresh, high_pids)]
+
+    rows = []
+    hue_order = []
+    for rel, thresh, pids_sel in groups:
+        if len(pids_sel) == 0:
+            print(f"  Warning: no pids with {sweep_param}{rel}{thresh:g} in "
+                  f"param_scan_{sweep_param}_{task}.pkl -- line skipped")
+            continue
+        label = f"{sym}{rel}{thresh:g} (n={len(pids_sel)})"
+        hue_order.append(label)
+        sub = active[active["pid"].isin(pids_sel)]
+        # Pre-fold to ONE row per (pid, observation) -- raw per-timestep
+        # samples within a trial aren't independent draws, so they must
+        # be collapsed to a single trial-mean, then averaged across that
+        # pid's own trials, BEFORE handing off to sns.lineplot; otherwise
+        # seaborn would treat every raw timestep as its own independent
+        # sample and compute a falsely tight CI.
+        per_trial = (sub.groupby(["pid", "trial", "observation"])["weight_tuned_activity"]
+                    .mean().reset_index())
+        per_pid = (per_trial.groupby(["pid", "observation"])["weight_tuned_activity"]
+                  .mean().reset_index())
+        per_pid["group"] = label
+        rows.append(per_pid)
+
+    if not rows:
+        ax.text(0.5, 0.5, f"No pids in either threshold group for {sweep_param}",
+               ha="center", va="center", transform=ax.transAxes, color="0.5", style="italic")
+        return
+    combined = pd.concat(rows, ignore_index=True)
+
     pal = get_palette(6)
-    for i, target in enumerate(targets):
-        nearest_pid = (pid_values - target).abs().idxmin()
-        actual_val = pid_values[nearest_pid]
-        sub = active[active["pid"] == nearest_pid]
-        per_trial_obs = (sub.groupby(["trial", "observation"])["weight_tuned_activity"]
-                        .mean().reset_index())
-        stats = (per_trial_obs.groupby("observation")["weight_tuned_activity"]
-                .agg(["mean", "sem"]).reset_index()).sort_values("observation")
-        ax.plot(stats["observation"], stats["mean"], color=pal[i], lw=1.8,
-               label=f"{sym}={actual_val:.2f} (pid {nearest_pid})")
-        ax.fill_between(stats["observation"], stats["mean"] - stats["sem"],
-                        stats["mean"] + stats["sem"], color=pal[i], alpha=0.18)
+    color_map = {label: pal[i] for i, label in enumerate(hue_order)}
+    sns.lineplot(data=combined, x="observation", y="weight_tuned_activity", hue="group",
+                hue_order=hue_order, palette=color_map, ax=ax, lw=1.8)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right", title=None)
 
     n_obs_max = int(df["observation"].max())
     ax.set_xlabel("Observation")

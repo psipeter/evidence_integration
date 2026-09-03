@@ -20,6 +20,17 @@ anything else. Compaction summaries omit conventions. Key ones to remember:
   runtime. Always use the filesystem/shell MCP tools for anything under
   /home/psipeter/evidence_integration/; if unsure whether an edit landed,
   grep the remote file for the new content before trusting it.
+- **A SECOND, separate tool-routing caveat, confirmed directly**: even the
+  filesystem/shell MCP tools only reach `hydra`, NOT `discovery-01` (or
+  whichever node the person's own cluster jobs actually run on/from, under
+  a different username there). A file Claude deleted via its own tools
+  showed gone on `hydra`, but the person's own rerun of the same command on
+  `discovery-01` still found it present. Claude CANNOT verify cluster-side
+  file state (existence, size, truncation, job status via squeue/sinfo)
+  directly — any such claim Claude makes reflects `hydra` only. Give the
+  person commands to run themselves on `discovery-01` and take their
+  terminal output as ground truth, rather than trusting a `hydra`-side `ls`/
+  `du` as if it were the same filesystem.
 - Figures save as PDF only — never convert to PNG/SVG or upload images to chat.
   This applies to task_backend/task UI screenshots too: don't upload Playwright
   screenshots to context to verify UI work — use DOM/computed-style assertions
@@ -354,88 +365,152 @@ A separate figure from Acts 1-5, using a different data-generation
 mechanism specifically designed to isolate each of alpha_0/lambda_/
 n_neurons's own causal contribution -- complementary to the giant's own
 random-virtual-pid covariation design, not a replacement for it. Uses TWO
-different underlying experiments depending on the row:
+different underlying experiments depending on the row.
 
 **Row 1 (alpha_0) -- `oddball`.** 3 observations clustered tightly around
 a center value, then one observation deviating from it by a fixed amount
 ("the oddball"), using abs(decoded PE) throughout, across a full grid of
-(cluster_centers x oddball_deviations x alpha_0 values).
+(cluster_centers x oddball_deviations x alpha_0 values). Unchanged this
+session, per instruction ("leave oddball as it is").
 
-**Rows 2/3 (lambda_/n_neurons) -- `param_scan`, a NEW, simpler experiment
-(this session), NOT `oddball`.** A full 15-observation arbitrary trial
-(Act 1.2-style, matching the ORIGINAL neural_giant's own row-1 lambda
-panel -- constant `obs_values=ones(n_obs)`), scanning ONE of
-alpha_0/lambda_/n_neurons across explicit values, the other two held
-fixed at `--base_*`. For each seed, reduces the error population's raw
-per-timestep activity to the WEIGHT-TUNED neurons' own mean (that seed's
-own error-ensemble encoders, `enc_dim_0 > 0.5`, matching the ORIGINAL
-neural_giant's own weight-tuned-neuron convention) -- done inside
-`neural_experiments.py` itself (not the figure script) since it needs
-each seed's own encoders, which only exist inside the live simulation;
-storing the full (T, n_neurons) array per seed instead would be
-prohibitively large. Downstream per-observation folding and decay-metric
-computation (mirroring `_load_neural_decay_metrics`'s own early-2-obs-
-minus-late-2-obs response decay and first-obs-minus-last-obs activity
-decay) still happens in `make_paper_figures.py`, per convention. Seeds
-play the role virtual pids played in the giant's own large-N regression
-(many independent draws), since this design scans explicit parameter
-values rather than random draws.
+**Rows 2/3 (lambda_/n_neurons) -- `param_scan`.** REDESIGNED this session
+-- an original version simulated a single arbitrary CONSTANT-INPUT trial
+(`obs_values=ones(n_obs)`, Act 1.2-style, matching the ORIGINAL
+neural_giant's own row-1 lambda panel) across `--n_seeds` independent
+seeds. That degenerate input gives the value ensemble nothing to
+integrate, so any activity trend across observations was an artefact of
+the input, not a real lambda-driven signature -- caught when a decay
+metric looked sign-flipped relative to the giant's own real-trial-based
+equivalent panel.
 
-**Layout, current: 3x2** (col 3, the center-invariance check, REMOVED
-from the layout per instruction -- see below). Row 1: col 1 = |decoded
-PE| vs time within the oddball observation's own window, one
-representative center, BOTH deviation signs folded into ONE
-`sns.lineplot` call per alpha_0 value (letting seaborn aggregate the two
-deviation-sign traces itself via its own mean+CI, rather than drawing
-them as separate lines/linestyles); col 2 = alpha_0 (x) vs max |decoded
-PE| AND absolute decrease by the window's end, twin axes, mean +- SEM
-aggregated across the WHOLE grid. Row 2: col 1 = weight-tuned error-
-neuron activity (Hz) vs observation, one line per lambda_ value, mean +-
-SEM across seeds (direct structural port of the ORIGINAL neural_giant's
-own panel 3); col 2 = decay(deltaR) AND decay(deltaA) vs lambda_, twin
-axes, one point per (lambda_, seed) -- direct reuse of
-`_plot_neural_dual_vs_param`, the SAME helper the original figure's own
-row-3 panels use. Row 3 (n_neurons): NOT YET BUILT, same `param_scan`
-structure.
+`param_scan` now runs on REAL trials, selected via `--trial_source`:
+  - `real` (original fix): each replicate is one REAL pid from
+    data/soltani_numbers.pkl, using that pid's own 32 real trials
+    AS-IS (already canonical [-1,1] scale, matching `_probe_worker`'s
+    own convention -- no rescale needed).
+  - `synthetic` (used for the current lambda_ row, to raise N past the
+    ~46 real pids available): each replicate is one virtual_pid
+    (1..200) from the pre-generated pool (data/synthetic_pool/,
+    `_load_synthetic_trials`), same 32-trial-per-member structure as
+    real data. Pool JSON values are on the RAW 0-100 scale and MUST be
+    rescaled (/50-1 for soltani_numbers) before reaching NEF, matching
+    `_synthetic_worker`'s own convention exactly.
+  Both sources use `activity_key_for_trial(dataset, trial)` for BOTH the
+  activity-map lookup AND the simulation seed -- the established
+  real-trial convention -- and both trial-index spaces (0..31) fit
+  within the activity file's own 40 precomputed keys for soltani_numbers,
+  so no extra precompute was needed for either.
 
-**Col 3 (center-invariance check) REMOVED, per instruction.** It had
-already served its purpose: the analysis it was checking for came back
-genuinely non-trivial -- max |decoded PE| and its decrease vary
+  Job granularity is now (pid) ALONE, not (sweep_value, pid): each real
+  pid or virtual_pid gets its OWN single value of the swept parameter,
+  drawn uniformly from `[--sweep_low, --sweep_high]`, deterministically
+  seeded per (trial_source, sweep_param, pid) via `zlib.crc32` on an
+  explicit byte string -- NOT Python's built-in `hash()`, which is
+  randomized per-process (PYTHONHASHSEED) and would silently draw a
+  DIFFERENT value for the same replicate on every separate cluster job.
+  This replaced an earlier (sweep_value, pid) full-cross-product grid
+  design (every replicate saw every explicit value), which produced an
+  unnatural-looking discrete-strip spacing in the decay-vs-param
+  regression panels since every replicate landed on the same handful of
+  x-positions -- a per-replicate random draw gives a genuinely continuous
+  x-axis instead, matching how `synthetic`'s own virtual-pid parameter
+  draws already work.
+
+  For each trial, still reduces the error population's raw per-timestep
+  activity to the WEIGHT-TUNED neurons' own mean (that trial's own
+  error-ensemble encoders, `enc_dim_0 > 0.5`) inside `neural_experiments.
+  py` itself, matching the ORIGINAL neural_giant's own weight-tuned-
+  neuron convention. Downstream per-observation folding and decay-metric
+  computation (mirroring `_load_neural_decay_metrics`'s own early-2-obs-
+  minus-late-2-obs response decay and first-obs-minus-last-obs activity
+  decay, POOLED across a pid's own trials before computing decay -- not
+  decay-per-trial-then-averaged) still happens in `make_paper_figures.py`.
+
+**Layout, current: 3x3** (col 3 added this session to rows 1 and 2 -- see
+below; row 3 still not built). Row 1: col 1 = |decoded PE| vs time within
+the oddball observation's own window, one representative center, BOTH
+deviation signs folded into ONE `sns.lineplot` call per alpha_0 value
+(letting seaborn aggregate via its own mean+CI); col 2 = alpha_0 (x) vs
+max |decoded PE| AND absolute decrease by the window's end, twin axes,
+mean +- SEM aggregated across the WHOLE grid; col 3 (NEW) = those same
+two DVs plotted directly against each other, one point per grid cell --
+matching the ORIGINAL neural_giant's own DV-vs-DV panels (5, 9: flat
+color, `sns.regplot` fit + CI, pearsonr r + stars) rather than
+color-coding by alpha_0.
+
+Row 2: col 1 = weight-tuned error-neuron activity (Hz) vs observation,
+REDESIGNED this session for the per-pid-random-draw data -- since there's
+no shared grid value to pick a representative line from anymore, groups
+BY VALUE RANGE instead: every pid with lambda_<=0.2 (line 1) and every
+pid with lambda_>=0.7 (line 2), each matching pid's own trials pre-folded
+to one row per (pid, observation), then handed to `sns.lineplot(hue=
+"group")` which computes mean + its own automatic CI ACROSS PIDS itself
+-- matching `_plot_oddball_pe_trace`'s own established convention (hand
+seaborn a long-format frame at the correct unit-of-independence, let it
+aggregate) rather than manually computing mean/SEM + fill_between. N per
+group is shown directly in its own legend entry. col 2 = decay(deltaR)
+AND decay(deltaA) vs lambda_, twin axes, one point per (lambda_, pid) --
+unchanged, direct reuse of `_plot_neural_dual_vs_param`; col 3 (NEW) =
+those same two DVs plotted directly against each other, one point per
+(lambda_, pid) -- the row-2 analogue of row 1's own col 3, reusing
+`_param_scan_decay_metrics` directly (no new data-loading logic).
+
+Row 3 (n_neurons): NOT YET BUILT, same `param_scan` structure.
+
+**Col 3 (row 1's original center-invariance check) REMOVED, per
+instruction, replaced this session by the DV-vs-DV scatter above -- a
+different panel, not a reinstatement.** The center-invariance analysis
+had already served its purpose: max |decoded PE| and its decrease vary
 NON-MONOTONICALLY with the oddball's own distance from the task's raw
 midpoint (50), confirmed directly (|rescaled oddball position| 0.20 gave
 a LARGER alpha_0-driven swing than 0.40, breaking simple edge-distance
 monotonicity) -- so keeping a dedicated panel around to re-confirm this
 on every render was no longer the point. What IS robust across every
 position tested is the SIGN/direction of each parameter's effect (higher
-alpha_0 -> higher max_pe AND higher decrease, everywhere), which is what
-col 2's whole-grid aggregation now documents itself as summarizing (see
-that panel's own docstring) -- NOT a claim that centers are
-interchangeable in absolute magnitude, which they are not.
-`_plot_oddball_center_invariance` itself is left defined (not deleted)
-in case a future row wants to re-run this check on its own grid.
+alpha_0 -> higher max_pe AND higher decrease, everywhere), which both
+col 2's whole-grid aggregation AND the new col 3 scatter now document
+(as an aggregate trend and as a single across-grid correlation,
+respectively) -- NOT a claim that centers are interchangeable in absolute
+magnitude, which they are not. `_plot_oddball_center_invariance` itself
+is left defined (not deleted) in case a future row wants to re-run this
+check on its own grid.
 
-**A real bug found and fixed this session, affecting EVERY oddball cell
-generated before the fix**: see the compaction-reminder note at the top
-of this file and docs/HISTORY.md -- `_decoders_for_seed`'s activity-key
-offset was applied only to the lookup, not to the actual simulation
+**A real bug found and fixed an earlier session, affecting EVERY oddball
+cell generated before that fix**: see the compaction-reminder note at the
+top of this file and docs/HISTORY.md -- `_decoders_for_seed`'s activity-
+key offset was applied only to the lookup, not to the actual simulation
 seed. Fixed via `_toy_activity_key` (single source of truth for both
-halves). All `oddball`/`param_scan` data referenced below as "current"
-was generated AFTER this fix.
+halves). All `oddball` data referenced below as "current" was generated
+AFTER this fix; `param_scan` no longer uses `_toy_activity_key` at all
+since its own redesign this session moved it onto real-trial-based
+`activity_key_for_trial`, the same convention `_probe_worker`/
+`_synthetic_worker` already use.
 
-**Status**: Row 1 built and regenerated post-fix on a small local dev
-grid (`--cluster_centers 20 50 80 --oddball_deviations -10 10
---sweep_values 0.2 0.8 --n_seeds 10`) -- confirmed the deviation-sign
-aggregation and the position-dependence finding above. Row 2 built and
-regenerated post-fix on a small local dev grid (`--sweep_values 0.1 0.7
---base_alpha_0 0.8 --n_seeds 10`) -- confirmed against the ORIGINAL
-neural_giant's own (pre-existing, unaffected-by-the-bug) bulk-mean
-lambda panel: same clean monotonic decay shape, just at a different
-absolute Hz level (weight-tuned neurons only vs. bulk mean over all
-neurons). Row 3 (n_neurons) NOT YET BUILT. **Cluster is back up as of
-this session** (an earlier `auks`/AFS credential-forwarding outage that
-blocked ALL `sbatch` submissions, not specific to this project's code,
-has been resolved by Research Computing) -- both rows now move to a
-denser grid submitted via `--mode submit` rather than local dev runs.
+**Status**: Row 1 (alpha_0) unchanged this session -- built and
+regenerated post-`_toy_activity_key`-fix on a small local dev grid,
+confirmed against the position-dependence finding above; col 3 (DV
+scatter) added and rendering correctly on that same data. Row 2
+(lambda_) fully redesigned and regenerated this session on the
+synthetic 200-member pool (`--trial_source synthetic --sweep_low 0.1
+--sweep_high 1.0 --base_alpha_0 0.7 --base_lambda_ 0.7
+--base_n_neurons 500`, one job per virtual_pid) -- col 1's threshold
+groups (<=0.2, >=0.7) and col 2/3's regression/scatter all confirmed
+rendering with a genuinely continuous lambda_ axis, no more discrete-
+grid artifacts. Row 3 (n_neurons) NOT YET BUILT -- would need its own
+--trial_source decision and its own col 1 grouping thresholds (the
+0.2/0.7 lambda_ values don't apply). **Cluster is up and being used for
+both rows via `--mode submit` per-replicate jobs** (46 for `real`, 200
+for `synthetic`).
+
+**Operational note, this session**: the machine Claude's own filesystem/
+shell MCP tools reach (`hydra`) and the machine cluster jobs actually run
+on/from (`discovery-01`, under a different username) are SEPARATE
+filesystems, confirmed directly (a file Claude deleted via its own tools
+appeared gone on `hydra` but still existed when the person tried to
+rerun the same command on `discovery-01`). Claude cannot verify cluster-
+side file state (existence, size, truncation) directly -- all such
+claims from Claude reflect `hydra` only and may not match `discovery-01`
+until the person confirms directly.
 
 ## Central cognitive model
 
