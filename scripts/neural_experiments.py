@@ -329,6 +329,84 @@ def run_raster_demo(args) -> None:
     print(f"Saved -> {out_path}")
 
 
+def run_n_neurons_demo(args) -> None:
+    """Local, cheap demo (NOT cluster-submitted, matching raster_demo/
+    sweep's own convention -- a handful of single-seed toy simulations,
+    not a real/synthetic-pool sweep): simulates the SAME single 5-
+    observation toy sequence across several (n_neurons, n_neurons_
+    counting) PAIRS (n_neurons_counting = 4x n_neurons, per instruction --
+    a DIFFERENT ratio convention from both `synthetic`'s own n_neurons=
+    n_neurons_counting and param_scan's own n_neurons_counting-fixed-at-
+    2000; see this experiment's own required activity files below), at
+    ONE shared (alpha_0, lambda_), --n_seeds independent toy seeds PER
+    PAIR (via _toy_activity_key -- the SAME arbitrary-demo-seed
+    convention raster_demo/sweep already use, NOT a real trial or
+    synthetic-pool member). Built for neural_giant2's row 3 (n_neurons)
+    col 1 panel, to visually illustrate how the decoded value
+    population's own tracking gets noisier/more-drifting at fewer
+    neurons, before row 3's own col 2/3 quantify this systematically.
+
+    Saves RAW per-seed traces, NOT pre-averaged -- a SINGLE seed risked
+    an unrepresentative too-good/too-bad draw making the panel
+    confusing (per instruction), but full averaging across many seeds
+    would smooth away the very spike-driven noise this panel exists to
+    show; --n_seeds (default a SMALL number) is deliberately a middle
+    ground, and the actual mean+CI aggregation happens in the figure
+    script via sns.lineplot (matching this project's established
+    convention of handing seaborn a long-format frame and letting it
+    aggregate, e.g. _plot_oddball_pe_trace), not here.
+
+    Each pair needs its OWN precomputed activity file (file identity is
+    the exact (n_neurons, n_neurons_counting) pair, not just n_neurons --
+    see _require_activities' own docstring) -- REQUIRED, no _pretrain()
+    fallback, same as every other experiment in this module.
+
+    Saves ALL pairs'/seeds' own full per-timestep decoded-VALUE trace,
+    plus the obs_values/alpha_0/lambda_ actually used -- needed
+    downstream so the figure script can recompute the RL_lambda ideal-
+    target overlay reproducibly from the saved file alone, rather than
+    hardcoding these values again in two places.
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = OUT_DIR / f"n_neurons_demo_{args.task}.pkl"
+
+    obs_values_raw = np.array(args.obs_values, dtype=float)
+    # RAW 0-100 pool scale -- rescale for soltani_numbers, matching
+    # _synthetic_worker's/_param_scan_worker's own convention exactly.
+    obs_values = (obs_values_raw / 50.0 - 1.0) if args.task == "soltani_numbers" \
+        else obs_values_raw
+
+    pairs = []
+    for spec in args.n_neurons_pairs:
+        n_str, nc_str = spec.split(":")
+        pairs.append((int(n_str), int(nc_str)))
+
+    traces = {}
+    for n_neurons, n_neurons_counting in pairs:
+        params = _base_params(args.task, args.alpha_0, n_neurons, args.lambda_,
+                              n_neurons_counting=n_neurons_counting)
+        activity_map = _require_activities(args.task, n_neurons, n_neurons_counting)
+        seed_traces = []
+        for seed in range(args.n_seeds):
+            key = _toy_activity_key(seed)
+            decoders = _decoders_for_seed(activity_map, key, args.alpha_0, args.lambda_)
+            print(f"n_neurons_demo: n_neurons={n_neurons} n_neurons_counting={n_neurons_counting} "
+                  f"seed {seed + 1}/{args.n_seeds}")
+            result = _simulate_full(params, obs_values, decoders, seed=key)
+            seed_traces.append({"seed": seed, "t": result["t"], "value": result["value"]})
+        traces[(n_neurons, n_neurons_counting)] = seed_traces
+
+    out = {
+        "traces": traces,
+        "obs_values_raw": obs_values_raw,
+        "alpha_0": args.alpha_0,
+        "lambda_": args.lambda_,
+        "task": args.task,
+    }
+    pd.to_pickle(out, out_path)
+    print(f"Saved {len(pairs)} pair(s) x {args.n_seeds} seed(s) -> {out_path}")
+
+
 # ── sweep (Act 1.2 + 1.3) ─────────────────────────────────────────────────────
 
 def run_sweep(args) -> None:
@@ -1330,6 +1408,20 @@ def main() -> None:
                           help="Explicit observation sequence for the demo trial")
     p_raster.add_argument("--seed", type=int, default=0)
     p_raster.set_defaults(func=run_raster_demo)
+
+    p_ndemo = sub.add_parser("n_neurons_demo")
+    p_ndemo.add_argument("--task", required=True)
+    p_ndemo.add_argument("--n_neurons_pairs", type=str, nargs="+", required=True,
+                        help="'n_neurons:n_neurons_counting' pairs, e.g. 50:200 200:800 500:2000")
+    p_ndemo.add_argument("--alpha_0", type=float, default=0.7)
+    p_ndemo.add_argument("--lambda_", type=float, default=0.7)
+    p_ndemo.add_argument("--obs_values", type=float, nargs="+", default=[30, 70, 40, 80],
+                        help="Raw 0-100 scale toy sequence, rescaled internally for soltani_numbers.")
+    p_ndemo.add_argument("--n_seeds", type=int, default=10,
+                        help="Independent toy seeds PER PAIR -- a SMALL number, deliberately "
+                             "not enough to fully average away spike noise (see this "
+                             "experiment's own docstring).")
+    p_ndemo.set_defaults(func=run_n_neurons_demo)
 
     p_sweep = sub.add_parser("sweep")
     p_sweep.add_argument("--task", required=True)

@@ -3311,6 +3311,93 @@ def _fold_observation_time(t: np.ndarray, t_iti: float, t_obs: float):
     return observation_number, t_within_obs
 
 
+def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
+    """Row 3, col 1: decoded VALUE population output vs time, for a
+    SINGLE hand-picked 4-observation toy sequence (neural_experiments.
+    py's own n_neurons_demo experiment). Plots EVERY seed's own RAW
+    trace as its OWN line (low alpha, no aggregation/CI) -- tried as a
+    scatter of all points first, but a connected line reads as more
+    genuinely "spiky"/jagged than disconnected points do, so switched
+    back per instruction. Pairs are plotted in ASCENDING n_neurons order
+    (smallest first, per instruction) so each larger-n, tighter/less-
+    noisy set of lines draws ON TOP of the smaller-n, more-spread-out
+    lines underneath, rather than the reverse (which would bury the
+    interesting low-n spread under a tight high-n cloud). Only the
+    FIRST seed of each pair gets a legend label -- the rest share that
+    pair's own color/alpha but would otherwise just repeat the same
+    legend entry --n_seeds times.
+
+    Overlaid: the IDEAL target value RL_lambda (at the SAME alpha_0/
+    lambda_ this demo's own NEF params used, saved in the file itself)
+    would produce for the SAME sequence, one point per observation,
+    CONNECTED by a black line (legend: "target"), placed at that
+    observation's own response-readout time (t_iti + i*t_step + t_obs,
+    matching this file's established readout convention elsewhere).
+    Computed inline via the EXACT formula models.math_models.py's own
+    RL_lambda branch uses (alpha=alpha_0/n**lambda_, error=value-
+    expectation, expectation += alpha*error, clip(-1,1)), not re-derived
+    independently, so this stays in sync if that formula ever changes.
+
+    This separates two things "decoded value alone" conflates: whether
+    the network tracks the RIGHT level (its own distance from the target
+    line) vs. how NOISY/spiky it is once there (jaggedness/spread of the
+    line bundle around its own trend) -- the qualitative story row 3 is
+    building toward.
+    """
+    path = NEURAL_EXP_DIR / f"n_neurons_demo_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, "No n_neurons_demo data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    traces = d["traces"]
+    obs_values_raw = d["obs_values_raw"]
+    alpha_0, lambda_ = d["alpha_0"], d["lambda_"]
+
+    obs_values = (obs_values_raw / 50.0 - 1.0) if task == "soltani_numbers" else obs_values_raw
+
+    from fitting.model_params import _NEF_FIXED
+    t_iti, t_obs = _NEF_FIXED["t_iti"], _NEF_FIXED["t_obs"]
+    t_step = t_obs + t_iti
+    n_obs = len(obs_values)
+
+    # RL_lambda's own EXACT update rule (models.math_models.py's RL_lambda
+    # branch) -- the ideal target this demo's own NEF params should track,
+    # marked at each observation's own response-readout time. Starts at
+    # (t=0, v=0) -- RL_lambda's own starting expectation BEFORE any
+    # observation, matching that branch's own "expectation = 0.0" init.
+    readout_t, ideal_v = [0.0], [0.0]
+    expectation = 0.0
+    for i, value in enumerate(obs_values, start=1):
+        alpha = alpha_0 / (i ** lambda_)
+        error = value - expectation
+        expectation += alpha * error
+        expectation = float(np.clip(expectation, -1, 1))
+        readout_t.append(t_iti + (i - 1) * t_step + t_obs)
+        ideal_v.append(expectation)
+
+    # Ascending n_neurons order -- smallest/noisiest plotted FIRST (bottom
+    # layer), largest/tightest plotted LAST (top layer), per instruction.
+    pairs = sorted(traces.keys())
+    pal = get_palette(max(6, len(pairs)))
+    for i, (n_neurons, n_neurons_counting) in enumerate(pairs):
+        seed_traces = traces[(n_neurons, n_neurons_counting)]
+        for j, seed_tr in enumerate(seed_traces):
+            label = f"n={n_neurons}, nc={n_neurons_counting}" if j == 0 else None
+            ax.plot(seed_tr["t"], seed_tr["value"], color=pal[i], lw=0.8,
+                    alpha=0.5, zorder=i + 1, label=label)
+
+    ax.plot(readout_t, ideal_v, color="black", marker="o", ms=4, lw=1.4,
+           zorder=10, label="target")
+
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Decoded value")
+    ax.set_xlim(0, n_obs * t_step)
+    ax.set_ylim(-1, 1)
+    ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def _plot_neural_raster_demo(ax) -> None:
     """Panel 1 (Act 1.1): spike raster of the error population's raw neuron
     output for one representative trial (neural_experiments.py's
@@ -4284,7 +4371,8 @@ def make_neural_giant2() -> Path:
     _plot_neural_giant2_decay_vs_param(axes[1, 1], "lambda_")
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
 
-    for col in (0, 1, 2):
+    _plot_n_neurons_demo_trace(axes[2, 0])
+    for col in (1, 2):
         axes[2, col].text(0.5, 0.5, "n_neurons row not yet built", ha="center",
                           va="center", transform=axes[2, col].transAxes,
                           color="0.5", style="italic")
