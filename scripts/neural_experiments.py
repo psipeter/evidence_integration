@@ -7,6 +7,30 @@ simulations) to an arbitrary --task, since none of this is actually
 carrabin-specific under the hood -- models/NEF.py's build_network/_pretrain
 are always built on counting_integrator regardless of dataset.
 
+*** CONVENTION, RE-STATED AFTER A REAL VIOLATION (see docs/HISTORY.md) ***
+NEVER let any simulation in this file fall back to a live _pretrain()
+training run when a precomputed counting-activity file (or a specific
+seed's key within it) is missing. Always load it via
+models.counting_integrator.load_activities()/fast_decode() (this file's
+own _require_activities()/_decoders_for_seed() wrap that pattern) and
+RAISE with the exact regenerate command if it's missing -- matching
+models.NEF's own _require_activity_map convention exactly. This was an
+EXPLICIT prior instruction that got silently reintroduced once already
+(_simulate_full, used by raster_demo/sweep/oddball, had a `decoders is
+None -> _pretrain(...)` fallback baked in) and only surfaced because a
+person noticed an unexplained asymmetry in an oddball result and asked
+whether the real activity file was actually being used. A silent
+_pretrain() fallback is NOT just slower (a full from-scratch Nengo
+training run per call, vs. an analytic decode from a cached Gram matrix)
+-- it is a genuinely DIFFERENT, unverified code path that can silently
+diverge from the file-based path with no error, no warning, and no visual
+cue in the output. If you are adding a new experiment to this file, or
+any other simulation calling models.NEF.build_network anywhere in this
+codebase, and it needs decoders: call _require_activities() +
+_decoders_for_seed() (or the equivalent in models.NEF/counting_integrator)
+and let a missing file/key raise. Do not add a new _pretrain() fallback,
+here or anywhere else that touches NEF simulation.
+
 Four experiments:
 
   raster_demo  — ONE trial, arbitrary (alpha_0, n_neurons, lambda_), full
@@ -34,6 +58,10 @@ Four experiments:
                  data for a qualitative covariation prediction, and much
                  cheaper/more robust to generate) -- kept here, not removed,
                  since it's still a real, independently-useful experiment.
+                 Uses models.NEF._require_activity_map directly (its own
+                 REQUIRED, not optional, no-_pretrain()-fallback
+                 convention) -- fixed this session alongside `synthetic`
+                 below; see this module's own top-of-file convention note.
 
   synthetic    — Acts 2/3's replacement data source. N "virtual pids", each
                  an independently-generated real trial sequence (via
@@ -108,6 +136,9 @@ TASK_DATAFILE = {
 READOUT_OFFSET = 0.5  # seconds into observation window for readout, matching
                       # every other NEF-adjacent script's own convention.
 
+# Cache for _require_activities -- see that function's own docstring.
+_ACTIVITY_MAP_CACHE: dict[tuple[int, int, str], dict] = {}
+
 
 def _base_params(task: str, alpha_0: float, n_neurons: float, lambda_: float,
                   **overrides) -> dict:
@@ -136,7 +167,95 @@ def _base_params(task: str, alpha_0: float, n_neurons: float, lambda_: float,
     return params
 
 
-def _simulate_full(params: dict, obs_values: np.ndarray, decoders: dict | None = None,
+def _require_activities(task: str, n_neurons: int, n_neurons_counting: int) -> dict:
+    """Load precomputed counting-activity Gram matrices for (n_neurons,
+    n_neurons_counting, task), or fail loudly with the exact regenerate
+    command. REQUIRED, not optional -- raster_demo/sweep/oddball (every
+    caller of _simulate_full) must NEVER fall back to a live _pretrain()
+    training run when the file is missing. This mirrors models.NEF's own
+    _require_activity_map convention exactly, and exists because that
+    convention was previously violated in this exact file (a silent
+    _pretrain() fallback inside _simulate_full) despite an explicit prior
+    instruction never to do this -- see this module's own top-of-file
+    convention note and docs/HISTORY.md.
+
+    Cached per (n_neurons, n_neurons_counting, task) for the lifetime of
+    one script invocation, since a sweep over many (alpha_0, lambda_)
+    values at a fixed n_neurons would otherwise reload the same
+    (possibly large, at n_neurons_counting=2000) file repeatedly.
+    """
+    key = (int(n_neurons), int(n_neurons_counting), task)
+    if key not in _ACTIVITY_MAP_CACHE:
+        from models.counting_integrator import load_activities
+        try:
+            _ACTIVITY_MAP_CACHE[key] = load_activities(
+                n_neurons=int(n_neurons), n_neurons_counting=int(n_neurons_counting),
+                dataset=task,
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"No precomputed counting-activity file for (n_neurons={n_neurons}, "
+                f"n_neurons_counting={n_neurons_counting}, dataset={task!r}). This file is "
+                f"REQUIRED -- neural_experiments.py never falls back to a live _pretrain() "
+                f"training run (see this module's own top-of-file convention note). "
+                f"Generate it first:\n"
+                f"  venv/bin/python models/counting_integrator.py --precompute_activities "
+                f"--n_neurons {n_neurons} --n_neurons_counting {n_neurons_counting} "
+                f"--dataset {task}\n"
+                f"then scp data/counting_activities_n{n_neurons}_nc{n_neurons_counting}_"
+                f"{task}.pkl to the cluster if running remotely."
+            ) from e
+    return _ACTIVITY_MAP_CACHE[key]
+
+
+def _toy_activity_key(seed: int) -> int:
+    """Maps an arbitrary toy seed (0-indexed, as used by raster_demo/
+    sweep/oddball/param_scan's own --seed/range(n_seeds) loops, which have
+    no real trial to key off of) to the activity file's own 1-indexed key
+    space. THE SINGLE SOURCE OF TRUTH for this mapping -- every caller
+    must use this SAME returned value for BOTH the activity-map lookup
+    (via _decoders_for_seed) AND the actual simulation seed passed to
+    _simulate_full/_simulate_param_scan_trial.
+
+    An EARLIER version of this file's own _decoders_for_seed applied this
+    +1 offset ONLY to the lookup key, while every caller still passed the
+    raw (un-offset) seed as the actual simulation seed -- silently pairing
+    a network's own seed-dependent tuning curves with a DIFFERENT seed's
+    decoders. This is exactly the "activity key vs simulation seed"
+    mismatch this project's own activity_key_for_trial (models/
+    counting_integrator.py) exists to prevent for real human trials (see
+    that function's own docstring and this file's "What NOT to do" list),
+    reintroduced here for these toy experiments and only caught because a
+    person noticed neural_giant2's row-2 activity panel didn't match the
+    ORIGINAL neural_giant's own (correctly seed-matched) equivalent panel.
+    See docs/HISTORY.md for the full incident. NEVER hand-derive this
+    offset inline a second time -- always call this function for both
+    halves of the pairing.
+    """
+    return int(seed) + 1
+
+
+def _decoders_for_seed(activity_map: dict, key: int, alpha_0: float, lambda_: float) -> dict:
+    """fast_decode for one specific activity KEY -- callers must obtain
+    `key` via _toy_activity_key(seed) and pass that SAME value both here
+    AND as the `seed` argument to _simulate_full/_simulate_param_scan_
+    trial. REQUIRED to be present in activity_map -- raises KeyError,
+    never falls back to _pretrain(), matching _require_activities' own
+    convention.
+    """
+    from models.counting_integrator import fast_decode
+    activity = activity_map.get(key)
+    if activity is None:
+        raise KeyError(
+            f"No precomputed counting activity for key={key}. "
+            f"This dataset's activity file only has keys 1..n_trials -- lower "
+            f"--n_seeds/--seed, or regenerate with a larger --n_trials via "
+            f"models/counting_integrator.py --precompute_activities."
+        )
+    return fast_decode(activity, alpha_0=float(alpha_0), lambda_=float(lambda_))
+
+
+def _simulate_full(params: dict, obs_values: np.ndarray, decoders: dict,
                    seed: int = 0) -> dict:
     """Build and run one trial, returning EVERY per-timestep probe as a
     plain array -- unlike models.NEF._simulate_trial, which only exposes
@@ -148,14 +267,18 @@ def _simulate_full(params: dict, obs_values: np.ndarray, decoders: dict | None =
     _simulate_trial and reads nengo.Simulator's own probe data directly --
     same pattern extras_carrabin.py's own _run_pe_dynamics already uses for
     the identical reason.
+
+    `decoders` is REQUIRED -- this function must NEVER fall back to a live
+    _pretrain() training run. Every caller must obtain decoders via
+    _require_activities()/_decoders_for_seed() (fast_decode against a
+    precomputed counting-activity file) BEFORE calling this, so a missing
+    file or seed key fails loudly there rather than silently retraining
+    here. See this module's own top-of-file convention note.
     """
     import nengo
-    from models.NEF import _pretrain, build_network
+    from models.NEF import build_network
 
     p = {**params, "seed": int(seed)}
-    if decoders is None:
-        decoders = _pretrain({**p, "base_seed": int(seed)})
-
     net = build_network(obs_values, p, decoders)
     dt = float(p["dt"])
     n_obs = len(obs_values)
@@ -191,10 +314,14 @@ def run_raster_demo(args) -> None:
         else np.ones(args.n_obs)
     params = _base_params(args.task, args.alpha_0, args.n_neurons, args.lambda_)
 
+    activity_map = _require_activities(args.task, args.n_neurons, params["n_neurons_counting"])
+    key = _toy_activity_key(args.seed)
+    decoders = _decoders_for_seed(activity_map, key, args.alpha_0, args.lambda_)
+
     print(f"raster_demo: task={args.task} alpha_0={args.alpha_0} "
           f"n_neurons={args.n_neurons} lambda_={args.lambda_} "
           f"n_obs={len(obs_values)}")
-    result = _simulate_full(params, obs_values, seed=args.seed)
+    result = _simulate_full(params, obs_values, decoders, seed=key)
     result["params"] = params
     result["obs_values"] = obs_values
 
@@ -249,8 +376,13 @@ def run_sweep(args) -> None:
                 setting[args.sweep_param2] = value2
             params = _base_params(args.task, setting["alpha_0"], setting["n_neurons"],
                                   setting["lambda_"])
+            activity_map = _require_activities(
+                args.task, setting["n_neurons"], params["n_neurons_counting"])
             for seed in range(args.n_seeds):
-                result = _simulate_full(params, obs_values, seed=seed)
+                key = _toy_activity_key(seed)
+                decoders = _decoders_for_seed(
+                    activity_map, key, setting["alpha_0"], setting["lambda_"])
+                result = _simulate_full(params, obs_values, decoders, seed=key)
                 row_data = {
                     "sweep_value": value,
                     "seed": seed,
@@ -298,8 +430,8 @@ def _probe_worker(task: str, pid: int, run_folder: str) -> pd.DataFrame:
     with seed=k. See that function's own docstring.
     """
     from fitting.model_params import MODEL_PARAMS
-    from models.NEF import PARAM_DEFAULTS, _pretrain, _simulate_trial
-    from models.counting_integrator import activity_key_for_trial, fast_decode, load_activities
+    from models.NEF import PARAM_DEFAULTS, _require_activity_map, _simulate_trial
+    from models.counting_integrator import activity_key_for_trial, fast_decode
 
     dataset_stem = TASK_DATAFILE[task]
     human = pd.read_pickle(data_path(dataset_stem))
@@ -327,14 +459,12 @@ def _probe_worker(task: str, pid: int, run_folder: str) -> pd.DataFrame:
     params["model_type"] = "NEF"
     params["pid"] = int(pid)
 
-    try:
-        activity_map = load_activities(
-            n_neurons=int(params["n_neurons"]),
-            n_neurons_counting=int(params["n_neurons_counting"]),
-            dataset=task,
-        )
-    except FileNotFoundError:
-        activity_map = None
+    # REQUIRED, not optional -- matches models.NEF.run()'s own convention
+    # (_require_activity_map) exactly. NEVER fall back to _pretrain() when
+    # this file is missing -- see this module's own top-of-file convention
+    # note and docs/HISTORY.md for the incident this re-states.
+    activity_map = _require_activity_map(
+        int(params["n_neurons"]), int(params["n_neurons_counting"]), task)
 
     t_obs_ = float(params["t_obs"])
     t_iti_ = float(params["t_iti"])
@@ -350,15 +480,22 @@ def _probe_worker(task: str, pid: int, run_folder: str) -> pd.DataFrame:
         akey = activity_key_for_trial(task, int(trial))
         p = {**params, "seed": akey}
 
-        if activity_map is not None:
-            activity = activity_map.get(akey)
-            decoders = (
-                fast_decode(activity, alpha_0=float(params["alpha_0"]),
-                            lambda_=float(params["lambda_"]))
-                if activity is not None else _pretrain({**p, "base_seed": akey})
+        # REQUIRED, not optional -- a missing key means this activity file
+        # doesn't cover this trial at all (e.g. too few trial-seeds
+        # precomputed); regenerate rather than silently retraining with
+        # mismatched tuning curves. See this module's own top-of-file
+        # convention note.
+        activity = activity_map.get(akey)
+        if activity is None:
+            raise KeyError(
+                f"No precomputed counting activity for key={akey} "
+                f"(dataset={task!r}, trial={int(trial)}). The activity file "
+                f"has keys 1..n_trials -- check _DATASET_N_TRIALS in "
+                f"models/counting_integrator.py, or regenerate with "
+                f"--precompute_activities."
             )
-        else:
-            decoders = _pretrain({**p, "base_seed": akey})
+        decoders = fast_decode(activity, alpha_0=float(params["alpha_0"]),
+                                lambda_=float(params["lambda_"]))
 
         try:
             responses, probe = _simulate_trial(obs_values, p, decoders, return_probes=True)
@@ -566,8 +703,8 @@ def _synthetic_worker(task: str, virtual_pid: int) -> dict:
     instruction.
     """
     from fitting.model_params import MODEL_PARAMS
-    from models.NEF import PARAM_DEFAULTS, _pretrain
-    from models.counting_integrator import fast_decode, load_activities
+    from models.NEF import PARAM_DEFAULTS, _require_activity_map
+    from models.counting_integrator import fast_decode
 
     draw = _synthetic_params(virtual_pid)
     fixed = MODEL_PARAMS[task]["NEF"].get("fixed", {})
@@ -578,11 +715,11 @@ def _synthetic_worker(task: str, virtual_pid: int) -> dict:
         "n_neurons": draw["n_neurons"], "n_neurons_counting": draw["n_neurons"],
     }
 
-    try:
-        activity_map = load_activities(
-            n_neurons=draw["n_neurons"], n_neurons_counting=draw["n_neurons"], dataset=task)
-    except FileNotFoundError:
-        activity_map = None
+    # REQUIRED, not optional -- matches models.NEF.run()'s own convention
+    # (_require_activity_map) exactly. NEVER fall back to _pretrain() when
+    # this file is missing -- see this module's own top-of-file convention
+    # note and docs/HISTORY.md for the incident this re-states.
+    activity_map = _require_activity_map(draw["n_neurons"], draw["n_neurons"], task)
 
     trials = _load_synthetic_trials(task, virtual_pid)
 
@@ -607,15 +744,20 @@ def _synthetic_worker(task: str, virtual_pid: int) -> dict:
         seed = trial_idx + 1  # 1-indexed, matching activity_key_for_trial's own
                               # +1 convention for 0-indexed (soltani-style) trials
 
-        if activity_map is not None:
-            activity = activity_map.get(seed)
-            decoders = (
-                fast_decode(activity, alpha_0=draw["alpha_0"], lambda_=draw["lambda_"])
-                if activity is not None
-                else _pretrain({**params, "seed": seed, "base_seed": seed})
+        # REQUIRED, not optional -- a missing key means this activity file
+        # doesn't cover this virtual pid's trial at all; regenerate rather
+        # than silently retraining with mismatched tuning curves. See this
+        # module's own top-of-file convention note.
+        activity = activity_map.get(seed)
+        if activity is None:
+            raise KeyError(
+                f"No precomputed counting activity for key={seed} "
+                f"(dataset={task!r}, virtual_pid={virtual_pid}, trial={trial_idx}). "
+                f"The activity file has keys 1..n_trials -- regenerate with a "
+                f"larger --n_trials via models/counting_integrator.py "
+                f"--precompute_activities."
             )
-        else:
-            decoders = _pretrain({**params, "seed": seed, "base_seed": seed})
+        decoders = fast_decode(activity, alpha_0=draw["alpha_0"], lambda_=draw["lambda_"])
 
         try:
             obs_rows, encoders = _simulate_trial_full(obs_values, params, decoders, seed)
@@ -707,9 +849,13 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
     """One (cluster_center, oddball_deviation, sweep_value) cell of the
     grid: 3 observations clustered around cluster_center (+-
     --cluster_spread), then one oddball observation at cluster_center +
-    oddball_deviation. Returns the full per-timestep abs(decoded PE)
-    trace (mean over --n_seeds seeds) plus summary stats (max, end-of-
-    trial value, % decrease) -- abs() throughout per instruction.
+    oddball_deviation. Returns the per-timestep abs(decoded PE) trace
+    (mean over --n_seeds seeds), WINDOWED TO THE 4TH (ODDBALL)
+    OBSERVATION ONLY -- excludes its own preceding ITI, since PE during
+    that ITI still reflects the 3rd (clustered) observation's tail, not
+    the oddball's own response -- plus summary stats (max within that
+    window, end-of-window value, and their absolute difference) --
+    abs() throughout per instruction.
     """
     cluster_vals = [cluster_center - args.cluster_spread, cluster_center,
                     cluster_center + args.cluster_spread]
@@ -722,27 +868,44 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
     base_kwargs[args.sweep_param] = sweep_value
     params = _base_params(args.task, **base_kwargs)
 
+    activity_map = _require_activities(args.task, params["n_neurons"], params["n_neurons_counting"])
+
     pe_traces = []
     t = None
     for seed in range(args.n_seeds):
-        result = _simulate_full(params, obs_values, seed=seed)
+        key = _toy_activity_key(seed)
+        decoders = _decoders_for_seed(activity_map, key, params["alpha_0"], params["lambda_"])
+        result = _simulate_full(params, obs_values, decoders, seed=key)
         pe_traces.append(np.abs(result["pe_product"]))
         t = result["t"]
     pe_mean = np.mean(pe_traces, axis=0)
 
-    max_pe = float(np.max(pe_mean))
-    end_pe = float(pe_mean[-1])
-    pct_decrease = 100.0 * (max_pe - end_pe) / max_pe if max_pe > 0 else np.nan
+    # Window to the 4th (oddball) observation's own stimulus window only:
+    # [3*t_step + t_iti, 4*t_step] -- i.e. from the end of its own ITI
+    # (excluding it) to the end of the trial. n_obs is always exactly 4
+    # for this experiment (3 clustered + 1 oddball).
+    t_obs_ = float(params["t_obs"])
+    t_iti_ = float(params["t_iti"])
+    t_step = t_obs_ + t_iti_
+    window_start = 3 * t_step + t_iti_
+    window_end = 4 * t_step
+    mask = (t >= window_start) & (t <= window_end)
+    t_window = t[mask] - window_start
+    pe_window = pe_mean[mask]
+
+    max_pe = float(np.max(pe_window))
+    end_pe = float(pe_window[-1])
+    decrease = max_pe - end_pe
 
     return {
         "cluster_center": cluster_center,
         "oddball_deviation": oddball_deviation,
         "sweep_value": sweep_value,
-        "t": t,
-        "pe": pe_mean,
+        "t": t_window,
+        "pe": pe_window,
         "max_pe": max_pe,
         "end_pe": end_pe,
-        "pct_decrease": pct_decrease,
+        "decrease": decrease,
         "obs_values_raw": obs_values_raw,
         "obs_values": obs_values,
     }
@@ -793,7 +956,7 @@ def run_oddball(args) -> None:
         pd.to_pickle(result, out_path)
         print(f"Saved center={args.cluster_center} deviation={args.oddball_deviation} "
               f"{args.sweep_param}={args.sweep_value}: max_pe={result['max_pe']:.4f} "
-              f"end_pe={result['end_pe']:.4f} pct_decrease={result['pct_decrease']:.1f}% "
+              f"end_pe={result['end_pe']:.4f} decrease={result['decrease']:.4f} "
               f"-> {out_path}")
 
     elif args.mode == "submit":
@@ -832,7 +995,7 @@ def run_oddball(args) -> None:
         grid = pd.DataFrame([
             {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
              args.sweep_param: r["sweep_value"], "max_pe": r["max_pe"], "end_pe": r["end_pe"],
-             "pct_decrease": r["pct_decrease"]}
+             "decrease": r["decrease"]}
             for r in results
         ]).sort_values(["cluster_center", "oddball_deviation", args.sweep_param]).reset_index(drop=True)
         traces = {
@@ -852,6 +1015,182 @@ def run_oddball(args) -> None:
         pd.to_pickle(result_all, out_path)
         print(f"Collected {len(files)} cell(s) -> {out_path}")
         print(grid)
+
+
+# ── param_scan (neural_giant2 rows 2/3 -- lambda_/n_neurons vs activity+decay) ──
+
+NEURAL_ENCODER_THRESHOLD = 0.5  # matches figure_yoo_neural.py's/make_paper_figures.py's
+                                # own ENCODER_THRESHOLD -- same weight-tuned-neuron
+                                # convention as the original neural_giant figure.
+
+
+def _simulate_param_scan_trial(params: dict, obs_values: np.ndarray, decoders: dict,
+                               seed: int = 0) -> dict:
+    """Build and run one arbitrary trial (same shape as _simulate_full),
+    but ALSO captures this trial's own error-ensemble encoders --
+    needed to identify weight-tuned neurons (enc_dim_0 > threshold) per
+    (sweep_value, seed), since net.error is built with seed=seed directly
+    and its encoders genuinely differ per seed (the same fact that made
+    per-trial encoders necessary for the `synthetic` experiment's own
+    _simulate_trial_full applies here too -- see that function's own
+    docstring). Returns per-timestep t/value/error_neurons (raw,
+    synapse=None, matching _simulate_full's own convention) plus the
+    (n_neurons, 2) encoders array.
+    """
+    import nengo
+    from models.NEF import build_network
+
+    p = {**params, "seed": int(seed)}
+    net = build_network(obs_values, p, decoders)
+    dt = float(p["dt"])
+    n_obs = len(obs_values)
+    t_total = n_obs * (float(p["t_obs"]) + float(p["t_iti"]))
+
+    with nengo.Simulator(net, dt=dt, seed=int(seed), progress_bar=False) as sim:
+        sim.run(t_total)
+        encoders = np.array(sim.data[net.error].encoders, copy=True)
+
+    t_arr = np.arange(len(sim.data[net.probe_value])) * dt
+    return {
+        "t": t_arr,
+        "value": sim.data[net.probe_value].squeeze(),
+        "error_neurons": sim.data[net.probe_error_neurons],  # (T, n_neurons), raw
+        "encoders": encoders,
+    }
+
+
+def _param_scan_worker(args, sweep_value: float) -> pd.DataFrame:
+    """One sweep_value's worth of --n_seeds independent arbitrary trials
+    (Act 1.2-style: --n_obs observations, arbitrary --obs_values, no real
+    human data), the other two of {alpha_0, lambda_, n_neurons} held
+    fixed at --base_*. For each seed, reduces the error population's raw
+    per-timestep activity to the WEIGHT-TUNED neurons' own mean (per that
+    seed's own error-ensemble encoders, enc_dim_0 > NEURAL_ENCODER_
+    THRESHOLD) -- matching the ORIGINAL neural_giant figure's own
+    weight-tuned-neuron convention, per instruction, rather than a bulk
+    mean over ALL neurons the way `sweep`'s own mean_error_activity
+    column does.
+
+    This reduction happens HERE, not in the figure script, because it
+    needs each seed's own encoders, which only exist inside the live
+    simulation -- storing the full (T, n_neurons) array per seed/
+    sweep_value instead would be prohibitively large (n_seeds x
+    n_sweep_values x ~30000 timesteps x 500 neurons). Downstream
+    per-observation folding and decay-metric computation still happens in
+    make_paper_figures.py, matching this project's convention (compute
+    metrics in figure scripts, not extras scripts) as closely as that
+    constraint allows.
+
+    REQUIRED activity file, no _pretrain() fallback -- see this module's
+    own top-of-file convention note.
+    """
+    obs_values = np.array(args.obs_values, dtype=float) if args.obs_values \
+        else np.ones(args.n_obs)
+
+    base_kwargs = dict(alpha_0=args.base_alpha_0, n_neurons=args.base_n_neurons,
+                       lambda_=args.base_lambda_)
+    base_kwargs[args.sweep_param] = sweep_value
+    params = _base_params(args.task, **base_kwargs)
+
+    activity_map = _require_activities(args.task, params["n_neurons"], params["n_neurons_counting"])
+
+    rows = []
+    for seed in range(args.n_seeds):
+        key = _toy_activity_key(seed)
+        decoders = _decoders_for_seed(activity_map, key, params["alpha_0"], params["lambda_"])
+        result = _simulate_param_scan_trial(params, obs_values, decoders, seed=key)
+
+        weight_idx = np.where(result["encoders"][:, 0] > NEURAL_ENCODER_THRESHOLD)[0]
+        if len(weight_idx) == 0:
+            print(f"\n  Warning: sweep_value={sweep_value} seed={seed}: no weight-tuned "
+                  f"neurons found (enc_dim_0 > {NEURAL_ENCODER_THRESHOLD}), skipping")
+            continue
+        weight_tuned_activity = result["error_neurons"][:, weight_idx].mean(axis=1)
+
+        rows.append(pd.DataFrame({
+            "sweep_value": sweep_value,
+            "seed": seed,
+            "t": result["t"],
+            "value_decoded": result["value"],
+            "weight_tuned_activity": weight_tuned_activity,
+            "n_weight_tuned": len(weight_idx),
+        }))
+        print(f"  {args.sweep_param}={sweep_value}  seed {seed + 1}/{args.n_seeds} "
+              f"({len(weight_idx)} weight-tuned neurons)", end="\r", flush=True)
+    print()
+
+    if not rows:
+        raise RuntimeError(
+            f"No seeds produced weight-tuned neurons for {args.sweep_param}={sweep_value} -- "
+            f"every seed hit the enc_dim_0 > {NEURAL_ENCODER_THRESHOLD} threshold with zero "
+            f"matching neurons; investigate before trusting this sweep_value."
+        )
+    return pd.concat(rows, ignore_index=True)
+
+
+def run_param_scan(args) -> None:
+    """Toy demo (Act 1.2-style): scan ONE of {alpha_0, lambda_, n_neurons}
+    across --sweep_values (other two held fixed at --base_*), --n_seeds
+    independent arbitrary trials per value, reducing to WEIGHT-TUNED
+    neuron activity per seed/timestep (see _param_scan_worker's own
+    docstring) -- built for neural_giant2's row 2 (lambda_) and row 3
+    (n_neurons) panels, which need real per-observation activity AND
+    decay metrics, matching the ORIGINAL neural_giant figure's own row-1/
+    row-3 panels but scanning explicit parameter values (this figure's
+    own convention) rather than random virtual pids (that figure's own
+    convention) -- seeds play the role virtual pids played there.
+
+    Has the same --mode run/submit/collect lifecycle as oddball/probe/
+    synthetic -- one job per sweep_value, --n_seeds trials run serially
+    within that job.
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if args.mode == "run":
+        if args.sweep_value is None:
+            raise SystemExit("--sweep_value required for --mode run")
+        tag = _oddball_value_tag(args.sweep_value)
+        out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}_v{tag}.pkl"
+        if out_path.exists():
+            print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
+            return
+        df = _param_scan_worker(args, args.sweep_value)
+        df.to_pickle(out_path)
+        print(f"Saved {len(df):,} rows ({df['seed'].nunique()} seeds) -> {out_path}")
+
+    elif args.mode == "submit":
+        root = str(Path(__file__).resolve().parent.parent)
+        print(f"Submitting {len(args.sweep_values)} param_scan jobs for "
+              f"sweep_param={args.sweep_param} task={args.task}")
+        for v in args.sweep_values:
+            tag = _oddball_value_tag(v)
+            out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}_v{tag}.pkl"
+            if out_path.exists():
+                print(f"  {args.sweep_param}={v}: already exists -- skipping")
+                continue
+            cmd = (
+                f"venv/bin/python scripts/neural_experiments.py param_scan "
+                f"--task {args.task} --mode run --sweep_param {args.sweep_param} "
+                f"--sweep_value {v} "
+                f"--base_alpha_0 {args.base_alpha_0} --base_lambda_ {args.base_lambda_} "
+                f"--base_n_neurons {args.base_n_neurons} --n_obs {args.n_obs} "
+                f"--n_seeds {args.n_seeds}"
+            )
+            script = make_job_script(root, [cmd], time_limit="1:0:0", mem="16G")
+            script_path = OUT_DIR / f"_job_param_scan_{args.sweep_param}_{args.task}_v{tag}.sh"
+            script_path.write_text(script)
+            submit_script(script_path, dry_run=args.dry_run)
+
+    elif args.mode == "collect":
+        files = sorted(OUT_DIR.glob(f"param_scan_{args.sweep_param}_{args.task}_v*.pkl"))
+        if not files:
+            print(f"No param_scan_{args.sweep_param}_{args.task}_v*.pkl files found in {OUT_DIR}")
+            return
+        df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
+        out_path = OUT_DIR / f"param_scan_{args.sweep_param}_{args.task}.pkl"
+        df.to_pickle(out_path)
+        print(f"Collected {len(files)} value(s) -> {out_path}")
+        print(df.groupby("sweep_value")["seed"].nunique())
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -934,6 +1273,23 @@ def main() -> None:
     p_odd.add_argument("--n_seeds", type=int, default=20)
     p_odd.add_argument("--dry_run", action="store_true")
     p_odd.set_defaults(func=run_oddball)
+
+    p_scan = sub.add_parser("param_scan")
+    p_scan.add_argument("--task", required=True)
+    p_scan.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
+    p_scan.add_argument("--sweep_param", required=True, choices=["alpha_0", "lambda_", "n_neurons"])
+    p_scan.add_argument("--sweep_value", type=float, default=None,
+                       help="Single value for --mode run (one job per value).")
+    p_scan.add_argument("--sweep_values", type=float, nargs="+", default=None,
+                       help="Full list of values for --mode submit.")
+    p_scan.add_argument("--base_alpha_0", type=float, required=True)
+    p_scan.add_argument("--base_lambda_", type=float, required=True)
+    p_scan.add_argument("--base_n_neurons", type=int, required=True)
+    p_scan.add_argument("--n_obs", type=int, default=15)
+    p_scan.add_argument("--obs_values", type=float, nargs="+", default=None)
+    p_scan.add_argument("--n_seeds", type=int, default=10)
+    p_scan.add_argument("--dry_run", action="store_true")
+    p_scan.set_defaults(func=run_param_scan)
 
     args = parser.parse_args()
     args.func(args)

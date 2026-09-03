@@ -3735,13 +3735,22 @@ def _plot_neural_dual_vs_param(
 
 def _oddball_primary_context(grid: pd.DataFrame) -> tuple[float, float]:
     """Pick one representative (cluster_center, oddball_deviation) for
-    panels that need a single context rather than the full grid -- middle
-    center, smallest-magnitude POSITIVE deviation available (falling back
-    to whatever deviation exists if none are positive).
+    panels that need a single context rather than the full grid.
+
+    Center: 50 (the task's own raw-scale midpoint) if present in the grid
+    -- per instruction, since it's the cleanest single context to show a
+    representative PE trace at (deviation sign is symmetric there, unlike
+    off-center positions where sign and position are confounded -- see
+    chat). Falls back to the middle of whatever centers ARE present if 50
+    isn't one of them, rather than erroring, so this still degrades
+    gracefully for a grid that doesn't include 50.
+
+    Deviation: smallest-magnitude POSITIVE deviation available (falling
+    back to whatever deviation exists if none are positive).
     """
     centers = sorted(grid["cluster_center"].unique())
     deviations = sorted(grid["oddball_deviation"].unique())
-    center = centers[len(centers) // 2]
+    center = 50.0 if 50.0 in centers else centers[len(centers) // 2]
     positive = [d for d in deviations if d > 0]
     deviation = min(positive) if positive else deviations[-1]
     return center, deviation
@@ -3753,13 +3762,21 @@ def _oddball_base_value(d: dict, sweep_param: str) -> float:
 
 
 def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Panel: |decoded PE| vs time across the oddball sequence (3
-    clustered observations, then one surprising observation far away), at
-    ONE representative (cluster_center, oddball_deviation) context, one
-    line per representative value of sweep_param (low/mid/high of
-    whatever was actually run -- 3 REPRESENTATIVE lines, per instruction).
-    No error band: the collected trace is already a mean over --n_seeds
-    seeds with no per-seed variance saved.
+    """Panel: |decoded PE| vs time WITHIN THE ODDBALL (4TH) OBSERVATION
+    ONLY -- the trace neural_experiments.py's _oddball_worker now returns
+    is already windowed to that single observation (t=0 at that
+    observation's own onset, excluding its preceding ITI), so this panel
+    shows the model's response to the surprise itself rather than the
+    whole 4-observation trial. ONE representative cluster_center
+    (_oddball_primary_context's own pick, currently 50), up to 3
+    representative values of sweep_param (low/mid/high of whatever was
+    actually run, per instruction) -- BOTH deviation signs present in the
+    grid are folded into ONE long-format frame per sweep_param value and
+    handed to sns.lineplot, which aggregates them itself (mean + its own
+    default CI band across the two deviation-sign traces at each
+    timepoint) rather than being drawn as separate lines/linestyles --
+    per instruction, simpler than manually distinguishing sign. No
+    title -- the legend already identifies every line.
     """
     path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
     if not path.exists():
@@ -3768,49 +3785,67 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
         return
     d = pd.read_pickle(path)
     grid, traces = d["grid"], d["traces"]
-    center, deviation = _oddball_primary_context(grid)
+    center, _ = _oddball_primary_context(grid)
+    deviations = sorted(grid["oddball_deviation"].unique())
 
     values = sorted(grid[sweep_param].unique())
     picks = [values[0], values[len(values) // 2], values[-1]] if len(values) >= 3 else values
 
-    from fitting.model_params import _NEF_FIXED
+    rows = []
+    for val in picks:
+        for deviation in deviations:
+            tr = traces.get((center, deviation, val))
+            if tr is None:
+                continue
+            rows.append(pd.DataFrame({"t": tr["t"], "pe": tr["pe"], "sweep_value": val}))
+    if not rows:
+        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    df = pd.concat(rows, ignore_index=True)
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     sym = label_sym.get(sweep_param, sweep_param)
     pal = get_palette(max(6, len(picks)))
-    n_obs = None
-    for i, val in enumerate(picks):
-        tr = traces.get((center, deviation, val))
-        if tr is None:
-            continue
-        ax.plot(tr["t"], tr["pe"], color=pal[i], lw=1.8, label=f"{sym}={val:g}")
-        n_obs = len(tr["t"])
+    color_map = {val: pal[i] for i, val in enumerate(picks)}
 
-    if n_obs is not None:
-        t_step = _NEF_FIXED["t_iti"] + _NEF_FIXED["t_obs"]
-        n_obs_actual = 4  # 3 clustered + 1 oddball, always, for this experiment
-        for k in range(1, n_obs_actual):
-            ax.axvline(k * t_step, color="0.7", lw=0.8, ls=":", zorder=0)
-        ax.set_xlim(0, n_obs_actual * t_step)
+    sns.lineplot(data=df, x="t", y="pe", hue="sweep_value", hue_order=picks,
+                palette=color_map, ax=ax, lw=1.8)
 
-    ax.set_xlabel("Time (s)")
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles, [f"{sym}={float(l):g}" for l in labels],
+              fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
+
+    ax.set_xlim(0, float(df["t"].max()))
+    ax.set_xlabel("Time since oddball onset (s)")
     ax.set_ylabel("|Decoded PE|")
-    ax.set_title(f"center={center:g}, deviation={deviation:+g}", fontsize=8)
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
 def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Panel: sweep_param (x) vs max |decoded PE| (peak error response) AND
-    % decrease from that max by the end of the trial (how much learning/
-    value-updating has shrunk the error), twin y-axes -- mean +- SEM
-    AGGREGATED across every (cluster_center, oddball_deviation) cell in
-    the grid for that sweep_param value, a more robust per-parameter
-    estimate than any single context alone (legitimate BECAUSE
-    _plot_oddball_center_invariance's own check confirms centers are
-    interchangeable for a fixed deviation magnitude -- if that check ever
-    shows real center-dependence, this aggregation stops being
-    appropriate and should be reconsidered).
+    """Panel: sweep_param (x) vs max |decoded PE| (peak error response
+    within the oddball observation's own window) AND its absolute
+    decrease by the end of that SAME window (max minus the window's own
+    end value -- how much learning/value-updating has shrunk the error
+    WITHIN the oddball observation, not across the whole trial), twin
+    y-axes -- mean +- SEM AGGREGATED across every (cluster_center,
+    oddball_deviation) cell in the grid for that sweep_param value.
+
+    AGGREGATION JUSTIFICATION (revised after real data, not the original
+    a-priori assumption -- see chat): centers are NOT actually
+    interchangeable in absolute magnitude -- both max_pe and decrease vary
+    non-monotonically with the oddball's own distance from the task's raw
+    midpoint (50), confirmed directly on soltani_numbers (e.g. |rescaled
+    oddball position| 0.20 gave a LARGER alpha_0-driven swing than 0.40,
+    breaking simple edge-distance monotonicity). What IS robust across
+    every position tested is the SIGN of the sweep_param's effect --
+    every tested cell showed higher alpha_0 -> higher max_pe AND higher
+    decrease, with only the magnitude of that effect varying by position.
+    Averaging across the grid here is therefore a summary of that
+    direction-robust effect, not a claim that position doesn't matter --
+    the per-position magnitude variation is a real, separate finding
+    that belongs in its own analysis/panel, not smoothed over silently by
+    this aggregate.
     """
     path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
     if not path.exists():
@@ -3819,10 +3854,10 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
         return
     d = pd.read_pickle(path)
     grid = d["grid"]
-    agg = (grid.groupby(sweep_param)[["max_pe", "pct_decrease"]]
+    agg = (grid.groupby(sweep_param)[["max_pe", "decrease"]]
           .agg(["mean", "sem"]).reset_index())
     agg.columns = [sweep_param, "max_pe_mean", "max_pe_sem",
-                  "pct_decrease_mean", "pct_decrease_sem"]
+                  "decrease_mean", "decrease_sem"]
     agg = agg.sort_values(sweep_param)
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
@@ -3839,27 +3874,29 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
         ax.set_xlim(left=0)
 
     ax2 = ax.twinx()
-    ax2.errorbar(agg[sweep_param], agg["pct_decrease_mean"], yerr=agg["pct_decrease_sem"],
+    ax2.errorbar(agg[sweep_param], agg["decrease_mean"], yerr=agg["decrease_sem"],
                 fmt="o-", color=c2, lw=1.8, ms=5, capsize=3)
-    ax2.set_ylabel("% decrease by trial end", color=c2)
+    ax2.set_ylabel("PE decrease (max\u2212end)", color=c2)
     ax2.tick_params(axis="y", labelcolor=c2)
     sns.despine(ax=ax2, top=True)
     sns.despine(ax=ax, top=True, right=True)
 
 
 def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Panel: |decoded PE| vs time, one line per cluster_center, all at
-    ONE representative oddball_deviation and sweep_param held at its own
-    --base_* value (whichever sweep value is closest to it) -- a direct
-    visual test of the person's own prediction that a fixed-magnitude
-    surprise produces the same response regardless of where the cluster
-    sits. If these collapse onto each other, that confirms
-    _plot_oddball_param_effect's own cross-center aggregation is
-    legitimate; if they don't, that's a real, informative finding about
-    where the model's behaviour depends on absolute position (e.g.
-    saturation near the edges of the rescaled range), not just relative
-    deviation -- and this panel should stay in the figure rather than be
-    removed as trivial.
+    """Panel: |decoded PE| vs time WITHIN THE ODDBALL (4TH) OBSERVATION
+    ONLY (see _plot_oddball_pe_trace's own note -- the saved trace is
+    already windowed to this one observation), one line per
+    cluster_center, all at ONE representative oddball_deviation and
+    sweep_param held at its own --base_* value (whichever sweep value is
+    closest to it) -- a direct visual test of the person's own
+    prediction that a fixed-magnitude surprise produces the same
+    response regardless of where the cluster sits. If these collapse
+    onto each other, that confirms _plot_oddball_param_effect's own
+    cross-center aggregation is legitimate; if they don't, that's a
+    real, informative finding about where the model's behaviour depends
+    on absolute position (e.g. saturation near the edges of the rescaled
+    range), not just relative deviation -- and this panel should stay in
+    the figure rather than be removed as trivial.
     """
     path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
     if not path.exists():
@@ -3875,34 +3912,162 @@ def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_n
     values = sorted(grid[sweep_param].unique())
     closest_val = min(values, key=lambda v: abs(v - base_val))
 
-    from fitting.model_params import _NEF_FIXED
-
     pal = get_palette(max(6, len(centers)))
-    n_obs = None
+    t_max = None
     for i, c in enumerate(centers):
         tr = traces.get((c, deviation, closest_val))
         if tr is None:
             continue
         ax.plot(tr["t"], tr["pe"], color=pal[i], lw=1.5, label=f"center={c:g}")
-        n_obs = len(tr["t"])
+        t_max = tr["t"][-1] if t_max is None else max(t_max, tr["t"][-1])
 
-    if n_obs is not None:
-        t_step = _NEF_FIXED["t_iti"] + _NEF_FIXED["t_obs"]
-        for k in range(1, 4):
-            ax.axvline(k * t_step, color="0.7", lw=0.8, ls=":", zorder=0)
-        ax.set_xlim(0, 4 * t_step)
+    if t_max is not None:
+        ax.set_xlim(0, t_max)
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     sym = label_sym.get(sweep_param, sweep_param)
-    ax.set_xlabel("Time (s)")
+    ax.set_xlabel("Time since oddball onset (s)")
     ax.set_ylabel("|Decoded PE|")
     ax.set_title(f"deviation={deviation:+g}, {sym}={closest_val:g}", fontsize=8)
     ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Row 2/3, col 1: weight-tuned error-neuron activity (Hz) vs
+    observation, one line per representative sweep_param value, mean +-
+    SEM across seeds -- direct structural port of the ORIGINAL
+    neural_giant's own panel 3 (_plot_neural_lambda_activity), reading
+    neural_experiments.py's own `param_scan` experiment instead of
+    `sweep` (a genuinely different design from row 1's `oddball` --
+    full 15-observation arbitrary trials, not a windowed surprise
+    response; see param_scan's own docstring). Weight-tuned-neuron
+    reduction is ALREADY applied there, per seed (encoders genuinely
+    differ by seed), so this function only folds the already-reduced
+    per-timestep trace into per-observation stats, matching the original
+    panel's own binning convention exactly.
+    """
+    path = NEURAL_EXP_DIR / f"param_scan_{sweep_param}_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, f"No param_scan {sweep_param} data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    from fitting.model_params import _NEF_FIXED
+
+    df = pd.read_pickle(path).copy()
+    t_iti, t_obs = _NEF_FIXED["t_iti"], _NEF_FIXED["t_obs"]
+    obs_num, t_within = _fold_observation_time(df["t"].values, t_iti, t_obs)
+    df["observation"] = obs_num
+    df["t_within_obs"] = t_within
+    active = df[~np.isnan(df["t_within_obs"])]
+
+    per_obs = (active.groupby(["sweep_value", "seed", "observation"])["weight_tuned_activity"]
+              .mean().reset_index())
+    stats = (per_obs.groupby(["sweep_value", "observation"])["weight_tuned_activity"]
+            .agg(["mean", "sem"]).reset_index())
+
+    label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
+    sym = label_sym.get(sweep_param, sweep_param)
+    pal = get_palette(6)
+    values = sorted(stats["sweep_value"].unique())
+    for i, val in enumerate(values):
+        sub = stats[stats["sweep_value"] == val].sort_values("observation")
+        ax.plot(sub["observation"], sub["mean"], color=pal[i], lw=1.8, label=f"{sym}={val:g}")
+        ax.fill_between(sub["observation"], sub["mean"] - sub["sem"],
+                        sub["mean"] + sub["sem"], color=pal[i], alpha=0.18)
+
+    n_obs_max = int(df["observation"].max())
+    ax.set_xlabel("Observation")
+    ax.set_xlim(0, n_obs_max)
+    ax.set_ylabel("Weight-tuned error\nneuron activity (Hz)")
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -> pd.DataFrame | None:
+    """Per (sweep_value, seed): response-change decay (mean |Delta
+    response| first 2 obs minus last 2) and weight-tuned activity decay
+    (activity at first obs minus last), extracted from
+    neural_experiments.py's param_scan raw per-timestep output at each
+    observation's own readout time -- matching models.NEF._extract_
+    responses' own small-window-average convention for response (|t -
+    t_resp| < dt*3) and neural_experiments.py's own READOUT_OFFSET (0.5s
+    into the observation) for activity, the SAME conventions the
+    synthetic/oddball pipelines already use elsewhere in this file.
+
+    Output column is named EXACTLY `sweep_param` (not a generic
+    "sweep_value") so this drops directly into _plot_neural_dual_vs_param,
+    the SAME shared helper the original neural_giant's own row-3 panels
+    use, with no adapter needed.
+    """
+    path = NEURAL_EXP_DIR / f"param_scan_{sweep_param}_{task}.pkl"
+    if not path.exists():
+        return None
+    from fitting.model_params import _NEF_FIXED
+
+    df = pd.read_pickle(path)
+    dt = float(_NEF_FIXED["dt"])
+    t_iti, t_obs = float(_NEF_FIXED["t_iti"]), float(_NEF_FIXED["t_obs"])
+    t_step = t_obs + t_iti
+    n_obs = int(np.floor(df["t"].max() / t_step))
+
+    rows = []
+    for (sweep_value, seed), g in df.groupby(["sweep_value", "seed"]):
+        g = g.sort_values("t")
+        t_arr = g["t"].to_numpy()
+        value_arr = g["value_decoded"].to_numpy()
+        act_arr = g["weight_tuned_activity"].to_numpy()
+
+        responses, activities = [], []
+        for i in range(n_obs):
+            t_resp = t_iti + i * t_step + t_obs
+            resp_mask = np.abs(t_arr - t_resp) < dt * 3
+            responses.append(float(np.mean(value_arr[resp_mask])) if resp_mask.any() else np.nan)
+
+            t_act = t_iti + i * t_step + NEURAL_READOUT_OFFSET
+            idx_act = int(np.argmin(np.abs(t_arr - t_act)))
+            activities.append(float(act_arr[idx_act]))
+
+        responses = np.array(responses)
+        activities = np.array(activities)
+        # First observation's own delta convention: |response| (matches
+        # this file's other decay metrics, e.g. _load_neural_decay_metrics).
+        delta = np.concatenate([[abs(responses[0])], np.abs(np.diff(responses))])
+
+        resp_decay = float(np.mean(delta[:2]) - np.mean(delta[-2:]))
+        act_decay = float(activities[0] - activities[-1])
+        rows.append({sweep_param: sweep_value, "seed": seed,
+                    "resp_decay": resp_decay, "act_decay": act_decay})
+
+    return pd.DataFrame(rows)
+
+
+def _plot_neural_giant2_decay_vs_param(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Row 2/3, col 2: decay(deltaR) AND decay(deltaA) vs sweep_param,
+    twin axes, one point per (sweep_value, seed) -- reuses
+    _plot_neural_dual_vs_param DIRECTLY, the SAME helper the ORIGINAL
+    neural_giant's own row-3 panels use, so the visual convention is
+    identical. Seeds play the role virtual pids played in that figure's
+    own large-N regression (many independent draws), rather than a
+    separate large-N synthetic campaign -- this figure's own design scans
+    explicit parameter values instead of random draws, so seeds are the
+    only source of independent replication available per value.
+    """
+    df = _param_scan_decay_metrics(sweep_param, task)
+    if df is None or len(df) < 3:
+        ax.text(0.5, 0.5, f"No param_scan {sweep_param} decay data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
+    param_label = label_sym.get(sweep_param, sweep_param)
+    _plot_neural_dual_vs_param(
+        ax, df, sweep_param, param_label,
+        "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)",
+        include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
+
+
 def make_neural_giant2() -> Path:
-    """3x3 figure: a second neural-predictions figure, one row per
+    """3x2 figure: a second neural-predictions figure, one row per
     parameter (alpha_0, lambda_, n_neurons), each investigated via its own
     fresh grid of oddball simulations (3 observations clustered around a
     center, then one surprising observation deviating from it, across
@@ -3911,44 +4076,66 @@ def make_neural_giant2() -> Path:
 
       Row 1 (alpha_0, lambda_=0.7, n_neurons=500/nc=2000 -- the RMSE
         production default):
-        Col 1: |decoded PE| vs time, one representative context, 3
-          representative alpha_0 values.
-        Col 2: alpha_0 (x) vs max |decoded PE| AND % decrease by trial
-          end, twin axes, mean +- SEM aggregated across the whole grid --
-          the neural prediction this row tests: higher alpha_0 produces a
-          bigger initial response AND more dramatic attenuation from
-          learning/value-updating.
-        Col 3: center-invariance check -- |decoded PE| vs time, one line
-          per cluster_center, same deviation and (near-)base alpha_0 --
-          tests directly whether the response to a fixed-magnitude
-          surprise really is independent of cluster_center, which is what
-          makes col 2's own cross-center aggregation legitimate. Kept
-          even if it shows the expected trivial (fully overlapping)
-          result, per instruction, since it's a real verification, not
-          just decoration -- remove only once confirmed genuinely
-          uninformative across all three rows.
-      Rows 2 (lambda_) and 3 (n_neurons): NOT YET BUILT -- same
-        structure, own fresh oddball grid each, to be added once row 1
-        is confirmed.
+        Col 1: |decoded PE| vs time, one representative center, BOTH
+          deviation signs, 3 representative alpha_0 values.
+        Col 2: alpha_0 (x) vs max |decoded PE| AND absolute decrease by
+          the end of the oddball's own window, twin axes, mean +- SEM
+          aggregated across the whole grid -- the neural prediction this
+          row tests: higher alpha_0 produces a bigger initial response
+          AND more dramatic attenuation from learning/value-updating.
+      Row 2 (lambda_=0.1 and 0.7, alpha_0=0.8, n_neurons=500/nc=2000 --
+        neural_experiments.py's own `param_scan` experiment, NOT
+        `oddball` -- a different design: full 15-observation arbitrary
+        trials (Act 1.2-style, matching the ORIGINAL neural_giant's own
+        row-1 lambda panel), not a windowed surprise response):
+        Col 1: weight-tuned error-neuron activity (Hz) vs observation,
+          one line per lambda_ value, mean +- SEM across --n_seeds --
+          direct structural port of the ORIGINAL neural_giant's own
+          panel 3 (_plot_neural_lambda_activity), just at this figure's
+          own explicit lambda_ values instead of that figure's own base
+          value.
+        Col 2: decay(deltaR) AND decay(deltaA) vs lambda_, twin axes, one
+          point per (lambda_, seed) -- direct reuse of
+          _plot_neural_dual_vs_param (the SAME helper the ORIGINAL
+          neural_giant's own row-3 panels use), with seeds standing in
+          for virtual pids as the "many independent draws" axis, since
+          this figure's own design scans explicit parameter values rather
+          than random draws.
+      Row 3 (n_neurons): NOT YET BUILT -- same param_scan structure, own
+        fresh scan, once row 2 is confirmed.
 
-    Reads neural_experiments.py's own `oddball` experiment (--mode
-    run/submit/collect, cluster-bound -- a real timing check found even a
-    modest single-context run exceeds a reasonable single local call, and
-    the full grid costs more still).
+    The center-invariance check (col 3 in an earlier version of this
+    figure) was REMOVED per instruction -- it had already served its
+    purpose: the analysis it was checking for (whether magnitude is
+    center-independent) came back genuinely non-trivial (magnitude varies
+    non-monotonically with the oddball's own distance from the task's raw
+    midpoint -- see chat and _plot_oddball_param_effect's own docstring),
+    so keeping a dedicated panel around to re-confirm that on every render
+    was no longer the point; the finding itself is now documented in
+    prose instead. _plot_oddball_center_invariance itself is left defined
+    (not deleted) in case a future row wants to re-run this check on its
+    own grid, just no longer wired into this figure's layout.
+
+    Row 1 reads neural_experiments.py's own `oddball` experiment; row 2
+    reads its `param_scan` experiment -- both cluster-bound (--mode
+    run/submit/collect; a real timing check found even a modest
+    single-context oddball run exceeds a reasonable single local call,
+    and param_scan's own full-15-observation trials cost similarly).
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75),
+    fig, axes = plt.subplots(3, 2, figsize=(FIGURE_SIZE[0] * 0.8 * 2 / 3, FIGURE_SIZE[1] * 2.1 * 0.75),
                              constrained_layout=True)
 
     _plot_oddball_pe_trace(axes[0, 0], "alpha_0")
     _plot_oddball_param_effect(axes[0, 1], "alpha_0")
-    _plot_oddball_center_invariance(axes[0, 2], "alpha_0")
 
-    for row, label in [(1, "lambda_"), (2, "n_neurons")]:
-        for col in (0, 1, 2):
-            axes[row, col].text(0.5, 0.5, f"{label} row not yet built", ha="center",
-                                va="center", transform=axes[row, col].transAxes,
-                                color="0.5", style="italic")
+    _plot_neural_giant2_activity_vs_obs(axes[1, 0], "lambda_")
+    _plot_neural_giant2_decay_vs_param(axes[1, 1], "lambda_")
+
+    for col in (0, 1):
+        axes[2, col].text(0.5, 0.5, "n_neurons row not yet built", ha="center",
+                          va="center", transform=axes[2, col].transAxes,
+                          color="0.5", style="italic")
 
     out_path, _ = _save_fig(fig, "neural_giant2")
     plt.close(fig)

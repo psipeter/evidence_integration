@@ -45,6 +45,48 @@ anything else. Compaction summaries omit conventions. Key ones to remember:
   combination — see docs/HISTORY.md for the full mechanics if task/ is ever
   touched again).
 - All NEF simulation data → data/runs/; figures → figures/
+- **NEVER let a NEF/counting-integrator simulation silently fall back to a
+  live `_pretrain()` training run when a precomputed counting-activity
+  file (or a specific seed's key within it) is missing.** Always load it
+  via `load_activities()`/`fast_decode()` and RAISE with the exact
+  regenerate command if it's missing -- this is `models.NEF`'s own
+  `_require_activity_map` convention, and it is NOT optional or a style
+  preference. It was violated once already, inside `scripts/
+  neural_experiments.py`'s own `_simulate_full` (used by `raster_demo`/
+  `sweep`/`oddball`), which had a silent `decoders is None ->
+  _pretrain(...)` fallback baked in despite this being an explicit prior
+  instruction -- only caught because a person noticed an unexplained
+  result asymmetry and asked whether the real activity file was actually
+  being used. Fixed via that file's own `_require_activities()`/
+  `_decoders_for_seed()` helpers (see "What NOT to do" and
+  docs/HISTORY.md for the full incident). `_probe_worker`/
+  `_synthetic_worker` in the SAME file had their own instances of this
+  exact pattern -- fixed the same session, via `models.NEF`'s own
+  `_require_activity_map` directly (real trial-based keys there, so no
+  need for a separate helper the way the arbitrary-seed toy experiments
+  needed).
+- **A SECOND, related bug found the same session, in the SAME fix above:**
+  `_decoders_for_seed`'s own `key = seed + 1` offset was applied ONLY to
+  the activity-map LOOKUP -- every caller (`run_raster_demo`, `run_sweep`,
+  `_oddball_worker`) still passed the raw, un-offset `seed` as the actual
+  SIMULATION seed to `_simulate_full`. This silently paired a network's
+  own seed-dependent tuning curves with a DIFFERENT seed's decoders --
+  the exact "activity key vs simulation seed" mismatch this project's own
+  `activity_key_for_trial` exists to prevent for real trials (see "What
+  NOT to do"), reintroduced here for `neural_experiments.py`'s toy
+  experiments. Caught only because a person noticed `neural_giant2`'s new
+  row-2 activity panel (`param_scan`, weight-tuned neurons only) showed a
+  qualitatively different pattern (dip-then-rise) than the ORIGINAL
+  neural_giant's own bulk-mean equivalent panel (clean monotonic decay,
+  generated before this bug was introduced). Fixed via `_toy_activity_key`
+  -- the single source of truth for this offset, now used identically for
+  BOTH halves of the pairing in every caller (`raster_demo`/`sweep`/
+  `oddball`/`param_scan`). **Every `oddball` grid cell generated during
+  this session, before this fix, is affected and needs regeneration** --
+  the qualitative findings (sign-independence of the alpha_0 effect, its
+  direction) may have survived since the same systematic offset applied
+  uniformly to every cell, but this was never confirmed and should not be
+  assumed. See docs/HISTORY.md for the full diagnostic trail.
 
 ---
 
@@ -310,51 +352,90 @@ rather than splitting it across two tasks that each only show half.
 
 A separate figure from Acts 1-5, using a different data-generation
 mechanism specifically designed to isolate each of alpha_0/lambda_/
-n_neurons's own causal contribution to the error population's response to
-a SURPRISING observation -- complementary to the giant's own random-
-virtual-pid covariation design, not a replacement for it.
+n_neurons's own causal contribution -- complementary to the giant's own
+random-virtual-pid covariation design, not a replacement for it. Uses TWO
+different underlying experiments depending on the row:
 
-**Design**: an "oddball" paradigm. 3 observations clustered tightly around
+**Row 1 (alpha_0) -- `oddball`.** 3 observations clustered tightly around
 a center value, then one observation deviating from it by a fixed amount
-("the oddball") -- after the first 3 (clustered) observations, the value
-population should have converged near the cluster center, so the error
-population's response to the oddball represents |oddball - center|, which
-should be roughly INDEPENDENT of the center itself for a fixed deviation
-magnitude (this is checked directly, not assumed -- see below). Simulated
-across a full grid of (cluster_centers x oddball_deviations x one swept
-parameter, the other two held fixed), using abs(decoded PE) throughout.
+("the oddball"), using abs(decoded PE) throughout, across a full grid of
+(cluster_centers x oddball_deviations x alpha_0 values).
 
-**Layout**: 3x3, one row per parameter. Each row: col 1 = |decoded PE| vs
-time at one representative (center, deviation) context, 3 representative
-values of that row's parameter; col 2 = that parameter (x) vs max |decoded
-PE| AND % decrease by trial end, twin axes, mean +- SEM aggregated across
-the WHOLE grid (legitimate precisely because of the center-invariance
-check in col 3 -- if that check ever showed real center-dependence, this
-aggregation would need reconsidering); col 3 = the center-invariance check
-itself -- |decoded PE| vs time, one line per cluster_center, same
-deviation and (near-)base value of the row's own parameter. Kept in the
-figure even if trivial (fully overlapping lines), per instruction, since
-it's a real verification the aggregation in col 2 depends on, not just
-decoration.
+**Rows 2/3 (lambda_/n_neurons) -- `param_scan`, a NEW, simpler experiment
+(this session), NOT `oddball`.** A full 15-observation arbitrary trial
+(Act 1.2-style, matching the ORIGINAL neural_giant's own row-1 lambda
+panel -- constant `obs_values=ones(n_obs)`), scanning ONE of
+alpha_0/lambda_/n_neurons across explicit values, the other two held
+fixed at `--base_*`. For each seed, reduces the error population's raw
+per-timestep activity to the WEIGHT-TUNED neurons' own mean (that seed's
+own error-ensemble encoders, `enc_dim_0 > 0.5`, matching the ORIGINAL
+neural_giant's own weight-tuned-neuron convention) -- done inside
+`neural_experiments.py` itself (not the figure script) since it needs
+each seed's own encoders, which only exist inside the live simulation;
+storing the full (T, n_neurons) array per seed instead would be
+prohibitively large. Downstream per-observation folding and decay-metric
+computation (mirroring `_load_neural_decay_metrics`'s own early-2-obs-
+minus-late-2-obs response decay and first-obs-minus-last-obs activity
+decay) still happens in `make_paper_figures.py`, per convention. Seeds
+play the role virtual pids played in the giant's own large-N regression
+(many independent draws), since this design scans explicit parameter
+values rather than random draws.
 
-**Status**: Row 1 (alpha_0) built and code-verified (against a synthetic
-grid file with known properties -- confirmed the aggregation and
-invariance-check logic both reproduce correctly). Data generation
-submitted to the cluster (`oddball --mode submit`, one job per grid cell --
-like `synthetic`, a real timing check found even a modest single-context
-run exceeds a reasonable single local call) but not yet collected;
-current grid is `--cluster_centers 20 40 60 80 --cluster_spread 1
---oddball_deviations -10 10 --sweep_values 0.2 0.4 0.6 0.8 1.0
---base_alpha_0 0.7 --base_lambda_ 0.7 --base_n_neurons 500`
-(n_neurons=500/nc=2000, the RMSE production default, held fixed for this
-row). Rows 2 (lambda_) and 3 (n_neurons) are NOT YET BUILT -- same
-structure, own fresh oddball grid each, once row 1's real (not just
-synthetic-test) result is confirmed.
+**Layout, current: 3x2** (col 3, the center-invariance check, REMOVED
+from the layout per instruction -- see below). Row 1: col 1 = |decoded
+PE| vs time within the oddball observation's own window, one
+representative center, BOTH deviation signs folded into ONE
+`sns.lineplot` call per alpha_0 value (letting seaborn aggregate the two
+deviation-sign traces itself via its own mean+CI, rather than drawing
+them as separate lines/linestyles); col 2 = alpha_0 (x) vs max |decoded
+PE| AND absolute decrease by the window's end, twin axes, mean +- SEM
+aggregated across the WHOLE grid. Row 2: col 1 = weight-tuned error-
+neuron activity (Hz) vs observation, one line per lambda_ value, mean +-
+SEM across seeds (direct structural port of the ORIGINAL neural_giant's
+own panel 3); col 2 = decay(deltaR) AND decay(deltaA) vs lambda_, twin
+axes, one point per (lambda_, seed) -- direct reuse of
+`_plot_neural_dual_vs_param`, the SAME helper the original figure's own
+row-3 panels use. Row 3 (n_neurons): NOT YET BUILT, same `param_scan`
+structure.
 
-Expected prediction for row 1 (not yet confirmed with real data): higher
-alpha_0 produces both a bigger initial response (higher max |decoded PE|)
-AND more dramatic attenuation from learning/value-updating (larger %
-decrease by trial end).
+**Col 3 (center-invariance check) REMOVED, per instruction.** It had
+already served its purpose: the analysis it was checking for came back
+genuinely non-trivial -- max |decoded PE| and its decrease vary
+NON-MONOTONICALLY with the oddball's own distance from the task's raw
+midpoint (50), confirmed directly (|rescaled oddball position| 0.20 gave
+a LARGER alpha_0-driven swing than 0.40, breaking simple edge-distance
+monotonicity) -- so keeping a dedicated panel around to re-confirm this
+on every render was no longer the point. What IS robust across every
+position tested is the SIGN/direction of each parameter's effect (higher
+alpha_0 -> higher max_pe AND higher decrease, everywhere), which is what
+col 2's whole-grid aggregation now documents itself as summarizing (see
+that panel's own docstring) -- NOT a claim that centers are
+interchangeable in absolute magnitude, which they are not.
+`_plot_oddball_center_invariance` itself is left defined (not deleted)
+in case a future row wants to re-run this check on its own grid.
+
+**A real bug found and fixed this session, affecting EVERY oddball cell
+generated before the fix**: see the compaction-reminder note at the top
+of this file and docs/HISTORY.md -- `_decoders_for_seed`'s activity-key
+offset was applied only to the lookup, not to the actual simulation
+seed. Fixed via `_toy_activity_key` (single source of truth for both
+halves). All `oddball`/`param_scan` data referenced below as "current"
+was generated AFTER this fix.
+
+**Status**: Row 1 built and regenerated post-fix on a small local dev
+grid (`--cluster_centers 20 50 80 --oddball_deviations -10 10
+--sweep_values 0.2 0.8 --n_seeds 10`) -- confirmed the deviation-sign
+aggregation and the position-dependence finding above. Row 2 built and
+regenerated post-fix on a small local dev grid (`--sweep_values 0.1 0.7
+--base_alpha_0 0.8 --n_seeds 10`) -- confirmed against the ORIGINAL
+neural_giant's own (pre-existing, unaffected-by-the-bug) bulk-mean
+lambda panel: same clean monotonic decay shape, just at a different
+absolute Hz level (weight-tuned neurons only vs. bulk mean over all
+neurons). Row 3 (n_neurons) NOT YET BUILT. **Cluster is back up as of
+this session** (an earlier `auks`/AFS credential-forwarding outage that
+blocked ALL `sbatch` submissions, not specific to this project's code,
+has been resolved by Research Computing) -- both rows now move to a
+denser grid submitted via `--mode submit` rather than local dev runs.
 
 ## Central cognitive model
 
@@ -2353,6 +2434,31 @@ change (e.g. "change X to Y", "add Z", "remove W").
 
 ## What NOT to do
 
+- **Do not let any NEF/counting-integrator simulation fall back to a live
+  `_pretrain()` training run when a precomputed counting-activity file,
+  or a specific seed's key within it, is missing.** Always require it
+  (`load_activities()` + `fast_decode()`, raising with the exact
+  regenerate command on a miss) -- matching `models.NEF`'s own
+  `_require_activity_map`. `scripts/neural_experiments.py`'s
+  `_require_activities()`/`_decoders_for_seed()` are the canonical
+  helpers for this file; use them (or the equivalent) for any NEW
+  simulation added anywhere in this codebase that needs decoders. This
+  bit the project once already -- see the compaction-reminder note at
+  the top of this file and docs/HISTORY.md for the incident -- and a
+  second reintroduction would be strictly worse, since by then there's
+  precedent to have checked against and didn't.
+- **Do not apply the activity-key offset to only ONE half of the
+  key/simulation-seed pairing for toy (non-real-trial) NEF experiments.**
+  `scripts/neural_experiments.py`'s `_toy_activity_key(seed)` is the
+  single source of truth for the 0-indexed-seed -> 1-indexed-key mapping
+  `raster_demo`/`sweep`/`oddball`/`param_scan` all need -- call it once
+  and pass the SAME returned value to both `_decoders_for_seed()` (the
+  lookup) and `_simulate_full()`/`_simulate_param_scan_trial()` (the
+  actual simulation seed). A real bug shipped exactly this way once
+  already this session (see the compaction-reminder note at the top of
+  this file and docs/HISTORY.md) -- the offset applied only to the
+  lookup, silently pairing a network's tuning curves with a different
+  seed's decoders.
 - Do not use str_replace/create_file/view for anything under
   /home/psipeter/evidence_integration/ — they write to Claude's local sandbox,
   not this remote host, and fail silently (see compaction-reminder note at top)
