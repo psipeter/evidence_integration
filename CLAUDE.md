@@ -455,7 +455,76 @@ those same two DVs plotted directly against each other, one point per
 (lambda_, pid) -- the row-2 analogue of row 1's own col 3, reusing
 `_param_scan_decay_metrics` directly (no new data-loading logic).
 
-Row 3 (n_neurons): NOT YET BUILT, same `param_scan` structure.
+Row 3 (n_neurons) -- a DIFFERENT underlying experiment from rows 1/2,
+settled this session after extensive exploration (see docs/HISTORY.md's
+"neural_giant2 row 3 (n_neurons): SNR measure exploration" entry for the
+full narrative -- a convergence hypothesis tested and found NOT to hold
+cleanly, a Fano-factor-based purely-neural measure tried and abandoned,
+split-half population reliability tried and kept):
+
+  Col 1 (BUILT): `n_neurons_demo` toy trace -- decoded VALUE population
+    output vs time for a single hand-picked 4-observation sequence ([30,
+    70, 40, 80]), one line per seed (10 seeds/pair, NOT averaged --
+    averaging would smooth away the spike noise this panel exists to
+    show), layered in ASCENDING n_neurons order so the noisier small-n
+    lines sit underneath the tighter large-n lines. Overlaid: the ideal
+    target RL_lambda would produce for the same sequence, connected by a
+    black line, one point per observation at that observation's own
+    response-readout time. Uses THREE (n_neurons, n_neurons_counting)
+    pairs at a 4x ratio (50:200, 100:400, 200:800) -- a DIFFERENT ratio
+    convention from both `synthetic`'s n_neurons=n_neurons_counting and
+    param_scan's n_neurons_counting-fixed-at-2000; each pair needed its
+    own one-time --precompute_activities run.
+
+  Col 2/3 (data collection underway, panels NOT YET BUILT): reads
+    `n_neurons_snr` (neural_experiments.py, renamed from the exploratory
+    `run_n_neurons_convergence` -- archived at archive/scripts/archive_
+    n_neurons_convergence_exploration.py), which measures TWO settled
+    SNR DVs, both restricted to the SAME 400-600ms window within the
+    oddball's own presentation (the established ~0.5s peak-response
+    latency), for the SAME oddball trial structure `oddball` uses (3
+    observations clustered around --cluster_center, then one deviating
+    by --oddball_deviation), now over a FULL GRID matching `oddball`'s
+    own row-1 grid: --cluster_centers 20 35 50 65 80, --oddball_
+    deviations -10 10, x FIVE (n_neurons, n_neurons_counting) pairs at
+    the established 4x ratio (50:200, 100:400, 200:800, 150:600,
+    250:1000) -- 50 total cells. Aggregation across this grid is NOT
+    YET DECIDED (every cell gets its own point in the collected grid,
+    not pre-averaged).
+      1. Decoded PE within-seed variance -- decreases monotonically with
+         n_neurons, same sign as response variability (sigma_response)
+         but a shallower slope (response variability is a downstream,
+         integrated/amplified consequence of this same noise source,
+         compounded across every prior observation; this measures the
+         noise source itself at one instant).
+      2. Split-half spike-population reliability -- a purely-neural,
+         decoder-free complement: bin the window's raw error-population
+         spike counts, restrict to NON-weight-tuned neurons (the
+         PE-dimension-tuned ones -- chosen over weight-tuned
+         specifically because it's a subpopulation an experimentalist
+         could plausibly identify empirically, unlike "weight-tuned," a
+         model-internal concept), randomly split into two halves many
+         times, pool each half's own counts per bin, correlate the two
+         halves' own pooled time series WITHIN one trial. Increases
+         monotonically with n_neurons, with shrinking across-seed SD too.
+    Computed ENTIRELY IN MEMORY (no raw spike persistence) -- the
+    exploratory version's temporary raw-spike-saving step is retired now
+    that the measure is settled; persisting raw spikes at real-panel
+    scale (many more n_neurons values x more seeds) would be needlessly
+    large. Panel 3's own design (which two quantities to plot against
+    each other, possibly pulling in rho/autocorrelation) is still open.
+
+    Has the SAME --mode run/submit/collect lifecycle `oddball` uses --
+    one job per (cluster_center, oddball_deviation, n_neurons_pair) cell
+    (50 jobs total for the grid above), matching `oddball`'s own
+    per-cell granularity exactly, since a run at this scale (5 centers x
+    2 deviations x 5 pairs x 10 seeds = 500 simulated trials) is well
+    past a reasonable single local call.
+
+  Confirmed directly from models/NEF.py: all of row 3's spike data comes
+  from the ERROR population (`net.error.neurons`) -- NOT the value
+  population (`net.value`, a separate ensemble), which none of this
+  touches.
 
 **Col 3 (row 1's original center-invariance check) REMOVED, per
 instruction, replaced this session by the DV-vs-DV scatter above -- a

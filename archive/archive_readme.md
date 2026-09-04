@@ -200,6 +200,25 @@ selection's output.
 
 ---
 
+## archive/scripts/archive_n_neurons_convergence_exploration.py
+
+The exploratory version of `scripts/neural_experiments.py`'s
+`run_n_neurons_convergence`, archived when it was simplified down to the
+two settled SNR DVs (split-half spike-population reliability + decoded
+PE variance, both within the oddball's own 400-600ms window -- see
+`docs/HISTORY.md`'s "n_neurons SNR measure exploration" entry for the
+full narrative, and `CLAUDE.md`'s neural_giant2 section for where these
+two DVs get used). This version tested whether the network's own running
+value estimate genuinely converges across seeds before the oddball hits
+(it does NOT, cleanly -- see the function's own updated docstring for
+the exact numbers), then explored several candidate purely-neural noise
+measures (most notably a within-trial Fano factor, tried and abandoned)
+against raw spike arrays it saved to a now-also-retired temporary folder.
+Not standalone-runnable as archived; see the file's own header for what
+it depends on and how to restore it.
+
+---
+
 ## archive/utils/archive_participant_filters_legacy.py
 
 The original (pre-Cohen's-f²-reframe) version of `utils/participant_

@@ -6834,3 +6834,153 @@ on the actual compute node) -- diagnosed each time from file SIZE alone
 identical to each other), without needing to inspect cluster job logs
 directly.
 
+### neural_giant2 row 3 (n_neurons): SNR measure exploration
+
+Before building row 3's real data-generation panels, a `run_n_neurons_
+convergence` diagnostic (`neural_experiments.py`, now archived --
+see `archive/scripts/archive_n_neurons_convergence_exploration.py`)
+walked through several candidate SNR measures on the SAME oddball trial
+structure `oddball` already uses, across three (n_neurons, n_neurons_
+counting) pairs at a 4x ratio (50:200, 100:400, 200:800).
+
+**1. Convergence hypothesis, tested directly, found NOT to hold
+cleanly.** The motivating idea: 3 pre-observations clustered within +-1
+unit of the oddball's own cluster_center should let the network's
+running VALUE estimate settle to nearly the same level across seeds
+before the oddball hits, so cross-seed variance in PE/response AT the
+oddball would then directly reflect momentary error-population SNR
+rather than accumulated drift. Measured directly (value/PE mean and
+variance at several windows -- pre-obs1 baseline, after obs1, the ITI
+right before the oddball, the oddball's own presentation, and the final
+decision) with BOTH a within-seed (across-time) and an across-seed (of
+each seed's own window mean) variance decomposition for every window.
+Result: `value_iti_before_oddball`'s across-seed variance was 13-56x its
+own within-seed variance across all three pairs -- most of the cross-
+seed spread by the oddball is DRIFT, not momentary noise, even with
+tightly clustered pre-observations. `value_decision`'s across-seed
+variance (0.034 at n=50) was nearly identical to `value_iti_before_
+oddball`'s (0.029) -- confirming most of the FINAL decision's own spread
+was already baked in before the oddball ever arrived. PE fared better
+but not perfectly: across/within ratio ~1.1-1.5x at observation 1
+(before any drift could accumulate) vs ~2.2-3.5x at the oddball -- real
+but much smaller drift contamination than the value-based measures.
+Kept the oddball paradigm anyway (rather than falling back to
+observation-1 measures) since real human data shows little variance at
+the first observation -- the settled-expectation-then-surprise
+manipulation is the intended design, not a workaround.
+
+**2. Response variability (sigma_response) vs. PE-within-seed-variance,
+both decrease with n_neurons, different slopes, same underlying cause.**
+Comparing relative decline from n=50 to n=200: response variability drops
+~15x; PE-within-seed variance (during the oddball's own 400-600ms window,
+centered on the established ~0.5s peak-response latency) drops only
+~6.8x. Resolved as expected, not a discrepancy: response variance is a
+DOWNSTREAM, integrated/amplified consequence of the same per-instant
+noise source, compounded across every observation that fed into the
+current estimate, while PE-within-seed-variance measures that noise
+source at one instant -- same sign, different magnitude, connected by
+the integration process.
+
+**3. A purely-neural (decoder-free) complement was requested, to see
+what's plausibly measurable from real spike data without needing a
+trained decoder.** Raw per-seed error-population spike arrays (BOTH the
+obs1 and oddball 400-600ms windows, every neuron, plus that trial's own
+encoders) were saved to a TEMPORARY folder specifically so multiple
+candidate measures could be tried without rerunning any simulation.
+
+  - **Within-trial Fano factor (tried, abandoned)**: bin spike counts,
+    compute per-neuron variance/mean ACROSS BINS within one trial,
+    average across neurons. Result: flat/noisy across n_neurons
+    (mean~0.12-0.16, sd~0.03-0.07 at every n_neurons value) -- NO trend,
+    unlike every decoded measure. Diagnosed as a genuine conceptual
+    mismatch, not a power/binning issue: Fano factor is a SINGLE-NEURON
+    statistic (how variable is one unit's own count, relative to its own
+    mean) with no mechanism to capture the POPULATION-AVERAGING benefit
+    that decoding gets from combining many independent noisy units
+    (decoded SNR improves roughly ~1/sqrt(n) from averaging; a single
+    neuron's own regularity doesn't have to change at all as n grows).
+
+  - **Split-half population reliability (worked)**: bin spike counts
+    (20ms bins), randomly split a subpopulation into two halves (50
+    random splits, averaged), pool (sum) each half's own counts per bin,
+    correlate the two halves' pooled time series -- all WITHIN one
+    trial. Unlike Fano factor, this DOES capture population-averaging:
+    each half gets more neurons too as n_neurons grows, so each half's
+    own pooled signal becomes a cleaner average of the shared
+    (stimulus-driven) component. Confirmed on weight-tuned-only neurons
+    first: r rose from 0.48-0.64 (n=50) to ~0.83 (n=200), with across-
+    seed SD shrinking from ~0.17-0.20 to ~0.04-0.05 over the same range --
+    the cleanest n_neurons effect found from any purely-neural measure.
+
+  - **Population choice matters for interpretation, not just magnitude**:
+    compared weight-tuned-only vs ALL neurons vs non-weight-tuned
+    (PE-dimension-tuned) neurons. ALL neurons gave higher r (0.81-0.94)
+    and non-weight-tuned alone gave intermediate r (0.71-0.92) than
+    weight-tuned-only (0.48-0.83) -- but this is confounded by population
+    SIZE (non-weight-tuned neurons are ~2x the weight-tuned count in this
+    network, and ALL neurons is the full union), not necessarily by
+    population IDENTITY; a fair size-controlled comparison was flagged
+    as the correct way to test identity specifically, but not run, since
+    non-weight-tuned was chosen for a different, practical reason
+    instead (see next point). Also: the obs1-vs-oddball asymmetry visible
+    with weight-tuned-only at n=50 (0.64 vs 0.48) shrank close to zero
+    with the larger non-weight-tuned/all-neuron populations -- consistent
+    with that asymmetry being a small-population-size artefact rather
+    than something specific to the weight dimension.
+
+  - **Settled on non-weight-tuned neurons specifically**, per instruction
+    -- "weight-tuned" is a model-internal concept (which dimension a
+    neuron's own encoder points toward) that doesn't map onto anything an
+    experimentalist could identify from real data, while "PE-dimension-
+    tuned" (non-weight-tuned, in this network's own 2D error ensemble) is
+    easier to explain and could plausibly be operationalized empirically
+    (e.g. neurons whose firing tracks surprise/error magnitude rather
+    than the integration weight itself).
+
+  - **Population identity, confirmed directly from models/NEF.py**: all
+    of this spike data is from the ERROR population (`net.error.neurons`,
+    2D: weight dimension + raw-PE dimension) -- NOT the value population
+    (`net.value`, a separate ensemble holding the running decoded
+    estimate), which none of this touched.
+
+**Settled on two DVs for panel 2, both restricted to the SAME 400-600ms
+window within the oddball's own presentation**: (1) decoded PE within-
+seed variance, (2) split-half spike-population reliability on non-
+weight-tuned neurons. `run_n_neurons_convergence` was renamed to
+`run_n_neurons_snr` and simplified to compute ONLY these two, ENTIRELY IN
+MEMORY -- the temporary raw-spike-saving step (and every other measure
+tried above) was archived rather than kept live, since the exploratory
+flexibility it existed for is no longer needed once the measure is fixed,
+and persisting raw spikes at real-panel scale (many more n_neurons
+values x more seeds) would be needlessly large. The old
+data/runs/neural_experiments/tmp_spike_arrays/ folder and the old
+n_neurons_convergence_soltani_numbers.pkl output are stale and should be
+deleted.
+
+### neural_giant2 row 3: n_neurons_snr grid expansion + cluster job-splitting
+
+Once the two SNR DVs were settled, the person asked to expand `n_neurons_
+snr` from a single fixed (cluster_center, oddball_deviation) combo to a
+full grid, matching row 1's own oddball design: the SAME cluster_centers
+row 1's alpha_0 sweep already used (20, 35, 50, 65, 80), oddball_
+deviations of both signs (-10, 10, not just +10), and two more (n_neurons,
+n_neurons_counting) pairs at the established 4x ratio (150:600, 250:1000
+-- confirmed directly, NOT 250:800 as first guessed from an ambiguous
+phrasing, since 250x4=1000). Aggregation across this grid isn't decided
+yet, so every cell keeps its own point rather than being pre-averaged.
+
+Asked directly whether the FIRST oddball experiment (row 1) needed
+cluster job-splitting at this same scale, rather than assuming --
+confirmed directly from `run_oddball`'s own code: yes, `oddball`'s
+`--mode submit` already loops over the full (cluster_center, oddball_
+deviation, sweep_value) cross-product, one job per cell (exactly how the
+90-cell alpha_0 grid was run earlier in this same session). `n_neurons_
+snr` was brought in line with that exact precedent: extracted the
+per-cell computation into `_n_neurons_snr_worker`, added the same
+--mode run/submit/collect lifecycle, one job per (cluster_center,
+oddball_deviation, n_neurons_pair) cell (50 jobs for the current grid --
+5 centers x 2 deviations x 5 pairs, 10 seeds each), rather than one long
+sequential local call (500 simulated trials, well past what a single
+local run should attempt, matching the same reasoning `oddball`'s own
+docstring already gives for its own grid).
+

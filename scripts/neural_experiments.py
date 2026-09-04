@@ -286,6 +286,7 @@ def _simulate_full(params: dict, obs_values: np.ndarray, decoders: dict,
 
     with nengo.Simulator(net, dt=dt, seed=int(seed), progress_bar=False) as sim:
         sim.run(t_total)
+        encoders = np.array(sim.data[net.error].encoders, copy=True)
 
     t_arr = np.arange(len(sim.data[net.probe_value])) * dt
     error_dec = sim.data[net.probe_error]          # (T, 2): [:,0]=weight/alpha(t), [:,1]=raw PE
@@ -297,6 +298,7 @@ def _simulate_full(params: dict, obs_values: np.ndarray, decoders: dict,
         "pe_product": error_dec[:, 0] * error_dec[:, 1],
         "error_neurons": sim.data[net.probe_error_neurons],   # (T, n_neurons) -- raw, for the raster
         "obs": sim.data[net.probe_obs].squeeze(),
+        "encoders": encoders,   # (n_neurons, 2) -- ADDED this session, for weight-tuned filtering
     }
 
 
@@ -989,6 +991,228 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
     }
 
 
+def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
+                          n_neurons: int, n_neurons_counting: int) -> dict:
+    """One (cluster_center, oddball_deviation, n_neurons_pair) cell: the
+    two settled SNR DVs (decoded PE within-seed variance, split-half
+    spike-population reliability on non-weight-tuned neurons), both
+    restricted to the SAME 400-600ms window within the oddball's own
+    presentation, averaged across --n_seeds. See run_n_neurons_snr's own
+    docstring for the full definitions.
+    """
+    cluster_vals = [cluster_center - args.cluster_spread, cluster_center,
+                    cluster_center + args.cluster_spread]
+    oddball_val = cluster_center + oddball_deviation
+    obs_values_raw = np.array(cluster_vals + [oddball_val], dtype=float)
+    obs_values = obs_values_raw / 50.0 - 1.0 if args.task == "soltani_numbers" else obs_values_raw
+
+    def _bin_counts(spikes: np.ndarray, dt: float, bin_ms: float) -> np.ndarray:
+        bin_size = int(round((bin_ms / 1000.0) / dt))
+        n_timesteps, n_neurons_ = spikes.shape
+        n_bins = n_timesteps // bin_size
+        return spikes[:n_bins * bin_size].reshape(n_bins, bin_size, n_neurons_).sum(axis=1) * dt
+
+    def _split_half_corr(counts: np.ndarray, idx: np.ndarray, n_splits: int,
+                         rng: np.random.Generator) -> float:
+        sub = counts[:, idx]
+        n = sub.shape[1]
+        if n < 4:
+            return float("nan")
+        corrs = []
+        for _ in range(n_splits):
+            perm = rng.permutation(n)
+            half = n // 2
+            h1 = sub[:, perm[:half]].sum(axis=1)
+            h2 = sub[:, perm[half:2 * half]].sum(axis=1)
+            if h1.std() > 0 and h2.std() > 0:
+                corrs.append(np.corrcoef(h1, h2)[0, 1])
+        return float(np.mean(corrs)) if corrs else float("nan")
+
+    rng = np.random.default_rng(0)
+    params = _base_params(args.task, args.alpha_0, n_neurons, args.lambda_,
+                          n_neurons_counting=n_neurons_counting)
+    activity_map = _require_activities(args.task, n_neurons, n_neurons_counting)
+
+    t_obs_ = float(params["t_obs"]); t_iti_ = float(params["t_iti"]); dt = float(params["dt"])
+    t_step = t_obs_ + t_iti_
+
+    pe_variances = []
+    split_half_rs = []
+    for seed in range(args.n_seeds):
+        key = _toy_activity_key(seed)
+        decoders = _decoders_for_seed(activity_map, key, params["alpha_0"], params["lambda_"])
+        result = _simulate_full(params, obs_values, decoders, seed=key)
+        t_arr = result["t"]
+        pe_trace = np.abs(result["pe_product"])
+
+        m = (t_arr >= 3 * t_step + t_iti_ + 0.4) & (t_arr < 3 * t_step + t_iti_ + 0.6)
+        pe_variances.append(float(np.var(pe_trace[m])))
+
+        non_weight_idx = np.where(result["encoders"][:, 0] <= NEURAL_ENCODER_THRESHOLD)[0]
+        counts = _bin_counts(result["error_neurons"][m], dt, args.splithalf_bin_ms)
+        split_half_rs.append(_split_half_corr(counts, non_weight_idx,
+                                               args.splithalf_n_splits, rng))
+
+    split_half_valid = [r for r in split_half_rs if not np.isnan(r)]
+    return {
+        "cluster_center": cluster_center,
+        "oddball_deviation": oddball_deviation,
+        "n_neurons": n_neurons,
+        "n_neurons_counting": n_neurons_counting,
+        "pe_variance_mean": float(np.mean(pe_variances)),
+        "pe_variance_per_seed": pe_variances,
+        "split_half_r_mean": float(np.mean(split_half_valid)) if split_half_valid else float("nan"),
+        "split_half_r_sd": float(np.std(split_half_valid)) if split_half_valid else float("nan"),
+        "split_half_r_per_seed": split_half_rs,
+        "obs_values_raw": obs_values_raw,
+    }
+
+
+def run_n_neurons_snr(args) -> None:
+    """SETTLED design (renamed from the exploratory run_n_neurons_
+    convergence -- see archive/scripts/archive_n_neurons_convergence_
+    exploration.py and docs/HISTORY.md's own "n_neurons SNR measure
+    exploration" entry for the full narrative of how this was arrived
+    at): measures TWO SNR DVs for neural_giant2's row 3 (n_neurons),
+    both restricted to the SAME 200ms window (t_iti+400ms to
+    t_iti+600ms, the established ~0.5s peak-response latency) within
+    the oddball's own presentation, for the SAME oddball trial structure
+    `oddball` already uses, now over a FULL GRID of --cluster_centers x
+    --oddball_deviations (matching `oddball`'s own grid convention,
+    since aggregation across this grid isn't decided yet -- every cell
+    gets its own point, not pre-averaged) x --n_neurons_pairs:
+
+      1. Decoded PE within-seed variance -- abs(pe_product) trace across
+         timesteps within the window, for ONE seed; variance computed
+         per seed, reported as the mean across --n_seeds. Already
+         established (this session) to decrease monotonically with
+         n_neurons, same sign as response variability (sigma_response),
+         though with a shallower slope -- response variability reflects
+         DRIFT accumulated/amplified from this same noise source across
+         every prior observation, while this measures the noise source
+         itself at one instant.
+
+      2. Split-half spike-population reliability -- a purely-neural,
+         decoder-free complement: bin the window's raw error-population
+         spike-impulse array (--splithalf_bin_ms bins), restrict to
+         NON-weight-tuned neurons (enc_dim_0 <= NEURAL_ENCODER_THRESHOLD
+         -- i.e. the PE-dimension-tuned neurons, per instruction: this
+         subpopulation is easier to explain/replicate empirically than
+         "weight-tuned," a model-internal concept), randomly split those
+         neurons into two halves --splithalf_n_splits times, pool
+         (sum) each half's own spike counts per bin, and correlate the
+         two halves' pooled time series -- all WITHIN one seed/trial,
+         never mixing across seeds. Reported as the mean across --
+         n_seeds. Confirmed (this session, via a temporary raw-spike-
+         saving pass now retired) to increase monotonically with
+         n_neurons on this subpopulation, with shrinking across-seed SD
+         too -- both a Fano-factor-based alternative (single-neuron
+         statistic, no mechanism to capture the population-averaging
+         benefit decoding gets from many independent noisy units) and
+         restricting to weight-tuned-only or using ALL neurons instead
+         were tried and are documented in docs/HISTORY.md, not reused
+         here.
+
+    NOTE: this experiment's own `_simulate_full` calls confirmed these
+    spikes come from the ERROR population (net.error.neurons, 2D: weight
+    dimension + raw-PE dimension) -- NOT the value population (net.value,
+    a separate ensemble holding the running decoded estimate), which this
+    experiment does not touch at all.
+
+    Computed ENTIRELY IN MEMORY -- no raw spike arrays are persisted.
+    The earlier exploratory version saved full per-seed spike arrays to a
+    temporary folder specifically to support trying several different
+    candidate measures without rerunning simulations; now that the
+    measure is settled, that flexibility is no longer needed, and
+    persisting raw spikes at real-panel scale (many more n_neurons
+    values x more seeds) would be needlessly large. Matches this
+    project's normal convention (raw traces saved only when a script
+    needs to support genuinely open-ended downstream analysis).
+
+    Values are on the RAW 0-100 numbers-task scale, matching `oddball`'s
+    own convention -- keep --cluster_centers comfortably away from 0 and
+    100 (and --oddball_deviations small enough not to push the oddball
+    itself close to those edges), same saturation concern `oddball`'s
+    own docstring flags.
+
+    Has the SAME --mode run/submit/collect lifecycle `oddball` uses --
+    one job per (cluster_center, oddball_deviation, n_neurons_pair) cell,
+    matching `oddball`'s own per-cell granularity exactly (a real timing
+    check on that experiment found even a modest single-context run
+    exceeds a reasonable single local call, and this grid multiplies
+    that the same way: n_centers x n_deviations x n_pairs).
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _tag3(c, d, pair_str):
+        return f"c{_oddball_value_tag(c)}_d{_oddball_value_tag(d)}_p{pair_str.replace(':', '-')}"
+
+    if args.mode == "run":
+        if args.cluster_center is None or args.oddball_deviation is None \
+                or args.n_neurons_pair is None:
+            raise SystemExit("--cluster_center, --oddball_deviation, and --n_neurons_pair "
+                             "all required for --mode run")
+        n_str, nc_str = args.n_neurons_pair.split(":")
+        n_neurons, n_neurons_counting = int(n_str), int(nc_str)
+        tag = _tag3(args.cluster_center, args.oddball_deviation, args.n_neurons_pair)
+        out_path = OUT_DIR / f"n_neurons_snr_{args.task}_{tag}.pkl"
+        if out_path.exists():
+            print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
+            return
+        result = _n_neurons_snr_worker(args, args.cluster_center, args.oddball_deviation,
+                                       n_neurons, n_neurons_counting)
+        pd.to_pickle(result, out_path)
+        print(f"Saved center={args.cluster_center} deviation={args.oddball_deviation} "
+              f"n_neurons={n_neurons} n_neurons_counting={n_neurons_counting}: "
+              f"pe_variance={result['pe_variance_mean']:.6f} "
+              f"split_half_r={result['split_half_r_mean']:.4f} -> {out_path}")
+
+    elif args.mode == "submit":
+        root = str(Path(__file__).resolve().parent.parent)
+        combos = [(c, d, p) for c in args.cluster_centers
+                 for d in args.oddball_deviations for p in args.n_neurons_pairs]
+        print(f"Submitting {len(combos)} n_neurons_snr jobs "
+              f"({len(args.cluster_centers)} centers x {len(args.oddball_deviations)} "
+              f"deviations x {len(args.n_neurons_pairs)} n_neurons pairs) for task={args.task}")
+        for c, d, p in combos:
+            tag = _tag3(c, d, p)
+            out_path = OUT_DIR / f"n_neurons_snr_{args.task}_{tag}.pkl"
+            if out_path.exists():
+                print(f"  center={c} deviation={d} pair={p}: already exists -- skipping")
+                continue
+            cmd = (
+                f"venv/bin/python scripts/neural_experiments.py n_neurons_snr "
+                f"--task {args.task} --mode run --n_neurons_pair {p} "
+                f"--cluster_center {c} --oddball_deviation {d} "
+                f"--cluster_spread {args.cluster_spread} "
+                f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} --n_seeds {args.n_seeds} "
+                f"--splithalf_bin_ms {args.splithalf_bin_ms} "
+                f"--splithalf_n_splits {args.splithalf_n_splits}"
+            )
+            script = make_job_script(root, [cmd], time_limit="1:0:0", mem="16G")
+            script_path = OUT_DIR / f"_job_n_neurons_snr_{args.task}_{tag}.sh"
+            script_path.write_text(script)
+            submit_script(script_path, dry_run=args.dry_run)
+
+    elif args.mode == "collect":
+        files = sorted(OUT_DIR.glob(f"n_neurons_snr_{args.task}_c*_d*_p*.pkl"))
+        if not files:
+            print(f"No n_neurons_snr_{args.task}_c*_d*_p*.pkl files found in {OUT_DIR}")
+            return
+        results = [pd.read_pickle(f) for f in files]
+        grid = pd.DataFrame([
+            {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
+             "n_neurons": r["n_neurons"], "n_neurons_counting": r["n_neurons_counting"],
+             "pe_variance_mean": r["pe_variance_mean"], "split_half_r_mean": r["split_half_r_mean"],
+             "split_half_r_sd": r["split_half_r_sd"]}
+            for r in results
+        ]).sort_values(["cluster_center", "oddball_deviation", "n_neurons"]).reset_index(drop=True)
+        out_path = OUT_DIR / f"n_neurons_snr_{args.task}.pkl"
+        pd.to_pickle({"grid": grid, "results": results, "task": args.task}, out_path)
+        print(f"Collected {len(files)} cell(s) -> {out_path}")
+        print(grid)
+
+
 def run_oddball(args) -> None:
     """Toy demo: 3 observations clustered around a center, then one
     "oddball" observation deviating from it -- across a full grid of
@@ -1422,6 +1646,32 @@ def main() -> None:
                              "not enough to fully average away spike noise (see this "
                              "experiment's own docstring).")
     p_ndemo.set_defaults(func=run_n_neurons_demo)
+
+    p_conv = sub.add_parser("n_neurons_snr")
+    p_conv.add_argument("--task", required=True)
+    p_conv.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
+    p_conv.add_argument("--n_neurons_pair", type=str, default=None,
+                       help="Single 'n_neurons:n_neurons_counting' pair for --mode run.")
+    p_conv.add_argument("--n_neurons_pairs", type=str, nargs="+", default=None,
+                       help="Full list of pairs for --mode submit, e.g. 50:200 100:400 200:800")
+    p_conv.add_argument("--cluster_center", type=float, default=None,
+                       help="Single center for --mode run.")
+    p_conv.add_argument("--cluster_centers", type=float, nargs="+", default=None,
+                       help="Full grid of centers for --mode submit, e.g. 20 35 50 65 80")
+    p_conv.add_argument("--cluster_spread", type=float, required=True)
+    p_conv.add_argument("--oddball_deviation", type=float, default=None,
+                       help="Single deviation for --mode run.")
+    p_conv.add_argument("--oddball_deviations", type=float, nargs="+", default=None,
+                       help="Full grid of deviations for --mode submit, e.g. -10 10")
+    p_conv.add_argument("--alpha_0", type=float, default=0.7)
+    p_conv.add_argument("--lambda_", type=float, default=0.7)
+    p_conv.add_argument("--n_seeds", type=int, default=10)
+    p_conv.add_argument("--splithalf_bin_ms", type=float, default=20.0,
+                       help="Bin width (ms) for the split-half spike-count bins.")
+    p_conv.add_argument("--splithalf_n_splits", type=int, default=50,
+                       help="Random half-splits averaged per seed for a stable estimate.")
+    p_conv.add_argument("--dry_run", action="store_true")
+    p_conv.set_defaults(func=run_n_neurons_snr)
 
     p_sweep = sub.add_parser("sweep")
     p_sweep.add_argument("--task", required=True)
