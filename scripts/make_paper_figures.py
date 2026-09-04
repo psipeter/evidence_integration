@@ -516,14 +516,20 @@ def _gather_metric_data(task_key: str, models: list[str], path_fn, get_loss_fn,
 
 def _draw_metric_boxplot(ax, task_key: str, title: str, order: list[str],
                          plot_df: pd.DataFrame, value_col: str, show_ylabel: bool,
-                         ylabel: str) -> None:
+                         ylabel: str, showfliers: bool = True) -> None:
     """Draw one boxplot panel from already-gathered (order, plot_df) data
     (see _gather_metric_data) -- the plotting half split out from that
     loading half so make_model_best_fit can reuse the DATA without
-    redrawing a boxplot from it."""
+    redrawing a boxplot from it.
+
+    `showfliers` defaults to True (matplotlib/seaborn's own default,
+    preserving prior behavior for any caller that doesn't pass it
+    explicitly) -- make_model_performance passes False so the sig-bar
+    headroom above the boxes doesn't have to clear outlier points too."""
     pal = {m: MODEL_COLORS[m] for m in order}
     sns.boxplot(data=plot_df, x="model", y=value_col, order=order,
-                hue="model", palette=pal, legend=False, ax=ax)
+                hue="model", palette=pal, legend=False, ax=ax,
+                showfliers=showfliers)
     ax.set_title(title, color=TASK_COLORS[task_key])
     ax.set_xlabel("")
     ax.set_ylabel(ylabel if show_ylabel else "")
@@ -532,68 +538,82 @@ def _draw_metric_boxplot(ax, task_key: str, title: str, order: list[str],
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_model_performance() -> Path:
-    """2-row, 4-column figure: TOP row is model fit under RMSE (to human
-    responses), BOTTOM row is model fit under NLL/quasi-MLE -- one
-    consolidated figure covering both metrics, per instruction, replacing
-    this figure's own earlier second row (fraction of pids each model
-    best-fits). That best-fit content has NOT been dropped -- it now lives
-    in its own figure, make_model_best_fit, covering BOTH metrics there
-    (see that function's own docstring) -- just no longer crammed into a
-    height_ratios=[4,1] strip under each boxplot here. The person plans to
-    add those fraction-best-fit panels back in as small Inkscape insets
-    onto each panel of THIS figure by hand, so this file no longer needs
-    to lay the two out together itself.
+def _whisker_top(values: np.ndarray, whis: float = 1.5) -> float:
+    """Upper whisker value for `values`, matching seaborn/matplotlib's own
+    default boxplot whisker definition (whis=1.5): the largest observed
+    point that is still <= Q3 + whis*IQR, NOT that bound itself (which
+    need not be an actual data value). Falls back to Q3 if every point
+    exceeds the bound (degenerate/tiny samples).
 
-    TOP ROW (RMSE): 5 models per task -- Mean, LeakyIntegrator,
-    PrimacyRecency, RL_lambda, NEF (TASK_PANELS, _model_fit_path) -- same
-    roster/fits this figure always used. Y-axis shared ACROSS the row
-    (sharey='row') and forced to start at 0 (RMSE is non-negative by
+    Exists so make_model_performance can size its sig-bar headroom off the
+    boxplot's own real visible extent, rather than matplotlib's
+    autoscaled ylim -- which still carries its own ~5% margin above
+    whatever point is currently topmost (outlier or whisker)."""
+    values = np.asarray(values, dtype=float)
+    q1, q3 = np.percentile(values, [25, 75])
+    upper_bound = q3 + whis * (q3 - q1)
+    within = values[values <= upper_bound]
+    return float(within.max()) if within.size else float(q3)
+
+
+def make_model_performance() -> Path:
+    """1-row, 4-column figure: model fit under RMSE (to human responses),
+    one panel per task (balls, snacks, colors, numbers) -- 5 models per
+    task -- Mean, LeakyIntegrator, PrimacyRecency, RL_lambda, NEF
+    (TASK_PANELS, _model_fit_path). Y-axis shared across the row
+    (sharey=True) and forced to start at 0 (RMSE is non-negative by
     construction).
 
-    BOTTOM ROW (NLL): 4 models per task -- Mean, LeakyIntegrator,
-    PrimacyRecency, RL_lambda, all "_resp_noise" variants, all read from
-    the unified data/runs/nll/ folder (NLL_RESP_NOISE_MODELS,
-    _nll_resp_noise_perf_path -- see that constant's own comment for the
-    session's refit this depends on). NEF is not included -- no NLL fit
-    exists for it yet. Y-axis shared ACROSS the row separately from the
-    top row (sharey='row', NOT a single sharey=True for the whole figure)
-    and NOT forced to start at 0 -- NLL can be, and often is, negative.
+    RMSE-ONLY AGAIN (this session): this function briefly carried a
+    second (NLL) row, consolidating both metrics into one figure. That
+    row is removed here, per instruction -- NLL reporting for the same
+    roster/tasks lives entirely in make_model_performance_nll (its own
+    1x4 figure, model_performance_nll.pdf/.svg), which already
+    duplicated this exact content independently, so there was nothing
+    new to move into archive/ beyond deleting the now-redundant loop
+    here. The best-fit-fraction content (a separate concern from this
+    figure's boxplots) still lives in make_model_best_fit, untouched by
+    this change -- see that function's own docstring, though its
+    "mirrors make_model_performance's own row/column layout" line is now
+    stale (make_model_best_fit itself still has 2 rows; only this figure
+    dropped one) and worth revisiting if that figure is touched next.
 
-    SIGNIFICANCE BARS in BOTH rows: RL_lambda vs the 3 math models, drawn
-    in RL_lambda's own color (MODEL_COLORS["RL_lambda"]) -- top row
-    excludes NEF from the comparison candidates (NEF is built to reproduce
-    RL_lambda's own behavior plus noise, so it's expected to rarely beat
-    it by design, not a meaningful comparison -- see this function's
-    inherited reasoning below); bottom row has no NEF to exclude at all.
-    Each row's headroom is computed independently (its own y_lo/y_hi/
-    dy_step), matching how the old single-metric figures each did this on
-    their own shared axis.
+    SIGNIFICANCE BARS: RL_lambda vs the 3 math models (Mean/
+    LeakyIntegrator/PrimacyRecency), drawn in RL_lambda's own color
+    (MODEL_COLORS["RL_lambda"]) -- NEF excluded from the comparison
+    candidates (NEF is built to reproduce RL_lambda's own behavior plus
+    noise, so it's expected to rarely beat it by design, not a
+    meaningful comparison) but stays in `order` so its box is still
+    drawn.
 
-    ONE shared 5-entry legend at the bottom (Mean/LeakyIntegrator/
-    PrimacyRecency/RL_lambda/NEF) -- NEF only actually appears in the top
-    row's boxes, but including it costs nothing and keeps one legend
-    covering every color used anywhere in the figure, rather than two
-    separate row-specific legends.
+    Sig-bar headroom is deliberately TIGHTER than the shared draw_sig_line
+    convention used elsewhere in this file (dy_step fraction 0.045 instead
+    of 0.07, smaller lead-in/trail padding) -- per instruction, so the
+    boxplots occupy a larger fraction of each panel than the annotation
+    margin above them. Only tuned here; make_model_performance_nll and
+    every other sig-bar figure keep the original 0.07 convention.
 
-    Saved as model_performance.pdf/.svg (renamed from
-    model_performance_rmse, since the figure is no longer RMSE-only) --
-    if anything outside this script (LaTeX source, etc.) still references
-    the old "model_performance_rmse" filename, that reference will need
-    updating too.
+    OUTLIERS HIDDEN (showfliers=False) and the shared y-axis top is set to
+    the actual upper WHISKER value (via _whisker_top, seaborn/matplotlib's
+    own whis=1.5 definition), not matplotlib's autoscaled ylim -- autoscale
+    still leaves its own ~5% margin above the topmost visible point, which
+    is exactly the extra whitespace being removed here. Sig bars stack
+    directly above that whisker-top value, per instruction.
 
-    Still PRINTS best-fit counts for BOTH metrics (via
-    _print_best_fit_counts, parameterized by value_col/metric_label) --
-    kept here since these numbers are directly about what this exact
-    figure just plotted, even though the corresponding BAR panels now
-    live in make_model_best_fit instead.
+    ONE shared 5-entry legend, placed close under the x-axis (small h_pad
+    on the constrained-layout engine) rather than the figure's own default
+    outside-legend spacing.
+
+    Still prints best-fit counts (via _print_best_fit_counts) -- these
+    numbers are directly about what this exact figure just plotted, even
+    though the corresponding bar panel lives in make_model_best_fit.
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(2, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
-                             sharey="row", constrained_layout=True)
+    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
+                             constrained_layout=True)
 
-    rmse_panel_data = []
-    for i, (ax, (task_key, title, models)) in enumerate(zip(axes[0], TASK_PANELS)):
+    panel_data = []
+    for i, (ax, (task_key, title, models)) in enumerate(zip(axes, TASK_PANELS)):
         gathered = _gather_metric_data(task_key, models, _model_fit_path, _get_loss, "rmse")
         if gathered is None:
             ax.text(0.5, 0.5, "No fitted models\nfor this task",
@@ -603,58 +623,55 @@ def make_model_performance() -> Path:
             continue
         order, plot_df = gathered
         _draw_metric_boxplot(ax, task_key, title, order, plot_df, "rmse",
-                             show_ylabel=(i == 0), ylabel="Model fit (RMSE)")
-        rmse_panel_data.append((ax, task_key, title, order, plot_df))
-    axes[0, 0].set_ylim(bottom=0)  # shared across the row via sharey='row'
+                             show_ylabel=(i == 0), ylabel="Model fit (RMSE)",
+                             showfliers=False)
+        panel_data.append((ax, task_key, title, order, plot_df))
 
-    nll_panel_data = []
-    for i, (ax, (task_key, title)) in enumerate(zip(axes[1], NLL_TASK_PANELS)):
-        gathered = _gather_metric_data(task_key, NLL_RESP_NOISE_MODELS,
-                                       _nll_resp_noise_perf_path, _get_loss, "nll")
-        if gathered is None:
-            ax.text(0.5, 0.5, "No fitted models\nfor this task",
-                    ha="center", va="center", transform=ax.transAxes,
-                    color="0.5", style="italic")
-            ax.set_title(title, color=TASK_COLORS[task_key])
-            continue
-        order, plot_df = gathered
-        _draw_metric_boxplot(ax, task_key, title, order, plot_df, "nll",
-                             show_ylabel=(i == 0), ylabel="Model fit (NLL)")
-        nll_panel_data.append((ax, task_key, title, order, plot_df))
-    # No axes[1, 0].set_ylim(bottom=0) -- NLL can be negative.
+    # Shared y-top = the actual max whisker across every model/panel, NOT
+    # matplotlib's autoscaled ylim -- see docstring. sharey=True means
+    # setting this on axes[0] alone is enough to apply it everywhere.
+    whisker_max = max(
+        _whisker_top(plot_df.loc[plot_df["model"] == m, "rmse"].to_numpy())
+        for ax, task_key, title, order, plot_df in panel_data
+        for m in order
+    )
+    axes[0].set_ylim(bottom=0, top=whisker_max)
 
     sig_color = MODEL_COLORS["RL_lambda"]
+    y_lo, y_hi = 0.0, whisker_max
+    # Tighter than the 0.07 convention (see docstring) -- less headroom
+    # spent on annotation, more of the panel spent on the boxplots.
+    dy_step = (y_hi - y_lo) * 0.045
+    # Small, not the shared convention's 0.3 -- bars sit directly above
+    # the whisker end, per instruction, rather than floating with a gap.
+    lead_in, trail = dy_step * 0.15, dy_step * 0.15
 
-    def _draw_row_sig_bars(row_axis_0, panel_data, ref_label, exclude, value_col):
-        y_lo, y_hi = row_axis_0.get_ylim()
-        dy_step = (y_hi - y_lo) * 0.07
-        per_panel_sig_lines = []
-        max_bars = 0
-        for ax, task_key, title, order, plot_df in panel_data:
-            sig_lines = (_compute_sig_lines(plot_df, "model", value_col, order, ref_label,
-                                            exclude=exclude)
-                        if ref_label in order else [])
-            per_panel_sig_lines.append((ax, sig_lines))
-            max_bars = max(max_bars, len(sig_lines))
-        if max_bars:
-            row_axis_0.set_ylim(top=y_hi + dy_step * 0.5 + max_bars * dy_step * 2.0 + dy_step)
-        for ax, sig_lines in per_panel_sig_lines:
-            y_current = y_hi + dy_step * 0.5
-            for x1, x2, stars in sig_lines:
-                draw_sig_line(ax, x1, x2, y_current, stars, color=sig_color)
-                y_current += dy_step * 2.0
-
-    _draw_row_sig_bars(axes[0, 0], rmse_panel_data, "RL_lambda", frozenset({"NEF"}), "rmse")
-    _draw_row_sig_bars(axes[1, 0], nll_panel_data, NLL_RESP_NOISE_REFERENCE, frozenset(), "nll")
+    per_panel_sig_lines = []
+    max_bars = 0
+    for ax, task_key, title, order, plot_df in panel_data:
+        sig_lines = (_compute_sig_lines(plot_df, "model", "rmse", order, "RL_lambda",
+                                        exclude=frozenset({"NEF"}))
+                    if "RL_lambda" in order else [])
+        per_panel_sig_lines.append((ax, sig_lines))
+        max_bars = max(max_bars, len(sig_lines))
+    if max_bars:
+        axes[0].set_ylim(top=y_hi + lead_in + max_bars * dy_step * 2.0 + trail)
+    for ax, sig_lines in per_panel_sig_lines:
+        y_current = y_hi + lead_in
+        for x1, x2, stars in sig_lines:
+            draw_sig_line(ax, x1, x2, y_current, stars, color=sig_color)
+            y_current += dy_step * 2.0
 
     legend_handles = [Patch(facecolor=MODEL_COLORS[m], label=MODEL_LABEL.get(m, m))
                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]]
-    fig.get_layout_engine().set(h_pad=0.25)
+    # h_pad much smaller than the 0.25 convention used elsewhere in this
+    # file -- pulls the outside-bottom legend up against the x-axis/tick
+    # labels instead of leaving a wide gap below the panels, per instruction.
+    fig.get_layout_engine().set(h_pad=0.03)
     fig.legend(handles=legend_handles, loc="outside lower center", ncol=5,
-               frameon=True, framealpha=0.9)
+               frameon=True, framealpha=0.9, borderaxespad=0.2)
 
-    _print_best_fit_counts(rmse_panel_data, value_col="rmse", metric_label="RMSE")
-    _print_best_fit_counts(nll_panel_data, value_col="nll", metric_label="NLL")
+    _print_best_fit_counts(panel_data, value_col="rmse", metric_label="RMSE")
 
     out_path, _ = _save_fig(fig, "model_performance")
     plt.close(fig)
@@ -1596,45 +1613,36 @@ def make_lambda_model_correlation() -> Path:
     return out_path
 
 
-def make_lambda_giant() -> Path:
-    """4-row, 4-column MEGA figure stacking four existing figures' own
-    panels, UNCHANGED, into one combined figure, per instruction:
-      Row 1: make_response_change's own 4 panels (balls/snacks/colors/
-        numbers -- TASK_PANELS).
-      Rows 2-3: make_lambda_overview's own 2x4 content, unchanged (row 2 =
-        lambda_overview's row 1: demo + 3 KDEs; row 3 = lambda_overview's
-        row 2: crosstask + 3 splithalf, no titles).
-      Row 4: make_lambda_model_correlation's own 3 panels (snacks/colors/
-        numbers -- LAMBDA_TASK_PANELS), in columns 2-4 (matching rows 2-3's
-        own snacks/colors/numbers column positions); column 1 is empty
-        (turned off) since that figure has no 4th/non-task panel of its
-        own to put there.
+def make_lambda_main() -> Path:
+    """2-row, 3-column figure -- rows 1-2, cols 2-4 of the now-archived
+    make_lambda_giant (see archive/scripts/archive_lambda_giant.py),
+    dropping column 1 (the balls-task response-change panel, now its own
+    supplementary figure, make_lambda_balls) and keeping only the
+    snacks/colors/numbers columns (LAMBDA_TASK_PANELS):
+      Row 1: make_response_change's own response-change-decay panels for
+        snacks/colors/numbers (task-colored titles).
+      Row 2: make_lambda_overview's own fitted-lambda KDE panels for the
+        same three tasks (no titles -- row 1 above already names each
+        task).
 
-    Row 1's own columns are [balls, snacks, colors, numbers] (TASK_PANELS'
-    own order) -- NOT task-aligned with rows 2-4's own column 1 (a
-    non-task demo/crosstask panel there, or empty in row 4). This is a
-    direct, unmodified stack of each source figure's own existing column
-    layout, not a reshuffle -- unlike make_lambda_overview's own
-    combination of two SAME-roster figures, response_change's own roster
-    includes balls (no lambda fit exists for it), so there's no shared
-    task set across all 4 rows to align columns by in the first place.
+    Row 2 col 1's own panel (the "lambda definition" demo, previously
+    row 2 col 1 of the giant) is NOT here -- it's now its own standalone
+    figure, make_lambda_metric, meant to be composited back in as an
+    Inkscape inset from that figure's saved SVG once this one is saved,
+    per instruction.
 
-    Row 1's legend (Human + 5 models) is drawn INSIDE the last panel
-    (numbers, upper right, small font) rather than as a figure-spanning
-    legend below the whole figure -- make_response_change's own
-    fig.legend(loc="outside lower center") would otherwise land at the
-    very bottom of this 4-row figure, nowhere near the row it belongs to.
-
-    Every panel reuses the EXACT SAME helper functions the four source
-    figures already call -- no panel-drawing logic is duplicated here,
-    only the layout differs. All four source figures are left completely
-    unchanged and still produce their own separate outputs.
+    Every panel reuses the exact same helper functions the giant (and its
+    own four source figures) already called -- no panel-drawing logic
+    duplicated here, only the layout (now 2x3, task-restricted) differs.
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(4, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.8),
+    fig, axes = plt.subplots(2, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
                              constrained_layout=True)
 
-    # Row 1 -- make_response_change's own panels, unchanged.
+    task_panels_no_balls = [(tk, title, models) for tk, title, models in TASK_PANELS
+                            if tk != "balls"]
+
+    # Row 1 -- make_response_change's own panels, unchanged, minus balls.
     data = _load_response_change_data()
     obs_max_by_task = {}
     for task_key in data:
@@ -1642,7 +1650,7 @@ def make_lambda_giant() -> Path:
         obs_vals = [human_delta["observation"].max()] + [
             df["observation"].max() for df in models.values() if len(df)]
         obs_max_by_task[task_key] = max(obs_vals)
-    for i, (task_key, title, models_list) in enumerate(TASK_PANELS):
+    for i, (task_key, title, models_list) in enumerate(task_panels_no_balls):
         human_delta, models, _ = data[task_key]
         ax = axes[0, i]
         ylabel = "Median \u0394R" if i == 0 else ""
@@ -1654,25 +1662,50 @@ def make_lambda_giant() -> Path:
     legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
     legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=2, label=MODEL_LABEL.get(m, m))
                        for m in ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]]
-    axes[0, 3].legend(handles=legend_handles, fontsize=7, loc="upper right",
+    axes[0, 2].legend(handles=legend_handles, fontsize=7, loc="upper right",
                       frameon=True, framealpha=0.9, ncol=1)
 
-    # Row 2, col 1 -- INLINED rather than calling _plot_lambda_demo, since
-    # the changes here (regplot-with-binning instead of a bare scatter,
-    # plus the shortened/mean-dropped ylabel) are specific to this one
-    # combined figure and shouldn't alter that shared helper's behavior
-    # for make_lambda_human/make_lambda_overview, which still call it
-    # as-is. Fit itself is UNCHANGED (same curve_fit call, same per-
-    # observation mean curve it's fit to) -- only the VISUAL replacement
-    # of individual scatter points with sns.regplot's own binned mean+CI
-    # markers changes, giving a within-observation variance indication
-    # the single mean point never showed. x_bins is passed the actual
-    # sorted unique observation values (not a bin COUNT), so every bin is
-    # exactly one observation -- the "binsize=1" the person asked for --
-    # rather than seaborn's own evenly-SPACED (not necessarily one-per-
-    # observation) default binning.
+    # Row 2 -- make_lambda_overview's own KDE panels, unchanged, no titles
+    # (row 1 above already names each task).
+    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
+        ax = axes[1, i]
+        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
+        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
+        _plot_lambda_distribution(ax, lam, task_key)
+        ax.set_ylabel("Density" if i == 0 else "")
+        ax.tick_params(axis="y", labelleft=(i == 0))
+
+    out_path, _ = _save_fig(fig, "lambda_main")
+    plt.close(fig)
+    return out_path
+
+
+def make_lambda_metric() -> Path:
+    """Single-panel figure: the "lambda definition" demo -- fitting
+    A*n^(-lambda) to one representative human pid's own mean |delta
+    response| curve (numbers task) -- previously row 2 col 1 of the
+    now-archived make_lambda_giant (see archive/scripts/
+    archive_lambda_giant.py), unchanged, pulled out as its own standalone
+    figure so it can be composited into make_lambda_main as a hand-placed
+    Inkscape inset from this figure's saved SVG, per instruction.
+
+    Visual/fit details are IDENTICAL to the giant's own inlined version
+    (not the plainer _plot_lambda_demo helper make_lambda_human/
+    make_lambda_overview call): sns.regplot's binned mean+CI markers (one
+    bin per observation, via x_bins=sorted unique observation values)
+    rather than a bare scatter, and the shortened "delta R" ylabel.
+
+    SQUARE figsize (side ~3.7in), NOT the shared 1-panel FIGURE_SIZE --
+    per instruction, sized to match one panel of make_lambda_main's own
+    2x3 grid (that grid is (FIGURE_SIZE[0], FIGURE_SIZE[1]*1.9*0.75) over
+    3 cols x 2 rows, so each panel is ~3.53in wide x ~3.88in tall; 3.7 is
+    the average of the two, close enough for an Inkscape inset that will
+    be manually rescaled onto that grid anyway).
+    """
+    _apply_slide_style()
+    fig, ax = plt.subplots(figsize=(3.7, 3.7), constrained_layout=True)
+
     demo_task_key = "numbers"
-    ax = axes[1, 0]
     human_delta_demo = _load_lambda_delta(demo_task_key, _human_data_path(demo_task_key))
     lam_demo = _fit_lambda_series(human_delta_demo, LAMBDA_N_OFFSET[demo_task_key])
     demo_pid = (lam_demo - lam_demo.median()).abs().idxmin()
@@ -1711,37 +1744,134 @@ def make_lambda_giant() -> Path:
     )
     leg.get_texts()[2].set_color(TASK_COLORS[demo_task_key])
 
-    # Row 2, cols 2-4 -- _plot_lambda_distribution unchanged, but the
-    # task-colored title is dropped (row 1 already shows it -- "using
-    # just the top row for those titles") and the one visible ylabel is
-    # shortened to "Density".
-    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
-        ax = axes[1, i + 1]
-        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
-        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
-        _plot_lambda_distribution(ax, lam, task_key)
-        ax.set_ylabel("Density" if i == 0 else "")
-        ax.tick_params(axis="y", labelleft=(i == 0))
-
-    _plot_lambda_crosstask_panel(axes[2, 0])
-    axes[2, 0].set_title("")
-    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
-        _plot_lambda_splithalf_panel(axes[2, i + 1], task_key, "", show_ylabel=(i == 0))
-
-    # Row 4 -- make_lambda_model_correlation's own panels; task-colored
-    # titles cleared the same way as row 2 (row 1 already shows them).
-    # _plot_lambda_model_corr_panel has no title parameter of its own, so
-    # it's cleared with an explicit ax.set_title("") right after the call.
-    axes[3, 0].axis("off")
-    legend_locs = {"snacks": "lower right"}
-    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
-        _plot_lambda_model_corr_panel(axes[3, i + 1], task_key, title, show_ylabel=(i == 0),
-                                      legend_loc=legend_locs.get(task_key, "best"))
-        axes[3, i + 1].set_title("")
-
-    out_path, _ = _save_fig(fig, "lambda_giant")
+    out_path, _ = _save_fig(fig, "lambda_metric")
     plt.close(fig)
     return out_path
+
+
+def make_lambda_balls() -> Path:
+    """Single-panel supplementary figure: the balls-task (carrabin)
+    response-change-decay panel -- previously row 1 col 1 of the
+    now-archived make_lambda_giant (see archive/scripts/
+    archive_lambda_giant.py). Moved to supplementary on its own, per
+    instruction, since it doesn't show the expected trend the other three
+    tasks do.
+
+    Same underlying data/helper as every other task column in
+    make_response_change/make_lambda_main (_load_response_change_data,
+    _draw_response_change_panel) -- only the layout (one panel, not part
+    of a larger grid) differs.
+    """
+    _apply_slide_style()
+    fig, ax = plt.subplots(figsize=FIGURE_SIZE, constrained_layout=True)
+
+    data = _load_response_change_data()
+    human_delta, models, title = data["balls"]
+    obs_max = max([human_delta["observation"].max()] +
+                 [df["observation"].max() for df in models.values() if len(df)])
+    _draw_response_change_panel(ax, human_delta, models, include_models=True,
+                                ylabel="Median \u0394R", obs_max=obs_max)
+    ax.set_title(title, color=TASK_COLORS["balls"])
+    ax.set_ylim(bottom=0)
+
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
+    legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=2, label=MODEL_LABEL.get(m, m))
+                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]]
+    ax.legend(handles=legend_handles, fontsize=9, loc="upper right",
+              frameon=True, framealpha=0.9, ncol=1)
+
+    out_path, _ = _save_fig(fig, "lambda_balls")
+    plt.close(fig)
+    return out_path
+
+
+def make_lambda_reliability() -> Path:
+    """1x3 supplementary figure: odd/even split-half reliability of fitted
+    lambda for snacks/colors/numbers -- previously row 3, cols 2-4 of the
+    now-archived make_lambda_giant (see archive/scripts/
+    archive_lambda_giant.py). Titles are RESTORED here (task-colored,
+    passed through to _plot_lambda_splithalf_panel) since this figure no
+    longer sits directly under a row that already names each task the way
+    the giant's own row 1 did.
+
+    Row 3 col 1 of the giant (the colors-vs-numbers lambda crosstask
+    panel) is NOT included here -- it now lives in make_lambda_sigma_
+    crosstask instead, paired with its sigma analogue, per instruction.
+
+    Same helper (_plot_lambda_splithalf_panel) and shared [0, 1.5] x/y
+    range (LAMBDA_XLIM) as every other lambda-reliability figure in this
+    file.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 0.6),
+                             constrained_layout=True)
+
+    for i, (ax, (task_key, title)) in enumerate(zip(axes, LAMBDA_TASK_PANELS)):
+        _plot_lambda_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
+
+    out_path, _ = _save_fig(fig, "lambda_reliability")
+    plt.close(fig)
+    return out_path
+
+
+def make_lambda_humanvmodel() -> Path:
+    """1x3 supplementary figure: each fitted model's own lambda vs that
+    same pid's human lambda, for snacks/colors/numbers -- previously row
+    4, cols 2-4 of the now-archived make_lambda_giant (see archive/
+    scripts/archive_lambda_giant.py). Titles are restored (see
+    make_lambda_reliability's own docstring for why).
+
+    NOTE: this is currently IDENTICAL in content to the pre-existing
+    make_lambda_model_correlation() (same panels, same
+    _plot_lambda_model_corr_panel helper, same LAMBDA_TASK_PANELS/
+    LAMBDA_CORR_MODELS roster) -- kept as its own function/output under
+    this new name per instruction, but the two now duplicate each other.
+    Worth flagging: make_lambda_model_correlation may be worth retiring
+    (or this one pointing at it instead) once that's confirmed.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 0.6),
+                             constrained_layout=True)
+
+    legend_locs = {"snacks": "lower right"}
+    for i, (ax, (task_key, title)) in enumerate(zip(axes, LAMBDA_TASK_PANELS)):
+        _plot_lambda_model_corr_panel(ax, task_key, title, show_ylabel=(i == 0),
+                                      legend_loc=legend_locs.get(task_key, "best"))
+
+    out_path, _ = _save_fig(fig, "lambda_humanvmodel")
+    plt.close(fig)
+    return out_path
+
+
+def make_lambda_sigma_crosstask() -> Path:
+    """1-row, 2-column figure, NEW (not a direct piece of the now-archived
+    make_lambda_giant, see archive/scripts/archive_lambda_giant.py) --
+    per instruction, pairs the lambda and sigma cross-task panels
+    together rather than leaving each embedded in its own giant:
+      Col 1: colors-vs-numbers cross-task comparison of fitted lambda
+        (_plot_lambda_crosstask_panel) -- previously the giant's own row
+        3 col 1.
+      Col 2: colors-vs-numbers cross-task comparison of response noise
+        (sigma) (_plot_sigma_crosstask_panel) -- the analogous panel from
+        make_sigma_giant's own row 2 col 1.
+
+    Both panels are human-only, unchanged, reusing the exact same helper
+    functions their respective giants already called. Side-by-side
+    (1x2) rather than stacked (2x1), per instruction -- figsize swapped
+    accordingly, keeping each individual panel roughly the same size as
+    the stacked version had.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 2, figsize=(FIGURE_SIZE[0] * 2 / 3, FIGURE_SIZE[1] * 0.75),
+                             constrained_layout=True)
+
+    _plot_lambda_crosstask_panel(axes[0])
+    _plot_sigma_crosstask_panel(axes[1])
+
+    out_path, _ = _save_fig(fig, "lambda_sigma_crosstask")
+    plt.close(fig)
+    return out_path
+
 
 
 
@@ -2545,75 +2675,50 @@ def _plot_sigma_model_corr_panel(ax, task_key: str, title: str,
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_sigma_giant() -> Path:
-    """3-row, 4-column MEGA figure: rows 1-2 are make_sigma_overview's own
-    2x4 content (schematic + 3 KDEs, then crosstask + 3 splithalf, no
-    titles), row 3 is the autocorrelation panels ("noise is
-    autocorrelated") -- per instruction.
+def make_sigma_main() -> Path:
+    """3-row, 3-column figure -- the now-archived make_sigma_giant (see
+    archive/scripts/archive_sigma_giant.py) with column 1 (the two
+    schematic panels -- "sigma definition"/"rho definition" -- plus the
+    crosstask panel, previously column 1 of rows 1/2/3) removed entirely,
+    per instruction:
+      Row 1: variability KDE panels for balls/colors/numbers
+        (VARIABILITY_TASK_PANELS), task-colored titles, unchanged.
+      Row 2: BLANK, per instruction -- its own former content (the
+        splithalf reliability panels, cols 2-4 of the giant's row 2) now
+        lives in its own figure, make_sigma_reliability. The crosstask
+        panel that used to sit in col 1 of this row already lives in
+        make_lambda_sigma_crosstask, paired with its lambda analogue.
+      Row 3: autocorrelation panels for the same three tasks
+        (RESID_TASK_PANELS), TITLES CLEARED (redundant with row 1's, two
+        rows up, now that row 2 no longer repeats them either).
 
-    UNLIKE make_lambda_giant, all three rows here already share the SAME
-    3-task column mapping (col 1 = non-task schematic/special panel,
-    col 2 = balls, col 3 = colors, col 4 = numbers) -- VARIABILITY_
-    TASK_PANELS and RESID_TASK_PANELS are the identical list, so there's
-    no task-set mismatch across rows to reconcile the way response_change's
-    own balls-inclusive roster needed for make_lambda_giant's row 1.
-
-    ROW 3 MODEL ROSTER: NLL_RESP_NOISE_MODELS (Mean/LeakyIntegrator/
-    PrimacyRecency/RL_lambda, all "_resp_noise", all from the unified
-    data/runs/nll/ folder) -- per instruction, NOT make_variance_autocorr_
-    models' own default NLL_MODEL_ORDER (which uses NoisyRL_lambda
-    instead of RL_lambda_resp_noise, and whose own file no longer exists
-    in data/runs/nll/ after this session's folder cleanup+refit anyway).
-    NEF is NOT included -- no NLL fit exists for it yet; add it to
-    NLL_RESP_NOISE_MODELS once one does, no other change needed here,
-    per instruction ("we'll include NEF when it's available").
-    Passed in via _load_variance_autocorr_data/_draw_variance_autocorr_
-    panel's own new `models`/`model_colors`/`responses_path_fn`
-    parameters (added this session, defaulting to each function's
-    EXISTING behavior so make_variance_autocorr_human/models are
-    completely unaffected -- verified directly, both still run and
-    produce their own separate outputs).
-
-    Every panel reuses the EXACT SAME helper functions the source figures
-    already call -- no panel-drawing logic duplicated here, only the
-    layout (and, for row 3, the model-roster override) differs.
+    3x3 kept (not collapsed to 2x3), per instruction, with row 2 left
+    literally blank -- worth revisiting if that empty row reads as
+    wasted space once rendered; collapsing to a 2-row grid (dropping the
+    blank row entirely) is a small change if so.
     """
     _apply_slide_style()
-    fig, axes = plt.subplots(3, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75),
+    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75),
                              constrained_layout=True)
 
-    # Row 1 -- make_sigma_overview's own row 1 (== make_variability_human's
-    # own panels), unchanged.
-    axes[0, 0].axis("off")
-    axes[0, 0].set_title("\u03c3 definition", color="0.3")
-    schematic = _rasterize_svg(VARIABILITY_SCHEMATIC)
-    if schematic is not None:
-        axes[0, 0].imshow(schematic, aspect="auto")
-    for i, (task_key, title) in enumerate(VARIABILITY_TASK_PANELS):
-        ax = axes[0, i + 1]
+    # Row 1 -- variability KDE panels, unchanged (minus the schematic
+    # column), real titles.
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[0], VARIABILITY_TASK_PANELS)):
         _plot_variability_panel(ax, task_key, title, include_models=False,
                                 show_ylabel=(i == 0))
         ax.set_ylabel("Density" if i == 0 else "")
 
-    # Row 2 -- make_sigma_overview's own row 2, unchanged (no titles).
-    _plot_sigma_crosstask_panel(axes[1, 0])
-    axes[1, 0].set_title("")
-    for i, (task_key, title) in enumerate(VARIABILITY_TASK_PANELS):
-        _plot_sigma_splithalf_panel(axes[1, i + 1], task_key, "", show_ylabel=(i == 0))
+    # Row 2 -- blank, per instruction.
+    for ax in axes[1]:
+        ax.axis("off")
 
-    # Row 3 -- autocorrelation, with NLL_RESP_NOISE_MODELS instead of the
-    # NoisyRL_lambda-based default.
+    # Row 3 -- autocorrelation, titles cleared (row 1 already names each
+    # task). Model roster unchanged (NLL_RESP_NOISE_MODELS).
     data = _load_variance_autocorr_data(models=NLL_RESP_NOISE_MODELS,
                                         responses_path_fn=_nll_resp_noise_responses_path)
-    axes[2, 0].axis("off")
-    axes[2, 0].set_title("\u03c1 definition", color="0.3")
-    schematic = _rasterize_svg(AUTOCORR_SCHEMATIC)
-    if schematic is not None:
-        axes[2, 0].imshow(schematic, aspect="auto")
-    for i, (task_key, title) in enumerate(RESID_TASK_PANELS):
-        ax = axes[2, i + 1]
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[2], RESID_TASK_PANELS)):
         human_res, model_results, lags = data[task_key]
-        _draw_variance_autocorr_panel(ax, task_key, title, human_res, model_results, lags,
+        _draw_variance_autocorr_panel(ax, task_key, "", human_res, model_results, lags,
                                       include_models=True, show_ylabel=(i == 0),
                                       models=NLL_RESP_NOISE_MODELS, model_colors=MODEL_COLORS)
         ax.set_xlabel("k")
@@ -2623,12 +2728,38 @@ def make_sigma_giant() -> Path:
     for m in NLL_RESP_NOISE_MODELS:
         legend_handles.append(Line2D([0], [0], color=MODEL_COLORS[m], lw=2.2,
                                      label=MODEL_LABEL.get(m, m)))
-    axes[2, 3].legend(handles=legend_handles, fontsize=7, loc="upper right",
+    axes[2, 2].legend(handles=legend_handles, fontsize=7, loc="upper right",
                       frameon=True, framealpha=0.9, ncol=1)
 
-    out_path, _ = _save_fig(fig, "sigma_giant")
+    out_path, _ = _save_fig(fig, "sigma_main")
     plt.close(fig)
     return out_path
+
+
+def make_sigma_reliability() -> Path:
+    """1x3 supplementary figure: odd/even split-half reliability of
+    response noise (sigma) for balls/colors/numbers -- previously row 2,
+    cols 2-4 of the now-archived make_sigma_giant (see archive/scripts/
+    archive_sigma_giant.py). Titles are RESTORED here (task-colored,
+    passed through to _plot_sigma_splithalf_panel), matching
+    make_lambda_reliability's own treatment, since this figure no longer
+    sits directly under a row that already names each task.
+
+    Row 2 col 1 of the giant (the colors-vs-numbers sigma crosstask
+    panel) is NOT included here -- it lives in make_lambda_sigma_
+    crosstask instead, paired with its lambda analogue.
+    """
+    _apply_slide_style()
+    fig, axes = plt.subplots(1, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 0.6),
+                             constrained_layout=True)
+
+    for i, (ax, (task_key, title)) in enumerate(zip(axes, VARIABILITY_TASK_PANELS)):
+        _plot_sigma_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
+
+    out_path, _ = _save_fig(fig, "sigma_reliability")
+    plt.close(fig)
+    return out_path
+
 
 
 def make_sigma_model_correlation() -> Path:
@@ -3904,8 +4035,8 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
               fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
 
     ax.set_xlim(0, float(df["t"].max()))
-    ax.set_xlabel("Time since oddball onset (s)")
-    ax.set_ylabel("|Decoded PE|")
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Decoded PE (oddball)")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -3955,7 +4086,7 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
     ax.errorbar(agg[sweep_param], agg["max_pe_mean"], yerr=agg["max_pe_sem"],
                fmt="o-", color=c1, lw=1.8, ms=5, capsize=3)
     ax.set_xlabel(sym)
-    ax.set_ylabel("Max |decoded PE|", color=c1)
+    ax.set_ylabel("Max decoded PE", color=c1)
     ax.tick_params(axis="y", labelcolor=c1)
     if sweep_param in ("alpha_0", "lambda_"):
         ax.set_xlim(left=0)
@@ -3963,7 +4094,7 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
     ax2 = ax.twinx()
     ax2.errorbar(agg[sweep_param], agg["decrease_mean"], yerr=agg["decrease_sem"],
                 fmt="o-", color=c2, lw=1.8, ms=5, capsize=3)
-    ax2.set_ylabel("PE decrease (max\u2212end)", color=c2)
+    ax2.set_ylabel("PE decrease", color=c2)
     ax2.tick_params(axis="y", labelcolor=c2)
     sns.despine(ax=ax2, top=True)
     sns.despine(ax=ax, top=True, right=True)
@@ -3998,8 +4129,8 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
     sns.regplot(data=grid, x="max_pe", y="decrease", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("Max |decoded PE|")
-    ax.set_ylabel("PE decrease (max−end)")
+    ax.set_xlabel("Max decoded PE")
+    ax.set_ylabel("PE decrease")
     ax.set_xlim(left=0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
@@ -4148,7 +4279,7 @@ def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "solta
     n_obs_max = int(df["observation"].max())
     ax.set_xlabel("Observation")
     ax.set_xlim(0, n_obs_max)
-    ax.set_ylabel("Weight-tuned error\nneuron activity (Hz)")
+    ax.set_ylabel("Error neuron activity (Hz)")
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
@@ -4255,38 +4386,19 @@ def _plot_neural_giant2_decay_vs_param(ax, sweep_param: str, task: str = "soltan
     param_label = label_sym.get(sweep_param, sweep_param)
     _plot_neural_dual_vs_param(
         ax, df, sweep_param, param_label,
-        "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)",
+        "resp_decay", "act_decay", "decay (\u0394R)", "\u0394A",
         include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
 
 
-def _plot_n_neurons_snr_triple(ax, task: str = "soltani_numbers") -> None:
-    """Row 3, col 2: three SNR-related DVs vs n_neurons, from
-    neural_experiments.py's own `n_neurons_snr` grid (one row per
-    (cluster_center, oddball_deviation, n_neurons) cell, aggregation
-    across cluster_center/oddball_deviation NOT pre-decided -- every
-    cell contributes its own point to the regression directly, matching
-    _plot_neural_dual_vs_param's own per-replicate convention).
-
-    PE variance and response variance (sigma_response**2) are the SAME
-    kind of quantity (both variances of a signal), so they share ONE
-    LOG-SCALE left axis -- log scale because they differ by ~1-2 orders
-    of magnitude in absolute value (response variance is a downstream,
-    amplified consequence of the same noise source PE variance measures
-    momentarily) while both decline by a comparable PROPORTIONAL amount;
-    log scale makes that proportional comparison fair rather than
-    squashing the smaller series flat near zero on a linear axis. A
-    linear OLS fit (sns.regplot, unchanged) displayed against a log
-    y-axis renders as a curved line -- expected and correct, not a
-    plotting error, matching the genuinely diminishing-returns shape
-    already confirmed in this data (biggest drop 50->100, progressively
-    smaller after).
-
-    Split-half r is a BOUNDED [0,1] correlation, a conceptually
-    different kind of quantity (and RISING rather than falling) -- gets
-    its own separate LINEAR right axis, direct structural port of
-    _plot_neural_dual_vs_param's own twin-axis convention just extended
-    to a third line sharing the left pair's axis instead of a fourth
-    axis.
+def _plot_n_neurons_snr_dv_scatter(ax, task: str = "soltani_numbers") -> None:
+    """Row 3, col 3: decoded PE noise (x) vs sigma (oddball response) (y)
+    plotted directly against each other, one point per (cluster_center,
+    oddball_deviation, n_neurons) cell -- the SAME two DVs col 2's
+    twin-axis panel plots vs n_neurons, here as a direct scatter, matching
+    the ORIGINAL neural_giant's own DV-vs-DV panels (5, 9) and this
+    figure's own row 1 col 3 / row 2 col 3 (flat color, small low-alpha
+    points, sns.regplot fit + CI band, pearsonr r + significance stars)
+    rather than color-coding by n_neurons.
     """
     path = NEURAL_EXP_DIR / f"n_neurons_snr_{task}.pkl"
     if not path.exists():
@@ -4294,41 +4406,69 @@ def _plot_n_neurons_snr_triple(ax, task: str = "soltani_numbers") -> None:
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     d = pd.read_pickle(path)
-    grid = d["grid"]
+    grid = d["grid"].copy()
+    grid["response_std"] = np.sqrt(grid["response_variance"])
 
-    pal = get_palette(6)
-    c_pe, c_resp, c_r = pal[0], pal[1], pal[2]
-
-    r_pe, p_pe = pearsonr(grid["n_neurons"], grid["pe_variance_mean"])
-    r_resp, p_resp = pearsonr(grid["n_neurons"], grid["response_variance"])
-    r_sh, p_sh = pearsonr(grid["n_neurons"], grid["split_half_r_mean"])
-
-    ax.scatter(grid["n_neurons"], grid["pe_variance_mean"], color=c_pe, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=grid, x="n_neurons", y="pe_variance_mean", ax=ax, color=c_pe, ci=95,
+    color = get_palette(6)[0]
+    r, p = pearsonr(grid["pe_variance_mean"], grid["response_std"])
+    ax.scatter(grid["pe_variance_mean"], grid["response_std"], color=color, s=8,
+              alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="pe_variance_mean", y="response_std", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"\u03c3\u00b2(PE): r={r_pe:.2f}{pvalue_to_stars(p_pe)}")
-    ax.scatter(grid["n_neurons"], grid["response_variance"], color=c_resp, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=grid, x="n_neurons", y="response_variance", ax=ax, color=c_resp, ci=95,
-               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"\u03c3\u00b2(response): r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
-    ax.set_yscale("log")
-    ax.set_xlabel("n_neurons")
-    ax.set_ylabel("Variance (log scale)")
-
-    ax2 = ax.twinx()
-    ax2.scatter(grid["n_neurons"], grid["split_half_r_mean"], color=c_r, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=grid, x="n_neurons", y="split_half_r_mean", ax=ax2, color=c_r, ci=95,
-               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"split-half r: r={r_sh:.2f}{pvalue_to_stars(p_sh)}")
-    ax2.set_ylabel("Split-half reliability (r)", color=c_r)
-    ax2.tick_params(axis="y", labelcolor=c_r)
-    sns.despine(ax=ax2, top=True)
-
-    handles1, labels1 = ax.get_legend_handles_labels()
-    handles2, labels2 = ax2.get_legend_handles_labels()
-    ax.legend(handles1 + handles2, labels1 + labels2, fontsize=7,
-             frameon=True, framealpha=0.9, loc="best")
+               label=f"r={r:.2f}{pvalue_to_stars(p)}")
+    ax.set_xlabel("decoded PE noise")
+    ax.set_ylabel("\u03c3R (oddball)")
+    ax.set_xlim(0, 5e-4)
+    ax.ticklabel_format(style="sci", axis="x", scilimits=(0, 0), useMathText=True)
+    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
+
+
+def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers") -> None:
+    """Row 3, col 2: response variance (sigma_response**2) vs decoded PE
+    noise, one on each axis, vs n_neurons -- direct reuse of
+    _plot_neural_dual_vs_param (the SAME plain-linear-twin-axis helper
+    every other panel in this figure already uses), reading neural_
+    experiments.py's own `n_neurons_snr` grid (one row per (cluster_
+    center, oddball_deviation, n_neurons) cell, aggregation across
+    cluster_center/oddball_deviation NOT pre-decided -- every cell
+    contributes its own point to the regression directly).
+
+    SUPERSEDES an earlier 3-line version (response variance + PE
+    variance sharing a log-scale axis, split-half r on a third linear
+    axis) -- the log scale made an OLS-linear regplot fit render as a
+    visibly curved line, and sharing one axis between two series read as
+    confusing rather than clarifying. Reverted to the plain twin-linear-
+    axis convention instead, per instruction.
+
+    TODO: split-half spike-population reliability (the purely-neural,
+    decoder-free SNR measure -- see docs/HISTORY.md's own "n_neurons SNR
+    measure exploration" entry) was dropped from THIS panel, per
+    instruction, but the underlying data is still collected in the SAME
+    n_neurons_snr grid (split_half_r_mean/split_half_r_sd columns) --
+    revisit as its own SUPPLEMENTARY figure rather than folding it back
+    in here.
+    """
+    path = NEURAL_EXP_DIR / f"n_neurons_snr_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, "No n_neurons_snr data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    grid = d["grid"].copy()
+    # sqrt to a genuine STANDARD DEVIATION -- matching the established
+    # sigma convention used everywhere else in this file (e.g.
+    # _qid_response_std's own .std(), never a variance under a sigma
+    # label). response_variance itself stays a variance (computed via
+    # np.var across seeds in _n_neurons_snr_worker); this sqrt is
+    # plot-side only, not a change to the underlying collected data.
+    grid["response_std"] = np.sqrt(grid["response_variance"])
+    ax2 = _plot_neural_dual_vs_param(
+        ax, grid, "n_neurons", "neurons",
+        "response_std", "pe_variance_mean",
+        "\u03c3R (oddball)", "decoded PE noise")
+    ax.set_xticks([50, 150, 250])
+    ax2.ticklabel_format(style="sci", axis="y", scilimits=(0, 0), useMathText=True)
 
 
 def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
@@ -4444,10 +4584,8 @@ def make_neural_giant2() -> Path:
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
 
     _plot_n_neurons_demo_trace(axes[2, 0])
-    _plot_n_neurons_snr_triple(axes[2, 1])
-    axes[2, 2].text(0.5, 0.5, "n_neurons row not yet built", ha="center",
-                    va="center", transform=axes[2, 2].transAxes,
-                    color="0.5", style="italic")
+    _plot_n_neurons_snr_pair(axes[2, 1])
+    _plot_n_neurons_snr_dv_scatter(axes[2, 2])
 
     out_path, _ = _save_fig(fig, "neural_giant2")
     plt.close(fig)
@@ -4578,12 +4716,18 @@ FIGURES = {
     "lambda_sanity_human": make_lambda_sanity_human,
     "lambda_overview": make_lambda_overview,
     "lambda_model_correlation": make_lambda_model_correlation,
-    "lambda_giant": make_lambda_giant,
+    "lambda_main": make_lambda_main,
+    "lambda_metric": make_lambda_metric,
+    "lambda_balls": make_lambda_balls,
+    "lambda_reliability": make_lambda_reliability,
+    "lambda_humanvmodel": make_lambda_humanvmodel,
+    "lambda_sigma_crosstask": make_lambda_sigma_crosstask,
     "variability_human": make_variability_human,
     "variability_models": make_variability_models,
     "sigma_sanity_human": make_sigma_sanity_human,
     "sigma_overview": make_sigma_overview,
-    "sigma_giant": make_sigma_giant,
+    "sigma_main": make_sigma_main,
+    "sigma_reliability": make_sigma_reliability,
     "neural_giant": make_neural_giant,
     "neural_giant2": make_neural_giant2,
     "sigma_model_correlation": make_sigma_model_correlation,

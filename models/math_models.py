@@ -74,6 +74,44 @@ _NOISE_WRAPPABLE_BASE_MODELS = frozenset(
 # for arbitrary noise types, so do not overload this suffix for anything else.
 _RESP_NOISE_SUFFIX = "_resp_noise"
 
+# Fixed small-int id per wrapped base model, for _resp_noise_seed below --
+# NOT a hash of the model_type STRING (Python's str hashing is randomized
+# per-process via PYTHONHASHSEED, unlike int/tuple-of-int hashing, which
+# utils.run_params.trial_seed relies on being stable). Every model in
+# _NOISE_WRAPPABLE_BASE_MODELS needs an entry.
+_RESP_NOISE_MODEL_SEED_ID = {"Mean": 0, "LeakyIntegrator": 1, "PrimacyRecency": 2, "RL_lambda": 3}
+
+
+def _resp_noise_seed(pid: int, model_type: str) -> int:
+    """Deterministic seed for add_noise's own i.i.d. noise draw, unique per
+    (pid, base model) -- fixes a real bug: add_noise previously defaulted to
+    RandomState(0) whenever params had no explicit "seed" key, which was
+    ALWAYS the case for every _resp_noise fit (fitting.fit never sets one).
+    Since add_noise draws a full (n_sims, len(mu)) array from ONE seeded
+    RandomState call, this meant every pid AND every wrapped model reused
+    the EXACT SAME underlying z-draw sequence, just rescaled by that pid's
+    own fitted sigma_resp -- not independent noise at all. Confirmed
+    directly: this spuriously correlated "residual variance growth across
+    observations" identically across all four wrapped models (Mean/
+    LeakyIntegrator/PrimacyRecency/RL_lambda) and across pids, for the
+    soltani_numbers/colors T5 sigma-growth check (see chat) -- a shared
+    fixed-seed artifact in the z-pattern at specific (trial, observation)
+    positions, not a real property of i.i.d. response noise.
+
+    Uses utils.run_params.trial_seed (int/tuple-of-int hashing only, stable
+    across process invocations) with model identity folded in via
+    _RESP_NOISE_MODEL_SEED_ID, so a fresh Python process per (dataset,
+    model_type, pid) fit -- the normal fitting.fit entry point -- still
+    gets a reproducible, but genuinely distinct, seed for each. Given a
+    fixed seed, every element of the resulting array draw is already an
+    independent sample (numpy's own RandomState.normal(size=...) behavior),
+    so no separate per-row/per-observation seeding is needed once (pid,
+    model) uniqueness is restored.
+    """
+    from utils.run_params import trial_seed
+    model = base_model_of(model_type)
+    return trial_seed(int(pid), _RESP_NOISE_MODEL_SEED_ID[model])
+
 
 def base_model_of(model_type: str) -> str:
     """Strip the _resp_noise suffix, if present. 'RL_lambda' -> 'RL_lambda';
@@ -113,6 +151,17 @@ def add_noise(params: dict, n_sims: int, sigma_resp: float,
     gets passed to run() and to _validate_model_dataset; sigma_resp is always
     removed from base_params before that call, since run() has no such parameter
     on a deterministic model.
+
+    SEEDING: if `params` has no explicit "seed" key (the normal case --
+    fitting.fit never sets one), the draw is seeded via _resp_noise_seed(pid,
+    model_type) -- unique per (pid, base model) -- rather than silently
+    defaulting to a fixed RandomState(0) shared by every pid and every
+    wrapped model. See _resp_noise_seed's own docstring for the real bug
+    this fixes (identical, merely-rescaled noise draws across pids/models,
+    which spuriously correlated apparent residual-variance growth across
+    observations). An explicit "seed" in `params` still overrides this, e.g.
+    for a caller that wants several independent realizations of the SAME
+    (pid, model).
     """
     model_type = base_model_of(params["model_type"])
     if model_type not in _NOISE_WRAPPABLE_BASE_MODELS:
@@ -127,7 +176,11 @@ def add_noise(params: dict, n_sims: int, sigma_resp: float,
     mu_df = run(base_params).sort_values(["trial", "observation"])
     mu = mu_df["response"].to_numpy(float)
 
-    rng = np.random.RandomState(int(params.get("seed", 0)))
+    if "seed" in params:
+        seed = int(params["seed"])
+    else:
+        seed = _resp_noise_seed(int(params["pid"]), params["model_type"])
+    rng = np.random.RandomState(seed)
     ens = np.clip(mu[np.newaxis, :] + rng.normal(0.0, sigma_resp, (n_sims, len(mu))),
                  -1.0, 1.0)
     if return_index:
