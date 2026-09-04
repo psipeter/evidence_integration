@@ -6482,7 +6482,7 @@ next concrete step once the cluster run finishes.
 
 ---
 
-## Rewiring neural_giant to synthetic data, two real bugs, sampling bounds, and neural_giant2 (this session)
+## Rewiring neural_giant to synthetic data, two real bugs, sampling bounds, and neural_main (this session)
 
 ### Rewiring make_paper_figures.py to the synthetic output
 
@@ -6642,7 +6642,7 @@ bounded and 0 is a meaningful reference (alpha_0/lambda_ panels and both
 scatter panels; NOT n_neurons, where real data starts at 500 and forcing
 the axis to 0 would waste half the panel on empty space).
 
-### neural_giant2: a second figure, the oddball paradigm
+### neural_main: a second figure, the oddball paradigm
 
 The person wanted a different angle: isolate each of alpha_0/lambda_/
 n_neurons's own causal contribution to the error population's response to
@@ -6717,9 +6717,9 @@ persist code changes; bash reads used for verification should be treated
 with a little skepticism immediately after a write, re-checked if a
 result looks unexpectedly stale.
 
-### neural_giant2's param_scan: a degenerate-input bug, then a full redesign
+### neural_main's param_scan: a degenerate-input bug, then a full redesign
 
-A later session revisited `neural_giant2`'s rows 2/3 (lambda_/n_neurons,
+A later session revisited `neural_main`'s rows 2/3 (lambda_/n_neurons,
 the `param_scan` experiment) after the oddball/param_scan debugging above
 had settled. Several separable things happened, in order:
 
@@ -6781,7 +6781,7 @@ silently replacing the other.
 
 **5. Col 1's own redesign: threshold groups, not representative values.**
 With every replicate now having its OWN random value rather than sharing
-a fixed grid, `_plot_neural_giant2_activity_vs_obs` (row 2/3 col 1) could
+a fixed grid, `_plot_neural_main_activity_vs_obs` (row 2/3 col 1) could
 no longer pick "the low/high value" the way the original grid-based
 version did. First fix: pick whichever single pid's own draw landed
 NEAREST each target (0.1, 0.7) and plot just that one pid's own curve.
@@ -6803,7 +6803,7 @@ pids itself. N per group now appears directly in its own legend entry.
 **6. Two new DV-vs-DV panels (col 3), one per row.** The ORIGINAL
 neural_giant already pairs a "two dependent variables plotted directly
 against each other" panel with every row (panel 5: sigma_R vs sigma_PE;
-panel 9: DeltaR-decay vs DeltaA-decay) -- `neural_giant2` had no
+panel 9: DeltaR-decay vs DeltaA-decay) -- `neural_main` had no
 analogue until this session. Added `_plot_oddball_dv_scatter` (row 1:
 max |decoded PE| vs decrease, one point per grid cell) and
 `_plot_param_scan_dv_scatter` (row 2: reusing `_param_scan_decay_metrics`
@@ -6834,7 +6834,7 @@ on the actual compute node) -- diagnosed each time from file SIZE alone
 identical to each other), without needing to inspect cluster job logs
 directly.
 
-### neural_giant2 row 3 (n_neurons): SNR measure exploration
+### neural_main row 3 (n_neurons): SNR measure exploration
 
 Before building row 3's real data-generation panels, a `run_n_neurons_
 convergence` diagnostic (`neural_experiments.py`, now archived --
@@ -6957,7 +6957,7 @@ data/runs/neural_experiments/tmp_spike_arrays/ folder and the old
 n_neurons_convergence_soltani_numbers.pkl output are stale and should be
 deleted.
 
-### neural_giant2 row 3: n_neurons_snr grid expansion + cluster job-splitting
+### neural_main row 3: n_neurons_snr grid expansion + cluster job-splitting
 
 Once the two SNR DVs were settled, the person asked to expand `n_neurons_
 snr` from a single fixed (cluster_center, oddball_deviation) combo to a
@@ -6984,3 +6984,520 @@ sequential local call (500 simulated trials, well past what a single
 local run should attempt, matching the same reasoning `oddball`'s own
 docstring already gives for its own grid).
 
+## Boundary-clipping correction for sigma-growth negative control (this session)
+
+### Motivation: filling in `make_sigma_main`'s blank row 2
+
+`make_sigma_main` had a row 2 left deliberately BLANK (see the earlier
+"3x3 kept ... with row 2 left literally blank" note this section now
+replaces). The person wanted a second, more intuitive companion to row
+3's autocorrelation panel for the same underlying claim -- that human/
+NEF response variability under REPEATED, identical stimuli (a qid/
+quasi-qid prefix) should GROW across observations within that shared
+prefix, because spiking/state noise gets folded into the represented
+state and compounds forward, whereas the math models' own noise
+mechanism (`models/math_models.py`'s `add_noise`, i.i.d. Gaussian added
+AFTER each deterministic update) has no such persistence and should stay
+flat. This is T5 (residual variance growth) from the PTN taxonomy,
+computed the same way `_resid_variance_growth` already did for
+carrabin/soltani's own established figures -- that function existed in
+`make_paper_figures.py` already, unused, apparently left over from an
+earlier draft of this exact row.
+
+### Bug #1, found first: every `_resp_noise` pid/model shared one seed
+
+Initial diagnostic (raw `_resid_variance_growth`, Human + the four
+`_resp_noise` math models + NEF, on balls/colors/numbers) showed a clean
+dichotomy on balls (Human/NEF grow, math models mildly decline) but NOT
+on colors/numbers, where several math models grew almost as much as
+Human -- and, suspiciously, in near-lockstep with each other despite
+having unrelated functional forms (Mean/LeakyIntegrator/PrimacyRecency/
+RL_lambda).
+
+Traced to `models/math_models.py`'s `add_noise`: its noise draw was
+`RandomState(int(params.get("seed", 0)))` -- and `fitting.fit` never set
+a `"seed"` key anywhere it called `add_noise` (the Optuna-search-time
+ensemble draw, or the final single-realization save draw). Every pid,
+every wrapped model, defaulted to the SAME seed, so the underlying
+z-draw sequence was IDENTICAL across pids, just rescaled by that pid's
+own fitted `sigma_resp` -- not independent noise. Any incidental
+position-dependent pattern in that one fixed draw would show up
+identically, after rescaling, in every pid and every model: exactly the
+synchronized "growth" observed.
+
+Fixed via `_resp_noise_seed(pid, model_type)` (new in `math_models.py`),
+deriving a seed unique per (pid, base model) through
+`utils.run_params.trial_seed` (int/tuple-of-int hashing only -- Python's
+str hashing is randomized per-process via `PYTHONHASHSEED`, so a naive
+`hash((pid, model_type_string))` would NOT have been reproducible across
+the separate process invocations `fitting.fit` runs per pid). `add_noise`
+now uses this whenever `params` has no explicit `"seed"`; an explicit
+seed still overrides it (kept for any caller wanting several independent
+realizations of the same pid/model).
+
+All 604 previously-run `_resp_noise` NLL fits (Mean/LeakyIntegrator/
+PrimacyRecency/RL_lambda x carrabin/yoo/soltani_numbers/soltani_colors)
+were deleted and resubmitted with the identical job spec recorded in
+`data/runs/nll/run_config.json` (`n_trials=200, k=5, optuna_seed=42,
+n_sims=100`, no `override_from_folder`) -- cheap to redo since these are
+closed-form math models, no NEF/cluster-scale simulation involved. Fixed
+the growth pattern almost everywhere: balls and numbers went fully flat
+(ratios ~0.94-1.06, from ~0.85-1.66 before), matching Human/NEF's own
+clean growth (~1.3-2.8) with no confound left to explain.
+
+### Bug #2 (not a bug): colors' remaining growth is real boundary clipping
+
+Colors still showed real growth for Mean (x1.54) and PrimacyRecency
+(x1.37) even after the seed fix -- LeakyIntegrator/RL_lambda were fine
+(~0.97/1.18). Ruled out an imperfect-qid-match explanation directly: the
+deterministic `mu` component is bit-identical (max std 0.0 across 5
+pids' worth of qid groups, all three tasks) within a qid group, so no
+real signal is leaking in via mismatched stimuli.
+
+The actual cause: `add_noise`'s `clip(mu + N(0,sigma_resp), -1, 1)`.
+Colors is binary evidence, so a running-mean-like estimator's `mu` after
+ONE observation is exactly the observation itself -- exactly +-1, sitting
+right on the clip boundary. Confirmed directly: Mean's own
+distance-to-boundary went 0.0 (obs 0) -> 0.375 -> 0.438 -> 0.531 -> 0.6
+(obs 4) for one pid. Near the boundary, roughly half of any added noise
+draw gets truncated away (censored, not resampled), so the OBSERVED
+variance is well below the true `sigma_resp^2`; as `mu` moves inward
+across observations, less gets clipped and the observed variance climbs
+back toward the true value -- pure measurement artefact, zero change in
+the actual (constant, per-pid) noise parameter. This also explains WHY
+only Mean/PrimacyRecency show it: both put a large, unshrunk weight on
+the very first observation (Mean IS that observation; PrimacyRecency
+weights it heavily), while LeakyIntegrator/RL_lambda scale the first
+observation by `(1-gamma)`/`alpha_0` respectively, so their own obs-0 `mu`
+is rarely close enough to +-1 for clipping to matter.
+
+Quantitatively confirmed via the closed-form variance of a clipped
+normal, `Var(clip(X,-1,1))` for `X ~ N(mu, sigma^2)` (folded/censored-
+normal moments, standard derivation via `E[X^2*1(a<X<b)]`'s decomposition
+into truncated first/second moments). Computed the PREDICTED growth
+curve from nothing but each pid's already-fitted `mu` trajectory and
+`sigma_resp` (no new fitting) and compared to the ACTUAL observed curve:
+
+| task | model | observed ratio | predicted ratio |
+|---|---|---|---|
+| balls | all four | 0.94-0.97 | 0.99-1.02 |
+| colors | Mean | 1.54 | 1.35 |
+| colors | LeakyIntegrator | 0.97 | 0.93 |
+| colors | PrimacyRecency | 1.37 | 1.35 |
+| colors | RL_lambda | 1.18 | 1.13 |
+| numbers | all four | 0.95-1.06 | 0.99-1.01 |
+
+The match (especially colors' two affected models, both landing within
+0.02-0.19 of the real ratio using ZERO free parameters beyond what was
+already fit) leaves no real, unexplained mechanism to hunt for.
+Cross-referenced against a HUMAN-side twin of this exact issue already on
+record: colors' first observation is independently known to be
+ceiling-pinned for real participants too ("78.7% of colors prefix
+responses are pinned at an extreme vs 0.3% for numbers" -- see this
+file's temporal-figure section), and dropping that observation from
+cols 3-4 was tried and REJECTED there because losing a fitting point
+cost more than the contamination. Same tradeoff, different figure.
+
+### Considered and rejected: removing clipping, or excluding data
+
+Three alternatives to a figure-level correction were weighed before
+settling on one:
+
+- **Remove clipping from `add_noise` entirely.** Rejected: the clip is
+  part of the actual fitted model, not a plotting artefact -- removing
+  it means refitting all 604 `_resp_noise` jobs against a genuinely
+  different likelihood (the SAME fits also feed
+  `make_sigma_model_correlation` and `make_model_best_fit`'s NLL panel,
+  so the blast radius is wider than this one figure), and an unclipped
+  model can predict responses outside the response scale's own bounds --
+  not a fix, a different (worse) model.
+- **Uniform boundary-distance exclusion** (drop any (pid, obs, qid)
+  group whose qid-conditional mean sits within some threshold of +-1,
+  applied identically to every source). Tested directly at thresholds
+  0.8-1.0: DOES flatten the math models (e.g. Mean's ratio -> 1.01 at
+  threshold 0.9), but WRECKS Human's own curve at the exact same
+  threshold -- Human's colors obs-0 responses are pinned even harder
+  than the models' (as expected, matching the ceiling-effect finding
+  above), so the filter shrinks that observation's human sample to a
+  tiny, unstable remainder (one test run: ratio flipped to 0.40 with a
+  spurious spike at obs 0). Rejected -- fixes the wrong side of the
+  comparison.
+- **Drop observation 0 as a whole column, colors only, uniformly.**
+  Better than the soft filter (no per-group sample shrinkage) but only a
+  PARTIAL fix: the clip effect is a gradual function of distance-to-
+  boundary across ALL four colors observations, not just obs 0 (matches
+  the predicted-vs-observed table above, which already differs from 1.0
+  well past the first point) -- Mean's ratio only came down to 1.30 with
+  the whole column dropped, still a visible, confusing residual trend.
+  Rejected as insufficient on its own.
+
+### The fix actually shipped: analytic boundary correction, colors' Mean/PrimacyRecency only
+
+Inverted the same closed-form relationship: given each pid's own fitted
+`sigma_resp` and known `mu` trajectory, solve (via `scipy.optimize.
+brentq`, monotonic in sigma for fixed mu so the root is unique) for the
+IMPLIED pre-clip sigma at each observation that would produce the
+ACTUALLY OBSERVED (clipped) variance. This is a real correction -- the
+standard treatment for censored-variance estimation (the same idea
+behind a Tobit correction) -- not a data exclusion or a model change.
+Flattens both affected curves close to 1.0:
+
+| model | raw ratio | corrected ratio |
+|---|---|---|
+| Mean | 1.54 | 1.15 |
+| PrimacyRecency | 1.37 | 0.98 |
+
+Applied ONLY to `("colors", "Mean")` and `("colors", "PrimacyRecency")`
+(`SIGMA_GROWTH_BOUNDARY_CORRECTED` in `make_paper_figures.py`) --
+LeakyIntegrator/RL_lambda on colors and every model on balls/numbers
+were already flat under the raw metric once the seed bug was fixed, so
+correcting those too would only add `brentq`-inversion noise for no
+benefit. Implemented as `_clipped_normal_var` (the closed-form moments),
+`_implied_sigma` (the inversion), `_resp_noise_params_path` (needed
+because the correction must re-run the deterministic base model from its
+fitted params to get `mu` -- the saved `_responses.pkl` file only has the
+already-noisy realization), `_resid_variance_growth_corrected` (the
+per-pid/per-observation implied-sigma curve, same `[observation, mean,
+std, se]` shape as the raw `_resid_variance_growth` so it drops into the
+same drawing code), and `_growth_stats_for_source` (the dispatcher that
+swaps in the corrected version only for the flagged pairs).
+
+**This is a genuine asymmetry, by design, not an oversight**: Human and
+NEF stay on the raw empirical metric throughout, because there is no
+equivalent parametric correction available for either -- Human's own
+boundary effect is a real behavioural ceiling response (not a known-form
+clip on a fitted noise parameter to invert), and NEF's noise is not
+simple additive Gaussian. Each source gets the estimator that's actually
+right for what it is, rather than forcing one uniform (and, for Human,
+demonstrably worse -- see the rejected boundary-filter test above)
+treatment onto all of them.
+
+### Row 2, as originally shipped (superseded -- see "Row 2/3 normalization and cleanup" below)
+
+`make_sigma_main`'s row 2, AS ORIGINALLY WIRED IN: Human (solid grey) +
+`NLL_RESP_NOISE_MODELS` (solid, except colors' Mean/PrimacyRecency which
+were DASHED) + NEF (solid, its own color) -- mean +/- SEM per
+observation, RAW (absolute SD) scale. The figure-level legend marked any
+model corrected on ANY task with a trailing `"*"` and a legend title
+("* colors only: boundary-corrected (see docs/HISTORY.md)") rather than
+per-task marking, since the legend itself was one entry per model
+across the whole figure. `NEF` was a genuine addition to this row's
+roster relative to row 3 (which at the time only ever plotted
+`NLL_RESP_NOISE_MODELS`) -- it is the other real positive case for this
+metric, not just a negative control.
+
+One scale mismatch was noticed while rendering: NEF's curve on
+colors/numbers sat at a much smaller absolute scale (~0.01-0.03) than
+Human/the math models (~0.07-0.33), because it reads the plain RMSE-fit
+`_responses.pkl` (a single point-estimate realization, less noisy in
+absolute terms) rather than an MLE/ensemble variant. RESOLVED below --
+not via the twin-axis treatment first suggested here, but by
+normalizing every curve to its own baseline, which makes absolute-scale
+differences stop mattering at all.
+
+## Model-performance cleanup and lambda/sigma giant retirement (this session)
+
+### model_performance: RMSE-only again, tighter sig-bar headroom
+
+`make_model_performance` briefly carried a second (NLL) row,
+consolidating both metrics into one figure. That row was removed, per
+instruction -- NLL reporting for the same roster/tasks lives entirely in
+the pre-existing `make_model_performance_nll` (its own 1x4 figure),
+which already duplicated that exact content, so nothing needed a new
+home. Figure is back to 1x4, RMSE only.
+
+Three more targeted tightenings, all per instruction, all scoped to
+this one figure (the shared `draw_sig_line`/`_draw_metric_boxplot`
+conventions used elsewhere in this file are untouched):
+- Sig-bar headroom: `dy_step` fraction cut from the shared 0.07
+  convention to 0.045, with smaller lead-in/trail padding, so annotation
+  margin doesn't dominate the panel.
+- Outliers hidden (`showfliers=False`, new parameter on
+  `_draw_metric_boxplot`, default `True` so the one other/future caller
+  is unaffected) and the y-axis top pinned to the ACTUAL max whisker
+  value via a new `_whisker_top()` helper (seaborn/matplotlib's own
+  whis=1.5 definition), not matplotlib's autoscaled ylim -- autoscale
+  still carries its own ~5% margin above whatever's topmost, which was
+  exactly the leftover whitespace being removed.
+- Legend pulled in tight under the x-axis: constrained-layout `h_pad`
+  dropped from the shared 0.25 convention to 0.03, plus
+  `borderaxespad=0.2` on the legend itself.
+
+### make_lambda_giant retired, split into six
+
+`make_lambda_giant` (a 4x4 mega-figure stacking `make_response_change`'s
+own 4 panels, `make_lambda_overview`'s own 2x4 content, and
+`make_lambda_model_correlation`'s own 3 panels, unmodified, into one
+combined layout) was retired per instruction and split into six pieces.
+Full code preserved at `archive/scripts/archive_lambda_giant.py` (NOT
+standalone-runnable as archived -- it references module-level state
+still living in `make_paper_figures.py`; see that file's own header for
+the complete list). Removed from the `FIGURES` dict; `lambda_giant` as a
+CLI argument now fails with a clear "invalid choice" listing every
+valid name.
+
+- `make_lambda_main` -- 2x3, rows 1-2 cols 2-4 of the giant
+  (snacks/colors/numbers only; balls/demo column dropped).
+- `make_lambda_metric` -- 1 panel, the giant's own row 2 col 1 (the
+  "lambda definition" demo, INLINED regplot-with-binning version, not
+  the plainer `_plot_lambda_demo` helper) -- pulled out standalone so it
+  can be hand-composited into `lambda_main` as an Inkscape inset from
+  its own saved SVG. Made SQUARE (figsize (3.7, 3.7)) later in the same
+  session, matching the average dimension of one `lambda_main` panel
+  (~3.53in wide x ~3.88in tall, 2x3 grid over `(FIGURE_SIZE[0],
+  FIGURE_SIZE[1]*1.9*0.75)`).
+- `make_lambda_balls` -- 1 panel, the giant's own row 1 col 1
+  (balls-task response-change panel) -- moved to supplementary since it
+  doesn't show the expected trend.
+- `make_lambda_reliability` -- 1x3, the giant's own row 3 cols 2-4
+  (split-half reliability), titles RESTORED (no longer sitting under a
+  row that already names each task the way the giant's row 1 did).
+- `make_lambda_humanvmodel` -- 1x3, the giant's own row 4 cols 2-4
+  (model-vs-human lambda correlation), titles restored. NOTE: currently
+  IDENTICAL in content to the pre-existing `make_lambda_model_correlation`
+  (same panels, same helper, same roster) -- built as its own
+  function/output per instruction rather than reusing that name, but the
+  two now duplicate each other; not yet reconciled.
+- `make_lambda_sigma_crosstask` -- NOT a piece of the original giant.
+  Pairs the giant's own row 3 col 1 (lambda colors-vs-numbers crosstask)
+  with the analogous panel from `make_sigma_giant`'s own row 2 col 1
+  (sigma crosstask). Originally built 2x1 (stacked), changed to 1x2
+  (side by side) later in the same session per instruction --
+  `figsize=(FIGURE_SIZE[0]*2/3, FIGURE_SIZE[1]*0.75)`, swapped from the
+  stacked version's `(FIGURE_SIZE[0]/3, FIGURE_SIZE[1]*1.5)` to keep each
+  individual panel roughly the same size.
+
+### make_sigma_giant retired, split into two
+
+Same treatment, same session: `make_sigma_giant` (a 3x4 mega-figure:
+rows 1-2 = `make_sigma_overview`'s own 2x4 content, row 3 = the
+autocorrelation panels) retired and split, per instruction. Archived at
+`archive/scripts/archive_sigma_giant.py`.
+
+- `make_sigma_main` -- 3x3, column 1 (the "sigma definition"/"rho
+  definition" schematics plus the crosstask panel -- previously column 1
+  of rows 1/2/3) removed entirely:
+  - Row 1: variability KDE panels, unchanged, real titles.
+  - Row 2: left BLANK at this point in the session (see "Boundary-
+    clipping correction" section above for how it got filled in, and
+    "Row 2/3 normalization and cleanup" below for how it was refined
+    further afterward).
+  - Row 3: autocorrelation panels, TITLES CLEARED (redundant with row
+    1's, two rows up).
+  3x3 was kept rather than collapsing to 2x3, per instruction, despite
+  row 2 being blank at the time.
+- `make_sigma_reliability` -- 1x3 supplementary: the giant's own row 2
+  cols 2-4 (split-half reliability of sigma), titles restored.
+
+## Row 2/3 normalization and cleanup (this session, after row 2 was filled in)
+
+Following the boundary-clipping-correction work above (which filled
+row 2 in with the raw residual-variance-growth metric), three more
+rounds of refinement, all per instruction, in the same session:
+
+**Row 2 normalized to a relative scale.** `_draw_variance_growth_panel`
+now divides each source's (Human, each `NLL_RESP_NOISE_MODELS` model,
+NEF) own `mean`/`se` by that SAME source's own value at its own first
+available observation, so every curve starts at 1.0 and the axis reads
+as "how many times its own baseline sigma has grown by observation k" --
+directly matching how this row's own results were already being talked
+about narratively (e.g. "grows x1.31", "x2.02") well before the plot
+itself was normalized to show that ratio at every point along x, not
+just the endpoints. A dashed guide line at y=1 marks the baseline.
+Resolves the NEF absolute-scale mismatch flagged in "Row 2, as
+originally shipped" above with no separate twin-axis treatment needed.
+Ylabel: `$\sigma_R$ (normalized)`.
+
+**Row 2's own legend removed.** Per instruction -- row 3 now carries the
+only legend for both rows (same Human/model/NEF color roster). This also
+removes the `"*"`/dashed-line explanation that used to live in row 2's
+legend title, marking colors' Mean/PrimacyRecency as boundary-corrected
+-- the dashed line styling itself (`SIGMA_GROWTH_BOUNDARY_CORRECTED`) is
+untouched, only the auto-generated legend note explaining it is gone.
+Worth covering in a caption or the hand-drawn inset if that distinction
+still needs surfacing to a reader.
+
+**Row 3: NEF added.** `_load_variance_autocorr_data` gained an
+`include_nef=True` parameter (default `False`, so
+`make_variance_autocorr_human`/`models`, which never pass it, are
+unaffected) that loads NEF's own residual autocorrelation using the SAME
+special per-task path convention row 2's own NEF handling already used
+(`_variability_model_path`'s MLE variant for balls, `_delta_responses_
+path`'s RMSE variant for colors/numbers -- NEF is never in
+`NLL_RESP_NOISE_MODELS`/`NLL_MODEL_ORDER`, so it can't go through the
+normal `responses_path_fn` mechanism the math models use). Confirmed
+directly: NEF's own autocorrelation shows the same decaying-from-well-
+above-zero pattern as Human/NoisyRL_lambda at every lag, all three tasks
+(e.g. numbers: 0.69 -> 0.39 -> 0.06). Row 3's legend now includes a NEF
+entry. Ylabel changed to a placeholder shorthand, `$\rho_\varepsilon$
+(autocorrelation)` (epsilon for "residual") -- meant to be spelled out
+in a hand-drawn inset rather than the axis label itself, per
+instruction.
+
+### Autocorrelation pairing definition: pooled (t, t+k) vs first-obs-only
+
+Question raised: does `_resid_autocorr` pool EVERY valid (t, t+k) pair
+within a trial into one correlation per (pid, lag), or does it only use
+the window's first observation paired with (first+k)? Answer: the
+former, already -- confirmed directly by reading the implementation.
+
+Added a `pool_all_pairs: bool = True` parameter to `_resid_autocorr`
+(threaded through `_load_variance_autocorr_data` too) to make the
+simpler alternative available for direct comparison, default `True`
+preserving existing behavior for every caller. Built a throwaway
+comparison (`scripts/_tmp_autocorr_compare.py`, numeric only, deleted
+after use; then `scripts/_tmp_autocorr_variant.py`, a full row-3-style
+plot with `pool_all_pairs=False`, rendered and inspected, then deleted).
+
+**Result** (Human + NEF, all three tasks; at each task's own largest
+lag the two necessarily coincide, since only one (t,t+k) pair remains to
+pool there -- a useful sanity check that both branches agree):
+
+| Task | Source | Pooled (k=1,2,3[,4]) | First-obs-only |
+|---|---|---|---|
+| Balls | Human | 0.62 / 0.41 / 0.27 | 0.52 / 0.35 / 0.26 |
+| Balls | NEF | 0.88 / 0.76 / 0.64 | 0.82 / 0.70 / 0.61 |
+| Colors | Human | 0.47 / 0.35 / 0.27 / 0.16 | 0.61 / 0.37 / 0.25 / 0.16 |
+| Colors | NEF | 0.70 / 0.44 / 0.19 / 0.01 | 0.34 / 0.17 / 0.10 / 0.01 |
+| Numbers | Human | 0.40 / 0.23 / 0.15 | 0.29 / 0.26 / 0.15 |
+| Numbers | NEF | 0.69 / 0.39 / 0.06 | 0.35 / 0.14 / 0.06 |
+
+Balls stays close either way. Colors/numbers Human shifts modestly and
+inconsistently (sometimes up, sometimes down at k=1). Colors/numbers
+NEF -- the case this row most needs to preserve -- roughly HALVES under
+the simplified version (0.70->0.34, 0.69->0.35 at k=1). The simplified
+version also loses statistical power: pooling combines multiple (t,t+k)
+pairs per trial, so more pids clear the "n>=3 pairs" inclusion
+threshold than under the one-pair-per-trial simplified version (e.g.
+colors Human k=1: only 13 pids usable under first-obs-only).
+
+**Decision: keep `pool_all_pairs=True`** (already the default; no code
+change needed to `make_sigma_main` itself, which never passed the
+parameter). The simplified version isn't just noisier -- it materially
+attenuates the NEF signal specifically. The parameter itself stays in
+the code (on both `_resid_autocorr` and `_load_variance_autocorr_data`)
+for any future revisit.
+
+
+## make_neural_giant retired; neural_main now authoritative (this session)
+
+### Why
+
+`make_neural_giant` (the original "Acts 1-3" figure: toy/illustrative
+population dynamics at arbitrary params, then sigma_R/sigma_PE and
+DeltaR/DeltaA-decay each plotted against alpha_0/lambda_/n_neurons via
+RANDOM-virtual-pid covariation across all three parameters at once) and
+neural_main (parameter-by-parameter: oddball for alpha_0, param_scan
+for lambda_/n_neurons, isolating each parameter's own causal
+contribution one row/column at a time) had been developed side by side
+for several sessions, described as complementary -- the giant showing
+random covariation, neural_main showing controlled per-parameter
+sweeps. Per instruction this session: neural_main is now the sole,
+authoritative figure for presenting the impact of neural parameters on
+behavior and activity. The giant's own random-covariation design added
+second-order value (showing the relationships hold under naturalistic
+parameter covariation, not just controlled sweeps) but that value no
+longer justified maintaining two full figures' worth of data pipeline
+and plotting code side by side, especially with neural_main still
+actively evolving (new n_neurons row, new DV-scatter columns, real vs
+synthetic trial sources -- see its own CLAUDE.md section for the full,
+current structure).
+
+### What was archived
+
+Confirmed via repo-wide grep before archiving that nothing else calls
+any of the following -- all exclusive to `make_neural_giant`'s own
+dependency tree (`_plot_neural_dual_vs_param`, `NEURAL_EXP_DIR`,
+`NEURAL_READOUT_OFFSET`, and `_fold_observation_time` are all SHARED
+with `make_neural_main` and were left in place):
+
+- `make_neural_giant` itself (the 3x4 figure function).
+- `_plot_neural_raster_demo`, `_plot_neural_lambda_activity`,
+  `_plot_neural_pe_dynamics` (row 1's three toy/illustrative panels).
+- `_load_neural_probe_variability`, `_load_neural_decay_metrics` (rows
+  2-3's own data loaders, reading neural_experiments.py's `synthetic`
+  experiment output).
+- `_plot_neural_sigma_vs_pe_variability`, `_plot_neural_resp_vs_act_decay`
+  (rows 2-3's own leftmost DV-vs-DV panels).
+- `_neural_weight_on_cols` -- had ZERO callers even before this
+  archiving (confirmed by grep); `_load_neural_decay_metrics` duplicates
+  its logic inline instead of calling it. Archived alongside the rest
+  since it's exclusively neural_giant-era code, not because it was ever
+  load-bearing.
+- `NEURAL_ENCODER_THRESHOLD` -- this file's own local copy of the
+  same-valued constant `scripts/neural_experiments.py` independently
+  defines for its own weight-tuned-neuron identification; NOT a shared
+  import, so removing this copy doesn't affect that file.
+
+Full code preserved at `archive/scripts/archive_neural_giant.py` (NOT
+standalone-runnable as archived -- see that file's own header for the
+full list of module-level state it still depends on). Also removed: the
+now-fully-unused `from utils.plot_spikes import plot_spikes,
+preprocess_spikes, sample_by_variance, cluster` import (only
+`_plot_neural_raster_demo` used any of these, and `preprocess_spikes`
+was already unused dead weight even within that function -- see its own
+docstring, which explains why `sample_by_variance`+`cluster` were used
+directly instead).
+
+Removed from the `FIGURES` dict; `neural_giant` as a CLI argument now
+fails with a clear "invalid choice" listing every remaining valid name.
+
+### What was NOT touched (explicitly out of scope)
+
+- `scripts/neural_experiments.py`'s own `raster_demo`/`sweep`/`probe`/
+  `synthetic` subcommands -- these generated the now-archived figure's
+  own data and have no other caller either, but the instruction was
+  specifically about "the old neural_giant functions" (the plotting
+  side, in `make_paper_figures.py`), not the simulation/data-generation
+  pipeline. They're likely dead weight now too, but left alone rather
+  than assumed in scope -- worth a follow-up pass if confirmed unwanted.
+- The generated data files themselves under `data/runs/
+  neural_experiments/` (`raster_demo_*.pkl`, `sweep_*.pkl`,
+  `synthetic_*.pkl`, `probe_*.pkl`) -- left on disk, not deleted.
+- The full "Acts 1-3" status/bug-fix narrative that used to live in
+  CLAUDE.md's own "Neural predictions figure" section (the N=200
+  synthetic-virtual-pid pipeline, its final sampling bounds, and the two
+  real bugs found building it -- a probe-worker activity-key/seed
+  mismatch, and a raw-vs-canonical observation-scale mismatch that
+  saturated NEF's ensembles) -- NOT deleted, just no longer repeated in
+  CLAUDE.md now that it describes a retired pipeline; the full narrative
+  already lives permanently in this file's own history (see the
+  "Neural predictions figure (Acts 1-5)" era entries earlier in
+  docs/HISTORY.md if the exact diagnostic trail is ever needed again).
+
+### Docs restructuring
+
+CLAUDE.md's `## Neural predictions figure (Acts 1-5)` section was
+restructured, per instruction ("the act 1-5 framework needs revisiting/
+removing"):
+- Renamed to `## Neural predictions figure` (dropped the "Acts 1-5"
+  framing entirely). Motivation kept (still accurate), rewritten to
+  point at neural_main's own per-parameter design instead of the old
+  5-act narrative.
+- "Structure -- 5 acts" subsection REMOVED (folded into neural_main's
+  own already-detailed structure section, promoted below).
+- "Implementation"/"Status" subsections (describing the now-retired
+  pipeline in detail) REMOVED from CLAUDE.md -- that history stays
+  intact in this file (HISTORY.md), per CLAUDE.md's own stated scope
+  ("current state only"; HISTORY.md is "the full design history").
+- The two forward-looking ideas that used to be "Act 4" (validation via
+  ablation/partial-correlation control) and "Act 5" (a synaptic-vs-
+  working-memory implementation comparison) were KEPT, per instruction,
+  as a new "Future extensions" list -- decoupled from the retired
+  figure's own numbering, so they read as standing todos for whichever
+  figure eventually takes them on, not artifacts of a dead naming
+  scheme.
+- `### neural_main -- a second, parameter-by-parameter figure`
+  (previously nested as a `###` subsection UNDER the Acts-1-5 heading,
+  despite its own text already saying "a separate figure from Acts
+  1-5") promoted to its own top-level `## neural_main` section, with
+  a new RETIREMENT NOTE at the top explaining the change and its own
+  "complementary to the giant... not a replacement for it" framing
+  corrected (that's no longer true).
+- The `## Simulation pipeline` section's own `### Neural predictions
+  figure (Acts 1-3 ...)` command-reference subsection was relabeled
+  RETIRED (commands kept for provenance -- they document how the
+  archived figure's own data was generated -- but no longer read as an
+  active workflow), and its stale `## Neural predictions figure (Acts
+  1-5)` cross-reference and its `neural_giant` build-command line were
+  both fixed/removed.

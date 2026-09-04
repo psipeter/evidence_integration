@@ -85,7 +85,7 @@ anything else. Compaction summaries omit conventions. Key ones to remember:
   the exact "activity key vs simulation seed" mismatch this project's own
   `activity_key_for_trial` exists to prevent for real trials (see "What
   NOT to do"), reintroduced here for `neural_experiments.py`'s toy
-  experiments. Caught only because a person noticed `neural_giant2`'s new
+  experiments. Caught only because a person noticed `neural_main`'s new
   row-2 activity panel (`param_scan`, weight-tuned neurons only) showed a
   qualitatively different pattern (dip-then-rise) than the ORIGINAL
   neural_giant's own bulk-mean equivalent panel (clean monotonic decay,
@@ -98,6 +98,25 @@ anything else. Compaction summaries omit conventions. Key ones to remember:
   direction) may have survived since the same systematic offset applied
   uniformly to every cell, but this was never confirmed and should not be
   assumed. See docs/HISTORY.md for the full diagnostic trail.
+- **A THIRD bug in this same family, in `models.math_models.add_noise`**:
+  it defaulted to `RandomState(0)` whenever `params` had no explicit
+  `"seed"` key -- which was ALWAYS true for every `_resp_noise` fit
+  (`fitting.fit` never set one). Every pid AND every wrapped model
+  (Mean/LeakyIntegrator/PrimacyRecency/RL_lambda) therefore drew the
+  EXACT SAME underlying noise sequence, merely rescaled by that pid's own
+  fitted `sigma_resp` -- not independent noise. This spuriously
+  correlated apparent "residual variance growth across observations"
+  identically across all four models and pids on soltani_numbers/colors,
+  and was only caught because a person noticed four unrelated model
+  forms tracking each other's growth curve too closely to be a
+  coincidence. Fixed via `_resp_noise_seed(pid, model_type)`, unique per
+  (pid, base model) via `utils.run_params.trial_seed` (int-only hashing,
+  stable across process invocations -- NOT Python's own randomized str
+  hashing). All 604 previously-run `_resp_noise` NLL fits were deleted
+  and resubmitted from scratch. See docs/HISTORY.md's "Boundary-clipping
+  correction for sigma-growth negative control" section for the full
+  trail, including a SEPARATE, genuine (non-bug) boundary-clipping
+  artefact found afterward on colors' Mean/PrimacyRecency specifically.
 
 ---
 
@@ -138,12 +157,16 @@ error dynamics, and how both scale with architectural parameters (n_neurons,
 α₀, λ). Together these constitute a mechanistically coherent account that is
 testable at multiple levels of analysis.
 
-The current active plan for making this argument concretely, as one
-consolidated figure (the "neural giant" -- see `## Neural predictions figure
-(Acts 1-5)` below for the full motivation/structure), reuses the SAME
-underlying error population across all of its panels rather than the older
-per-task carrabin/yoo neural figures (N1-N8 below), which each only ever
-showed part of the story.
+The current active plan for making this argument concretely --
+`neural_main` (see `## Neural predictions figure` below for the full
+structure) -- isolates each architectural parameter's own causal
+contribution one row/column at a time, reusing the SAME underlying
+error population across its panels rather than the older per-task
+carrabin/yoo neural figures (N1-N8 below), which each only ever showed
+part of the story. (An earlier consolidated figure, "neural_giant",
+took a random-covariation approach across all three parameters at
+once -- retired and archived once neural_main covered the same
+argument more directly; see that section for detail.)
 
 ### Goal 4 — Novel testable predictions
 Spiking noise produces state-persistent variability that differs qualitatively
@@ -202,11 +225,12 @@ NEF predictions; testable in future empirical experiments.
 
 N1-N8 above is the OLDER per-task taxonomy (figure_carrabin_neural.py/
 figure_yoo_neural.py, each only covering part of the story on its own task).
-The CURRENT active plan consolidates this into one figure -- see below.
+The CURRENT active plan consolidates this into one figure, `neural_main`
+-- see below.
 
 ---
 
-## Neural predictions figure (Acts 1-5)
+## Neural predictions figure
 
 ### Motivation
 The theory's central mechanism is a WEIGHTED prediction error (PE) updating
@@ -219,152 +243,59 @@ possibly striatum/VTA) -- i.e. every claim in this figure is framed as a
 concrete, testable prediction for a real neuroimaging experiment, not just a
 model-internal description.
 
-### Structure -- 5 acts, building in strength of claim
-
-1. **Toy/illustrative population dynamics** (no fitting, no behavioural
-   data -- pure model mechanism, arbitrary parameter values). Shows: a
-   single-trial spike raster of the error population with decoded PE
-   overlaid; error-neuron activity vs observation-within-trial across a few
-   λ values; decoded PE vs time-within-observation across an α₀ x n_neurons
-   grid. Claims: α₀ controls the upswing of decoded PE; n_neurons controls
-   its noise level; λ controls the rate at which error neurons become
-   quiescent (stop responding to new input). These are the measurable-in-
-   the-lab quantities (neural activity, decoded representations) with no
-   model-fitting involved.
-2. **Behaviour <-> PE representation, both axes measurable.** Ties Act 1's
-   predictions back to σ and λ: σ (response variability) vs PE variability;
-   ΔR(early-late) vs ΔA(early-late) [response-change decay vs activity
-   decay]. Both axes on each panel are things a real neuroimaging study
-   could measure directly -- no parametric model comparison needed -- so
-   each panel is its own standalone empirical prediction.
-3. **Both X and Y jointly controlled by the same underlying parameter.**
-   σ AND PE variability vs fitted α₀ (both depend on the same scaling
-   factor); fitted λ vs ΔR-decay AND ΔA-decay (twin axes). Same
-   underlying data as Act 2, replotted against the parameter that drives
-   both measured quantities together.
-4. **Validation via ablation/statistical control** (NOT YET BUILT). For
-   each Act 2/3 relationship: a partial correlation controlling for the
-   other parameter, and, where feasible, a mechanistic ablation (forcing a
-   parameter to a null value and showing the correlation collapses) --
-   matching yoo's own existing λ=0 ablation precedent.
-5. **Optional -- synaptic vs working-memory implementation comparison**
-   (NOT STARTED, separate downstream scope). Different predictions under
-   an ITI manipulation, depending on which implementation of the learning
-   rule is assumed. Deliberately out of scope for now.
+**Current approach: isolate each parameter's own causal contribution, one
+at a time.** `neural_main` (see `## neural_main` below for the full
+structure) sweeps ONE architectural parameter (α₀, λ, or n_neurons) per
+row/column while holding the others fixed, rather than reading off a
+correlation across randomly-covarying parameters -- a design that isolates
+causation more directly than the earlier `neural_giant` did (retired --
+see `## neural_main`'s own note for why, and
+archive/scripts/archive_neural_giant.py for the full retired figure).
 
 ### Task choice: soltani_numbers throughout
 Unlike the old N1-N8 table (split across carrabin/yoo, each missing half the
-metrics), Acts 1-3 all run on `soltani_numbers` specifically -- the ONE task
+metrics), this figure runs on `soltani_numbers` specifically -- the ONE task
 with both a real fitted σ and a real fitted λ (carrabin has σ but not λ;
 yoo has λ but not σ; both soltani tasks have both, numbers picked
 arbitrarily over colors). This lets one task carry the whole argument
 rather than splitting it across two tasks that each only show half.
 
-### Implementation
-- `scripts/neural_experiments.py` -- generalises extras_carrabin.py's
-  pattern (param-grid sweeps, probe simulations) to an arbitrary `--task`,
-  since none of it is actually carrabin-specific under the hood. Five
-  experiments: `raster_demo` (Act 1, one trial, arbitrary params, full
-  per-timestep error-population output for a spike raster), `sweep` (Act 1,
-  one OR two swept parameters -- a cross product if two -- full
-  per-timestep resolution), `probe` (fitted-pid probe simulation -- kept as
-  a real, independently-useful experiment, but superseded for Acts 2/3 by
-  `synthetic` below), `synthetic` (Acts 2/3's actual data source -- see
-  Status below), `oddball` (a SEPARATE figure, `neural_giant2` -- see its
-  own section below, not part of the Acts 1-5 structure). Output:
-  `data/runs/neural_experiments/`.
-- `scripts/make_paper_figures.py`'s `make_neural_giant()` builds the Acts
-  1-3 figure. Currently 3x4: row 1 = Act 1's three panels (+1 empty slot);
-  row 2 = sigma_R/sigma_PE (scatter, then one twin-axis panel per
-  alpha_0/lambda_/n_neurons via a shared `_plot_neural_dual_vs_param`
-  helper); row 3 = the same structure for DeltaR/DeltaA-decay. Y-axes
-  (including twin axes) are shared across each full row, set manually
-  after plotting since `plt.subplots`' own `sharey` doesn't reach
-  per-panel twins.
+### Future extensions (soft todos, not tied to any current figure's own structure)
+- **Validation via ablation/statistical control** (NOT YET BUILT). For each
+  parameter-vs-outcome relationship `neural_main` shows: a partial
+  correlation controlling for the other parameters, and, where feasible, a
+  mechanistic ablation (forcing a parameter to a null value and showing the
+  correlation collapses) -- matching yoo's own existing λ=0 ablation
+  precedent.
+- **Optional -- synaptic vs working-memory implementation comparison**
+  (NOT STARTED, separate downstream scope). Different predictions under
+  an ITI manipulation, depending on which implementation of the learning
+  rule is assumed. Deliberately out of scope for now.
 
-### Status
-- **Act 1: DONE.** All 3 panels built, data generated locally (cheap --
-  see docs/HISTORY.md for the exact parameter values used).
-- **Act 2/3: DONE**, via the synthetic forward-simulation approach
-  (reconsidered from the original fitted-pid `probe`/`save_activities`
-  approach -- see docs/HISTORY.md for the full reasoning):
-  - N=200 "virtual pids", each an independently-generated real trial
-    sequence (`task_backend/generate_sequences.py --task numbers --n_pool
-    200`, same generative design real participants get, written to
-    `data/synthetic_pool/`, never touching real experimental data) paired
-    with ONE randomly-drawn (alpha_0, lambda_, n_neurons) -- NOT a fitted
-    pid's own params. Justification: these are qualitative covariation
-    predictions for future empirical studies to test, not fits to
-    existing behavioural data, so artificial data is exactly as good as
-    real-pid data for this purpose.
-  - **Sampling bounds, FINAL**: alpha_0 ~ Uniform(0.5, 1), lambda_ ~
-    Uniform(0.1, 1), n_neurons ~ uniform choice over {500, 600, ...,
-    1500}. Narrowed from an initial Uniform(0,1)/{100,...,1000} after
-    directly checking two things: (1) alpha_0 below ~0.2-0.4 produces a
-    genuine floor effect in alpha(t)=alpha_0/t^lambda -- lambda has
-    nothing to modulate when alpha_0 is that small, confirmed by
-    restricting the original wide-range data to alpha_0>0.2 and watching
-    the lambda-vs-decay correlations jump from r=0.16-0.38 to r=0.36-0.54;
-    (2) n_neurons below 500 added enough measurement noise to null out
-    the sigma-related relationships specifically (n_neurons>=500
-    subsetting took sigma-vs-PE-variability from r=0.43 to r=0.81) while
-    barely moving the decay-related ones (already noise-robust, since
-    decay reflects a systematic drift rather than a directly
-    noise-driven quantity). With the final bounds, EVERY relationship in
-    the figure is real and significant with no post-hoc filtering needed
-    (lambda-vs-decay in particular: r=0.52/0.64, up from r=0.16/0.38
-    at the original wide bounds).
-  - `scripts/neural_experiments.py synthetic --mode run/submit/collect` --
-    ONE simulation pass per virtual pid saves response, decoded PE,
-    per-neuron error-population activity, AND that trial's own encoders,
-    so no further commands are needed afterward. Encoders are saved PER
-    TRIAL, not per virtual pid -- confirmed directly that `net.error` is
-    built with `seed=seed` (the same seed that varies per trial), so its
-    encoders genuinely differ trial to trial; a single pid-level encoders
-    file (`utils/save_activities.py`'s own convention, which never varies
-    `seed` across trials at all) would silently misidentify weight-tuned
-    neurons for any trial but the one it was captured from.
-  - **Two real, previously-uncaught bugs found and fixed** while building
-    this (both confirmed directly, not just suspected -- see
-    docs/HISTORY.md for the full diagnostic trail):
-    1. The OLD fitted-pid `_probe_worker` looked up `activity_map.get(
-       int(trial))` and seeded simulations with the raw (0-indexed) trial
-       number directly, instead of `models.counting_integrator.
-       activity_key_for_trial(dataset, trial)` (the shared helper that
-       exists specifically for this -- soltani trials are 0-indexed,
-       activity keys start at 1, and a network's encoders are only valid
-       for the seed they were built with). Fixed; the affected
-       `probe_soltani_numbers*.pkl` files were deleted rather than kept.
-    2. `_synthetic_worker`/`_simulate_trial_full` fed RAW 0-100-scale pool
-       values directly into NEF -- the pool JSON (`task_backend/
-       generate_sequences.py`'s own output) is on the raw scale, unlike
-       `data/soltani_numbers.pkl`'s own "value" column, which
-       `scripts/build_model_inputs.py`'s `build_from_df()` has ALREADY
-       rescaled (x/50-1) before real human data ever reaches NEF. Raw
-       values saturate NEF's ensembles (radius_e=1.5, radius_v=1.0) and
-       produce plausible-looking but meaningless output -- exactly what
-       `nef_obs_values()`'s own docstring warns about. This was the
-       DOMINANT cause of an early, alarming finding (simulated |Delta R|
-       decay values 5-20x larger than the original fitted-pid figure) --
-       fixing it alone recovered the DeltaA-vs-DeltaR-decay correlation
-       from r=-0.13 (null) back to r=0.86, essentially matching the
-       original r=0.83. Fixed by applying the exact same x/50-1 transform
-       to the pool's raw "values" before simulating (numbers-specific;
-       colors' own pool values are already +-1 and must NOT be
-       rescaled again).
-  - Counting-activity files: regenerated at a clean, uniform n_sims=1 for
-    all 11 values (500-1500 step 100, n_neurons=n_neurons_counting) for
-    soltani_numbers -- confirmed n_sims=1 is sufficient for `synthetic`'s
-    own probe-style variability (repeated qids across real/synthetic
-    trials, not an ensemble average needing n_sims>=2).
-- **Act 4/5: NOT STARTED.**
+See `## neural_main` below for the current figure's own full
+implementation, layout, and status.
 
-### neural_giant2 -- a second, parameter-by-parameter figure (scripts/make_paper_figures.py's own make_neural_giant2())
+---
 
-A separate figure from Acts 1-5, using a different data-generation
-mechanism specifically designed to isolate each of alpha_0/lambda_/
-n_neurons's own causal contribution -- complementary to the giant's own
-random-virtual-pid covariation design, not a replacement for it. Uses TWO
+## neural_main -- the authoritative neural-parameter-impact figure (scripts/make_paper_figures.py's own make_neural_main())
+
+**RETIREMENT NOTE**: an earlier figure, `make_neural_giant` (3x4: toy/
+illustrative population dynamics, then σ/PE-variability and ΔR/ΔA-decay
+each plotted against α₀/λ/n_neurons via RANDOM-virtual-pid covariation --
+the design once described as "Acts 1-3" of a planned "Acts 1-5"
+narrative), was RETIRED this session, per instruction -- `neural_main`
+is now the sole, authoritative figure for presenting the impact of
+neural parameters on behavior and activity. Full code archived at
+`archive/scripts/archive_neural_giant.py` (with the full "Acts 1-3"
+status/bug-fix history preserved in docs/HISTORY.md, not repeated here);
+removed from the `FIGURES` dict. The two genuinely-forward-looking ideas
+that used to be "Acts 4/5" of that narrative (ablation/statistical
+validation; a synaptic-vs-working-memory comparison) carry forward as
+the "Future extensions" list above, decoupled from that retired figure's
+own numbering.
+
+Uses a data-generation mechanism specifically designed to isolate each
+of alpha_0/lambda_/n_neurons's own causal contribution. Uses TWO
 different underlying experiments depending on the row.
 
 **Row 1 (alpha_0) -- `oddball`.** 3 observations clustered tightly around
@@ -457,7 +388,7 @@ those same two DVs plotted directly against each other, one point per
 
 Row 3 (n_neurons) -- a DIFFERENT underlying experiment from rows 1/2,
 settled this session after extensive exploration (see docs/HISTORY.md's
-"neural_giant2 row 3 (n_neurons): SNR measure exploration" entry for the
+"neural_main row 3 (n_neurons): SNR measure exploration" entry for the
 full narrative -- a convergence hypothesis tested and found NOT to hold
 cleanly, a Fano-factor-based purely-neural measure tried and abandoned,
 split-half population reliability tried and kept):
@@ -1881,10 +1812,14 @@ Never run NEF simulations through MCP tool calls (will time out).
         --ensembles error --timing once_per_obs
     # Output: data/runs/{folder}/activities_error_yoo.pkl, encoders_error_yoo.pkl
 
-### Neural predictions figure (Acts 1-3 — scripts/neural_experiments.py, make_neural_giant())
+### RETIRED -- neural_giant's own data source (scripts/neural_experiments.py raster_demo/sweep/synthetic, make_neural_giant())
 
-See `## Neural predictions figure (Acts 1-5)` above for the full
-motivation/structure. All commands below target `soltani_numbers`.
+`make_neural_giant` itself is retired (archived at archive/scripts/
+archive_neural_giant.py; `neural_main` is now the authoritative figure
+for this -- see `## neural_main` above). Commands below are kept for
+provenance/reference only (how the archived figure's own data was
+generated), not as an active workflow. All commands target
+`soltani_numbers`.
 
     # Act 1.1 -- single-trial spike raster + decoded PE demo (arbitrary params)
     python scripts/neural_experiments.py raster_demo --task soltani_numbers \
@@ -1921,7 +1856,7 @@ motivation/structure. All commands below target `soltani_numbers`.
     python scripts/neural_experiments.py synthetic --task soltani_numbers \
         --mode collect
 
-    # neural_giant2's own data source -- oddball paradigm (cluster, per grid cell)
+    # neural_main's own data source -- oddball paradigm (cluster, per grid cell)
     # 3 clustered observations then one surprising ('oddball') observation,
     # across a (cluster_centers x oddball_deviations x one swept parameter)
     # grid, the other two params held fixed. abs(decoded PE) throughout.
@@ -1949,9 +1884,9 @@ motivation/structure. All commands below target `soltani_numbers`.
     #   oddball_{sweep_param}_soltani_numbers_c{center}_d{deviation}_v{value}.pkl
     #     (per grid cell), oddball_{sweep_param}_soltani_numbers.pkl (collected)
 
-    # Build the figures (each reads whatever's currently in data/runs/neural_experiments/):
-    python scripts/make_paper_figures.py neural_giant
-    python scripts/make_paper_figures.py neural_giant2
+    # Build the figure (reads whatever's currently in data/runs/neural_experiments/):
+    python scripts/make_paper_figures.py neural_main
+    # (neural_giant itself is retired -- see the RETIRED note above)
 
 ---
 
@@ -2481,6 +2416,98 @@ above. `--datafile <name>` as above.
 
 ---
 
+## scripts/make_paper_figures.py -- composite/presentation figures
+
+A SEPARATE script from the `figure_*.py` scripts above -- reuses their
+underlying data-loading/panel-drawing helpers where possible (see each
+function's own docstring for exactly which), but produces this deck's
+own multi-panel PDF+SVG outputs (`FIGURES` dict at the bottom of the
+file maps a CLI name to each `make_*` function; `python -m scripts.
+make_paper_figures <name>` builds one).
+
+**`model_performance`** -- 1x4 (balls/snacks/colors/numbers), RMSE-only
+(the NLL row this figure briefly carried was removed; NLL has its own
+standalone `model_performance_nll`). Outliers hidden, y-axis top pinned
+to the actual max WHISKER value (not matplotlib's autoscaled ylim) so
+sig-bar headroom sits tight against the real data range, and the legend
+is pulled in close under the x-axis (small `h_pad`) -- all per
+instruction, to maximize the fraction of each panel spent on the
+boxplots themselves rather than on margin.
+
+**Lambda figures** -- `make_lambda_giant` (a 4x4 mega-figure stacking
+four other figures' own panels) was RETIRED this session and split into
+six, per instruction (archived at `archive/scripts/
+archive_lambda_giant.py`, with the full row/col -> new-figure mapping in
+that file's own header):
+- `lambda_main` -- 2x3 (snacks/colors/numbers only, balls dropped):
+  response-change-decay panels, then fitted-lambda KDEs.
+- `lambda_metric` -- 1-panel, SQUARE figsize (3.7x3.7in, matching the
+  average dimension of one `lambda_main` panel) -- the "lambda
+  definition" demo (power-law fit to one representative pid's own mean
+  |delta response| curve), meant to be hand-composited into `lambda_main`
+  as an Inkscape inset from this figure's own saved SVG.
+- `lambda_balls` -- 1-panel supplementary (balls task doesn't show the
+  expected trend).
+- `lambda_reliability` -- 1x3 supplementary: odd/even split-half
+  reliability of fitted lambda, titles restored (no longer under a row
+  that already names each task).
+- `lambda_humanvmodel` -- 1x3 supplementary: model-vs-human lambda
+  correlation. NOTE: currently IDENTICAL in content to the pre-existing
+  `make_lambda_model_correlation` -- not yet reconciled/retired, flagged
+  for whoever picks this up next.
+- `lambda_sigma_crosstask` -- 1x2 (NOT a piece of the original giant):
+  pairs the lambda and sigma colors-vs-numbers crosstask panels
+  side by side.
+
+**Sigma figures** -- `make_sigma_giant` (a 3x4 mega-figure) was RETIRED
+the same way, split into two (archived at `archive/scripts/
+archive_sigma_giant.py`):
+- `sigma_main` -- 3x3 (schematic/crosstask column removed entirely):
+  - Row 1: variability KDE panels (balls/colors/numbers), real titles.
+  - Row 2: residual-variance GROWTH (T5), NORMALIZED -- each source
+    (Human, `NLL_RESP_NOISE_MODELS`, NEF) divided by its OWN
+    first-observation value, so every curve starts at 1.0 and reads as
+    relative growth (ylabel `$\sigma_R$ (normalized)`). This also
+    resolved a real scale mismatch NEF used to have vs Human/the math
+    models on colors/numbers (see docs/HISTORY.md's "Boundary-clipping
+    correction for sigma-growth negative control" section) without
+    needing a twin-axis treatment. No legend on this row -- titles
+    cleared, row 3's legend below now covers both rows' color roster.
+    Colors' Mean/PrimacyRecency curves stay DASHED (a real, analytically
+    -corrected boundary-clipping artifact, `SIGMA_GROWTH_BOUNDARY_
+    CORRECTED`) but that distinction no longer has a legend note calling
+    it out, since the row-2 legend that carried it was removed -- would
+    need covering in a caption/hand-drawn inset if it still needs
+    surfacing.
+  - Row 3: within-trial residual autocorrelation (T6), Human +
+    `NLL_RESP_NOISE_MODELS` + NEF (NEF ADDED this session via
+    `_load_variance_autocorr_data`'s new `include_nef=True`), titles
+    cleared, ylabel `$\rho_\varepsilon$ (autocorrelation)` (epsilon for
+    "residual" -- meant as a compact placeholder, to be spelled out in a
+    hand-drawn inset rather than the axis label itself).
+  - Row 2 left BLANK in an earlier version of this figure -- see
+    docs/HISTORY.md for the full backstory before it was filled in.
+- `sigma_reliability` -- 1x3 supplementary: odd/even split-half
+  reliability of response noise (sigma), titles restored.
+
+**`_resid_autocorr`'s `pool_all_pairs` parameter** (default `True`):
+controls whether lag-k autocorrelation pools EVERY valid (t, t+k) pair
+within a trial into one correlation per (pid, lag) -- the established
+metric, used everywhere -- or uses ONLY the window's first observation
+paired with (first+k) (`pool_all_pairs=False`, a simpler single-
+reference-point alternative). Compared directly this session (Human +
+NEF, all three tasks): close for balls, but the simplified version
+roughly HALVES the NEF effect on colors/numbers at low lags (e.g. colors
+k=1: 0.70 -> 0.34) and drops usable pids at colors k=1 (fewer trials
+clear the >=3-pairs threshold with only one pair per trial instead of
+several pooled). Kept `pool_all_pairs=True` as the shipped default after
+this comparison -- the simplified version isn't just noisier, it
+materially attenuates the one signal (NEF) this row most needs to
+preserve. The parameter itself stays in the code for any future
+revisit; see docs/HISTORY.md for the full comparison table.
+
+---
+
 ## Environment
 
 Always use: /home/psipeter/evidence_integration/venv/bin/python
@@ -2650,6 +2677,16 @@ change (e.g. "change X to Y", "add Z", "remove W").
   `data/soltani_*[_datafile].pkl`, built by
   `scripts/pull_soltani_data.py`
 - Do not add loss_type, shape_loss, joint_loss, beta hooks
+- Do not let `models.math_models.add_noise` fall back to a bare
+  `params.get("seed", 0)` default again — every pid and every wrapped
+  model would silently share the identical noise draw, merely rescaled
+  by that pid's own fitted `sigma_resp`. Always resolve through
+  `_resp_noise_seed(pid, model_type)` when `params` has no explicit
+  `"seed"` (this is now `add_noise`'s own built-in behavior — the rule
+  here is: don't add a NEW call site elsewhere that re-implements a
+  seed default instead of relying on this). See the compaction-reminder
+  note near the top of this file and docs/HISTORY.md's "Boundary-clipping
+  correction for sigma-growth negative control" section for the incident.
 - Do not use trial_seed / base_seed for NEF — seed = int(trial) directly
 - Do not read cv_loss_mean directly — use _get_loss
 - Do not create scripts outside scripts/

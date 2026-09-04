@@ -34,15 +34,14 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from scipy.optimize import curve_fit
-from scipy.stats import gaussian_kde, pearsonr, wilcoxon
+from scipy.optimize import curve_fit, brentq
+from scipy.stats import gaussian_kde, pearsonr, wilcoxon, norm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.paths import data_path, RUNS_DIR, FIGURES_DIR
 from utils.aggregate import plot_error_aggregate, plot_delta_aggregate
 from utils.plot_style import draw_sig_line, pvalue_to_stars, get_palette
-from utils.plot_spikes import plot_spikes, preprocess_spikes, sample_by_variance, cluster
 
 # NOT presentations/make_figures.py's own local
 # `Path(__file__).resolve().parent / "figures"` (that pointed at
@@ -2683,19 +2682,28 @@ def make_sigma_main() -> Path:
     per instruction:
       Row 1: variability KDE panels for balls/colors/numbers
         (VARIABILITY_TASK_PANELS), task-colored titles, unchanged.
-      Row 2: BLANK, per instruction -- its own former content (the
-        splithalf reliability panels, cols 2-4 of the giant's row 2) now
-        lives in its own figure, make_sigma_reliability. The crosstask
-        panel that used to sit in col 1 of this row already lives in
-        make_lambda_sigma_crosstask, paired with its lambda analogue.
+      Row 2: residual-variance GROWTH across observations (T5) --
+        NORMALIZED, per instruction: each source (Human,
+        NLL_RESP_NOISE_MODELS, NEF) divided by its own first-observation
+        value, so every curve starts at 1.0 and reads as relative growth
+        rather than absolute SD (see _draw_variance_growth_panel's own
+        docstring -- this also resolves NEF's previously much-smaller
+        absolute scale on colors/numbers, noted as an open item in
+        docs/HISTORY.md before this normalization). Same three tasks
+        (RESID_TASK_PANELS), titles cleared (row 1 already names each
+        task). This was blank in an earlier version of this figure --
+        see docs/HISTORY.md's "Boundary-clipping correction for
+        sigma-growth negative control" section for the full backstory
+        (a shared-seed bug in add_noise was found and fixed first,
+        confirmed via chat before this row was ever wired in; colors'
+        Mean/PrimacyRecency additionally use a boundary-corrected metric,
+        marked with a dashed line and "*" in the legend -- see
+        SIGMA_GROWTH_BOUNDARY_CORRECTED's own comment).
       Row 3: autocorrelation panels for the same three tasks
         (RESID_TASK_PANELS), TITLES CLEARED (redundant with row 1's, two
-        rows up, now that row 2 no longer repeats them either).
+        rows up, and now with row 2's own legend immediately above it).
 
-    3x3 kept (not collapsed to 2x3), per instruction, with row 2 left
-    literally blank -- worth revisiting if that empty row reads as
-    wasted space once rendered; collapsing to a 2-row grid (dropping the
-    blank row entirely) is a small change if so.
+    3x3 kept, matching row 3's existing layout.
     """
     _apply_slide_style()
     fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75),
@@ -2708,26 +2716,50 @@ def make_sigma_main() -> Path:
                                 show_ylabel=(i == 0))
         ax.set_ylabel("Density" if i == 0 else "")
 
-    # Row 2 -- blank, per instruction.
-    for ax in axes[1]:
-        ax.axis("off")
+    # Row 2 -- residual-variance growth, titles cleared (row 1 above
+    # already names each task). See _load_variance_growth_data/
+    # _draw_variance_growth_panel's own docstrings. No legend here, per
+    # instruction -- row 3 below shares the same model color roster (plus
+    # NEF, plus Human), so ONE legend there covers both rows. This also
+    # drops the boundary-correction "*"/dashed-line explanation that used
+    # to live in this row's own legend title (SIGMA_GROWTH_BOUNDARY_
+    # CORRECTED's dashed styling itself is untouched -- only the legend
+    # note explaining it is gone; worth covering in the hand-drawn inset
+    # or a caption if that distinction still needs calling out).
+    growth_data = _load_variance_growth_data(models=NLL_RESP_NOISE_MODELS,
+                                             responses_path_fn=_nll_resp_noise_responses_path)
+    for i, (ax, (task_key, title)) in enumerate(zip(axes[1], RESID_TASK_PANELS)):
+        human_stats, model_stats, nef_stats = growth_data[task_key]
+        _draw_variance_growth_panel(ax, task_key, "", human_stats, model_stats, nef_stats,
+                                    show_ylabel=(i == 0))
+        ax.set_ylabel(r"$\sigma_R$ (normalized)" if i == 0 else "")
 
     # Row 3 -- autocorrelation, titles cleared (row 1 already names each
-    # task). Model roster unchanged (NLL_RESP_NOISE_MODELS).
+    # task). NEF ADDED to the roster here (NOT in NLL_RESP_NOISE_MODELS
+    # itself -- no NLL fit uses that roster for NEF -- so it's loaded via
+    # _load_variance_autocorr_data's own include_nef=True, which uses the
+    # same special per-task NEF path convention row 2's loader already
+    # established). Ylabel is a placeholder shorthand for "autocorrelation
+    # of the residual (deviation from that pid/obs/qid's own typical
+    # response)" -- meant to be spelled out in a hand-drawn inset rather
+    # than in the axis label itself, per instruction.
     data = _load_variance_autocorr_data(models=NLL_RESP_NOISE_MODELS,
-                                        responses_path_fn=_nll_resp_noise_responses_path)
+                                        responses_path_fn=_nll_resp_noise_responses_path,
+                                        include_nef=True)
     for i, (ax, (task_key, title)) in enumerate(zip(axes[2], RESID_TASK_PANELS)):
         human_res, model_results, lags = data[task_key]
         _draw_variance_autocorr_panel(ax, task_key, "", human_res, model_results, lags,
                                       include_models=True, show_ylabel=(i == 0),
-                                      models=NLL_RESP_NOISE_MODELS, model_colors=MODEL_COLORS)
+                                      models=NLL_RESP_NOISE_MODELS + ["NEF"],
+                                      model_colors=MODEL_COLORS)
         ax.set_xlabel("k")
-        ax.set_ylabel("\u03c1" if i == 0 else "")
+        ax.set_ylabel(r"$\rho_\varepsilon$ (autocorrelation)" if i == 0 else "")
 
     legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")]
     for m in NLL_RESP_NOISE_MODELS:
         legend_handles.append(Line2D([0], [0], color=MODEL_COLORS[m], lw=2.2,
                                      label=MODEL_LABEL.get(m, m)))
+    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=2.2, label="NEF"))
     axes[2, 2].legend(handles=legend_handles, fontsize=7, loc="upper right",
                       frameon=True, framealpha=0.9, ncol=1)
 
@@ -3086,6 +3118,165 @@ RESID_MIN_REPEATS = {"balls": 3, "colors": 2, "numbers": 2}
 RESID_LAGS = {"balls": [1, 2, 3], "colors": [1, 2, 3, 4], "numbers": [1, 2, 3]}
 
 
+# Boundary-clipping correction for the row-2 residual-variance-GROWTH
+# panel -- see docs/HISTORY.md's own "Boundary-clipping correction for
+# sigma-growth negative control" section for the full derivation and the
+# empirical validation (forward: predicted vs observed RAW growth ratio
+# matched within ~0.1-0.2 for every model/task; inverse: this flattens
+# colors' Mean/PrimacyRecency ratio from 1.54/1.37 to 0.98-1.15).
+#
+# Applied ONLY to these (task, base model) pairs -- confirmed, real clip
+# artifacts, not a genuine noise-propagation signature: colors' Mean/
+# PrimacyRecency have an early mu that sits close enough to +-1 (a single
+# binary observation IS the running-mean estimate there) that add_noise's
+# clip(-1,1) truncates real noise variance early in the prefix and
+# inflates the apparent growth ratio. LeakyIntegrator/RL_lambda on colors
+# and every model on balls/numbers were already close to flat under the
+# RAW metric once the shared-seed bug was fixed (see chat) -- correcting
+# those too would just add brentq-inversion noise for no benefit.
+SIGMA_GROWTH_BOUNDARY_CORRECTED = {("colors", "Mean"), ("colors", "PrimacyRecency")}
+
+
+def _clipped_normal_var(mu, sigma: float, a: float = -1.0, b: float = 1.0):
+    """Closed-form variance of Y = clip(X, a, b) for X ~ N(mu, sigma^2) --
+    the analytic correction for boundary/ceiling compression of an
+    additive-noise model's observed spread. `mu` may be an array
+    (evaluated elementwise); `sigma` is scalar. See
+    SIGMA_GROWTH_BOUNDARY_CORRECTED's own comment / docs/HISTORY.md for
+    the derivation and why this is needed at all.
+    """
+    mu = np.atleast_1d(np.asarray(mu, dtype=float))
+    alpha = (a - mu) / sigma
+    beta = (b - mu) / sigma
+    Phi_a, Phi_b = norm.cdf(alpha), norm.cdf(beta)
+    phi_a, phi_b = norm.pdf(alpha), norm.pdf(beta)
+    mid = Phi_b - Phi_a
+    EY = a * Phi_a + b * (1 - Phi_b) + mu * mid + sigma * (phi_a - phi_b)
+    EY2 = (a**2 * Phi_a + b**2 * (1 - Phi_b)
+           + mu**2 * mid + 2 * mu * sigma * (phi_a - phi_b)
+           + sigma**2 * (mid + alpha * phi_a - beta * phi_b))
+    return EY2 - EY**2
+
+
+def _implied_sigma(mu_vals, observed_var: float, sigma_lo: float = 1e-4,
+                   sigma_hi: float = 3.0) -> float:
+    """Invert _clipped_normal_var for sigma, given the observed (clipped)
+    variance and the mu values that produced it -- the boundary-corrected
+    estimate of a model's TRUE (pre-clip) noise scale at one (pid,
+    observation). Monotonic increasing in sigma for fixed mu, so brentq
+    finds a unique root in [sigma_lo, sigma_hi]; falls back to whichever
+    bracket endpoint is closer if the observed variance falls outside the
+    range spanned by the bracket (should not happen at this project's
+    sigma_resp scale, but avoids a bracket error crashing a whole figure
+    over one edge pid/observation).
+    """
+    def f(sigma):
+        return float(np.mean(_clipped_normal_var(mu_vals, sigma))) - observed_var
+    if f(sigma_hi) < 0:
+        return sigma_hi
+    if f(sigma_lo) > 0:
+        return sigma_lo
+    return brentq(f, sigma_lo, sigma_hi)
+
+
+def _resp_noise_params_path(task_key: str, model: str) -> Path:
+    """Path to one (task, base model)'s fitted _resp_noise NLL params --
+    sigma_resp plus whatever base-model params (gamma / eps_p,eps_r /
+    alpha_0,lambda_) were fit jointly in the same NLL search. Needed only
+    by _resid_variance_growth_corrected, which must re-run the
+    deterministic base model to recover each pid's own mu trajectory --
+    _nll_resp_noise_responses_path's own file has the noisy realization,
+    not the params that produced it.
+    """
+    dataset = {"balls": "carrabin", "colors": "soltani_colors",
+              "numbers": "soltani_numbers"}[task_key]
+    return RUNS_DIR / "nll" / f"{model}_resp_noise_{dataset}_nll_params.pkl"
+
+
+def _resid_variance_growth_corrected(task_key: str, model: str,
+                                     qid_map: pd.DataFrame, prefix: int | None,
+                                     min_repeats: int) -> pd.DataFrame | None:
+    """Boundary-corrected counterpart of _resid_variance_growth, for ONE
+    (task, model) pair in SIGMA_GROWTH_BOUNDARY_CORRECTED. Per pid,
+    recovers the IMPLIED (pre-clip) sigma_resp at each observation via
+    _implied_sigma, using that pid's own fitted params (re-running the
+    deterministic base model for its mu trajectory, NOT reading its saved
+    noisy responses for mu) and the SAME per-(pid,obs,qid) empirical
+    variance _resid_variance_growth itself computes from the noisy
+    responses. Returns the same [observation, mean, std, se] shape so it
+    drops into the same drawing code as the raw metric. See
+    SIGMA_GROWTH_BOUNDARY_CORRECTED's own comment for the validation.
+    """
+    from models import math_models
+    dataset = {"balls": "carrabin", "colors": "soltani_colors",
+              "numbers": "soltani_numbers"}[task_key]
+    ppath = _resp_noise_params_path(task_key, model)
+    rpath = _nll_resp_noise_responses_path(task_key, model)
+    if not ppath.exists() or not rpath.exists():
+        return None
+    params_df = pd.read_pickle(ppath).set_index("pid")
+    resid = _resid_frame(task_key, rpath, qid_map, prefix)
+
+    obs_values = sorted(resid["observation"].unique())
+    implied_by_obs: dict[int, list[float]] = {o: [] for o in obs_values}
+    for pid in params_df.index:
+        row = params_df.loc[pid]
+        base_params = {"model_type": model, "dataset": dataset, "pid": int(pid)}
+        for col in params_df.columns:
+            if col not in ("sigma_resp", "model_type", "dataset", "pid", "datafile"):
+                base_params[col] = row[col]
+        mu_df = math_models.run(base_params)
+        if prefix is not None:
+            mu_df = mu_df[mu_df["observation"] < prefix]
+        merged = mu_df.merge(qid_map[qid_map["pid"] == pid],
+                             on=["pid", "trial", "observation"])
+        mu_by_qid = merged.groupby(["observation", "qid"])["response"].first()
+
+        pid_resid = resid[resid["pid"] == pid]
+        for obs in obs_values:
+            if obs not in mu_by_qid.index.get_level_values(0):
+                continue
+            obs_resid = pid_resid[pid_resid["observation"] == obs]
+            stds = obs_resid.groupby("qid")["resid"].apply(
+                lambda x: x.std() if len(x) >= min_repeats else np.nan).dropna()
+            if stds.empty:
+                continue
+            observed_var = float((stds ** 2).mean())
+            mu_vals = mu_by_qid.loc[obs].values
+            try:
+                implied_by_obs[obs].append(_implied_sigma(mu_vals, observed_var))
+            except Exception:
+                continue
+
+    rows = []
+    for obs, vals in sorted(implied_by_obs.items()):
+        if not vals:
+            continue
+        vals = np.array(vals)
+        n = len(vals)
+        rows.append({"observation": obs, "mean": vals.mean(), "std": vals.std(),
+                    "se": vals.std() / np.sqrt(n)})
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
+def _growth_stats_for_source(task_key: str, model: str, path: Path,
+                             qid_map: pd.DataFrame, prefix: int | None,
+                             min_repeats: int) -> pd.DataFrame | None:
+    """Raw _resid_variance_growth for every (task, model), EXCEPT the
+    pairs in SIGMA_GROWTH_BOUNDARY_CORRECTED, which use the boundary-
+    corrected implied-sigma version instead. `path` is unused for
+    corrected pairs (that path re-derives its own params/responses paths
+    internally) but kept in the signature so both branches share one
+    call shape at the loader call site.
+    """
+    if (task_key, model) in SIGMA_GROWTH_BOUNDARY_CORRECTED:
+        return _resid_variance_growth_corrected(task_key, model, qid_map, prefix, min_repeats)
+    resid = _resid_frame(task_key, path, qid_map, prefix)
+    return _resid_variance_growth(resid, min_repeats)
+
+
 def _resid_frame(task_key: str, path: Path, qid_map: pd.DataFrame,
                  prefix: int | None) -> pd.DataFrame:
     """One (task, source)'s raw response file -> residuals against the
@@ -3124,7 +3315,8 @@ def _resid_variance_growth(resid_df: pd.DataFrame, min_repeats: int) -> pd.DataF
     return stats
 
 
-def _resid_autocorr(resid_df: pd.DataFrame, lags: list[int]):
+def _resid_autocorr(resid_df: pd.DataFrame, lags: list[int],
+                    pool_all_pairs: bool = True):
     """Cross-pid mean/SEM of within-trial lag-k residual autocorrelation --
     matching figure_soltani_temporal.py's own _autocorr_stats (pairs by
     ACTUAL observation index, not array position, so a missing checkpoint
@@ -3135,20 +3327,38 @@ def _resid_autocorr(resid_df: pd.DataFrame, lags: list[int]):
     source scripts, not a compromise between them). Returns (lags, means,
     sems) or "no_repeats"/"insufficient" (see figure_soltani_temporal.py's
     own degenerate-case guards, reproduced identically: a qid with only one
-    repeat gives a trivially-zero residual, not a genuine signal)."""
+    repeat gives a trivially-zero residual, not a genuine signal).
+
+    `pool_all_pairs` (default True, preserving all existing callers'
+    behavior unchanged) controls WHICH (t, t+lag) pairs feed the
+    per-(pid, lag) Pearson r:
+      - True: every valid t in the trial paired with t+lag, POOLED into
+        one correlation per (pid, lag) -- the established metric.
+      - False: ONLY the window's first observation (t = that pid's own
+        min observation) paired with (first + lag) -- a simpler,
+        single-reference-point version, per instruction ("1+k pairs"),
+        for comparison against the pooled version above. At the largest
+        lag in a task the two are IDENTICAL by construction (only one
+        valid t remains to pool), which is a useful sanity check that
+        both branches agree there.
+    """
     repeat_counts = resid_df.groupby(["pid", "observation", "qid"]).size()
     if not (repeat_counts >= 2).any():
         return "no_repeats"
 
+    obs_min = resid_df["observation"].min()
     pid_rs: dict[int, list[float]] = {lag: [] for lag in lags}
     for _, pid_df in resid_df.groupby("pid"):
         for lag in lags:
             pairs = []
             for (_, _), g in pid_df.groupby(["pid", "trial"]):
                 obs_to_resid = dict(zip(g["observation"], g["resid"]))
-                for o, resid_o in obs_to_resid.items():
-                    if (o + lag) in obs_to_resid:
-                        pairs.append((resid_o, obs_to_resid[o + lag]))
+                if pool_all_pairs:
+                    for o, resid_o in obs_to_resid.items():
+                        if (o + lag) in obs_to_resid:
+                            pairs.append((resid_o, obs_to_resid[o + lag]))
+                elif obs_min in obs_to_resid and (obs_min + lag) in obs_to_resid:
+                    pairs.append((obs_to_resid[obs_min], obs_to_resid[obs_min + lag]))
             if len(pairs) < 3:
                 continue
             arr = np.array(pairs)
@@ -3196,7 +3406,9 @@ def _nll_resp_noise_responses_path(task_key: str, model: str) -> Path:
 
 
 def _load_variance_autocorr_data(models: list[str] | None = None,
-                                 responses_path_fn=None) -> dict:
+                                 responses_path_fn=None,
+                                 include_nef: bool = False,
+                                 pool_all_pairs: bool = True) -> dict:
     """task_key -> (human_res, model_results, lags). Loaded ONCE and shared
     between the human-only and human+models figure functions below -- same
     established pattern as _load_response_change_data -- so both read the
@@ -3208,6 +3420,22 @@ def _load_variance_autocorr_data(models: list[str] | None = None,
     resolving to NLL_MODEL_ORDER/_nll_responses_path, so
     make_variance_autocorr_human/models (which call this with no
     arguments) are completely unaffected.
+
+    `include_nef=True` additionally loads NEF's own residual
+    autocorrelation into model_results["NEF"], using the SAME per-task
+    path convention row 2's own NEF handling uses
+    (_load_variance_growth_data: _variability_model_path's MLE variant
+    for balls, _delta_responses_path's RMSE variant for colors/numbers)
+    -- NEF is never IN NLL_RESP_NOISE_MODELS/NLL_MODEL_ORDER itself (no
+    NLL fit uses that roster for NEF), so it can't go through the normal
+    responses_path_fn mechanism the way the math models do. Defaults to
+    False; make_variance_autocorr_human/models (which never pass it) are
+    unaffected.
+
+    `pool_all_pairs` is passed straight through to every _resid_autocorr
+    call (Human, each model, NEF) -- see that function's own docstring.
+    Defaults to True (the established metric); all existing callers are
+    unaffected.
     """
     models = models if models is not None else NLL_MODEL_ORDER
     responses_path_fn = responses_path_fn or _nll_responses_path
@@ -3217,7 +3445,7 @@ def _load_variance_autocorr_data(models: list[str] | None = None,
         human_path = _human_data_path(task_key)
         human_resid = _resid_frame(task_key, human_path, qid_map, prefix)
         lags = RESID_LAGS[task_key]
-        human_res = _resid_autocorr(human_resid, lags)
+        human_res = _resid_autocorr(human_resid, lags, pool_all_pairs=pool_all_pairs)
 
         model_results = {}
         for m in models:
@@ -3226,9 +3454,20 @@ def _load_variance_autocorr_data(models: list[str] | None = None,
                 print(f"  (missing {mpath.name} -- skipping {m} for {task_key})")
                 continue
             mresid = _resid_frame(task_key, mpath, qid_map, prefix)
-            mres = _resid_autocorr(mresid, lags)
+            mres = _resid_autocorr(mresid, lags, pool_all_pairs=pool_all_pairs)
             if not isinstance(mres, str):
                 model_results[m] = mres
+
+        if include_nef:
+            nef_path = (_variability_model_path(task_key, "NEF") if task_key == "balls"
+                       else _delta_responses_path(task_key, "NEF"))
+            if nef_path.exists():
+                nef_resid = _resid_frame(task_key, nef_path, qid_map, prefix)
+                nef_res = _resid_autocorr(nef_resid, lags, pool_all_pairs=pool_all_pairs)
+                if not isinstance(nef_res, str):
+                    model_results["NEF"] = nef_res
+            else:
+                print(f"  (missing {nef_path.name} -- skipping NEF for {task_key})")
 
         out[task_key] = (human_res, model_results, lags)
     return out
@@ -3280,6 +3519,138 @@ def _draw_variance_autocorr_panel(ax_ac, task_key: str, title: str, human_res,
     ax_ac.set_xticks(lags)
     ax_ac.margins(x=0.15)
     sns.despine(ax=ax_ac, top=True, right=True)
+
+
+def _load_variance_growth_data(models: list[str] | None = None,
+                               responses_path_fn=None) -> dict:
+    """task_key -> (human_stats, model_stats, nef_stats), each an
+    _resid_variance_growth-shaped DataFrame ([observation, mean, std, se])
+    or None. Mirrors _load_variance_autocorr_data's own structure/override
+    mechanism (models/responses_path_fn), for the row-2 residual-
+    variance-GROWTH panel instead of row-3's autocorrelation.
+
+    NEF is included here (unlike row 3's NLL_RESP_NOISE_MODELS-only
+    roster) since it's the other real positive case for this metric --
+    see chat. Uses the SAME NEF path convention as the row-1 variability
+    panels (_variability_model_path's MLE variant for balls,
+    _delta_responses_path's RMSE variant for colors/numbers).
+
+    Each model's stats come from _growth_stats_for_source, which
+    transparently substitutes the boundary-corrected implied-sigma metric
+    for the (task, model) pairs in SIGMA_GROWTH_BOUNDARY_CORRECTED -- see
+    that constant's own comment.
+    """
+    models = models if models is not None else NLL_RESP_NOISE_MODELS
+    responses_path_fn = responses_path_fn or _nll_resp_noise_responses_path
+    out = {}
+    for task_key, title in RESID_TASK_PANELS:
+        qid_map, prefix = _variability_qid_map(task_key)
+        min_repeats = RESID_MIN_REPEATS[task_key]
+
+        human_resid = _resid_frame(task_key, _human_data_path(task_key), qid_map, prefix)
+        human_stats = _resid_variance_growth(human_resid, min_repeats)
+
+        model_stats = {}
+        for m in models:
+            mpath = responses_path_fn(task_key, m)
+            if (task_key, m) not in SIGMA_GROWTH_BOUNDARY_CORRECTED and not mpath.exists():
+                print(f"  (missing {mpath.name} -- skipping {m} for {task_key})")
+                continue
+            stats = _growth_stats_for_source(task_key, m, mpath, qid_map, prefix, min_repeats)
+            if stats is not None:
+                model_stats[m] = stats
+
+        nef_path = (_variability_model_path(task_key, "NEF") if task_key == "balls"
+                   else _delta_responses_path(task_key, "NEF"))
+        nef_stats = None
+        if nef_path.exists():
+            nef_resid = _resid_frame(task_key, nef_path, qid_map, prefix)
+            nef_stats = _resid_variance_growth(nef_resid, min_repeats)
+
+        out[task_key] = (human_stats, model_stats, nef_stats)
+    return out
+
+
+def _draw_variance_growth_panel(ax, task_key: str, title: str, human_stats,
+                                model_stats: dict, nef_stats,
+                                show_ylabel: bool) -> None:
+    """Draws ONE row-2 residual-variance-GROWTH panel, NORMALIZED per
+    instruction: each source (Human, each model, NEF) is divided by its
+    OWN value at its own first available observation, so every curve
+    starts at 1.0 and the y-axis reads directly as "how many times its
+    own baseline sigma has grown by observation k" -- growth SHAPE
+    across sources becomes directly comparable regardless of each
+    source's absolute noise scale. This also resolves NEF's own much-
+    smaller absolute scale on colors/numbers vs Human/the math models --
+    see docs/HISTORY.md's "one pre-existing... scale mismatch" note,
+    which this supersedes (no separate twin-axis treatment needed now
+    that every curve is on the same relative scale).
+
+    A dashed horizontal guide at y=1 marks the shared baseline every
+    curve starts from.
+
+    mean AND se are divided by the SAME scalar baseline (that source's
+    own first-observation mean) -- baseline itself is treated as a fixed
+    constant, not its own random variable, matching the simplest
+    standard normalized-growth convention; se already reflects genuine
+    cross-pid variability at each observation, so the SEM band's own
+    width simply rescales along with the mean.
+
+    A source whose own baseline is missing, zero, or non-finite is
+    skipped entirely (never divides into inf/NaN) -- guards against a
+    degenerate all-zero first-observation residual, though not expected
+    in practice at this project's response-noise scale.
+    """
+    ax.set_title(title, color=TASK_COLORS[task_key])
+    ax.axhline(1, color="0.7", lw=0.8, ls="--", zorder=1)
+
+    def _normalized(stats):
+        if stats is None or not len(stats):
+            return None
+        s = stats.sort_values("observation")
+        baseline = s["mean"].iloc[0]
+        if not np.isfinite(baseline) or baseline == 0:
+            return None
+        out = s.copy()
+        out["mean"] = out["mean"] / baseline
+        out["se"] = out["se"] / baseline
+        return out
+
+    human_norm = _normalized(human_stats)
+    if human_norm is not None:
+        ax.plot(human_norm["observation"], human_norm["mean"], "-", color=HUMAN_COLOR,
+                lw=2.2, zorder=6)
+        ax.fill_between(human_norm["observation"], human_norm["mean"] - human_norm["se"],
+                       human_norm["mean"] + human_norm["se"], color=HUMAN_COLOR,
+                       alpha=0.2, zorder=1)
+    else:
+        ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center",
+               transform=ax.transAxes, color="0.5", style="italic")
+
+    for j, m in enumerate(NLL_RESP_NOISE_MODELS):
+        if m not in model_stats:
+            continue
+        m_norm = _normalized(model_stats[m])
+        if m_norm is None:
+            continue
+        style = "--" if (task_key, m) in SIGMA_GROWTH_BOUNDARY_CORRECTED else "-"
+        color = MODEL_COLORS[m]
+        ax.plot(m_norm["observation"], m_norm["mean"], style, color=color, lw=2.0, zorder=5 - j)
+        ax.fill_between(m_norm["observation"], m_norm["mean"] - m_norm["se"],
+                       m_norm["mean"] + m_norm["se"], color=color, alpha=0.15, zorder=1)
+
+    nef_norm = _normalized(nef_stats)
+    if nef_norm is not None:
+        ax.plot(nef_norm["observation"], nef_norm["mean"], "-", color=MODEL_COLORS["NEF"],
+                lw=2.0, zorder=7)
+        ax.fill_between(nef_norm["observation"], nef_norm["mean"] - nef_norm["se"],
+                       nef_norm["mean"] + nef_norm["se"], color=MODEL_COLORS["NEF"],
+                       alpha=0.15, zorder=1)
+
+    ax.set_xlabel("Observation")
+    ax.set_ylabel("Normalized \u03c3 (baseline = 1)" if show_ylabel else "")
+    ax.tick_params(axis="y", labelleft=show_ylabel)
+    sns.despine(ax=ax, top=True, right=True)
 
 
 def make_variance_autocorr_human() -> Path:
@@ -3415,11 +3786,18 @@ def make_variance_autocorr_models() -> Path:
     return out_path
 
 
-# ── Neural giant figure (Acts 1-3; neural_experiments.py's own outputs) ─────
+# ── Neural predictions figures (neural_experiments.py's own outputs) ──────
+# Shared infrastructure below (NEURAL_EXP_DIR, NEURAL_READOUT_OFFSET,
+# _fold_observation_time) plus _plot_n_neurons_demo_trace (neural_main's
+# own row 3 col 1). The OLD "Acts 1-3" neural_giant figure that used to
+# live in this section (raster demo, PE-dynamics grid, lambda-activity
+# sweep, sigma/decay-vs-param covariation panels) was retired -- archived
+# at archive/scripts/archive_neural_giant.py. make_neural_main, below,
+# is now the authoritative figure for this.
 # Task: soltani_numbers throughout -- the one task with BOTH a real sigma
 # fit and a real lambda fit, per instruction, so it alone can carry the
-# whole Acts-1-3 narrative rather than splitting it across two tasks the
-# way carrabin/yoo's own old neural figures did.
+# whole narrative rather than splitting it across two tasks the way
+# carrabin/yoo's own old neural figures did.
 
 NEURAL_EXP_DIR = RUNS_DIR / "neural_experiments"
 NEURAL_READOUT_OFFSET = 0.5  # seconds into the observation window -- matches
@@ -3526,369 +3904,6 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
     ax.set_xlim(0, n_obs * t_step)
     ax.set_ylim(-1, 1)
     ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
-    sns.despine(ax=ax, top=True, right=True)
-
-
-def _plot_neural_raster_demo(ax) -> None:
-    """Panel 1 (Act 1.1): spike raster of the error population's raw neuron
-    output for one representative trial (neural_experiments.py's
-    raster_demo experiment), with the decoded PE trace overlaid on a twin
-    axis.
-
-    Uses sample_by_variance + cluster DIRECTLY (not the preprocess_spikes
-    convenience wrapper) -- confirmed by checking check_NEF_pipeline.py and
-    its archived predecessor, the only other NEF-dynamics spike-raster code
-    in this repo, that neither actually does anything more than call
-    preprocess_spikes(t, arr, num=50) as-is. That wrapper's own default
-    sample_size=200 exceeds our n_neurons=100, so sample_by_variance's
-    'select the highest-variance (truly active) neurons' step was a no-op
-    (nothing to filter out of only 100 available), and its final merge
-    step then block-averages neurons into synthetic composites -- fine
-    when sampling genuinely thins a large pool, but here it just blurred
-    real individual spike trains together without ever having filtered
-    anything. Calling sample_by_variance with num=50 (well under 100) and
-    skipping merge keeps real, individual, genuinely-active neurons.
-
-    X-axis zoomed to the first 5 observations (10s of the full 30s trial),
-    per instruction. Raster's own y-axis has no text label (per
-    instruction, neuron index isn't inherently meaningful to a general
-    reader) and its ticks are moved to the RIGHT side, since the decoded
-    PE axis (the more informative one) takes the LEFT side instead --
-    physical spines are unaffected by this (sns.despine's own left/right
-    already matched this after the swap: ax2's default top+right removal
-    keeps its left spine where its now-left ticks sit; ax's explicit
-    right=False keeps its right spine where its now-right ticks sit).
-    Decoded-PE line stays the palette green, but its axis label/ticks no
-    longer use that color (per instruction -- color removed from the
-    label specifically, not the line).
-    """
-    path = NEURAL_EXP_DIR / "raster_demo_soltani_numbers.pkl"
-    if not path.exists():
-        ax.text(0.5, 0.5, "No raster demo data", ha="center", va="center",
-                transform=ax.transAxes, color="0.5", style="italic")
-        return
-    d = pd.read_pickle(path)
-    t_active, spikes_active = sample_by_variance(d["t"], d["error_neurons"],
-                                                 num=50, filter_width=0.02)
-    t_sorted, spikes_sorted = cluster(t_active, spikes_active, filter_width=0.002)
-    plot_spikes(t_sorted, spikes_sorted, ax=ax)
-    ax.set_xlabel("Time (s)")
-    ax.set_xlim(0, 5 * 2.0)  # 5 observations x (t_obs=1.5 + t_iti=0.5)
-
-    pe_color = get_palette(6)[2]  # palette green -- kept on the LINE only
-    ax2 = ax.twinx()
-    ax2.plot(d["t"], d["pe_product"], color=pe_color, lw=1.0)
-    ax2.set_ylabel("Decoded Prediction Error")
-    ax2.yaxis.set_label_position("left")
-    ax2.yaxis.tick_left()
-    ax2.set_ylim(0.0, 0.8)
-    # ax's own tick-right must be set AFTER twinx() -- twinx() resets it
-    # back to the left otherwise (confirmed directly by rendering: setting
-    # this before twinx() left both axes' tick numbers stacked on the
-    # left, overlapping).
-    ax.yaxis.set_label_position("right")
-    ax.yaxis.tick_right()
-    ax.set_yticks([])  # no explicit neuron count needed, per instruction
-    ax.set_ylim(0, 50)  # raster fills the full panel height (50 neurons)
-    sns.despine(ax=ax2, top=True)
-    sns.despine(ax=ax, top=True, right=False)
-
-
-def _plot_neural_lambda_activity(ax) -> None:
-    """Panel 2 (Act 1.2): raw error-neuron activity vs observation-within-
-    trial, one line per arbitrary lambda_ value (neural_experiments.py's
-    sweep experiment, sweep_param='lambda_'). Style matches the reference
-    lambda_drives_discounting figure's own leftmost panel, generalized from
-    a 2-group (high/low median split of real fitted lambdas) comparison to
-    N explicit, arbitrary swept values -- there's no real per-pid lambda
-    here at all, by design (see chat).
-    """
-    path = NEURAL_EXP_DIR / "sweep_soltani_numbers_lambda_.pkl"
-    if not path.exists():
-        ax.text(0.5, 0.5, "No lambda sweep data", ha="center", va="center",
-                transform=ax.transAxes, color="0.5", style="italic")
-        return
-    from fitting.model_params import _NEF_FIXED
-
-    d = pd.read_pickle(path)
-    df = d["df"].copy()
-    t_iti, t_obs = _NEF_FIXED["t_iti"], _NEF_FIXED["t_obs"]
-    obs_num, t_within = _fold_observation_time(df["t"].values, t_iti, t_obs)
-    df["observation"] = obs_num
-    df["t_within_obs"] = t_within
-    active = df[~np.isnan(df["t_within_obs"])]
-
-    # Mean activity within each observation's own active window, per
-    # (sweep_value, seed, observation) -- then averaged across seeds.
-    per_obs = (active.groupby(["sweep_value", "seed", "observation"])["mean_error_activity"]
-              .mean().reset_index())
-    stats = (per_obs.groupby(["sweep_value", "observation"])["mean_error_activity"]
-            .agg(["mean", "sem"]).reset_index())
-
-    pal = get_palette(6)
-    for i, val in enumerate(sorted(stats["sweep_value"].unique())):
-        sub = stats[stats["sweep_value"] == val].sort_values("observation")
-        ax.plot(sub["observation"], sub["mean"], color=pal[i], lw=1.8,
-                label=f"\u03bb={val:g}")
-        ax.fill_between(sub["observation"], sub["mean"] - sub["sem"],
-                        sub["mean"] + sub["sem"], color=pal[i], alpha=0.18)
-
-    ax.set_xlabel("Observation")
-    ax.set_xlim(0, 15)
-    ax.set_xticks(range(0, 16, 5))
-    ax.set_ylabel("Error neuron activity (Hz)")
-    ax.set_ylim(62, 82)
-    ax.set_yticks(range(62, 83, 2))
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
-    sns.despine(ax=ax, top=True, right=True)
-
-
-def _plot_neural_pe_dynamics(ax, show_markers: bool = False) -> None:
-    """Panel 2 (Act 1.3): decoded PE vs time-within-observation, for the
-    cross product of arbitrary alpha_0 x n_neurons values (matching the
-    original reference PE_dynamics figure's own two-parameter convention
-    -- reverted from a single-parameter sweep after reflection; see chat).
-    Reads neural_experiments.py's sweep experiment run with BOTH
-    --sweep_param2/--sweep_values2 set (sweep_soltani_numbers_alpha_0_
-    n_neurons.pkl).
-
-    show_markers=False (the default, per instruction) hides the dashed
-    "PE/Response measured at" vertical lines and their labels entirely --
-    set True to bring them back (matching the reference figure's own
-    convention).
-
-    Uses ONLY the first observation window, per instruction -- not
-    averaged across all 15 -- for a clean single-transient read, matching
-    the reference figure's own one-observation-per-trial convention.
-
-    Reads sweep_param/sweep_param2 from the saved file's own metadata
-    (rather than hardcoding "alpha_0"/"n_neurons" here) so this still works
-    unchanged if the two swept parameters are ever reassigned.
-    """
-    path = NEURAL_EXP_DIR / "sweep_soltani_numbers_alpha_0_n_neurons.pkl"
-    if not path.exists():
-        ax.text(0.5, 0.5, "No alpha_0 x n_neurons sweep data", ha="center", va="center",
-                transform=ax.transAxes, color="0.5", style="italic")
-        return
-    from fitting.model_params import _NEF_FIXED
-
-    d = pd.read_pickle(path)
-    df = d["df"].copy()
-    p1, p2 = d["sweep_param"], d["sweep_param2"]
-    t_iti, t_obs = _NEF_FIXED["t_iti"], _NEF_FIXED["t_obs"]
-    obs_num, t_within = _fold_observation_time(df["t"].values, t_iti, t_obs)
-    df["observation"] = obs_num
-    df["t_within_obs"] = t_within
-    first_obs = df[(df["observation"] == 1) & (~np.isnan(df["t_within_obs"]))].copy()
-
-    # Downsample for a cleaner line: dt=0.001s -> every 5ms.
-    first_obs["t_bin"] = (first_obs["t_within_obs"] * 200).round() / 200
-    stats = (first_obs.groupby(["sweep_value", "sweep_value2", "t_bin"])["pe_product"]
-            .agg(["mean", "sem"]).reset_index())
-
-    combos = sorted({(row.sweep_value, row.sweep_value2)
-                     for row in stats.itertuples()})
-    pal = get_palette(max(6, len(combos)))
-    label_sym = {"alpha_0": "\u03b1\u2080", "n_neurons": "n", "lambda_": "\u03bb"}
-    for i, (v1, v2) in enumerate(combos):
-        sub = stats[(stats["sweep_value"] == v1) & (stats["sweep_value2"] == v2)].sort_values("t_bin")
-        label = f"{label_sym[p1]}={v1:g}, {label_sym[p2]}={v2:g}"
-        ax.plot(sub["t_bin"], sub["mean"], color=pal[i], lw=1.8, label=label)
-        ax.fill_between(sub["t_bin"], sub["mean"] - sub["sem"],
-                        sub["mean"] + sub["sem"], color=pal[i], alpha=0.18)
-
-    if show_markers:
-        from matplotlib.transforms import blended_transform_factory
-        trans = blended_transform_factory(ax.transData, ax.transAxes)
-        for x, lbl in [(NEURAL_READOUT_OFFSET, "PE\nmeasured at"), (t_obs, "Response\nmeasured at")]:
-            ax.axvline(x, color="0.4", lw=1.0, ls="--", zorder=0)
-            ax.text(x, 1.02, lbl, transform=trans, ha="center", va="bottom",
-                    clip_on=False, fontsize=7, color="0.4")
-
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Decoded Prediction Error")
-    ax.set_xlim(0, t_obs + 0.05)
-    ax.set_ylim(0.0, 0.3)
-    ax.set_yticks([0.0, 0.1, 0.2, 0.3])
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9, ncol=1, loc="upper right")
-    sns.despine(ax=ax, top=True, right=True)
-
-
-NEURAL_ENCODER_THRESHOLD = 0.5  # matches figure_yoo_neural.py's own ENCODER_THRESHOLD
-
-
-def _neural_weight_on_cols(pid_enc: pd.DataFrame, neuron_cols: list[str]) -> list[str]:
-    """Which of the error ensemble's neurons are tuned to the WEIGHT
-    dimension (enc_dim_0 -- net.error[0] in build_network, fed from the
-    counting memory via W_weight) rather than the PE dimension (enc_dim_1).
-    Direct port of figure_yoo_neural.py's own _weight_on_cols -- same
-    encoders file layout, same threshold.
-    """
-    on_idx = pid_enc[pid_enc["enc_dim_0"] > NEURAL_ENCODER_THRESHOLD]["neuron_idx"].values
-    return [f"n{i}" for i in on_idx if f"n{i}" in neuron_cols]
-
-
-def _load_neural_probe_variability(min_trials: int = 3) -> pd.DataFrame | None:
-    """Per-virtual-pid response variability (sigma) and PE variability,
-    from neural_experiments.py's `synthetic` experiment (Acts 2/3's actual
-    data source -- see CLAUDE.md's own "Neural predictions figure" Status
-    section for why this replaced the original fitted-pid `probe` data) --
-    mean std across repeated qid presentations. Uses the SAME min_trials=3
-    gate as _qid_response_std (the canonical sigma computation every other
-    figure in this file uses): a (virtual_pid, qid, observation) cell with
-    fewer than min_trials repeated presentations has its std discarded
-    (NaN) rather than trusted, before averaging per virtual pid.
-
-    alpha_0/lambda_/n_neurons here are the RANDOM draw for that virtual
-    pid (see neural_experiments.py's own _synthetic_params), not a fitted
-    value -- these are qualitative covariation predictions for future
-    empirical studies, not fits to existing behavioural data, so this is
-    by design, not a limitation to work around.
-    """
-    probe_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_probe.pkl"
-    params_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_params.pkl"
-    if not (probe_path.exists() and params_path.exists()):
-        return None
-    df = pd.read_pickle(probe_path)
-    params = pd.read_pickle(params_path)
-    agg = (df.groupby(["virtual_pid", "qid", "observation"])[["pe", "response"]]
-          .agg(lambda x: x.std() if len(x) >= min_trials else np.nan)
-          .dropna())
-    if agg.empty:
-        return None
-    per_pid = agg.groupby("virtual_pid")[["pe", "response"]].mean().reset_index()
-    per_pid = per_pid.rename(columns={"pe": "pe_std", "response": "resp_std"})
-    return per_pid.merge(params[["virtual_pid", "alpha_0", "lambda_", "n_neurons"]], on="virtual_pid")
-
-
-def _load_neural_decay_metrics() -> pd.DataFrame | None:
-    """Per-virtual-pid activity decay (mean weight-tuned-neuron activity,
-    first observation minus last) and response-change decay (mean
-    |Delta response|, first 2 observations minus last 2), from
-    neural_experiments.py's `synthetic` experiment.
-
-    Weight-tuned-neuron identification happens PER (virtual_pid, trial),
-    not per virtual_pid -- confirmed directly (see CLAUDE.md/docs/
-    HISTORY.md) that a trial's own error-ensemble encoders depend on that
-    trial's own seed, so a single pid-level encoders set (the convention
-    the OLD fitted-pid loader used, inherited from utils/save_activities.py)
-    would silently misidentify weight-tuned neurons for every trial but
-    the one its encoders happened to come from.
-    """
-    probe_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_probe.pkl"
-    act_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_activity.pkl"
-    enc_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_encoders.pkl"
-    params_path = NEURAL_EXP_DIR / "synthetic_soltani_numbers_params.pkl"
-    if not all(p.exists() for p in [probe_path, act_path, enc_path, params_path]):
-        return None
-
-    probe = pd.read_pickle(probe_path)
-    act = pd.read_pickle(act_path)
-    enc = pd.read_pickle(enc_path)
-    params = pd.read_pickle(params_path)
-
-    # Weight-tuned neuron indices, per (virtual_pid, trial) -- NOT per
-    # virtual_pid alone, since encoders genuinely differ by trial.
-    weight_tuned = (enc[enc["enc_dim_0"] > NEURAL_ENCODER_THRESHOLD]
-                    .groupby(["virtual_pid", "trial"])["neuron_idx"]
-                    .apply(list))
-
-    act_indexed = act.set_index(["virtual_pid", "trial"]).sort_index()
-    mean_act_rows = []
-    for (vp, trial), idxs in weight_tuned.items():
-        if not idxs:
-            continue
-        cols = [f"n{i}" for i in idxs]
-        try:
-            sub = act_indexed.loc[(vp, trial)]
-        except KeyError:
-            continue
-        if isinstance(sub, pd.Series):
-            sub = sub.to_frame().T
-        mean_vals = sub[cols].mean(axis=1)
-        for obs, val in zip(sub["observation"], mean_vals):
-            mean_act_rows.append({"virtual_pid": vp, "trial": trial,
-                                  "observation": obs, "mean_act": val})
-    if not mean_act_rows:
-        return None
-    mean_act_df = pd.DataFrame(mean_act_rows)
-
-    rows = []
-    for vp in params["virtual_pid"].unique():
-        pid_act = mean_act_df[mean_act_df["virtual_pid"] == vp]
-        if pid_act.empty:
-            continue
-        act_by_obs = pid_act.groupby("observation")["mean_act"].mean()
-        obs_sorted = sorted(act_by_obs.index)
-        if len(obs_sorted) < 2:
-            continue
-        act_decay = float(act_by_obs[obs_sorted[0]]) - float(act_by_obs[obs_sorted[-1]])
-
-        pid_resp = probe[probe["virtual_pid"] == vp].sort_values(["trial", "observation"]).copy()
-        obs_sorted_r = sorted(pid_resp["observation"].unique())
-        if len(obs_sorted_r) < 4:
-            continue
-        pid_resp["delta"] = pid_resp.groupby("trial")["response"].diff().abs()
-        first_obs = obs_sorted_r[0]
-        pid_resp.loc[pid_resp["observation"] == first_obs, "delta"] = (
-            pid_resp.loc[pid_resp["observation"] == first_obs, "response"].abs())
-        early = pid_resp[pid_resp["observation"].isin(obs_sorted_r[:2])]["delta"].mean()
-        late = pid_resp[pid_resp["observation"].isin(obs_sorted_r[-2:])]["delta"].mean()
-        resp_decay = float(early) - float(late)
-
-        rows.append({"virtual_pid": int(vp), "act_decay": act_decay, "resp_decay": resp_decay})
-
-    if not rows:
-        return None
-    return pd.DataFrame(rows).merge(params[["virtual_pid", "alpha_0", "lambda_", "n_neurons"]], on="virtual_pid")
-
-
-def _plot_neural_sigma_vs_pe_variability(ax) -> None:
-    """Panel: response variability (sigma) vs PE variability, one point per
-    virtual pid -- both measurable in a real neuroimaging study with no
-    model fitting on either axis. Points small and low-alpha, regression
-    line thick with its CI band -- the fit is the point of this panel, not
-    any individual point.
-    """
-    df = _load_neural_probe_variability()
-    if df is None or len(df) < 3:
-        ax.text(0.5, 0.5, "No probe variability data", ha="center", va="center",
-                transform=ax.transAxes, color="0.5", style="italic")
-        return
-    color = get_palette(6)[0]
-    r, p = pearsonr(df["resp_std"], df["pe_std"])
-    ax.scatter(df["pe_std"], df["resp_std"], color=color, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=df, x="pe_std", y="resp_std", ax=ax, color=color, ci=95,
-               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("\u03c3PE")
-    ax.set_ylabel("\u03c3R")
-    ax.set_xlim(left=0)
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
-    sns.despine(ax=ax, top=True, right=True)
-
-
-def _plot_neural_resp_vs_act_decay(ax) -> None:
-    """Panel: NEF's own |Delta response| decay vs activity decay, one
-    point per virtual pid -- both measurable, no model fitting on either
-    axis. Points small and low-alpha, regression line thick with its CI
-    band -- the fit is the point of this panel, not any individual point.
-    """
-    df = _load_neural_decay_metrics()
-    if df is None or len(df) < 3:
-        ax.text(0.5, 0.5, "No activity/response decay data", ha="center", va="center",
-                transform=ax.transAxes, color="0.5", style="italic")
-        return
-    color = get_palette(6)[0]
-    r, p = pearsonr(df["act_decay"], df["resp_decay"])
-    ax.scatter(df["act_decay"], df["resp_decay"], color=color, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=df, x="act_decay", y="resp_decay", ax=ax, color=color, ci=95,
-               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("\u0394A (Hz)")
-    ax.set_ylabel("\u0394R decay")
-    ax.set_xlim(left=0)
-    ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -4187,7 +4202,7 @@ def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_n
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_neural_giant2_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers",
+def _plot_neural_main_activity_vs_obs(ax, sweep_param: str, task: str = "soltani_numbers",
                                         low_thresh: float = 0.2, high_thresh: float = 0.7) -> None:
     """Row 2/3, col 1: weight-tuned error-neuron activity (Hz) vs
     observation, for two GROUPS of replicates -- every pid/virtual_pid
@@ -4366,7 +4381,7 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
     return pd.DataFrame(rows)
 
 
-def _plot_neural_giant2_decay_vs_param(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
     """Row 2/3, col 2: decay(deltaR) AND decay(deltaA) vs sweep_param,
     twin axes, one point per (sweep_value, seed) -- reuses
     _plot_neural_dual_vs_param DIRECTLY, the SAME helper the ORIGINAL
@@ -4474,7 +4489,7 @@ def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers") -> None:
 def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
     """Row 2, col 3: NEF's own |Delta response| decay (y) vs weight-tuned
     activity decay (x), one point per (sweep_param value, real pid) --
-    the SAME per-pid decay metrics _plot_neural_giant2_decay_vs_param
+    the SAME per-pid decay metrics _plot_neural_main_decay_vs_param
     twin-axis plots vs sweep_param, here shown instead as a direct
     scatter of THAT panel's own two dependent variables against each
     other. This is the row-2 analogue of row 1's _plot_oddball_dv_scatter
@@ -4501,7 +4516,7 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_neural_giant2() -> Path:
+def make_neural_main() -> Path:
     """3x2 figure: a second neural-predictions figure, one row per
     parameter (alpha_0, lambda_, n_neurons), each investigated via its own
     fresh grid of oddball simulations (3 observations clustered around a
@@ -4579,131 +4594,19 @@ def make_neural_giant2() -> Path:
     _plot_oddball_param_effect(axes[0, 1], "alpha_0")
     _plot_oddball_dv_scatter(axes[0, 2], "alpha_0")
 
-    _plot_neural_giant2_activity_vs_obs(axes[1, 0], "lambda_")
-    _plot_neural_giant2_decay_vs_param(axes[1, 1], "lambda_")
+    _plot_neural_main_activity_vs_obs(axes[1, 0], "lambda_")
+    _plot_neural_main_decay_vs_param(axes[1, 1], "lambda_")
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
 
     _plot_n_neurons_demo_trace(axes[2, 0])
     _plot_n_neurons_snr_pair(axes[2, 1])
     _plot_n_neurons_snr_dv_scatter(axes[2, 2])
 
-    out_path, _ = _save_fig(fig, "neural_giant2")
+    out_path, _ = _save_fig(fig, "neural_main")
     plt.close(fig)
     return out_path
 
 
-def make_neural_giant() -> Path:
-    """3x4 figure: Acts 1-3 of the neural predictions narrative (see chat
-    for the full 5-act plan):
-      Row 1 (Act 1, toy/illustrative, arbitrary params):
-        Panel 1: spike raster + decoded-PE demo.
-        Panel 2: alpha_0 x n_neurons cross product, decoded PE vs
-          time-within-observation, first observation only.
-        Panel 3: lambda sweep, error-neuron activity vs observation.
-        Panel 4: (empty -- row 1 only has 3 panels).
-      Row 2 (sigma_R and sigma_PE, both measurable, no fitting on either):
-        Panel 5: sigma_R vs sigma_PE.
-        Panels 6-8: sigma_R AND sigma_PE, twin axes, each vs ONE of
-          alpha_0/lambda_/n_neurons -- a breakdown of how much each
-          parameter individually contributes, not a substitute for the
-          still-pending multivariate regression (see chat).
-      Row 3 (DeltaR-decay and DeltaA-decay, same structure):
-        Panel 9: DeltaR-decay vs DeltaA-decay.
-        Panels 10-12: DeltaR-decay AND DeltaA-decay, twin axes, each vs
-          ONE of alpha_0/lambda_/n_neurons.
-
-    Rows 2/3 read neural_experiments.py's own `synthetic` experiment --
-    N randomly-parameterized virtual pids (NOT fitted params), per
-    instruction; see CLAUDE.md's own "Neural predictions figure" Status
-    section and docs/HISTORY.md for the full design rationale, including
-    two real bugs found and fixed along the way (a response-readout
-    averaging mismatch, and a raw-vs-canonical-scale mismatch that
-    saturated NEF's ensembles) and the sampling-bounds narrowing that
-    followed (alpha_0 in [0.5,1], lambda_ in [0.1,1], n_neurons in
-    [500,1500] -- avoiding a genuine floor effect in alpha(t)=alpha_0/
-    t^lambda at low alpha_0, and the extra measurement noise at low
-    n_neurons that diluted the sigma-related relationships specifically).
-
-    Act 4/5 are not included yet.
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(3, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.85 * 0.75),
-                             constrained_layout=True)
-
-    _plot_neural_raster_demo(axes[0, 0])
-    _plot_neural_pe_dynamics(axes[0, 1])
-    _plot_neural_lambda_activity(axes[0, 2])
-    axes[0, 3].axis("off")
-
-    sigma_df = _load_neural_probe_variability()
-    _plot_neural_sigma_vs_pe_variability(axes[1, 0])
-    if sigma_df is not None and len(sigma_df) >= 3:
-        row2_twins = []
-        row2_twins.append(_plot_neural_dual_vs_param(
-            axes[1, 1], sigma_df, "alpha_0", "\u03b1\u2080",
-            "resp_std", "pe_std", "\u03c3 (response)", "\u03c3 (prediction error)",
-            include_x_zero=True))
-        row2_twins.append(_plot_neural_dual_vs_param(
-            axes[1, 2], sigma_df, "lambda_", "\u03bb",
-            "resp_std", "pe_std", "\u03c3 (response)", "\u03c3 (prediction error)",
-            include_x_zero=True))
-        row2_twins.append(_plot_neural_dual_vs_param(
-            axes[1, 3], sigma_df, "n_neurons", "neurons",
-            "resp_std", "pe_std", "\u03c3 (response)", "\u03c3 (prediction error)"))
-
-        # Shared y-axes across the whole row: axes[1,0]'s own y (resp_std)
-        # and every panel's left axis (also resp_std) get one common range;
-        # every panel's twin (right) axis (pe_std) gets another. Twin axes
-        # aren't reachable via plt.subplots' own sharey (they're created
-        # per-panel, not at subplot-creation time), hence doing this
-        # manually here rather than at fig, axes = plt.subplots(...).
-        resp_pad = 0.05 * (sigma_df["resp_std"].max() - sigma_df["resp_std"].min())
-        pe_pad = 0.05 * (sigma_df["pe_std"].max() - sigma_df["pe_std"].min())
-        resp_lim = (sigma_df["resp_std"].min() - resp_pad, sigma_df["resp_std"].max() + resp_pad)
-        pe_lim = (sigma_df["pe_std"].min() - pe_pad, sigma_df["pe_std"].max() + pe_pad)
-        for col in (0, 1, 2, 3):
-            axes[1, col].set_ylim(resp_lim)
-        for ax2 in row2_twins:
-            ax2.set_ylim(pe_lim)
-    else:
-        for col in (1, 2, 3):
-            axes[1, col].text(0.5, 0.5, "No probe variability data", ha="center",
-                              va="center", transform=axes[1, col].transAxes,
-                              color="0.5", style="italic")
-
-    decay_df = _load_neural_decay_metrics()
-    _plot_neural_resp_vs_act_decay(axes[2, 0])
-    if decay_df is not None and len(decay_df) >= 3:
-        row3_twins = []
-        row3_twins.append(_plot_neural_dual_vs_param(
-            axes[2, 1], decay_df, "alpha_0", "\u03b1\u2080",
-            "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)",
-            include_x_zero=True))
-        row3_twins.append(_plot_neural_dual_vs_param(
-            axes[2, 2], decay_df, "lambda_", "\u03bb",
-            "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)",
-            include_x_zero=True))
-        row3_twins.append(_plot_neural_dual_vs_param(
-            axes[2, 3], decay_df, "n_neurons", "neurons",
-            "resp_decay", "act_decay", "decay (\u0394R)", "decay (\u0394A)"))
-
-        resp_pad = 0.05 * (decay_df["resp_decay"].max() - decay_df["resp_decay"].min())
-        act_pad = 0.05 * (decay_df["act_decay"].max() - decay_df["act_decay"].min())
-        resp_lim = (decay_df["resp_decay"].min() - resp_pad, decay_df["resp_decay"].max() + resp_pad)
-        act_lim = (decay_df["act_decay"].min() - act_pad, decay_df["act_decay"].max() + act_pad)
-        for col in (0, 1, 2, 3):
-            axes[2, col].set_ylim(resp_lim)
-        for ax2 in row3_twins:
-            ax2.set_ylim(act_lim)
-    else:
-        for col in (1, 2, 3):
-            axes[2, col].text(0.5, 0.5, "No activity/response decay data", ha="center",
-                              va="center", transform=axes[2, col].transAxes,
-                              color="0.5", style="italic")
-
-    out_path, _ = _save_fig(fig, "neural_giant")
-    plt.close(fig)
-    return out_path
 
 
 FIGURES = {
@@ -4728,8 +4631,7 @@ FIGURES = {
     "sigma_overview": make_sigma_overview,
     "sigma_main": make_sigma_main,
     "sigma_reliability": make_sigma_reliability,
-    "neural_giant": make_neural_giant,
-    "neural_giant2": make_neural_giant2,
+    "neural_main": make_neural_main,
     "sigma_model_correlation": make_sigma_model_correlation,
     "variance_autocorr_human": make_variance_autocorr_human,
     "variance_autocorr_models": make_variance_autocorr_models,

@@ -226,7 +226,7 @@ def _toy_activity_key(seed: int) -> int:
     counting_integrator.py) exists to prevent for real human trials (see
     that function's own docstring and this file's "What NOT to do" list),
     reintroduced here for these toy experiments and only caught because a
-    person noticed neural_giant2's row-2 activity panel didn't match the
+    person noticed neural_main's row-2 activity panel didn't match the
     ORIGINAL neural_giant's own (correctly seed-matched) equivalent panel.
     See docs/HISTORY.md for the full incident. NEVER hand-derive this
     offset inline a second time -- always call this function for both
@@ -343,7 +343,7 @@ def run_n_neurons_demo(args) -> None:
     ONE shared (alpha_0, lambda_), --n_seeds independent toy seeds PER
     PAIR (via _toy_activity_key -- the SAME arbitrary-demo-seed
     convention raster_demo/sweep already use, NOT a real trial or
-    synthetic-pool member). Built for neural_giant2's row 3 (n_neurons)
+    synthetic-pool member). Built for neural_main's row 3 (n_neurons)
     col 1 panel, to visually illustrate how the decoded value
     population's own tracking gets noisier/more-drifting at fewer
     neurons, before row 3's own col 2/3 quantify this systematically.
@@ -917,7 +917,7 @@ def run_synthetic(args) -> None:
             print(f"Collected {len(files)} file(s), {n_pids} virtual pids -> {out_path}")
 
 
-# ── oddball (neural_giant2's per-parameter rows) ──────────────────────────────────────
+# ── oddball (neural_main's per-parameter rows) ──────────────────────────────────────
 
 def _oddball_value_tag(val: float) -> str:
     """Filesystem-safe tag for one numeric value, e.g. 0.2 -> '0p2', -15 -> 'm15'."""
@@ -1089,7 +1089,7 @@ def run_n_neurons_snr(args) -> None:
     convergence -- see archive/scripts/archive_n_neurons_convergence_
     exploration.py and docs/HISTORY.md's own "n_neurons SNR measure
     exploration" entry for the full narrative of how this was arrived
-    at): measures TWO SNR DVs for neural_giant2's row 3 (n_neurons),
+    at): measures TWO SNR DVs for neural_main's row 3 (n_neurons),
     both restricted to the SAME 200ms window (t_iti+400ms to
     t_iti+600ms, the established ~0.5s peak-response latency) within
     the oddball's own presentation, for the SAME oddball trial structure
@@ -1350,7 +1350,7 @@ def run_oddball(args) -> None:
         print(grid)
 
 
-# ── param_scan (neural_giant2 rows 2/3 -- lambda_/n_neurons vs activity+decay) ──
+# ── param_scan (neural_main rows 2/3 -- lambda_/n_neurons vs activity+decay) ──
 
 NEURAL_ENCODER_THRESHOLD = 0.5  # matches figure_yoo_neural.py's/make_paper_figures.py's
                                 # own ENCODER_THRESHOLD -- same weight-tuned-neuron

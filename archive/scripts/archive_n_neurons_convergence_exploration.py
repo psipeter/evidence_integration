@@ -2,7 +2,7 @@
 neural_experiments.py's run_n_neurons_convergence, extracted verbatim
 before it was simplified down to the two settled SNR DVs (see
 docs/HISTORY.md's own "n_neurons SNR measure exploration" entry for the
-full narrative of how this was arrived at, and CLAUDE.md's neural_giant2
+full narrative of how this was arrived at, and CLAUDE.md's neural_main
 section for where these two DVs actually get used).
 
 This version tested the CONVERGENCE HYPOTHESIS itself (does the
