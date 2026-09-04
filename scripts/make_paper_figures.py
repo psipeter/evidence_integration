@@ -4259,6 +4259,78 @@ def _plot_neural_giant2_decay_vs_param(ax, sweep_param: str, task: str = "soltan
         include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
 
 
+def _plot_n_neurons_snr_triple(ax, task: str = "soltani_numbers") -> None:
+    """Row 3, col 2: three SNR-related DVs vs n_neurons, from
+    neural_experiments.py's own `n_neurons_snr` grid (one row per
+    (cluster_center, oddball_deviation, n_neurons) cell, aggregation
+    across cluster_center/oddball_deviation NOT pre-decided -- every
+    cell contributes its own point to the regression directly, matching
+    _plot_neural_dual_vs_param's own per-replicate convention).
+
+    PE variance and response variance (sigma_response**2) are the SAME
+    kind of quantity (both variances of a signal), so they share ONE
+    LOG-SCALE left axis -- log scale because they differ by ~1-2 orders
+    of magnitude in absolute value (response variance is a downstream,
+    amplified consequence of the same noise source PE variance measures
+    momentarily) while both decline by a comparable PROPORTIONAL amount;
+    log scale makes that proportional comparison fair rather than
+    squashing the smaller series flat near zero on a linear axis. A
+    linear OLS fit (sns.regplot, unchanged) displayed against a log
+    y-axis renders as a curved line -- expected and correct, not a
+    plotting error, matching the genuinely diminishing-returns shape
+    already confirmed in this data (biggest drop 50->100, progressively
+    smaller after).
+
+    Split-half r is a BOUNDED [0,1] correlation, a conceptually
+    different kind of quantity (and RISING rather than falling) -- gets
+    its own separate LINEAR right axis, direct structural port of
+    _plot_neural_dual_vs_param's own twin-axis convention just extended
+    to a third line sharing the left pair's axis instead of a fourth
+    axis.
+    """
+    path = NEURAL_EXP_DIR / f"n_neurons_snr_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, "No n_neurons_snr data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    grid = d["grid"]
+
+    pal = get_palette(6)
+    c_pe, c_resp, c_r = pal[0], pal[1], pal[2]
+
+    r_pe, p_pe = pearsonr(grid["n_neurons"], grid["pe_variance_mean"])
+    r_resp, p_resp = pearsonr(grid["n_neurons"], grid["response_variance"])
+    r_sh, p_sh = pearsonr(grid["n_neurons"], grid["split_half_r_mean"])
+
+    ax.scatter(grid["n_neurons"], grid["pe_variance_mean"], color=c_pe, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="n_neurons", y="pe_variance_mean", ax=ax, color=c_pe, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"\u03c3\u00b2(PE): r={r_pe:.2f}{pvalue_to_stars(p_pe)}")
+    ax.scatter(grid["n_neurons"], grid["response_variance"], color=c_resp, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="n_neurons", y="response_variance", ax=ax, color=c_resp, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"\u03c3\u00b2(response): r={r_resp:.2f}{pvalue_to_stars(p_resp)}")
+    ax.set_yscale("log")
+    ax.set_xlabel("n_neurons")
+    ax.set_ylabel("Variance (log scale)")
+
+    ax2 = ax.twinx()
+    ax2.scatter(grid["n_neurons"], grid["split_half_r_mean"], color=c_r, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="n_neurons", y="split_half_r_mean", ax=ax2, color=c_r, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3},
+               label=f"split-half r: r={r_sh:.2f}{pvalue_to_stars(p_sh)}")
+    ax2.set_ylabel("Split-half reliability (r)", color=c_r)
+    ax2.tick_params(axis="y", labelcolor=c_r)
+    sns.despine(ax=ax2, top=True)
+
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2, fontsize=7,
+             frameon=True, framealpha=0.9, loc="best")
+    sns.despine(ax=ax, top=True, right=True)
+
+
 def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
     """Row 2, col 3: NEF's own |Delta response| decay (y) vs weight-tuned
     activity decay (x), one point per (sweep_param value, real pid) --
@@ -4372,10 +4444,10 @@ def make_neural_giant2() -> Path:
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
 
     _plot_n_neurons_demo_trace(axes[2, 0])
-    for col in (1, 2):
-        axes[2, col].text(0.5, 0.5, "n_neurons row not yet built", ha="center",
-                          va="center", transform=axes[2, col].transAxes,
-                          color="0.5", style="italic")
+    _plot_n_neurons_snr_triple(axes[2, 1])
+    axes[2, 2].text(0.5, 0.5, "n_neurons row not yet built", ha="center",
+                    va="center", transform=axes[2, 2].transAxes,
+                    color="0.5", style="italic")
 
     out_path, _ = _save_fig(fig, "neural_giant2")
     plt.close(fig)

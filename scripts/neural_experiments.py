@@ -1035,9 +1035,13 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
 
     t_obs_ = float(params["t_obs"]); t_iti_ = float(params["t_iti"]); dt = float(params["dt"])
     t_step = t_obs_ + t_iti_
+    n_obs = len(obs_values)
+
+    from models.NEF import _extract_responses
 
     pe_variances = []
     split_half_rs = []
+    responses = []
     for seed in range(args.n_seeds):
         key = _toy_activity_key(seed)
         decoders = _decoders_for_seed(activity_map, key, params["alpha_0"], params["lambda_"])
@@ -1053,6 +1057,16 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
         split_half_rs.append(_split_half_corr(counts, non_weight_idx,
                                                args.splithalf_n_splits, rng))
 
+        # "Decision time" response -- reuse models.NEF's own canonical
+        # _extract_responses directly (the SAME function every other
+        # response-readout in this project calls) rather than
+        # reimplementing its window-averaging formula here. Returns one
+        # value per observation; the oddball is always the LAST
+        # (index n_obs-1) in this trial's own 3-clustered-then-1-oddball
+        # structure.
+        all_responses = _extract_responses(t_arr, result["value"], n_obs, params)
+        responses.append(float(all_responses[-1]))
+
     split_half_valid = [r for r in split_half_rs if not np.isnan(r)]
     return {
         "cluster_center": cluster_center,
@@ -1064,6 +1078,8 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
         "split_half_r_mean": float(np.mean(split_half_valid)) if split_half_valid else float("nan"),
         "split_half_r_sd": float(np.std(split_half_valid)) if split_half_valid else float("nan"),
         "split_half_r_per_seed": split_half_rs,
+        "response_variance": float(np.var(responses)),
+        "response_per_seed": responses,
         "obs_values_raw": obs_values_raw,
     }
 
@@ -1112,6 +1128,21 @@ def run_n_neurons_snr(args) -> None:
          restricting to weight-tuned-only or using ALL neurons instead
          were tried and are documented in docs/HISTORY.md, not reused
          here.
+
+      3. Response variance (sigma_response**2) -- ADDED this session for
+         the 3-DV panel (PE variance + split-half r share a log-scale
+         axis, response variance gets its own linear axis). The response
+         value at "decision time" (the oddball -- always the LAST
+         observation in this trial's own 3-clustered-then-1-oddball
+         structure), extracted by calling models.NEF's own canonical
+         `_extract_responses(t_arr, value, n_obs, params)` directly --
+         NOT its window-averaging formula reimplemented here -- the SAME
+         function every other response-readout in this project calls;
+         variance computed ACROSS seeds (this is a downstream, integrated/
+         amplified consequence of the same noise source PE variance
+         measures at one instant, so its own n_neurons slope is expected
+         to be steeper -- confirmed earlier this session on a smaller,
+         unaggregated dataset).
 
     NOTE: this experiment's own `_simulate_full` calls confirmed these
     spikes come from the ERROR population (net.error.neurons, 2D: weight
@@ -1204,7 +1235,7 @@ def run_n_neurons_snr(args) -> None:
             {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
              "n_neurons": r["n_neurons"], "n_neurons_counting": r["n_neurons_counting"],
              "pe_variance_mean": r["pe_variance_mean"], "split_half_r_mean": r["split_half_r_mean"],
-             "split_half_r_sd": r["split_half_r_sd"]}
+             "split_half_r_sd": r["split_half_r_sd"], "response_variance": r["response_variance"]}
             for r in results
         ]).sort_values(["cluster_center", "oddball_deviation", "n_neurons"]).reset_index(drop=True)
         out_path = OUT_DIR / f"n_neurons_snr_{args.task}.pkl"
