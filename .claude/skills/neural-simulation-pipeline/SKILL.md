@@ -4,8 +4,10 @@ Use this skill when generating extra NEF simulation data needed by figure
 scripts — counting activity files, or data for the neural predictions
 figure (`neural_main`) — as opposed to a standard model fit (see the
 fitting-pipeline skill for that). Always generate locally (or via cluster
-if slow), then scp to the cluster. Never run NEF simulations through MCP
-tool calls — will time out.
+if slow), then scp to the cluster. NEF simulation runtime varies from
+minutes to hours — write the script, then give the person the exact
+command to run themselves once they've judged expected runtime; never
+run one directly.
 
 ---
 

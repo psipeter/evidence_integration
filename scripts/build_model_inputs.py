@@ -161,6 +161,8 @@ def build(results_file: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--results_file", type=str, default="task_results_pilot2.pkl",
-                        help="Filename under data/ produced by task/parse_results.py")
+                        help="Filename under data/ produced by archive/task/parse_results.py "
+                             "(task/ itself is now fully retired and archived -- see "
+                             "archive/HISTORY_task_legacy.md)")
     args = parser.parse_args()
     build(args.results_file)

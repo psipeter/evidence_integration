@@ -44,5 +44,7 @@ experiment), `data/`, `docs/` (this project's living documentation),
 ## Legacy: task/ (retired)
 
 The original JATOS/MindProbe-hosted online task. Superseded by
-`task_backend/` above; remains on disk for historical reference. Full
-design history: `archive/HISTORY_task_legacy.md`.
+`task_backend/` above; fully retired and archived under
+`archive/task/` (build artifacts and raw participant data deleted as
+reproducible/recoverable, not preserved). Full design history:
+`archive/HISTORY_task_legacy.md`.

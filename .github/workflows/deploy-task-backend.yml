@@ -1,9 +1,11 @@
 name: Deploy task_backend to GitHub Pages
 
-# Deploys ONLY task_backend/ -- the JATOS pipeline (task/) has no build/
-# deploy step at all (JATOS/MindProbe serves it directly) and this
-# workflow never touches it. Path-filtered so unrelated commits elsewhere
-# in the repo (task/, docs, analysis scripts) don't trigger a rebuild.
+# Deploys ONLY task_backend/ -- the JATOS pipeline (task/, now fully
+# retired and archived under archive/task/ -- see
+# archive/HISTORY_task_legacy.md) never had a build/deploy step at all
+# (JATOS/MindProbe served it directly) and this workflow never touched
+# it. Path-filtered so unrelated commits elsewhere in the repo (archive/,
+# docs, analysis scripts) don't trigger a rebuild.
 #
 # Prerequisite (one-time, done in the GitHub UI, not in this file):
 #   - Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"

@@ -3339,5 +3339,188 @@ Prolific's current CSV headers; override with `--prolific-id-col` etc. if
 it picks the wrong one).
 
 ---
+
+## `task/` directory retired from disk entirely -- code archived to `archive/task/`, build artifacts and raw participant data deleted
+
+Everything above this point describes `task/` while it still lived on
+disk as a dormant-but-present directory, kept around "for historical
+reference" per README.md's own old wording. This entry is the final
+step: `task/` no longer exists anywhere in the working tree at all.
+`task_backend/` (Supabase-backed) is now in production with real
+published data, fully superseding the JATOS/MindProbe pipeline this file
+documents -- there is no remaining reason for `task/` to occupy space or
+show up in greps of the active codebase.
+
+### What moved, verbatim, to `archive/task/`
+
+Every git-tracked file `task/` still had (75 files, confirmed via `git
+ls-files task/` before the move, and confirmed to exactly match the
+on-disk file list after untracked cruft below was cleared first) moved
+via `git mv task archive/task`, preserving its internal structure
+exactly:
+- The application itself: `src/` (all jsPsych plugins, shared modules,
+  both tasks' `config.js`), `index-{binary,continuous,test}.html`,
+  `vite.config.js`, `dev-server.js`, `package.json`/`package-lock.json`,
+  `consent_form.{doc,txt}`.
+- Sequence generation: `generate_sequences.py`,
+  `generate_sequences_{hybrid,iid,momentmatch}.py`,
+  `generate_sequences_pool.py`, and the pre-generated
+  `sequences/{binary,continuous}{,_iid,_momentmatch}_sequences.{json,pkl}`
+  (12 files -- these are the actual tracked reference sequence files
+  from the iid/momentmatch/hybrid method comparison documented earlier
+  in this file, not the untracked, regenerable per-participant pool).
+- JATOS packaging: `generate_jzip.py`,
+  `evidence-integration-{binary,continuous}.jzip` (the real, deployed
+  bundles -- NOT the `*-TEST-2trial.jzip` disposable test bundles, see
+  below).
+- Testing: `test_browser.mjs`, `test_pool_assignment.mjs`.
+- **Data-fetching/parsing code, explicitly called out for preservation**:
+  `parse_results.py` (JATOS export -> tidy `.pkl`) and
+  `reconcile_prolific_jatos.py` (Prolific-vs-JATOS submission
+  reconciliation). Both moved with `git mv` specifically so their history
+  follows them into the archive rather than a plain copy severing it --
+  they're genuinely reusable pieces of data-wrangling logic (self-
+  contained, no cross-imports on anything else in `task/`), not
+  application code, which is why they're called out separately from the
+  rest of the app above even though they moved the same way.
+- `task/.gitignore` itself (documented what was ignored inside the
+  directory that no longer exists at this path; kept alongside its
+  former siblings rather than deleted, since it's tracked and still
+  documents real reasoning about the files sitting next to it in the
+  archive).
+
+`scripts/pilot_overview.py` moved alongside it, to `archive/scripts/
+pilot_overview.py` -- this was the deferred decision flagged in
+`archive/archive_readme.md`'s "Not moved, but flagged for awareness"
+note (see there): it reads real pilot participant data and compares it
+against fixed/hand-tuned model parameters via an ad-hoc join against
+`task/sequences/*.json` (its own `--seq_dir` default is literally
+`'task/sequences'`), and is superseded by the properly-Optuna-fitted,
+participant-filtered `figure_soltani_{performance,temporal,variability}.py`
+pipeline. With `task/` itself now gone, `pilot_overview.py` could not run
+even if someone wanted it to (its default `--seq_dir` and
+`--human_pkl` both point at now-nonexistent paths) -- there was no
+remaining argument for leaving it in `scripts/`.
+
+### What was deleted outright (reproducible or externally recoverable -- NOT archived)
+
+Per explicit instruction, these were `rm -rf`'d rather than archived,
+since `archive/` exists for restorability and neither category needs
+it:
+
+**Reproducible build artifacts** (already documented as such in the
+root `.gitignore` before this cleanup): `task/node_modules/` (66M, `npm
+install` from `package.json`/`package-lock.json`, both archived),
+`task/dist/`, `task/dist-binary/`, `task/dist-continuous/` (Vite build
+output, `npm run build`), `task/__pycache__/`, `task/sequences_pool/`
+(19M, regenerable via `generate_sequences_pool.py --n_pool 200 --task
+both --seed 0`, both archived), `task/sequences_pool_binary_prefix_backup/`
+(9.4M, same script with the prefix-based defaults), and `task/jatos.js`
+(the vendored JATOS client library). Confirmed via `git ls-files` before
+deletion that none of these directories held any tracked file (all
+returned 0).
+
+**Raw participant data** (recoverable from its original export source if
+ever needed again, per instruction -- not from anything this repo
+controls): `task/dev-results/` (4.9M), `task/pilot1/` (3.0M),
+`task/pilot2/` (12M), `task/pilot3/` (3.1M), and the two disposable
+`evidence-integration-{binary,continuous}-TEST-2trial.jzip` bundles
+(manual small-scale JATOS testing artifacts, distinct from the real
+tracked `.jzip` bundles above). Confirmed via `git ls-files` before
+deletion that none of these held any tracked file either.
+
+**Gitignored scratch scripts, judgment call**: `task/compute_bonus_tmp.py`
+and `task/compute_bonus_numbers_tmp.py` were untracked (already
+gitignored) one-off scripts hardcoding a path into `task/pilot3/` (e.g.
+`pathlib.Path('/home/psipeter/evidence_integration/task/pilot3/colors.txt')`)
+-- with `pilot3/` itself deleted per the above, these could not run even
+if kept. Deleted rather than archived: they were never git-tracked, so
+`archive/`'s restorability guarantee never covered them anyway, and
+their only content (a hardcoded pilot3 path + a bonus-computation loop
+already superseded by the real bonus system documented earlier in this
+file) has no standalone value once their one input file is gone.
+
+**Also removed**: an empty, untracked `task/public/` directory (no
+contents, `git ls-files` confirmed nothing tracked inside), and (not
+present at the time of this pass, but documented in `task/.gitignore`
+as a possibility) a stray LibreOffice `.~lock.consent_form.doc#` lock
+file, had one existed.
+
+### Docs updated
+
+- `CLAUDE.md`: repository-structure entry for `task/` removed (it no
+  longer exists as a standalone top-level directory); `archive/`'s own
+  entry extended to mention `archive/task/`. Added a "Do not resurrect
+  the `task/` (JATOS/MindProbe) pipeline without an explicit plan" bullet
+  under "What NOT to do", mirroring the existing diederen/jiang/usher
+  bullet's pattern -- explicitly notes that unlike the fully-restorable
+  code, the raw data and build artifacts are gone for good. The existing
+  "Do not read soltani human data from `task/sequences/`" bullet was
+  reworded to point at the new `archive/task/` location rather than
+  implying the old path still exists.
+- `README.md`: "Legacy: task/ (retired)" section's "remains on disk for
+  historical reference" wording (no longer true) replaced with the
+  actual current state (archived under `archive/task/`, raw data/build
+  artifacts deleted).
+- `.gitignore`: removed every `task/`-prefixed entry whose target no
+  longer exists at that path (`task/node_modules/`, `task/dist*/`,
+  `task/jatos.js`, `task/sequences/{sweep,diagnostics}/`,
+  `task/sequences/{all_sequences,sequences}.{json,pkl}`,
+  `task/sequences_pool{,_binary_prefix_backup}/`), including the
+  explanatory comment blocks that went with the sequence-pool entries
+  (their rationale no longer applies to anything on disk). Left the
+  non-`task/`-prefixed scratch-file entries in the same block alone
+  (`/tmp/seq_pool*/`, `scripts/sweep_sequences.py`, etc.) and fixed one
+  now-dangling comment elsewhere in the file that referenced "`task/dist*`
+  elsewhere in this file" as a reasoning example.
+- Fixed a few stale-but-narrow path references in still-active files
+  that pointed at `task/parse_results.py` by name (now
+  `archive/task/parse_results.py`): `scripts/inspect_participant.py`'s
+  module docstring and `scripts/build_model_inputs.py`'s
+  `--results_file` help text, both purely descriptive comments, no
+  behavior change. `.github/workflows/deploy-task-backend.yml`'s own
+  comment block (describing why the workflow's path filter ignores
+  non-`task_backend/` commits) updated the same way. Left alone: several
+  other `task/`-containing strings elsewhere in `scripts/` and
+  `models/NEF.py` that either already read as historical past-tense
+  narrative (already framed as "retired"/"OLD JATOS-era" before this
+  pass) or turned out to be unrelated line-wraps of "task/datafile" or
+  "task/model" (a slash-separated pair of nouns, not a path) upon
+  inspection -- confirmed via a full non-archive repo grep both before
+  and after this pass; nothing else referenced the now-moved path.
+- No `docs/DECISIONS.md` entry added for this pass -- retiring an
+  already-fully-superseded, already-narratively-documented directory by
+  moving its code to `archive/` and deleting its reproducible/recoverable
+  contents is a routine, diffable code change (this repo's own stated
+  criterion for when DECISIONS.md does NOT apply), not a decision git
+  history can't hold on its own. The actual platform decision (why
+  `task_backend`/Supabase over continuing with JATOS/MindProbe at all)
+  was already made and documented earlier in this same file (see "Pilot
+  #3 real-participant incidents" and "Own-backend decision (Supabase)"
+  above) -- this entry is just that decision's long-deferred cleanup
+  step, not a new decision.
+
+### How to restore
+
+1. `git mv archive/task task` (and `git mv archive/scripts/pilot_overview.py
+   scripts/pilot_overview.py` if that's wanted back too).
+2. Re-add the removed `.gitignore` entries (see this file's git history
+   for the exact removed block, or copy from an old commit) if the build
+   artifacts/sequence pool are going to be regenerated on disk again.
+3. `cd task && npm install && npm run build` to regenerate
+   `node_modules/`/`dist*/`.
+4. `python task/generate_sequences_pool.py --n_pool 200 --task both --seed 0`
+   to regenerate the per-participant pool (and `--task binary` with the
+   prefix-based defaults for the binary-prefix-backup variant), if
+   needed.
+5. The raw participant data (`dev-results/`, `pilot1-3/`) and the
+   `*-TEST-2trial.jzip` bundles are NOT recoverable from this repo --
+   they would need to come from wherever they were originally exported
+   from (JATOS/MindProbe's own export, or Prolific's submission export),
+   if they're ever needed again.
+6. Revert the CLAUDE.md/README.md/.gitignore/scripts doc edits described
+   above (straightforward via `git log --follow` on each file).
+
+---
 ---
 

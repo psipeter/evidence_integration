@@ -105,10 +105,8 @@ npx playwright test
 
 **The person running this project runs tests themselves** — give exact
 commands rather than running directly. If ever run programmatically, use
-a background+poll pattern (`setsid nohup ... > logfile &`, poll with
-`sleep`/`tail`), not one blocking call — a full-suite call can exceed a
-tool's own response-window timeout even though the suite runs fine on
-the real host.
+Bash's `run_in_background` rather than a blocking foreground call — a
+full suite runs long enough that it needs the background form.
 
 ## Data pipeline out (Supabase → analysis)
 

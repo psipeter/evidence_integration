@@ -1542,4 +1542,37 @@ likely constraint to watch as real participant N grows, but this depends
 on the actual plan tier and total planned N, neither confidently known
 from this session.
 
+## Playwright test-running guidance (retired from root CLAUDE.md's session-start checklist)
+
+Root `CLAUDE.md`'s session-start checklist used to carry: "The person
+runs tests themselves. Give exact commands; don't run `pytest`/`npx
+playwright test` directly unless explicitly asked. A single full-suite
+call can exceed the tool's own response window even though the suite
+runs fine on the real host -- if ever run programmatically, use a
+background+poll pattern (`setsid nohup ... > logfile &`, poll with
+`sleep`/`tail`), and check `lsof -ti:5183 -ti:5184` are empty first
+(stale servers can squat test ports)."
+
+Retired 2026-09-05 when the project moved from an MCP filesystem/shell
+connector setup onto Claude Code Desktop. The manual nohup/poll
+workaround existed to route around that old connector's tool-response-
+window timeout; Claude Code's native `run_in_background` Bash option
+handles this directly now, with no manual script needed (see
+`task_backend/CLAUDE.md`'s own Testing section, updated to match rather
+than removed -- pytest doesn't exist in this project, so the root-level
+version of this bullet was really just a duplicate, generic-sounding
+copy of task_backend's Playwright-specific guidance).
+
+The bullet is dropped from the root checklist specifically because
+task_backend is no longer under active development (Prolific cutover is
+done, pilots have run) -- not because the underlying caution about
+running a real-Supabase-backed test suite has changed. If task_backend
+work resumes and this needs revisiting, re-derive the policy fresh
+rather than restoring this verbatim. The stale-test-server port check
+(`lsof -ti:5183 -ti:5184`) is still live and current in
+`task_backend/CLAUDE.md`'s Testing section -- it documents a real hazard,
+not a workaround, so it wasn't touched.
+
+---
+
 ## Participant exclusion criteria: four candidates, and how we chose (this session)

@@ -72,8 +72,8 @@ logs/
 # library directory -- both are fully reproducible via
 #   quarto render presentations/presentation.qmd
 # and the library directory in particular is large, third-party, and adds
-# nothing not already implied by the .qmd (same reasoning as figures/*,
-# data/runs/, and task/dist* elsewhere in this file).
+# nothing not already implied by the .qmd (same reasoning as figures/*
+# and data/runs/ elsewhere in this file).
 presentations/*.html
 presentations/*_files/
 
@@ -86,35 +86,12 @@ Thumbs.db
 .idea/
 *.swp
 # Sequence generation scratch files
-task/sequences/sweep/
-task/sequences/diagnostics/
-task/sequences/all_sequences.pkl
 /tmp/seq_pool/
 /tmp/seq_pool_cont/
 /tmp/test_prefix3/
 /tmp/test_prefix3_runs/
 scripts/sweep_sequences.py
 scripts/test_sequences_subsampling.py
-task/sequences/sequences.json
-task/sequences/sequences.pkl
-
-# Per-participant sequence pool (task/generate_sequences_pool.py output) --
-# 800 small files (200 members x 2 tasks x .pkl/.json) is too much file-count
-# churn for git to track usefully, and it's fully reproducible on demand via
-# `python task/generate_sequences_pool.py --n_pool 200 --task both --seed 0`
-# (the exact promoted parameters live in that script's own CLI defaults) --
-# resolves the earlier open question about whether to commit this pool or
-# consolidate it into fewer files: neither, just don't track it at all.
-task/sequences_pool/
-
-# Backup of the deterministic-prefix binary pool, taken before switching
-# production to the no-prefix scheme (chat history) -- same reasoning as
-# task/sequences_pool/ above (large per-participant file count, and this
-# is specifically the OLD scheme, fully reproducible on demand via
-# `python task/generate_sequences_pool.py --n_pool 200 --task binary --seed 0`
-# with the prefix-based defaults, i.e. without --no_prefix), not something
-# that needs to live in git history to be recoverable.
-task/sequences_pool_binary_prefix_backup/
 
 # Canonical production datasets, built by scripts/pull_soltani_data.py
 # (complete_pairs + the non_integrator exclusion criterion). TRACKED (not
@@ -137,10 +114,3 @@ task/sequences_pool_binary_prefix_backup/
 # directly (scp/rsync, never git) so both places assign the same integer
 # pid to the same real person.
 data/pid_registry.json
-
-# Vite build output and npm dependencies
-task/node_modules/
-task/dist-continuous/
-task/dist-binary/
-task/dist/
-task/jatos.js

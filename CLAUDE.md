@@ -7,42 +7,28 @@ choices were made (including retired models), see `docs/DECISIONS.md`.
 For task_backend specifics (including participant exclusion and
 sequence-generation diagnostics), see `task_backend/CLAUDE.md` (loads
 automatically when working there). For exact CLI recipes (data pulls,
-fitting jobs), see `.claude/skills/` — not yet auto-loaded since this
-project isn't on Claude Code yet; read the relevant `SKILL.md` directly
-until that transition happens. Read this file fully before making
-changes.
+fitting jobs), see `.claude/skills/` — these auto-surface via Claude
+Code's Skill tool based on task match; invoke by name or let them load
+implicitly. Read this file fully before making changes.
 
 ---
 
 ## Session-start checklist
 
-- **Tool routing (critical):** `str_replace`/`create_file`/`view` operate
-  on Claude's own local sandbox, NOT this remote host. Only
-  `filesystem:read_text_file`/`write_file`/`edit_file` and
-  `shell:run_command` touch real project files under
-  `/home/psipeter/evidence_integration/`. Using the wrong tool succeeds
-  silently with no error. If unsure whether an edit landed, grep the
-  remote file before trusting it.
-- **A second, separate caveat:** even the filesystem/shell MCP tools only
-  reach `hydra`, not `discovery-01` (or whichever node cluster jobs
-  actually run on/from, under a different username there). Claude cannot
-  verify cluster-side file/job state directly — give the person commands
-  to run themselves on `discovery-01` and take their terminal output as
-  ground truth.
+- **Cluster reach:** Claude's tools (Bash included) only reach `hydra`,
+  not `discovery-01` (or whichever node cluster jobs actually run
+  on/from, under a different username there). Claude cannot verify
+  cluster-side file/job state directly — give the person commands to run
+  themselves on `discovery-01` and take their terminal output as ground
+  truth.
 - **Figures save PDF only** — never PNG/SVG, never upload images to chat
   unless a genuine visual judgment call is needed (see "Figure
   iteration" below). Don't upload Playwright screenshots either — use
   DOM/computed-style assertions instead.
-- **The person runs tests themselves.** Give exact commands; don't run
-  `pytest`/`npx playwright test` directly unless explicitly asked. A
-  single full-suite call can exceed the tool's own response window even
-  though the suite runs fine on the real host — if ever run
-  programmatically, use a background+poll pattern
-  (`setsid nohup ... > logfile &`, poll with `sleep`/`tail`), and check
-  `lsof -ti:5183 -ti:5184` are empty first (stale servers can squat test
-  ports).
-- **Never run NEF simulations via MCP tool calls** — will time out.
-  Write a script and give the command to run on cluster or locally.
+- **NEF simulation runtime varies from minutes to hours.** Never run one
+  directly — write the script, then give the person the exact command
+  so they can judge expected runtime themselves before running it (on
+  cluster or locally).
 - All NEF simulation data → `data/runs/`; figures → `figures/`.
 - **Never let a NEF/counting-integrator simulation silently fall back to
   a live `_pretrain()` training run** when a precomputed counting-activity
@@ -181,7 +167,8 @@ A new round of data needs no new model plumbing, just a new pkl.
 For generating counting activity files or neural predictions figure
 (`neural_main`) data, see `.claude/skills/neural-simulation-pipeline/SKILL.md`.
 Always generate locally (or via cluster if slow), then scp to the
-cluster. Never run NEF simulations through MCP tool calls.
+cluster. Runtime varies minutes-to-hours — write the script, give the
+person the exact command, let them run it themselves.
 
 ---
 
@@ -218,8 +205,9 @@ evidence_integration/
   jobs/
     submit_probe_pids.sh, submit_n_neurons_scan.sh, submit_yoo_noise.sh
   task_backend/        — online task (see task_backend/CLAUDE.md)
-  task/                — legacy, retired (see archive/HISTORY_task_legacy.md)
-  archive/              — retired code + frozen history
+  archive/              — retired code + frozen history (incl. archive/task/,
+                          the fully-retired legacy JATOS/MindProbe pipeline;
+                          see archive/HISTORY_task_legacy.md)
   docs/
     SCIENCE.md          — scientific goals, current thread, results, NEF architecture
     DECISIONS.md        — non-diff-shaped methodology/platform decisions
@@ -281,23 +269,22 @@ not explicitly requested. Only implement immediately when explicitly
 asked for a specific change ("change X to Y", "add Z", "remove W").
 
 ### Figure iteration
-After any figure change, render via `pdftoppm` and inspect with
-`filesystem:read_media_file` — sparingly, since each image upload costs
-context. Prefer running analysis via `shell:run_command` to check
-numerical results first; only upload an image when visual layout/style
-review is genuinely needed; delete the temporary PNG immediately after.
+After any figure change, render via `pdftoppm` and inspect with the
+`Read` tool — sparingly, since each image read costs context. Prefer
+running analysis via Bash to check numerical results first; only read
+an image when visual layout/style review is genuinely needed; delete
+the temporary PNG immediately after.
 
 ```bash
 pdftoppm -png -singlefile -r 150 figures/figure_X.pdf figures/_prev
-# then filesystem:read_media_file figures/_prev.png
+# then Read figures/_prev.png
 # then git clean -f figures/_prev.png
 ```
 
 ### Temporary analysis scripts
-For exploratory analysis: write to `scripts/_tmp_*.py`, run via
-`shell:run_command`, delete immediately after
-(`venv/bin/python -c "import pathlib; pathlib.Path('scripts/_tmp_X.py').unlink()"`).
-Never commit `_tmp` files.
+For exploratory analysis: write to `scripts/_tmp_*.py`, run via Bash,
+delete immediately after (`rm scripts/_tmp_X.py`). Never commit `_tmp`
+files.
 
 ### Git and commit messages
 The person handles all `git commit`/`git push` themselves — never run
@@ -312,27 +299,30 @@ for that narrative going forward, findable later via `git log --grep
 platform evaluations, methodology choices made before any code existed.
 
 ### Context efficiency
-- Prefer `shell:run_command` with `python -c` for short computations over
-  writing tmp files
-- Use filesystem tools (`read_text_file` with head/tail) rather than
-  loading full files when only a portion is needed
+- Prefer Bash with `python -c` for short computations over writing tmp
+  files
+- Use `Read`'s `offset`/`limit` rather than loading full files when only
+  a portion is needed — conserves context tokens, not working around a
+  hard size limit
 - When scanning over parameters, print a compact table rather than
   per-pid details unless specifically needed
-- Use `conversation_search` instead of loading the full transcript for
-  routine tasks
 
 ---
 
 ## What NOT to do
 
-- Do not use `str_replace`/`create_file`/`view` for anything under
-  `/home/psipeter/evidence_integration/` — they write to Claude's local
-  sandbox, not this remote host, and fail silently.
 - Do not add diederen, jiang, or usher back without an explicit plan.
 - Do not reintroduce `NoisyCounting`, `NoisyRL_lambda`, the MLE fitting
   pipeline, `models/RNN.py`, or NEF's NLL/multi-seed-ensemble branch
   without an explicit plan — all retired, see `docs/DECISIONS.md`. Code
   is archived (restorable), not deleted.
+- Do not resurrect the `task/` (JATOS/MindProbe) online-task pipeline
+  without an explicit plan — fully superseded by `task_backend/`
+  (Supabase-backed, in production with real published data) and now
+  fully retired: its code lives at `archive/task/` (restorable), but its
+  raw participant data (`dev-results/`, `pilot1-3/`) and reproducible
+  build artifacts (`node_modules/`, `dist*/`, `sequences_pool*/`) were
+  deleted, not archived — see `archive/HISTORY_task_legacy.md`.
 - Do not reintroduce `task_continuous`/`task_binary` as dataset names, or
   `continuous`/`binary` as soltani task labels (see "Active datasets").
 - Do not build a `{dataset}_{datafile}` name by hand — call
@@ -347,8 +337,10 @@ platform evaluations, methodology choices made before any code existed.
   sees `|value| > 1.5` so that mistake fails loudly.
 - Do not pair a counting-activity key with a different simulation seed
   (see checklist above).
-- Do not read soltani human data from `task/sequences/` — the only source
-  is `data/soltani_*[_datafile].pkl`, built by `scripts/pull_soltani_data.py`.
+- Do not read soltani human data from `task/sequences/` (the retired
+  JATOS/MindProbe pipeline, now fully archived under `archive/task/`) —
+  the only source is `data/soltani_*[_datafile].pkl`, built by
+  `scripts/pull_soltani_data.py`.
 - Do not add `loss_type`, `shape_loss`, `joint_loss`, `beta` hooks.
 - Do not let `models.math_models.add_noise` fall back to a bare seed
   default (see checklist above).
@@ -359,7 +351,8 @@ platform evaluations, methodology choices made before any code existed.
 - Do not double-apply the carrabin transform.
 - Do not pass a full path as `run_folder` — always a short name.
 - Do not commit or push without being asked.
-- Do not run NEF simulations through MCP tool calls (will time out).
+- Do not run NEF simulations directly — runtime varies minutes-to-hours;
+  hand the person the exact command and let them judge when to run it.
 - Do not use RNN-based sigma as a noise metric — use qid-grouped response
   std for soltani (the RNN estimator itself is retired; see
   `docs/DECISIONS.md`).

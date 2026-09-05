@@ -9,7 +9,9 @@ one participant at a time, before there's enough completed data for the
 population-level figure_soltani_*.py pipeline to mean anything.
 
 That pipeline depends on scripts/build_model_inputs.py, which is still
-pointed at the OLD JATOS-era task/parse_results.py output -- no adapter
+pointed at the OLD JATOS-era archive/task/parse_results.py output (task/
+itself is now fully retired and archived -- see
+archive/HISTORY_task_legacy.md) -- no adapter
 from Supabase's events table into that pipeline exists yet (see
 CLAUDE.md/TODO.md's "Data pipeline (deferred on purpose)" notes). This
 script is NOT that adapter -- it's a deliberately lightweight, single-
