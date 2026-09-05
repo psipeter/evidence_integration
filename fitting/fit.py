@@ -3,24 +3,21 @@ Participant-level model fitting via Optuna (TPE) and k-fold CV.
 
 Objective: RMSE from ``fitting.losses.compute_loss`` by default, or Gaussian
 NLL from ``fitting.losses.compute_nll``/``nll_from_ensemble`` via ``--loss nll``.
-NLL applies to STOCHASTIC models only -- the math-model ensemble path
-(models.math_models.simulate_ensemble, currently just NoisyRL_lambda) or NEF's
-own ensemble path (models.NEF.simulate_ensemble, added for NEF's NLL branch --
-see docs/HISTORY.md) -- a deterministic model's ensemble is a delta function
-and its NLL is undefined; see either module's simulate_ensemble docstring.
-RMSE cannot identify a noise parameter at all (it collapses to zero, since
-squared error only sees the mean); NLL was verified on soltani_numbers pid 1
-to have a genuine INTERIOR optimum (sigma_resp ~0.04-0.05, NLL falling from
-389 at sigma_resp=0.001 to -2.46 at the optimum and rising again beyond it) --
-see docs/HISTORY.md.
+NLL applies only to a deterministic base model wrapped with i.i.d. response
+noise via ``models.math_models.add_noise`` (a name ending in ``_resp_noise``,
+e.g. ``RL_lambda_resp_noise``) -- a deterministic model's own ensemble is a
+delta function and its NLL is undefined. RMSE cannot identify a noise
+parameter at all (it collapses to zero, since squared error only sees the
+mean); NLL was verified on soltani_numbers pid 1 to have a genuine INTERIOR
+optimum (sigma_resp ~0.04-0.05, NLL falling from 389 at sigma_resp=0.001 to
+-2.46 at the optimum and rising again beyond it).
 
-NEF's own ensemble needs a counting-activity file with n_trials*n_sims
-precomputed seeds, not just n_trials -- see models.counting_integrator.
-precompute_activities' own n_sims parameter and models.NEF.simulate_ensemble.
-Pass --n_sims explicitly for NEF fits (models.NEF.NEF_DEFAULT_N_SIMS=50 is a
-ballpark starting point from cheap-model calibration, not this module's own
---n_sims default, which stays at its own validated value for NoisyRL_lambda/
-_resp_noise).
+NEF's own NLL/multi-seed-ensemble branch, and the math-model stochastic-
+ensemble path (NoisyRL_lambda), were both retired -- too expensive to run
+(NEF) or phased out of active analysis (NoisyRL_lambda). See
+docs/DECISIONS.md. NEF still fits under RMSE via NEF.run(); only the NLL
+path is gone. If ever restored, see archive/fitting/archive_fit_nll_nef.py
+and archive/models/archive_math_models_noise.py for the removed code.
 
 Entry point::
 
@@ -48,7 +45,7 @@ import pandas as pd
 
 import fitting.losses as losses
 import models.math_models as math_models
-from models.math_models import _NOISE_WRAPPABLE_BASE_MODELS, _STOCHASTIC_ENSEMBLE_MODELS, base_model_of, is_resp_noise_model
+from models.math_models import _NOISE_WRAPPABLE_BASE_MODELS, base_model_of, is_resp_noise_model
 from models import NEF
 from fitting.model_params import MODEL_PARAMS
 from utils.paths import RUNS_DIR, data_path, dataset_stem, resolve_run_folder
@@ -237,13 +234,13 @@ def fit(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs.
 
-    loss_fn='nll' requires model_type in models.math_models._STOCHASTIC_ENSEMBLE_MODELS
-    (a genuinely stochastic model, e.g. "NoisyRL_lambda") OR a name ending in
-    "_resp_noise" whose base model is in _NOISE_WRAPPABLE_BASE_MODELS (a
-    deterministic model wrapped with i.i.d. response noise via
-    models.math_models.add_noise, e.g. "RL_lambda_resp_noise"). Checked up front
-    so a bad combination fails before an Optuna study is created, not on the
-    first trial.
+    loss_fn='nll' requires a name ending in "_resp_noise" whose base model is
+    in _NOISE_WRAPPABLE_BASE_MODELS (a deterministic model wrapped with i.i.d.
+    response noise via models.math_models.add_noise, e.g.
+    "RL_lambda_resp_noise"). NEF and the genuinely-stochastic math-model path
+    (NoisyRL_lambda) both had their own NLL branches; both are retired (see
+    module docstring). Checked up front so a bad combination fails before an
+    Optuna study is created, not on the first trial.
 
     `override_from_folder`, if given, pins this pid's base-model parameters
     (e.g. RL_lambda's alpha_0/lambda_) to their RMSE-fitted values read from
@@ -257,27 +254,22 @@ def fit(
     of anything.
 
     NOTE: NEF's own joint (alpha_0, lambda_, n_neurons) NLL search
-    (search_n_neurons) was tried and archived (see docs/HISTORY.md) --
-    superseded by a forward-simulation approach (random parameter draws,
-    no fitting) for the neural-predictions figure's bottom row, which
-    needed neither an Optuna search over n_neurons nor the ensemble
-    ddof-driven n_sims>1 precompute that search required.
+    (search_n_neurons) and its later multi-seed-ensemble NLL branch were
+    both tried and retired -- see docs/DECISIONS.md and
+    archive/fitting/archive_fit_nll_nef.py.
     """
     if loss_fn not in ("rmse", "nll"):
         raise ValueError(f"loss_fn must be 'rmse' or 'nll', got {loss_fn!r}")
     if loss_fn == "nll":
-        is_ensemble_model = model_type in _STOCHASTIC_ENSEMBLE_MODELS
         is_wrapped_model = (is_resp_noise_model(model_type)
                             and base_model_of(model_type) in _NOISE_WRAPPABLE_BASE_MODELS)
-        is_nef_model = model_type == "NEF"
-        if not (is_ensemble_model or is_wrapped_model or is_nef_model):
+        if not is_wrapped_model:
             raise ValueError(
-                f"--loss nll needs a stochastic model, a '<model>_resp_noise' "
-                f"wrapper, or NEF; {model_type!r} is none of these. Use --loss "
-                f"rmse for this model, or fit one of "
-                f"{sorted(_STOCHASTIC_ENSEMBLE_MODELS)}, 'NEF', or "
-                f"'{{model}}_resp_noise' for model in "
-                f"{sorted(_NOISE_WRAPPABLE_BASE_MODELS)}.")
+                f"--loss nll needs a '<model>_resp_noise' wrapper; "
+                f"{model_type!r} is not one. NEF's and NoisyRL_lambda's own "
+                f"NLL branches are retired (docs/DECISIONS.md) -- use --loss "
+                f"rmse for those, or fit one of '{{model}}_resp_noise' for "
+                f"model in {sorted(_NOISE_WRAPPABLE_BASE_MODELS)}.")
     if run_folder is None:
         run_folder = RUNS_DIR / "default"
     run_folder = resolve_run_folder(run_folder)
@@ -355,20 +347,14 @@ def fit(
         if loss_fn == "nll":
             # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
             # resulting ensemble by trial rather than re-simulating per fold.
-            # Three ensemble sources, dispatched on model_type:
-            #   NEF                                        -> NEF.simulate_ensemble
-            #   genuinely stochastic (NoisyRL_lambda)      -> math_models.simulate_ensemble
-            #   deterministic + i.i.d. wrapper (*_resp_noise) -> math_models.add_noise
-            if model_type == "NEF":
-                ens, row_index = NEF.simulate_ensemble(
-                    params, n_sims, return_index=True)
-            elif model_type in _STOCHASTIC_ENSEMBLE_MODELS:
-                ens, row_index = math_models.simulate_ensemble(
-                    params, n_sims, return_index=True)
-            else:
-                ens, row_index = math_models.add_noise(
-                    params, n_sims, sigma_resp=params["sigma_resp"],
-                    return_index=True)
+            # Only one ensemble source remains active -- the deterministic +
+            # i.i.d. wrapper (*_resp_noise) via math_models.add_noise. NEF's
+            # and NoisyRL_lambda's own ensemble branches are retired (fit()'s
+            # own loss_fn=='nll' validation above already rejects any other
+            # model_type before reaching here).
+            ens, row_index = math_models.add_noise(
+                params, n_sims, sigma_resp=params["sigma_resp"],
+                return_index=True)
             mean_loss, fold_losses = _cross_validate_nll(
                 params, ens, row_index, human, k=k)
         else:
@@ -507,9 +493,9 @@ if __name__ == "__main__":
              "Gaussian NLL of observed responses under the model's simulated "
              "predictive distribution -- a proper scoring rule that penalises "
              "both a wrong mean AND a wrong variance, so it CAN find a genuine "
-             "noise level. Only for models in "
-             "models.math_models._STOCHASTIC_ENSEMBLE_MODELS (a deterministic "
-             "model's ensemble is a delta function, so NLL is undefined).",
+             "noise level. Only for '<model>_resp_noise' names (NEF's and "
+             "NoisyRL_lambda's own NLL branches are retired, see "
+             "docs/DECISIONS.md).",
     )
     parser.add_argument(
         "--n_sims", type=int, default=100,
@@ -517,12 +503,7 @@ if __name__ == "__main__":
              "Verified stable at n_sims=100 -- 5 reseeded reps all picked the "
              "same argmin on a sigma_resp sweep -- with a smaller ensemble "
              "(n_sims=25) already agreeing. Cost is roughly linear: n_sims=100 "
-             "is ~0.45s/eval, i.e. ~2.3 min for a 300-trial fit. For NEF, this "
-             "default is NOT calibrated -- pass --n_sims 50 explicitly (see "
-             "models.NEF.NEF_DEFAULT_N_SIMS and docs/HISTORY.md for where that "
-             "ballpark comes from: cheap-model calibration, not a direct NEF "
-             "measurement), and note NEF's own activity file must have been "
-             "precomputed with a matching --n_sims.",
+             "is ~0.45s/eval, i.e. ~2.3 min for a 300-trial fit.",
     )
     parser.add_argument(
         "--override_from_folder", default=None,

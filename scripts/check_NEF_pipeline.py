@@ -34,19 +34,16 @@ not just a slow path. If the file is missing, this script raises with the
 exact command to generate it -- regenerate deliberately, don't let a script
 decide to do it for you.
 
---n_sims_ensemble N (optional) also runs a REAL Nengo equivalence check of
-NEF.simulate_ensemble against NEF.run() -- see check_ensemble_invariant
-below. This is the check CLAUDE.md's "NEF architecture" section flags as
-missing: scripts/verify_ensemble_invariant.py covers the math-model ensemble
-paths but never touches models.NEF, so this is the closest thing to a real
-Nengo-level correctness check the multi-seed/NLL mechanism has. Needs an
-activity file with n_trials*n_sims entries for the sampled trials --
-regenerate with --precompute_activities --n_sims N first if it raises.
+NOTE: this script used to also support --n_sims_ensemble, a real Nengo
+equivalence check of NEF.simulate_ensemble (NEF's multi-seed NLL ensemble)
+against NEF.run(). That branch, and NEF's own simulate_ensemble, are
+retired (too expensive to run -- see docs/DECISIONS.md); this script now
+only does the RMSE-vs-RL_lambda check and dynamics plots below.
 
 Usage:
     python scripts/check_NEF_pipeline.py --dataset soltani_numbers --pid 3 \
         --alpha_0 0.6 --lambda_ 0.4 --n_neurons 200 --n_neurons_counting 1000 \
-        --n_trials 8 --plot_trials 3 --n_sims_ensemble 5
+        --n_trials 8 --plot_trials 3
 """
 
 from __future__ import annotations
@@ -68,7 +65,6 @@ from fitting.model_params import MODEL_PARAMS
 from models import math_models
 from models.NEF import PARAM_DEFAULTS, build_network
 from models.NEF import run as nef_run
-from models.NEF import simulate_ensemble as nef_simulate_ensemble
 from models.counting_integrator import (
     activity_key_for_trial,
     fast_decode as fast_decode_counting,
@@ -756,60 +752,9 @@ def print_report(params: dict, trials: list[int], result: dict) -> None:
         print(f"    obs {o}: {v:.4f}")
 
 
-def check_ensemble_invariant(params: dict, trials: list[int], n_sims: int) -> None:
-    """REAL Nengo-level check of NEF.simulate_ensemble against NEF.run() --
-    the check CLAUDE.md's "NEF architecture" section flags as missing
-    (scripts/verify_ensemble_invariant.py only covers the math-model
-    ensemble paths, never models.NEF). Two things, both genuine invariants
-    rather than tautologies, since simulate_ensemble and run() are two
-    independently-written code paths:
-
-    1. sim=1's ensemble row must EXACTLY match run()'s point-estimate
-       response, because activity_key_for_trial(dataset, trial, sim=1) --
-       what simulate_ensemble uses for sim 1 -- IS activity_key_for_trial
-       (dataset, trial) -- what run() uses. If these ever disagree, either
-       the seed formula or one of the two simulation paths has a real bug.
-    2. Different sims must give genuinely DIFFERENT responses for the same
-       row. If they don't, the multi-seed mechanism isn't doing what it
-       claims (e.g. a key-lookup bug silently resolving every sim to the
-       same seed).
-
-    REQUIRES an activity file with n_trials*n_sims entries for the sampled
-    trials -- raises (from within NEF.simulate_ensemble) with the exact
-    regenerate command if it doesn't have them.
-    """
-    print(f"\nEnsemble invariant check (n_sims={n_sims}, trials={trials}):")
-    ens, idx = nef_simulate_ensemble(params, n_sims, trials=trials, return_index=True)
-    run_df = nef_run(params, trials=trials)
-
-    sim1_df = idx.copy()
-    sim1_df["response_ensemble"] = ens[0, :]
-    merged = sim1_df.merge(
-        run_df[["trial", "observation", "response"]], on=["trial", "observation"]
-    )
-    if len(merged) != len(sim1_df):
-        raise ValueError(
-            f"Row mismatch aligning simulate_ensemble against run(): "
-            f"{len(sim1_df)} ensemble rows, {len(merged)} matched. Both should "
-            f"cover exactly the same (trial, observation) pairs."
-        )
-    diff = (merged["response_ensemble"] - merged["response"]).abs()
-    max_diff = float(diff.max())
-    verdict1 = "PASS" if max_diff < 1e-9 else "FAIL -- see models/NEF.py's simulate_ensemble/run()"
-    print(f"  sim=1 vs run() max abs diff: {max_diff:.2e}  [{verdict1}]")
-
-    per_row_std = ens.std(axis=0)
-    verdict2 = (
-        "PASS -- genuine per-sim spread"
-        if per_row_std.min() > 1e-9
-        else "FAIL -- sims are not independent; check activity_key_for_trial(sim=...) usage"
-    )
-    print(
-        f"  per-row std across sims: mean={per_row_std.mean():.4f} "
-        f"min={per_row_std.min():.4f} max={per_row_std.max():.4f}  [{verdict2}]"
-    )
-
-
+# check_ensemble_invariant() (real Nengo check of the retired
+# NEF.simulate_ensemble against NEF.run()) was removed along with that
+# ensemble branch -- see docs/DECISIONS.md.
 def plot_comparison(params: dict, result: dict, out_stem: str) -> None:
     apply_style()
     merged = result["merged"].sort_values(["trial", "observation"])
@@ -992,14 +937,6 @@ def main() -> None:
     p.add_argument("--save_panels", action="store_true", default=False,
                     help="Also export individual per-panel PDFs for the "
                          "plotted trials (slide-deck use)")
-    p.add_argument("--n_sims_ensemble", type=int, default=0,
-                    help="If >0, also run check_ensemble_invariant (a real "
-                         "Nengo check of NEF.simulate_ensemble against "
-                         "NEF.run(), plus non-degeneracy across sims) with "
-                         "this many sims, on the sampled trials. Needs an "
-                         "activity file with n_trials*n_sims entries -- "
-                         "generate with --precompute_activities --n_sims N "
-                         "first.")
     args = p.parse_args()
 
     params = _load_params(
@@ -1062,11 +999,6 @@ def main() -> None:
         plot_dynamics(probe_data, trial)
         if args.save_panels:
             save_individual_panels(probe_data, trial)
-
-    # ── Ensemble invariant check (optional, real Nengo) ─────────────────────
-    if args.n_sims_ensemble > 0:
-        check_ensemble_invariant(params, sampled, args.n_sims_ensemble)
-
 
 if __name__ == "__main__":
     main()

@@ -173,7 +173,6 @@ def _run_n_neurons_scan(
     import time as _time
     from fitting.model_params import _NEF_FIXED
     from models.NEF import PARAM_DEFAULTS, _pretrain, _simulate_trial
-    from models.RNN import fit as rnn_fit
     from models.counting_integrator import (
         fast_decode, precompute_activities,
     )

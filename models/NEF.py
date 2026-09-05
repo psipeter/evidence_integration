@@ -121,17 +121,9 @@ def _pretrain(params: dict) -> dict:
     return decode_counting_integrator(raw, p)
 
 
-# Ballpark default for NEF's NLL ensemble size (see docs/HISTORY.md), from
-# CHEAP-MODEL calibration (NoisyRL_lambda proxy, scripts/calibrate_nll_nsims.py)
-# rather than a direct NEF measurement -- NEF's own noise magnitude/mechanism
-# hasn't been checked against this number yet, so treat it as a starting
-# point to raise later for a more exact estimate, not a validated final
-# answer the way fitting/fit.py's own n_sims=100 is documented to be for
-# NoisyRL_lambda's sigma_resp. Deliberately NOT wired into fitting.fit's own
-# shared --n_sims CLI default (that flag applies to every --loss nll model
-# type and stays at its own validated default for NoisyRL_lambda/
-# _resp_noise) -- pass --n_sims 50 explicitly when fitting NEF under NLL.
-NEF_DEFAULT_N_SIMS = 50
+# NEF_DEFAULT_N_SIMS and simulate_ensemble() (NEF's multi-seed NLL
+# ensemble) were retired -- too expensive to run at scale. See
+# docs/DECISIONS.md and archive/models/archive_NEF_simulate_ensemble.py.
 
 
 def _require_activity_map(
@@ -487,120 +479,6 @@ def run(
     if save:
         out.to_pickle(data_path(f"{pfull['model_type']}_{stem}_{pid}.pkl"))
     return out
-
-
-def simulate_ensemble(
-    params: dict, n_sims: int, return_index: bool = False, trials: list | None = None,
-):
-    """n_sims independent realisations of NEF, one per (trial, sim), for a
-    distributional (NLL) loss -- the NEF analogue of
-    models.math_models.simulate_ensemble, added to support NEF's --loss nll
-    path (see docs/HISTORY.md and fitting/fit.py's dispatch).
-
-    UNLIKE run()'s single canonical seed per trial (activity_key_for_trial's
-    trial-tied seed, giving one deterministic point-estimate response), each
-    sim here uses a GENUINELY DIFFERENT seed -- and therefore genuinely
-    different neural tuning curves -- for the SAME trial's stimulus.
-    activity_key_for_trial(dataset, trial, sim) supplies that seed; see its
-    own docstring for why reusing seeds ACROSS TRIALS (rather than across
-    sims within a trial) would silently correlate supposedly-independent
-    ensemble members instead of giving genuine per-sim independence.
-
-    REQUIRES an activity file with n_trials * n_sims entries, not just
-    n_trials -- see counting_integrator.precompute_activities' own n_sims
-    parameter. Generate with --precompute_activities --n_sims N (resumable:
-    growing an existing file to a larger n_sims does not re-simulate the
-    keys it already has).
-
-    `trials` (optional, unlike math_models.simulate_ensemble which has no
-    such option -- added because a real Nengo ensemble costs n_trials*n_sims
-    real simulations, unlike a cheap closed-form math model, so restricting
-    to a subset matters in practice, e.g. for scripts/check_NEF_pipeline.py's
-    ensemble-invariant check): if given, only those trials are simulated,
-    same filtering convention as run()'s own `trials` argument.
-
-    Returns (n_sims, n_rows), rows ordered exactly as run() returns them
-    (sorted by trial, then observation) -- the same convention
-    models.math_models.simulate_ensemble uses, so both can be sliced/scored
-    identically by fitting.losses.nll_from_ensemble.
-
-    Applies the SAME post-processing run() applies
-    (nef_response_to_model_scale, then apply_binary_transform) rather than a
-    second, hand-rolled copy of it -- math_models.simulate_ensemble's own
-    docstring flags exactly this as a real risk (it has to inline carrabin's
-    Laplace-shrinkage formula itself, with a comment warning that re-deriving
-    it must stay in sync with utils/binary_transform.py). Here that risk is
-    avoided entirely: apply_binary_transform is called directly, once, on
-    the full stacked (sim, trial, observation) frame.
-    """
-    pfull = {**PARAM_DEFAULTS, **params}
-    pfull["nef_type"] = "recurrent"
-    dataset = pfull["dataset"]
-    pid = int(pfull["pid"])
-
-    stem = dataset_stem(dataset, pfull.get("datafile"))
-    human_pid = pd.read_pickle(data_path(f"{stem}.pkl")).query("pid == @pid")
-    if trials is not None:
-        human_pid = human_pid[human_pid["trial"].isin(trials)]
-
-    _activity_map = _require_activity_map(
-        int(pfull["n_neurons"]), int(pfull["n_neurons_counting"]),
-        str(dataset), n_sims=n_sims,
-    )
-
-    per_trial = []
-    index_rows = []
-    for trial, trial_data in human_pid.groupby("trial"):
-        trial_data = trial_data.sort_values("observation")
-        obs_values = nef_obs_values(
-            trial_data["value"].to_numpy(dtype=float), dataset
-        )
-        n_obs = len(obs_values)
-        out = np.empty((n_sims, n_obs))
-        for sim in range(1, n_sims + 1):
-            akey = activity_key_for_trial(dataset, trial, sim=sim)
-            p = {**pfull, "seed": akey}
-            activity = _activity_map.get(akey)
-            if activity is None:
-                raise KeyError(
-                    f"No precomputed counting activity for key {akey} "
-                    f"(dataset={dataset!r}, trial={int(trial)}, sim={sim}). "
-                    f"The activity file needs n_trials*n_sims entries -- "
-                    f"regenerate with --precompute_activities "
-                    f"--n_sims {n_sims}."
-                )
-            decoders = fast_decode_counting(
-                activity,
-                alpha_0=float(pfull["alpha_0"]),
-                lambda_=float(pfull["lambda_"]),
-            )
-            out[sim - 1, :] = _simulate_trial(obs_values, p, decoders)
-        per_trial.append(out)
-        obs_labels = trial_data["observation"].to_numpy()
-        index_rows.append(pd.DataFrame(
-            {"trial": [int(trial)] * len(obs_labels), "observation": obs_labels}))
-
-    ens_raw = np.concatenate(per_trial, axis=1)  # (n_sims, n_rows), pre-transform
-    index_df = pd.concat(index_rows, ignore_index=True)
-    n_rows = ens_raw.shape[1]
-
-    # Apply run()'s own post-processing ONCE on the full stacked frame,
-    # rather than per-sim or via a re-derived formula.
-    long_df = pd.DataFrame({
-        "model_type": pfull["model_type"],
-        "pid": pid,
-        "trial": np.tile(index_df["trial"].to_numpy(), n_sims),
-        "observation": np.tile(index_df["observation"].to_numpy(), n_sims),
-        "response": [
-            nef_response_to_model_scale(float(v), dataset) for v in ens_raw.ravel()
-        ],
-    })
-    long_df = apply_binary_transform(long_df, dataset)
-    ens = long_df["response"].to_numpy().reshape(n_sims, n_rows)
-
-    if return_index:
-        return ens, index_df
-    return ens
 
 
 def parse_args() -> argparse.Namespace:

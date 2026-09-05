@@ -1,33 +1,31 @@
-"""Verify models.math_models against run(seed=i)/run() directly, for every
+"""Verify models.math_models.add_noise against run() directly, for every
 dataset/model combination this project fits under --loss nll.
 
-Not a pytest suite -- this project has none. Run this manually after touching
-simulate_ensemble, add_noise, _noisy_rl_lambda_response, or
-_validate_model_dataset's allowlists, and before trusting a fit that used
---loss nll on a dataset/model it has not been run against before.
+Not a pytest suite -- this project has none. Run this manually after
+touching add_noise, _resp_noise_seed, or _validate_model_dataset's
+allowlists, and before trusting a fit that used --loss nll on a
+dataset/model it has not been run against before.
 
-Two checks, for the two ensemble sources fit.py dispatches between:
+Checks add_noise, for deterministic base models wrapped with i.i.d.
+response noise (_NOISE_WRAPPABLE_BASE_MODELS, e.g. RL_lambda via
+"RL_lambda_resp_noise"):
+  (a) it reduces EXACTLY to run()'s deterministic output at sigma=0,
+  (b) the empirical mean across a large ensemble is close to that same
+      deterministic mu (a sanity bound on Monte Carlo error, not an exact
+      equality), and (c) the empirical SD is close to the requested
+      sigma_resp.
+  (d) it accepts BOTH the bare model name ("RL_lambda") and the
+      fitting-time suffixed name ("RL_lambda_resp_noise") identically,
+      since fit.py passes the suffixed name and a bug here silently broke
+      that path once already.
 
-1. simulate_ensemble, for genuinely stochastic models (_STOCHASTIC_ENSEMBLE_MODELS,
-   e.g. NoisyRL_lambda). Checks simulate_ensemble(params, n)[i] ==
-   run({**params, "seed": i}).response for several seeds -- this is the check
-   that caught two real bugs while extending NoisyRL_lambda to carrabin: an
-   editing accident that deleted three of _run_carrabin's branches, and
-   simulate_ensemble labelling columns with a synthetic range(n_obs) instead of
-   the dataset's real (possibly 1-indexed) observation values, which fed the
-   wrong `t` into carrabin's Laplace-shrinkage formula. Both were invisible to
-   py_compile and to exercising individual branches in isolation.
-
-2. add_noise, for deterministic base models wrapped with i.i.d. response noise
-   (_NOISE_WRAPPABLE_BASE_MODELS, e.g. RL_lambda via "RL_lambda_resp_noise").
-   Checks (a) it reduces EXACTLY to run()'s deterministic output at sigma=0,
-   (b) the empirical mean across a large ensemble is close to that same
-   deterministic mu (a sanity bound on Monte Carlo error, not an exact
-   equality), and (c) the empirical SD is close to the requested sigma_resp.
-   Also checks it accepts BOTH the bare model name ("RL_lambda") and the
-   fitting-time suffixed name ("RL_lambda_resp_noise") identically, since
-   fit.py passes the suffixed name and a bug here silently broke that path
-   once already this session.
+NOTE: this script used to also check models.math_models.simulate_ensemble
+against run(seed=i) for genuinely-stochastic models (NoisyRL_lambda). That
+model, and simulate_ensemble itself, were retired (state-noise models
+phased out of active analysis -- see docs/DECISIONS.md), so that check is
+gone too. If ever restored, see
+archive/models/archive_math_models_noise.py and git history for this
+script's pre-retirement version.
 """
 import sys
 import warnings
@@ -39,13 +37,10 @@ sys.path.insert(0, ".")
 warnings.filterwarnings("ignore")
 
 from models import math_models as mm
-from models.math_models import _NOISE_WRAPPABLE_BASE_MODELS, _STOCHASTIC_ENSEMBLE_MODELS
+from models.math_models import _NOISE_WRAPPABLE_BASE_MODELS
 from utils.paths import data_path
 
 DATASETS = ["carrabin", "yoo", "soltani_numbers", "soltani_colors"]
-ENSEMBLE_PARAM_SETS = {
-    "NoisyRL_lambda": dict(alpha_0=0.9, lambda_=0.6, sigma_state=0.02),
-}
 BASE_PARAM_SETS = {
     "Mean": dict(),
     "LeakyIntegrator": dict(gamma=0.5),
@@ -69,26 +64,7 @@ def check(dataset, model_type, worst, label):
     print(f"  {dataset:16s} {model_type:22s} {label:26s} {worst:.2e}  {status}")
 
 
-print("=== simulate_ensemble vs run(seed=i) ===")
-for dataset in DATASETS:
-    df = pd.read_pickle(data_path(f"{dataset}.pkl"))
-    pid = int(df["pid"].iloc[0])
-    for model_type in sorted(_STOCHASTIC_ENSEMBLE_MODELS):
-        try:
-            mm._validate_model_dataset(model_type, dataset)
-        except ValueError:
-            continue  # not registered for this dataset -- skip
-        params = dict(model_type=model_type, dataset=dataset, pid=pid, save=False,
-                     **ENSEMBLE_PARAM_SETS[model_type])
-        ens = mm.simulate_ensemble(params, N_SIMS)
-        worst = 0.0
-        for i in range(N_SIMS):
-            ref = (mm.run({**params, "seed": i})
-                   .sort_values(["trial", "observation"])["response"].to_numpy())
-            worst = max(worst, float(np.abs(ens[i] - ref).max()))
-        check(dataset, model_type, worst, "matches run(seed=i)")
-
-print("\n=== add_noise vs run() ===")
+print("=== add_noise vs run() ===")
 for dataset in DATASETS:
     df = pd.read_pickle(data_path(f"{dataset}.pkl"))
     pid = int(df["pid"].iloc[0])

@@ -1,4 +1,7 @@
 # NOTE: jiang/usher params in archive/fitting/archive_model_params.py
+# NOTE: NoisyCounting/NoisyRL_lambda params, and MLE_PARAMS/
+# NEF_N_NEURONS_VALUES, retired -- see
+# archive/fitting/archive_model_params_retired.py and docs/DECISIONS.md.
 """
 Single source of truth for all model parameters.
 
@@ -63,11 +66,6 @@ _NEF_RANGES: dict[str, tuple] = {
 MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     "carrabin": {
         "Mean": {},
-        "NoisyCounting": {
-            "mu": (0.001, 2.0, 0.001),
-            "sigma_c": (0.001, 2.0, 0.001),
-            "nu": (0.001, 2.0, 0.001),
-        },
         "LeakyIntegrator": {
             "gamma": (0.001, 0.999, 0.001),
         },
@@ -81,20 +79,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-        },
-        "NoisyRL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
-            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
-            # via add_noise()) at EQUAL parameter count. See
-            # models/math_models.py's _noisy_rl_lambda_response docstring and
-            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
-            # only, not calibrated -- --loss nll finds a genuine interior optimum
-            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
-            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
-            # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -138,20 +122,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
-        },
-        "NoisyRL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
-            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
-            # via add_noise()) at EQUAL parameter count. See
-            # models/math_models.py's _noisy_rl_lambda_response docstring and
-            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
-            # only, not calibrated -- --loss nll finds a genuine interior optimum
-            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
-            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
-            # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -201,20 +171,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
-        "NoisyRL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
-            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
-            # via add_noise()) at EQUAL parameter count. See
-            # models/math_models.py's _noisy_rl_lambda_response docstring and
-            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
-            # only, not calibrated -- --loss nll finds a genuine interior optimum
-            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
-            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
-            # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 2.0, 0.001),
-        },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
         # as NoisyRL_lambda's sigma_state -- the pairing that isolates whether
@@ -259,20 +215,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             "alpha_0": (0.01, 1.0, 0.001),
             "lambda_": (0.01, 1.0, 0.001),
         },
-        "NoisyRL_lambda": {
-            "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-            # sigma_resp REMOVED -- this is now STATE-NOISE-ONLY, by design, so it
-            # can be compared against RL_lambda_resp_noise (i.i.d. response noise
-            # via add_noise()) at EQUAL parameter count. See
-            # models/math_models.py's _noisy_rl_lambda_response docstring and
-            # docs/HISTORY.md for the split. Floor 0.001 is a TECHNICAL floor
-            # only, not calibrated -- --loss nll finds a genuine interior optimum
-            # on its own (verified: NLL fell from 389 at sigma=0.001 to -2.46 at
-            # the optimum and rose again beyond it), so a fit pinned at 0.001 is a
-            # genuine finding, not evidence the floor needs raising.
-            "sigma_state": (0.001, 2.0, 0.001),
-        },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
         # as NoisyRL_lambda's sigma_state -- the pairing that isolates whether
@@ -306,37 +248,9 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     },
 }
 
-# Parameter ranges for MLE fitting (sim_db / fit_mle.py).
-# Narrower and more realistic than MODEL_PARAMS ranges, since MLE is
-# sensitive to extreme params (likelihood blows up for very wide distributions).
-# Informed by RMSE-fitted distributions plus expected state-noise range.
-MLE_PARAMS: dict[str, dict[str, dict[str, object]]] = {
-    "carrabin": {
-        "NoisyCounting": {
-            "mu":      (0.05,  0.40,  0.002),   # expanded upper; finer step
-            "sigma_c": (0.001, 0.30,  0.002),   # RMSE collapses to ~0; MLE recovers ~0.03-0.08
-            "nu":      (0.001, 0.35,  0.002),   # expanded upper; pid1 nu=0.21 near old bound
-            "fixed": {},
-        },
-        "NEF": {
-            "lambda_": (0.01, 1.0, 0.001),
-            "alpha_0": (0.01, 1.0, 0.001),
-            # n_neurons is discrete — list signals CategoricalDistribution in fit_mle.py
-            # n_neurons_counting is always set equal to n_neurons
-            "n_neurons": "categorical",
-            "fixed": {
-                **{k: v for k, v in _NEF_FIXED.items()
-                   if k not in ("n_neurons", "n_neurons_counting")},
-                "radius_c": 5,
-            },
-        },
-    },
-}
-
-# Discrete n_neurons values for NEF MLE fitting.
-# Activity files must exist: data/counting_activities_n{N}_nc{N}_carrabin.pkl
-# Generate locally then scp to cluster before submitting MLE jobs.
-NEF_N_NEURONS_VALUES: list[int] = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
+# MLE_PARAMS and NEF_N_NEURONS_VALUES (MLE fitting via sim_db/fit_mle.py)
+# retired along with NoisyCounting and the MLE pipeline itself -- see
+# docs/DECISIONS.md and archive/fitting/archive_model_params_retired.py.
 
 
 # diederen model params archived in archive/misc/

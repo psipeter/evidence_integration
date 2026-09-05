@@ -429,10 +429,11 @@ def main() -> None:
     parser.add_argument(
         "--loss", dest="loss", choices=("rmse", "nll"), default="rmse",
         help="Loss fitting.fit minimises -- see that module's docstring. 'nll' "
-             "only for models in models.math_models._STOCHASTIC_ENSEMBLE_MODELS "
-             "or a '<model>_resp_noise' name; fitting.fit itself validates this "
-             "before creating an Optuna study, so an invalid combination fails "
-             "per-job rather than blocking the whole submit call.",
+             "only for a '<model>_resp_noise' name (NEF's and NoisyRL_lambda's "
+             "own NLL branches are retired, see docs/DECISIONS.md); fitting.fit "
+             "itself validates this before creating an Optuna study, so an "
+             "invalid combination fails per-job rather than blocking the whole "
+             "submit call.",
     )
     parser.add_argument(
         "--n_sims", type=int, default=100,

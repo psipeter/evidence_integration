@@ -8,24 +8,19 @@ from pathlib import Path
 
 DEFAULT_TIME_LIMITS = {
     "Mean": "0:30:0",
-    "NoisyCounting": "24:0:0",
     "RL": "2:0:0",
     "RL_lambda": "2:0:0",
-    "NoisyRL_lambda": "6:0:0",
-    "Mean": "0:30:0",
     "LeakyIntegrator": "1:0:0",
     "PrimacyRecency": "2:0:0",
     "PearceHall": "2:0:0",
     "NEF": "72:0:0",
 }
+# NoisyCounting/NoisyRL_lambda entries removed -- both retired, see docs/DECISIONS.md.
 
 DEFAULT_MEM_LIMITS = {
     "Mean": "8G",
-    "NoisyCounting": "16G",
     "RL": "8G",
     "RL_lambda": "8G",
-    "NoisyRL_lambda": "8G",
-    "Mean": "8G",
     "LeakyIntegrator": "4G",
     "PrimacyRecency": "8G",
     "PearceHall": "8G",

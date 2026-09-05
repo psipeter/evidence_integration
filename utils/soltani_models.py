@@ -30,24 +30,23 @@ models leaves them human-only rather than drawing flat lines at zero.
 """
 from __future__ import annotations
 
-# Append-only; index determines colour. NoisyRL_lambda is last so that adding it
-# left every existing model's colour untouched.
+# Append-only; index determines colour.
 MODEL_ORDER = [
     "Mean",
     "LeakyIntegrator",
     "PrimacyRecency",
     "RL_lambda",
     "NEF",
-    "NoisyRL_lambda",
 ]
+# NoisyRL_lambda was here (last entry) until retired -- see docs/DECISIONS.md.
+# Removing it was safe re: colour stability since it was the LAST entry (see
+# module docstring's "APPEND-only" rule); nothing else's index moved.
 
 DEFAULT_MODELS = ["Mean", "LeakyIntegrator", "PrimacyRecency"]
 
-# Models with a genuine noise term. NoisyRL_lambda qualifies only when its noise
-# is actually nonzero -- under RMSE fitting both sigmas pile up at their lower
-# bounds (measured: 35/35 at floor for numbers), so with floors of 0 it would
-# behave exactly like RL_lambda and draw a flat line here.
-STOCHASTIC_MODELS = frozenset({"NEF", "NoisyCounting", "NoisyRL_lambda"})
+# Models with a genuine noise term. NoisyCounting/NoisyRL_lambda retired
+# (docs/DECISIONS.md) -- NEF is the only one left in active analysis.
+STOCHASTIC_MODELS = frozenset({"NEF"})
 
 
 def add_model_args(parser, default: list[str] | None = None) -> None:
@@ -57,7 +56,7 @@ def add_model_args(parser, default: list[str] | None = None) -> None:
         "--models", nargs="+", default=None, metavar="MODEL",
         help="Which fitted models to overlay, in this order. Choose from "
              f"{', '.join(MODEL_ORDER)}. Default {', '.join(d)} -- the three "
-             "baselines; RL_lambda, NoisyRL_lambda and NEF are opt-in so a "
+             "baselines; RL_lambda and NEF are opt-in so a "
              "default figure stays readable. Pass --models with no effect on "
              "colours: each model's colour comes from its position in the full "
              "MODEL_ORDER, not from the requested subset, so subset figures stay "
