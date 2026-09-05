@@ -281,3 +281,30 @@ switch happened and why.
 
 **Full investigation:** `archive/HISTORY_modeling_2026.md`.
 
+---
+
+## Legacy per-dataset figure scripts retired in favor of make_paper_figures.py
+
+**Decision:** the split per-dataset P/V/T/N figure scripts
+(`figure_{carrabin,yoo,soltani}_{performance,variability,temporal,neural}.py`),
+the two older legacy combined figures (`figure_carrabin.py`,
+`figure_yoo.py`), and the neural data-generation scripts that fed the old
+N1-N8 taxonomy (`extras_carrabin.py`, `extras_yoo.py`, plus the job
+scripts that only ever invoked them) are retired from active use, in
+favor of `scripts/make_paper_figures.py`'s consolidated `make_*`
+functions.
+
+**Why:** a thorough review compared every panel/function in the retired
+scripts against `make_paper_figures.py`'s current `make_*` functions and
+found each one either already has a newer equivalent there, or computed a
+metric deliberately dropped from the current figure set. The N1-N8
+per-task neural taxonomy specifically (`figure_carrabin_neural.py`/
+`figure_yoo_neural.py`) only ever covered HALF the neural story per task
+(carrabin has a real fitted sigma but no fitted lambda; yoo the reverse)
+-- exactly the gap closed by `neural_main`'s soltani-only design, which
+runs on one task with both real fits in hand. The project owner confirmed
+this comparison against the rendered figures themselves before
+archiving.
+
+**Full investigation:** `archive/HISTORY_modeling_2026.md`.
+

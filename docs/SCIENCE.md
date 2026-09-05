@@ -106,7 +106,7 @@ giants retired alongside `neural_giant` in favour of the row-based
 with the MLE fitting pipeline built for it, the RNN conditional-mean
 estimator, and NEF's own NLL/multi-seed-ensemble branch (too expensive to
 run at the scale this project needs). None of this affects the RMSE-fit
-models the P/T/N figures are built on (Mean, LeakyIntegrator,
+models the figures above are built on (Mean, LeakyIntegrator,
 PrimacyRecency, RL_lambda, NEF, and the still-active `_resp_noise`
 i.i.d.-noise wrapper). Code archived under `archive/models/`,
 `archive/fitting/`; full reasoning in `docs/DECISIONS.md`.
@@ -153,101 +153,154 @@ retired (too expensive to run at scale; see docs/DECISIONS.md and
 
 ---
 
-## Metric taxonomy (PTN framework)
+## Metric taxonomy
 
-All analyses and figure panels are organised under three groups. Figures
-save PDF only.
+All analyses and figure panels are organised around the central model's
+own free parameters — `alpha_0`/`lambda_` (the decay-rate construct) and
+`sigma_resp` (the noise construct) — bookended by overall model
+performance and by the neural mechanism that realises both constructs
+biophysically. Figures save PDF only.
 
-### P — Performance
-| Code | Metric | Carrabin | Yoo |
-|------|--------|----------|-----|
-| P1 | Estimation error: RMSE to hidden probability / true mean, per pid | Y | Y |
-| P2 | Model fit: RMSE to human responses, per pid | Y | Y |
+### 1. Model performance (RMSE)
+Establishes the models — including NEF — as credible fits to human
+behaviour, supporting Goal 1's cross-task generalisation claim:
+`task-specific model ≈ NEF > LeakyIntegrator ≥ PrimacyRecency ≥ Mean`.
+`model_performance` is the main 4-task comparison (Mean/LeakyIntegrator/
+PrimacyRecency/RL_lambda/NEF); `model_best_fit` and
+`model_performance_nll` give the same comparison as best-fit-fraction and
+NLL views; `temporal_performance` shows the human error trajectory
+(RMSE-to-ground-truth vs observation) across all four tasks.
 
-### T — Temporal
-| Code | Metric | Carrabin | Yoo |
-|------|--------|----------|-----|
-| T1 | Task performance vs observation | Y | Y |
-| T2 | Response change vs observation (mean \|Δresponse\|) | Y | Y |
-| T3 | Split-half reliability of λ | N | Y |
-| T4 | λ_model vs λ_human (individual differences) | N | Y |
-| T5 | Residual variance growth across obs (state noise accumulation) | Y | N |
-| T6 | Within-trial residual autocorrelation decay (state persistence) | Y | N |
+### 2. Lambda exploration
+The discounting/recency-bias signature of power-law integration (Goal 2).
 
-### N — Neural (NEF predictions; testable in future empirical experiments)
-| Code | Metric | Carrabin | Yoo |
-|------|--------|----------|-----|
-| N1 | Decoded PE timecourse within observation window | Y | Y |
-| N2 | PE variability vs response variability (partial-r control for α₀) | Y | N |
-| N3 | Response/PE variability vs fitted α₀ | Y | N |
-| N4 | Response/PE variability vs n_neurons scan | Y | N |
-| N5-N8 | Weight-neuron activity/λ relationships | N | Y |
+**2.1 Response change decay across tasks.** Update magnitude
+(`|Δresponse|`) shrinks with observation count, at a task-appropriate
+rate — `response_change` (main 4-task figure, human + 5 models),
+`lambda_metric` (illustration of the power-law fitting procedure),
+`lambda_main` (composite pairing response-change with fitted-λ
+distributions).
 
-N1-N8 above is the older per-task taxonomy (`figure_carrabin_neural.py`/
-`figure_yoo_neural.py`); the current consolidated argument lives in
-`neural_main` (above), run on `soltani_numbers` specifically — the one
-task with both a real fitted σ and a real fitted λ.
+**2.2 Individual differences for humans.** A single fitted λ per person
+locates them on the primacy↔recency spectrum — `lambda_human` (per-task λ
+distributions across participants), `lambda_overview` (adds cross-task
+reliability underneath).
 
----
+### 3. Sigma exploration
+Goal 4's novel prediction: spiking noise is qualitatively different from
+i.i.d. response noise, and NEF — not the deterministic-plus-`_resp_noise`
+models — is the one that reproduces it.
 
-## Scientific narrative per figure group
+**3.1 Individual differences in response variability for humans.** How
+noisy is each person's response to a repeated, identical stimulus —
+`variability_human` (per-task KDE, human-only) and `variability_models`
+(same, with model overlay).
 
-### P figures — establishing the model as a credible fit
-NEF is competitive with or better than Mean/LI/PR on RMSE, both tasks.
-NoisyCounting performs best on carrabin (task-specific, expected). On
-yoo, Mean has near-zero estimation error (it computes the exact running
-mean) but humans diverge from it — motivating the temporal analyses.
-Cross-task consistency of this pattern is the contribution.
+**3.2 Growth of variability during the early sequence.** Response noise
+should accumulate over the course of a trial if it's state-persistent
+rather than i.i.d. — `sigma_main` row 2 (normalised residual-variance
+growth vs observation, human + models + NEF, all three tasks). NEF tracks
+the human growth pattern; the `_resp_noise` models do not.
 
-### V figures — response variability structure (carrabin only)
-NEF produces the right level and temporal structure of response
-variability, which deterministic models (Mean, LI, PR) structurally
-cannot, since they give identical responses to identical inputs.
+**3.3 Autocorrelation of deviation from average behaviour at time t vs
+t+k.** The more direct signature of state persistence: genuine
+state-persistent noise produces decaying positive autocorrelation of the
+residual; pure i.i.d. response noise looks like scatter around zero at
+every lag — `variance_autocorr_human`/`variance_autocorr_models`
+(dedicated 4-panel figures) and `sigma_main` row 3 (folded into the
+composite). As with growth, NEF reproduces the human autocorrelation
+pattern; the `_resp_noise` models don't.
 
-### T figures — temporal dynamics of evidence integration
-NEF captures within-sequence update dynamics: decay of update magnitude
-(recency bias), individual λ differences, and accumulation/persistence of
-response variability.
+Together, 3.2 and 3.3 are the empirical core of Goal 4: two independent
+metrics, both distinguishing NEF's spiking-noise mechanism from ordinary
+response noise on the same behavioural data the models were fit to.
 
-### N figures — neural predictions
-The error ensemble generates quantitative neural predictions — PE
-dynamics, variability scaling with α₀/n_neurons, weight-neuron activity
-profiles — internally consistent with the behavioural fit and testable in
-future neural recording studies. `neural_main` is the current, sole
-authoritative version of this argument (see "Current thread" above).
+**Supplementary:**
+1. **Lambda for balls task (no decay)** — `lambda_balls`, kept separate
+   since balls doesn't show the expected decay the other three tasks do.
+2. **Lambda and sigma reliability within and across tasks** —
+   `lambda_reliability`/`sigma_reliability` (odd/even split-half, within
+   task), `lambda_sigma_crosstask` (colors-vs-numbers, paired),
+   `lambda_sanity_human`/`sigma_sanity_human` (combined reliability +
+   cross-task).
+3. **Lambda and sigma, human vs model** — `lambda_model_correlation`/
+   `lambda_humanvmodel` and `sigma_model_correlation`: how well each
+   model's own fitted λ/σ tracks the same participant's.
+
+### 4. Neural predictions
+Goal 3's joint behavioural-and-neural account, realised in one figure,
+`neural_main`, run on `soltani_numbers` (the one task with both a real
+fitted λ and a real fitted σ). Each row isolates one architectural
+parameter causally via a controlled sweep, and each row shares the same
+internal structure: observe the qualitative phenomenon, show it scales
+with the parameter, then predict an individual-difference signature
+testable with future spike-resolved recordings.
+
+- **Row 1 — oddball experiment (α₀).** A run of consistent inputs
+  followed by an oddball: the error population's decoded PE rises sharply
+  then declines as the value estimate updates in real time. Magnitude and
+  decline rate both depend on the synaptic learning rate α₀; individuals
+  with larger oddball PE responses are predicted to adapt fastest.
+- **Row 2 — error activity decline across the block (λ).** Error-sensitive
+  neurons' activity decays over the course of a block, producing
+  progressively smaller (more conservative) value updates later on. Both
+  the activity decay and the shrinking update size depend on the synaptic
+  modulation λ; individuals with larger activity attenuation are predicted
+  to show the most stable late-block behaviour.
+- **Row 3 — oddball SNR / response variability (n_neurons).** The decoded
+  value signal drifts over time, producing different responses to
+  identical repeated sequences. Both response variability and
+  within-trial error-population variability depend on the number of
+  simulated neurons; individuals with the most inconsistent post-oddball
+  error-population readouts are predicted to show the most response
+  variability.
 
 ---
 
 ## Current figure panel inventory
 
-| Script | Group | Layout | Status |
-|---|---|---|---|
-| figure_carrabin_performance.py | P | 1×3 | Built |
-| figure_carrabin_variability.py | V | 1×4 | Built |
-| figure_carrabin_temporal.py | T | 1×4 | Built |
-| figure_carrabin_neural.py | N | 1×4 | Built (older per-task taxonomy) |
-| figure_yoo_performance.py | P | 1×3 | Built |
-| figure_yoo_temporal.py | T | 1×4 | Built |
-| figure_yoo_neural.py | N | 1×4 | Built (older per-task taxonomy) |
-| figure_soltani_performance.py | P | 2×3 | Built, human-only (real pilot data) |
-| figure_soltani_temporal.py | T | 2×6 | Built, human-only |
-| figure_soltani_variability.py | V | 2×3 | Built, human-only |
-| make_paper_figures.py: neural_main | N | 3×3 | Row 1-2 built; row 3 col 1 built, cols 2-3 in progress |
-
-`figure_carrabin.py`/`figure_yoo.py` are legacy combined figures,
-superseded by the split P/V/T/N scripts above.
+| Figure | Section | Layout |
+|---|---|---|
+| `temporal_performance` | 1. Model performance | 1×1 |
+| `model_performance` | 1. Model performance | 1×4 |
+| `model_best_fit` | 1. Model performance | 2×4 |
+| `model_performance_nll` | 1. Model performance | 1×4 |
+| `response_change` | 2.1 Response change decay | 1×4 |
+| `lambda_metric` | 2.1 Response change decay | 1×1 |
+| `lambda_main` | 2.1 + 2.2 composite | 2×3 |
+| `lambda_human` | 2.2 Individual differences | 1×4 |
+| `lambda_overview` | 2.2 composite | 2×4 |
+| `lambda_balls` | Supplementary | 1×1 |
+| `lambda_reliability` | Supplementary | 1×3 |
+| `sigma_reliability` | Supplementary | 1×3 |
+| `lambda_sigma_crosstask` | Supplementary | 1×2 |
+| `lambda_sanity_human` | Supplementary | 1×4 |
+| `sigma_sanity_human` | Supplementary | 1×4 |
+| `lambda_model_correlation` | Supplementary | 1×3 |
+| `lambda_humanvmodel` | Supplementary | 1×3 |
+| `sigma_model_correlation` | Supplementary | 1×3 |
+| `variability_human` | 3.1 Individual differences | 1×4 |
+| `variability_models` | 3.1 Individual differences | 1×4 |
+| `sigma_overview` | 3.1 composite | 2×4 |
+| `sigma_main` | 3.1 + 3.2 + 3.3 composite | 3×3 |
+| `variance_autocorr_human` | 3.3 Autocorrelation | 1×4 |
+| `variance_autocorr_models` | 3.3 Autocorrelation | 1×4 |
+| `neural_main` | 4. Neural predictions | 3×3 |
 
 ---
 
 ## Future extensions (soft todos, not tied to any current figure's structure)
 
-- **Validation via ablation/statistical control** (not yet built). For
-  each parameter-vs-outcome relationship `neural_main` shows: a partial
-  correlation controlling for the other parameters, and, where feasible,
-  a mechanistic ablation (forcing a parameter to null and showing the
-  correlation collapses) — matching yoo's existing λ=0 ablation
-  precedent.
+- **Make row 2 (error activity decline / λ) more compelling** by relating
+  it back to behavioural error rates later in the task, not just update
+  magnitude.
+- **Validation via ablation/statistical control** (not yet built) — a
+  perturbation experiment as `neural_main`'s row 4. For each
+  parameter-vs-outcome relationship rows 1-3 show: a partial correlation
+  controlling for the other parameters, and, where feasible, a mechanistic
+  ablation (forcing a parameter to null and showing the correlation
+  collapses) — direct causal validation of the current rows.
 - **Synaptic vs. working-memory implementation comparison** (not
-  started, separate downstream scope). Different predictions under an
-  ITI manipulation depending on which implementation of the learning
-  rule is assumed. Deliberately out of scope for now.
+  started, separate downstream scope) — `neural_main`'s row 5. Different
+  predictions under an ITI manipulation depending on which implementation
+  of the learning rule is assumed. Deliberately out of scope for now.

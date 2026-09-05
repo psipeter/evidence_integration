@@ -195,15 +195,16 @@ evidence_integration/
     participant_filters.py  — exclusion criteria (see task_backend/CLAUDE.md)
     colors_quasi_qids.py    — empirically-derived repeat structure for colors
   scripts/
-    figure_{carrabin,yoo,soltani}_{performance,variability,temporal,neural}.py
-    make_paper_figures.py     — composite/presentation figures (incl. neural_main)
+    make_paper_figures.py     — sole figure generator (composite/presentation
+                                figures, incl. neural_main); supersedes the
+                                retired per-dataset figure_*.py scripts
+                                (archived, see "What NOT to do")
     build_model_inputs.py, pull_soltani_data.py
     inspect_participant.py, inspect_participant_temporal.py
     plot_sequences.py         — see .claude/skills/task-backend-sequences/SKILL.md
-    extras_carrabin.py, extras_yoo.py, neural_experiments.py
+    neural_experiments.py
     verify_ensemble_invariant.py, check_NEF_pipeline.py
-  jobs/
-    submit_probe_pids.sh, submit_n_neurons_scan.sh, submit_yoo_noise.sh
+  jobs/                       — generated SLURM scripts (gitignored)
   task_backend/        — online task (see task_backend/CLAUDE.md)
   archive/              — retired code + frozen history (incl. archive/task/,
                           the fully-retired legacy JATOS/MindProbe pipeline;
@@ -316,6 +317,14 @@ platform evaluations, methodology choices made before any code existed.
   pipeline, `models/RNN.py`, or NEF's NLL/multi-seed-ensemble branch
   without an explicit plan — all retired, see `docs/DECISIONS.md`. Code
   is archived (restorable), not deleted.
+- Do not reintroduce the split per-dataset
+  `figure_{carrabin,yoo,soltani}_{performance,variability,temporal,neural}.py`
+  scripts, the legacy combined `figure_carrabin.py`/`figure_yoo.py`, or
+  `extras_carrabin.py`/`extras_yoo.py` (the older N1-N8 neural-data-generation
+  taxonomy) without an explicit plan — all superseded by
+  `scripts/make_paper_figures.py`'s consolidated `make_*` functions and
+  `neural_main`; see `docs/DECISIONS.md`. Code is archived under
+  `archive/scripts/` (restorable), not deleted.
 - Do not resurrect the `task/` (JATOS/MindProbe) online-task pipeline
   without an explicit plan — fully superseded by `task_backend/`
   (Supabase-backed, in production with real published data) and now

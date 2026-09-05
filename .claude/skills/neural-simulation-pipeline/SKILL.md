@@ -31,9 +31,11 @@ experiments, run on `soltani_numbers`. Build the figure with:
 python scripts/make_paper_figures.py neural_main
 ```
 
-Older per-task carrabin/yoo neural panel data (PE dynamics, probe sims,
-n_neurons scan, λ=0 ablation, error ensemble activities) is generated via
-`scripts/extras_carrabin.py`/`scripts/extras_yoo.py` and
-`jobs/submit_probe_pids.sh` — see those scripts' own `--help` for current
-flags; this is the older N1-N8 taxonomy, not the current consolidated
-argument.
+The older per-task carrabin/yoo neural panel data (PE dynamics, probe sims,
+n_neurons scan, λ=0 ablation, error ensemble activities) and the N1-N8
+taxonomy it fed (`figure_carrabin_neural.py`/`figure_yoo_neural.py`) are
+retired — superseded by `neural_main`'s consolidated, soltani-only design
+(see `docs/DECISIONS.md`). That older generation's scripts
+(`extras_carrabin.py`, `extras_yoo.py`) and the job scripts that invoked
+them are archived under `archive/scripts/`/`archive/jobs/`, restorable if
+ever needed again.

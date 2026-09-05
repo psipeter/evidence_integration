@@ -2638,3 +2638,106 @@ removing"):
   active workflow), and its stale `## Neural predictions figure (Acts
   1-5)` cross-reference and its `neural_giant` build-command line were
   both fixed/removed.
+
+---
+
+## Legacy per-dataset figure/extras scripts retired; make_paper_figures.py is now the sole figure generator (this session)
+
+### What moved
+
+Fourteen scripts, `git mv`'d verbatim into `archive/scripts/` (same
+filenames, no `archive_` prefix -- these are complete, standalone
+scripts, not extracted pieces of a larger file):
+
+- Carrabin family: `figure_carrabin.py` (legacy combined 2x4),
+  `figure_carrabin_neural.py` (N group), `figure_carrabin_performance.py`
+  (P), `figure_carrabin_temporal.py` (T), `figure_carrabin_variability.py`
+  (V).
+- Yoo family: `figure_yoo.py` (legacy combined), `figure_yoo_neural.py`
+  (N), `figure_yoo_performance.py` (P), `figure_yoo_temporal.py` (T).
+- Soltani family: `figure_soltani_performance.py` (P),
+  `figure_soltani_temporal.py` (T), `figure_soltani_variability.py` (V).
+- Extras (neural data-generation scripts, the older N1-N8 taxonomy):
+  `extras_carrabin.py`, `extras_yoo.py`.
+
+Plus six job scripts that did nothing but shell out to
+`extras_carrabin.py`/`extras_yoo.py` (SLURM boilerplate + one call each,
+confirmed by reading every one in full before moving):
+`jobs/submit_probe_pids.sh`, `submit_n_neurons_scan.sh`,
+`submit_neurons_scan.sh`, `submit_pe_readout.sh`, `submit_yoo_noise.sh`,
+`submit_yoo_ablation.sh` -- moved with a plain `mv`, not `git mv`: `jobs/`
+is wholesale-gitignored project-wide (confirmed via `git check-ignore
+-v`; the bare `jobs/` pattern in `.gitignore` matches the directory at
+any depth, so `archive/jobs/` is gitignored too), so none of these six
+were ever git-tracked to begin with. This matches how `archive/jobs/`
+already holds several earlier retirements the identical way (e.g.
+`submit_probe_pids_diederen.sh`, `submit_nef2d_sweep.sh`) -- not a new
+convention invented for this pass.
+
+### Why
+
+All superseded by `scripts/make_paper_figures.py`, the consolidated
+presentation-figure generator, after a thorough review comparing every
+panel/function in these files against `make_paper_figures.py`'s current
+`make_*` functions: either a newer equivalent function already exists
+there, or the metric it computed was deliberately dropped from the
+current figure set. The project owner then confirmed the comparison
+against the rendered figures themselves before signing off on archiving
+everything at once.
+
+The N1-N8 per-task neural taxonomy (`figure_carrabin_neural.py`/
+`figure_yoo_neural.py`, and the `extras_*.py` scripts that generated
+their data) is a special case of this, already flagged as superseded in
+the "make_paper_figures.py consolidation" entry above: each only ever
+told HALF the neural story (carrabin has a real fitted sigma but no
+fitted lambda; yoo has a real fitted lambda but no fitted sigma) --
+exactly the gap `neural_main`'s soltani-only design closed once NEF was
+fit for all four datasets, by running Acts 1-3 on ONE task with BOTH real
+fits in hand instead of splitting the argument across two tasks that each
+only cover half of it.
+
+### Known cross-dependency, verified intact after the move
+
+`figure_yoo_neural.py`'s own `from scripts.figure_yoo_temporal import
+_fit_lambda_curve_fit` still resolves post-move: both files moved
+together to `archive/scripts/`, and `figure_yoo_neural.py`'s own
+`sys.path.insert(0, str(Path(__file__).resolve().parent.parent))` now
+inserts `archive/` (not the repo root) once the file lives at
+`archive/scripts/figure_yoo_neural.py` -- so `scripts.figure_yoo_temporal`
+resolves to `archive/scripts/figure_yoo_temporal.py`, the very file it
+moved alongside, via that relative parent-of-parent trick. Verified
+directly, not assumed: exec'd `archive/scripts/figure_yoo_neural.py` as a
+standalone module and confirmed the whole thing runs, including its
+`utils.*` imports, which resolve via Python's namespace-package
+aggregation across `archive/utils/` and the repo-root `utils/` (neither
+directory has an `__init__.py`, so both are portions of one namespace
+package named `utils`).
+
+### How to restore
+
+`git mv` each file back from `archive/scripts/` to `scripts/` (plain `mv`
+for the six job scripts, back to `jobs/`, which re-enters the gitignored
+state they were always in). No other code changes needed -- nothing
+outside these fourteen scripts and six job scripts ever imported or
+called them. Confirmed by a repo-wide grep (excluding `archive/`,
+`venv/`, `node_modules/`, `.git/`) both before and after the move; the
+only remaining hits are historical/comment mentions, left as-is: `docs/
+SCIENCE.md` (explicitly out of scope this pass -- a separate, deliberate
+effort is redefining that doc's own metric taxonomy), `presentations/
+make_figures.py` (the old predecessor `make_paper_figures.py` was copied
+from and has since diverged past -- comment mentions only, no live
+imports, and this file itself was out of scope for this retirement),
+`scripts/neural_experiments.py` and `fitting/fit.py` (both explicitly
+out of scope for this pass -- comment-only attribution of
+`extras_carrabin.py`'s pattern/naming, not a functional dependency), and
+`scripts/inspect_participant_temporal.py`/`utils/colors_quasi_qids.py`/
+`utils/participant_filters.py` (docstring attribution of
+`figure_soltani_temporal.py`'s conventions, likewise not a live import).
+
+### No data files moved
+
+Nothing in `data/` or `data/runs/` changed. Every currently-published
+figure (`make_paper_figures.py`'s own `make_*` functions) reads its own
+pre-computed `.pkl` inputs directly and never imported these scripts;
+this retirement only removes the ability to regenerate figures/data via
+these specific, now-superseded entry points.
