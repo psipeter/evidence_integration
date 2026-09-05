@@ -2741,3 +2741,155 @@ figure (`make_paper_figures.py`'s own `make_*` functions) reads its own
 pre-computed `.pkl` inputs directly and never imported these scripts;
 this retirement only removes the ability to regenerate figures/data via
 these specific, now-superseded entry points.
+
+---
+
+## MLE-pipeline retirement completed: scripts/build_sim_db.py and fitting/collect.py's MLE-collect branches archived (this session)
+
+`docs/DECISIONS.md`'s "State-noise models, NoisyCounting, and their
+MLE/NLL pipelines retired from active analysis" entry archived
+`fitting/fit_mle.py` (as `archive/fitting/archive_fit_mle.py`) but left
+two live loose ends: `scripts/build_sim_db.py`, still sitting in the
+active `scripts/` tree, and `fitting/collect.py` (an active, non-archived
+file) still carrying three MLE-only collection functions plus their CLI
+wiring. Nothing called either anymore -- confirmed by a repo-wide grep
+(excluding `archive/`, `venv/`, `node_modules/`, `.git/`) before touching
+anything -- this entry closes that gap.
+
+### What moved
+
+- `scripts/build_sim_db.py` -> `archive/scripts/build_sim_db.py`, via
+  `git mv` (whole-file move, history follows).
+- `fitting/collect.py`'s `_collect_mle_params`, `_generate_mle_responses`,
+  and `_collect_mle_from_db` functions, plus the `--type` choices
+  `"mle_params"`/`"mle_responses"`/`"mle_from_db"`, their `elif` dispatch
+  branches, and the `--model_type`/`--dataset`/`--db_folder` CLI args
+  that existed only to serve them -- extracted verbatim into a NEW file,
+  `archive/fitting/archive_collect_mle.py` (paired with the existing
+  `archive/fitting/archive_fit_mle.py`), via Write + Edit rather than a
+  whole-file move, since `fitting/collect.py` itself stays active (its
+  `params`/`responses`/`activities` branches are still exercised by the
+  RMSE/NLL pipeline). Checked first whether `--model_type`/`--dataset`
+  were shared with the surviving branches -- they were not; nothing in
+  `_collect_params`/`_collect_responses`/`_collect_activities` reads
+  `args.model_type`, `args.dataset`, or `args.db_folder`.
+- `fitting/losses.py`'s `compute_sim_db_loss` was left in place (not
+  named for removal), but its `FileNotFoundError` message hard-coded
+  `python scripts/build_sim_db.py ...` as the fix-it command -- now
+  stale since the script moved. Updated the message to point at
+  `archive/scripts/build_sim_db.py` and note it needs restoring to
+  `scripts/` first. `compute_sim_db_loss` itself now has zero active
+  callers (only the two archived MLE files call it) -- flagged here as
+  an observation, not acted on, since retiring it outright wasn't part
+  of this cleanup's scope.
+
+### The build_sim_db.py naming collision
+
+`archive/scripts/build_sim_db.py` already existed before this move -- an
+older, different prototype committed directly into `archive/` in
+`d1b34d7` ("Introduce PVTBN metric taxonomy"), predating the real MLE
+pipeline (added later, in `d4a5756`, "Add MLE fitting pipeline"). The two
+differ in a real, load-bearing way: the old one takes `n_seeds` and has
+no `out_path_override` param on `simulate_param_point`; the real one
+(what `scripts/build_sim_db.py` actually was, and what
+`archive/fitting/archive_fit_mle.py` actually imports and calls --
+verified directly: `archive_fit_mle.py`'s own `_simulate_and_save` calls
+`simulate_param_point(..., n_sims=n_sims, ..., out_path_override=tmp_path)`,
+a signature only the real version has) takes `n_sims` and supports
+`out_path_override` for its atomic-rename NFS-safe write path. A plain
+`git mv scripts/build_sim_db.py archive/scripts/build_sim_db.py` would
+have silently overwritten the old prototype with the real one, losing it.
+
+Resolved by renaming the old prototype to
+`archive/scripts/build_sim_db_early_draft.py` (with a header comment
+added explaining what it is and why it's distinct) and moving the real,
+currently-active `scripts/build_sim_db.py` into the now-vacated
+`archive/scripts/build_sim_db.py` slot -- the canonical name, since that
+matches what `archive/fitting/archive_fit_mle.py` (and now
+`archive/fitting/archive_collect_mle.py`) actually needs restored if
+either is ever revived. `git status` reports this pair of moves as an
+`M`/`R` rather than two clean renames -- a rename-detection heuristic
+across the two operations, not a sign anything went wrong; both files'
+contents were diffed and confirmed correct after the move.
+
+### Verification
+
+- `python -m py_compile` on `fitting/collect.py`,
+  `archive/fitting/archive_collect_mle.py`,
+  `archive/scripts/build_sim_db.py`,
+  `archive/scripts/build_sim_db_early_draft.py`, and `fitting/losses.py`
+  -- all clean.
+- `python -m fitting.collect --help` and a plain `import fitting.collect`
+  both succeed post-edit.
+- Exercised `fitting.collect`'s surviving `params`/`responses` branches
+  end-to-end against a throwaway `data/runs/_tmp_verify_collect/` folder
+  (synthetic `run_config.json` + per-pid params/performance/responses
+  pkls for two fake carrabin pids, deleted immediately after) rather than
+  a real run folder, so nothing under real `data/runs/` was touched or
+  re-derived. Both branches concatenated and wrote the expected combined
+  files correctly.
+- Re-grepped the whole repo (excluding `archive/`) for `build_sim_db`,
+  `mle_params`/`mle_responses`/`mle_from_db`, and
+  `_collect_mle_*`/`_generate_mle_responses` after all edits: every
+  remaining hit is inside `archive/` (the two archived files themselves,
+  plus this file's and `archive/HISTORY_raw_2026-09.md`'s pre-existing
+  historical mentions of the sim_db architecture). No live reference
+  remains.
+
+### No data files moved
+
+`data/sim_db/` (if it exists on disk locally) was not touched -- it isn't
+git-tracked, and nothing in this cleanup reads or writes it. This
+retirement only removes the CODE that could regenerate or scan it.
+
+---
+
+## MLE-pipeline retirement, final loose end: fitting/losses.py's compute_sim_db_loss archived (this session)
+
+The "Cleanup completed 2026-09-05" entry above flagged
+`fitting/losses.py`'s `compute_sim_db_loss` as having zero active callers
+but left it in place, out of scope for that pass. This entry closes that
+last gap.
+
+### What moved
+
+- `compute_sim_db_loss` -- extracted verbatim from `fitting/losses.py`
+  into a NEW file, `archive/fitting/archive_losses_mle.py`, paired with
+  the existing `archive/fitting/archive_fit_mle.py` and
+  `archive/fitting/archive_collect_mle.py` (both of which import it: `from
+  fitting.losses import compute_sim_db_loss`). A new file was used rather
+  than appending to `archive_collect_mle.py`, since `compute_sim_db_loss`
+  is a loss function, not a collect function -- `archive_losses.py` (the
+  jiang/usher-era archived losses file) was already taken by unrelated
+  content, hence the `_mle` suffix to disambiguate.
+- The comment directly above `NLL_SIGMA_FLOOR` in `fitting/losses.py`
+  referenced `compute_sim_db_loss`'s own 1e-3 sigma clamp by name as a
+  contrast case ("clamping turns the NLL into scaled squared error...
+  which is what compute_sim_db_loss's own 1e-3 clamp silently does").
+  Reworded to make the same point (a floor via clamping degenerates NLL
+  into scaled squared error, which this design deliberately avoids)
+  without naming a function no longer in the file.
+- The now-dead `compute_nll()`-removal comment just above
+  `nll_from_ensemble` referenced `compute_sim_db_loss` nowhere, so it was
+  left untouched; a new short comment was added in its place noting where
+  `compute_sim_db_loss` itself went.
+
+### Verification
+
+- Repo-wide grep (excluding `archive/`, `venv/`, `node_modules/`,
+  `.git/`) for `compute_sim_db_loss`, before and after the edit: before,
+  the only hits were `fitting/losses.py`'s own definition/comment plus
+  the two already-archived callers; after, the only non-archive hit is
+  the (correctly non-functional) mention in `fitting/losses.py`'s new
+  comment explaining where the function went.
+- `python -m py_compile` on `fitting/losses.py`,
+  `archive/fitting/archive_losses_mle.py`,
+  `archive/fitting/archive_fit_mle.py`, and
+  `archive/fitting/archive_collect_mle.py` -- all clean.
+- Read `fitting/losses.py` in full before and after: `compute_loss`,
+  `_filter_first_blocks`, and `nll_from_ensemble` are untouched; only
+  `compute_sim_db_loss` and the one comment were changed.
+
+### No data files moved
+
+Nothing in `data/` was touched by this pass.

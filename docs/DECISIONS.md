@@ -263,6 +263,23 @@ archive_calibrate_nll_nsims.py`, `archive/models/archive_RNN.py`. All
 restorable by merging back in -- each archive file's own header comment
 says exactly what to reconnect.
 
+**Cleanup completed 2026-09-05:** the initial pass above left
+`scripts/build_sim_db.py` and three MLE-only collection functions in the
+still-active `fitting/collect.py`. Both are now archived too --
+`archive/scripts/build_sim_db.py` (whole-file move; a distinct, older
+prototype already occupying that path was preserved alongside it as
+`archive/scripts/build_sim_db_early_draft.py`) and `archive/fitting/
+archive_collect_mle.py` (extracted from `fitting/collect.py`, which
+remains active for its RMSE/NLL `params`/`responses`/`activities`
+branches). Full narrative: `archive/HISTORY_modeling_2026.md`'s
+"MLE-pipeline retirement completed" entry.
+
+**Fully done as of 2026-09-05:** the one function left out of scope by
+that pass, `fitting/losses.py`'s `compute_sim_db_loss` (zero active
+callers, only the two archived MLE files), is now archived too --
+`archive/fitting/archive_losses_mle.py`. See `archive/HISTORY_modeling_2026.md`'s
+"MLE-pipeline retirement, final loose end" entry.
+
 ---
 
 ## neural_main replaces neural_giant as the sole neural-parameter-impact figure

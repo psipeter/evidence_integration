@@ -99,8 +99,8 @@ def compute_loss(
 # Floor on the ensemble SD, to keep the Gaussian NLL finite. NOT a free
 # parameter and NOT a way to admit deterministic models: a deterministic model's
 # ensemble SD is exactly 0, and clamping it turns the NLL into scaled squared
-# error with an arbitrary scale -- which is what compute_sim_db_loss's own 1e-3
-# clamp silently does. compute_nll REFUSES deterministic models instead. This
+# error with an arbitrary scale -- which is exactly what a naive sigma clamp
+# would silently do. compute_nll REFUSES deterministic models instead. This
 # floor exists only for the rare cell where a genuinely stochastic model happens
 # to produce near-identical responses across sims (e.g. both noise SDs at their
 # lower bounds and a clipped response).
@@ -130,75 +130,12 @@ def nll_from_ensemble(ens: np.ndarray, y: np.ndarray,
 # stochastic model again, its old implementation is in git history
 # (fitting/losses.py, pre-retirement) and archive/models/archive_math_models_noise.py.
 
-
-def compute_sim_db_loss(
-    model_type: str,
-    params: dict,
-    human_pid: pd.DataFrame,
-    db_dir: "Path | str",
-) -> float:
-    """Group-level log-likelihood from simulation database.
-
-    For each (sequence, obs) cell, evaluates the likelihood of the full set of
-    observed responses under the model's predicted Gaussian. This penalises both
-    mean mismatch and variance mismatch — a model with correct mean but wrong
-    variance, or correct variance but wrong mean, both score poorly.
-
-    The group log-likelihood of n observed responses under N(mu_sim, sigma_sim^2):
-        sum_i log N(r_i | mu_sim, sigma_sim^2)
-        = -n/2 log(2*pi*sigma^2) - n/(2*sigma^2) * [var_obs + (mean_obs-mu_sim)^2]
-    The sigma^2 term penalises over-dispersion; the squared-mean-error term
-    penalises mean mismatch. Both must be small for high likelihood.
-
-    Returns negative mean log-likelihood per observation (lower = better).
-    """
-    import hashlib, json
-    from collections import defaultdict
-    from pathlib import Path
-    from scipy.stats import norm
-
-    db_dir  = Path(db_dir)
-    SKIP    = {"pid", "model_type", "dataset", "seed", "base_seed"}
-    free    = {k: v for k, v in params.items() if k not in SKIP}
-    key     = json.dumps({"model": model_type, "params": free}, sort_keys=True)
-    ph      = hashlib.md5(key.encode()).hexdigest()[:12]
-    db_path = db_dir / model_type / f"{model_type}_{ph}.pkl"
-
-    if not db_path.exists():
-        raise FileNotFoundError(
-            f"Simulation database not found: {db_path}\n"
-            f"Run: python scripts/build_sim_db.py --model {model_type} "
-            f"--params_json \'{json.dumps(free)}\'"
-        )
-
-    db = pd.read_pickle(db_path)["data"]   # {seq_tuple: (n_sims, n_obs)}
-
-    # Group all observed responses by (seq, obs_idx)
-    cell_obs: dict[tuple, list] = defaultdict(list)
-    for _, tdf in human_pid.groupby("trial"):
-        tdf = tdf.sort_values("observation")
-        seq = tuple(tdf["value"].values)
-        for obs_idx, r in enumerate(tdf["response"].values):
-            cell_obs[(seq, obs_idx)].append(float(r))
-
-    total_ll  = 0.0
-    n_obs_total = 0
-
-    for (seq, obs_idx), r_list in cell_obs.items():
-        if seq not in db:
-            continue
-        sim_trajs = db[seq]
-        if sim_trajs.shape[0] < 1:
-            continue  # need at least 1 simulation
-        sim_col  = sim_trajs[:, obs_idx]
-        mu_sim   = float(sim_col.mean())
-        sig_sim  = max(float(sim_col.std()), 1e-3)
-        r_arr    = np.array(r_list)
-        total_ll += float(np.sum(norm.logpdf(r_arr, loc=mu_sim, scale=sig_sim)))
-        n_obs_total += len(r_arr)
-
-    if n_obs_total == 0:
-        raise ValueError("No valid (seq, obs) cells found in database for this pid")
-
-    return float(-total_ll / n_obs_total)
+# compute_sim_db_loss() (group-level log-likelihood from a simulation
+# database keyed by params-hash) was removed when the MLE pipeline's last
+# loose ends were cleaned up -- see docs/DECISIONS.md's "State-noise
+# models, NoisyCounting, and their MLE/NLL pipelines retired from active
+# analysis" entry and archive/HISTORY_modeling_2026.md. Its only callers
+# were the already-archived archive/fitting/archive_fit_mle.py and
+# archive/fitting/archive_collect_mle.py; now archived itself, unchanged,
+# at archive/fitting/archive_losses_mle.py.
 

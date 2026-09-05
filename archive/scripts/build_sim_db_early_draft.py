@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""Build a simulation database for carrabin PMMH-style likelihood fitting.
+"""SUPERSEDED EARLY DRAFT — see archive/HISTORY_modeling_2026.md's MLE-cleanup
+entry (2026-09-05). Committed directly into archive/ in d1b34d7 as an
+exploratory prototype; never the version scripts/build_sim_db.py actually
+ran as, and NOT the version archive/fitting/archive_fit_mle.py's imports
+match (that file calls `simulate_param_point(..., n_sims=..., out_path_override=...)`,
+a signature only the real, later `archive/scripts/build_sim_db.py` (added in
+d4a5756, used by the MLE pipeline until its 2026-09-05 retirement) has. Kept
+here only so this early n_seeds-based prototype isn't lost, not because
+anything still depends on it.
+
+Build a simulation database for carrabin PMMH-style likelihood fitting.
 
 For a given model and parameter set, simulates all 32 binary sequences
-n_sims times each, storing the complete response trajectory (5 responses)
+n_seeds times each, storing the complete response trajectory (5 responses)
 per simulation. Simulations are shared across all pids.
 
 Database structure (one file per parameter point):
@@ -10,10 +20,10 @@ Database structure (one file per parameter point):
     Contents: {
         "params":     dict of model parameters,
         "model_type": str,
-        "n_sims":    int,
+        "n_seeds":    int,
         "elapsed_s":  float,
         "data": {
-            seq_tuple: np.ndarray of shape (n_sims, n_obs)
+            seq_tuple: np.ndarray of shape (n_seeds, n_obs)
                        each row is one simulated response trajectory
         }
     }
@@ -21,14 +31,14 @@ Database structure (one file per parameter point):
 The likelihood for a given pid is then:
     For each trial the pid ran with sequence S:
         Compare observed response trajectory (5 values) against the
-        simulated distribution data[S] — a (n_sims, 5) array.
+        simulated distribution data[S] — a (n_seeds, 5) array.
         Evaluate a Gaussian (or multivariate Gaussian) log-likelihood.
 
 Usage:
     python scripts/build_sim_db.py \\
         --model NEF \\
         --params_json '{"alpha_0": 0.3, "lambda_": 0.5}' \\
-        --n_sims 100 \\
+        --n_seeds 100 \\
         --db_folder data/sim_db \\
         --run_folder carrabin
 
@@ -36,7 +46,7 @@ Usage:
         --model NoisyCounting \\
         --grid_file data/sim_db/NoisyCounting_grid.pkl \\
         --grid_idx 42 \\
-        --n_sims 100
+        --n_seeds 100
 """
 
 from __future__ import annotations
@@ -74,31 +84,30 @@ def params_hash(model_type: str, params: dict) -> str:
 def simulate_param_point(
     model_type: str,
     params: dict,
-    n_sims: int,
+    n_seeds: int,
     db_dir: Path,
     run_folder: str = "carrabin",
     overwrite: bool = False,
-    out_path_override: Path | None = None,
 ) -> Path:
-    """Simulate all 32 sequences × n_sims for one parameter point.
+    """Simulate all 32 sequences × n_seeds for one parameter point.
 
-    For each sequence, produces an (n_sims, n_obs) array of response
+    For each sequence, produces an (n_seeds, n_obs) array of response
     trajectories. Saves to db_dir/{model_type}_{hash}.pkl.
 
     Returns the output path.
     """
-    ph        = params_hash(model_type, params)
+    ph       = params_hash(model_type, params)
     model_dir = db_dir / model_type
     model_dir.mkdir(parents=True, exist_ok=True)
-    out_path  = out_path_override or (model_dir / f"{model_type}_{ph}.pkl")
+    out_path  = model_dir / f"{model_type}_{ph}.pkl"
 
-    if out_path.exists() and not overwrite and out_path_override is None:
+    if out_path.exists() and not overwrite:
         print(f"Already exists: {out_path.name} — skipping")
         return out_path
 
     print(f"Simulating {model_type}  hash={ph}")
     print(f"  params: { {k:v for k,v in params.items() if k not in ('model_type','dataset','pid')} }")
-    print(f"  n_sims={n_sims}, n_sequences={len(ALL_SEQUENCES)}")
+    print(f"  n_seeds={n_seeds}, n_sequences={len(ALL_SEQUENCES)}")
 
     DETERMINISTIC = {"Mean", "PrimacyRecency", "LeakyIntegrator", "RL"}
     t0 = time.time()
@@ -107,14 +116,14 @@ def simulate_param_point(
     for seq in ALL_SEQUENCES:
         if model_type in DETERMINISTIC:
             traj = _simulate_deterministic(model_type, params, seq)
-            # Replicate n_sims times — distribution is a delta
-            db_data[seq] = np.tile(traj, (n_sims, 1))  # (n_sims, n_obs)
+            # Replicate n_seeds times — distribution is a delta
+            db_data[seq] = np.tile(traj, (n_seeds, 1))  # (n_seeds, n_obs)
 
         elif model_type == "NoisyCounting":
-            db_data[seq] = _simulate_noisy_counting(params, seq, n_sims)
+            db_data[seq] = _simulate_noisy_counting(params, seq, n_seeds)
 
         elif model_type == "NEF":
-            db_data[seq] = _simulate_nef(params, seq, n_sims, run_folder)
+            db_data[seq] = _simulate_nef(params, seq, n_seeds, run_folder)
 
         else:
             raise ValueError(f"Unknown model_type: {model_type!r}")
@@ -123,9 +132,9 @@ def simulate_param_point(
     out = {
         "params":     params,
         "model_type": model_type,
-        "n_sims":    n_sims,
+        "n_seeds":    n_seeds,
         "elapsed_s":  elapsed,
-        "data":       db_data,  # {seq_tuple: (n_sims, n_obs) array}
+        "data":       db_data,  # {seq_tuple: (n_seeds, n_obs) array}
     }
     pd.to_pickle(out, out_path)
     print(f"  Saved in {elapsed:.0f}s → {out_path.name}")
@@ -150,43 +159,36 @@ def _simulate_deterministic(model_type: str, params: dict,
 
 
 def _simulate_noisy_counting(params: dict, seq: tuple,
-                              n_sims: int) -> np.ndarray:
-    """Return shape (n_sims, n_obs) for NoisyCounting.
+                              n_seeds: int) -> np.ndarray:
+    """Return shape (n_seeds, n_obs) for NoisyCounting.
 
-    Matches the implementation in math_models.py exactly:
-      r = cognitive state (cumulative count)
-      p_hat = response estimate on [-1, 1]
-      Update: r += x * mu + xi (xi ~ N(0, sigma_c))
-              p_hat += (r - p_hat) * exp(epsilon) (epsilon ~ N(0, nu))
-              p_hat = clip(p_hat, -1, 1)
-
-    No carrabin shrinkage transform is applied (NoisyCounting is excluded).
-    Seeds are 0..n_sims-1 to match a trial-index-based seeding scheme.
+    Implements the model directly (r_{t+1} = r_t + x_{t+1}*mu + xi,
+    response = clip(r + eps, 0, 1) * 2 - 1) to get per-observation
+    responses across seeds.
     """
     mu      = float(params["mu"])
     sigma_c = float(params["sigma_c"])
     nu      = float(params["nu"])
     n_obs   = len(seq)
-    trajs   = np.zeros((n_sims, n_obs))
+    trajs   = np.zeros((n_seeds, n_obs))
 
-    for seed in range(n_sims):
-        rng   = np.random.RandomState(seed)
-        r     = 0.0
-        p_hat = 0.0
+    for seed in range(n_seeds):
+        rng     = np.random.RandomState(seed)
+        r_state = 0.0   # initial cognitive state (maps to p=0.5 on [0,1])
         for obs_idx, val in enumerate(seq):
-            xi    = rng.normal(0.0, sigma_c)
-            r     = r + float(val) * mu + xi
-            eps   = rng.normal(0.0, nu)
-            p_hat = p_hat + (r - p_hat) * float(np.exp(eps))
-            p_hat = float(np.clip(p_hat, -1.0, 1.0))
-            trajs[seed, obs_idx] = p_hat
+            xi      = rng.normal(0.0, sigma_c)
+            r_state = r_state + val * mu + xi
+            eps     = rng.normal(0.0, nu)
+            p_hat   = float(np.clip(r_state + eps, 0.0, 1.0))
+            # Convert [0,1] → [-1,1] to match carrabin response scale
+            trajs[seed, obs_idx] = p_hat * 2.0 - 1.0
 
     return trajs
 
 
-def _simulate_nef(params: dict, seq: tuple, n_sims: int,
+def _simulate_nef(params: dict, seq: tuple, n_seeds: int,
                   run_folder: str) -> np.ndarray:
-    """Return shape (n_sims, n_obs) for the NEF model."""
+    """Return shape (n_seeds, n_obs) for the NEF model."""
     from models.NEF import PARAM_DEFAULTS, _pretrain, _simulate_trial
     from models.counting_integrator import fast_decode, load_activities
 
@@ -207,7 +209,7 @@ def _simulate_nef(params: dict, seq: tuple, n_sims: int,
     trajs  = []
     failed = 0
 
-    for seed in range(n_sims):
+    for seed in range(n_seeds):
         p = {**full_params, "seed": seed}
         if activity_map is not None:
             act = activity_map.get(seed % len(activity_map))
@@ -227,7 +229,7 @@ def _simulate_nef(params: dict, seq: tuple, n_sims: int,
             failed += 1
 
     if failed:
-        print(f"  Warning: {failed}/{n_sims} seeds failed")
+        print(f"  Warning: {failed}/{n_seeds} seeds failed")
 
     return np.array(trajs) if trajs else np.zeros((0, n_obs))
 
@@ -245,7 +247,7 @@ def main() -> None:
                         help="Path to pkl of parameter grid (list of dicts)")
     parser.add_argument("--grid_idx", type=int, default=None,
                         help="Index into grid_file to simulate")
-    parser.add_argument("--n_sims", type=int, default=100)
+    parser.add_argument("--n_seeds", type=int, default=100)
     parser.add_argument("--db_folder", type=str, default="data/sim_db")
     parser.add_argument("--run_folder", type=str, default="carrabin")
     parser.add_argument("--overwrite", action="store_true")
@@ -272,7 +274,7 @@ def main() -> None:
     simulate_param_point(
         model_type=args.model,
         params=params,
-        n_sims=args.n_sims,
+        n_seeds=args.n_seeds,
         db_dir=db_dir,
         run_folder=args.run_folder,
         overwrite=args.overwrite,
