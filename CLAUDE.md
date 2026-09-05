@@ -9,7 +9,11 @@ sequence-generation diagnostics), see `task_backend/CLAUDE.md` (loads
 automatically when working there). For exact CLI recipes (data pulls,
 fitting jobs), see `.claude/skills/` — these auto-surface via Claude
 Code's Skill tool based on task match; invoke by name or let them load
-implicitly. Read this file fully before making changes.
+implicitly. For custom subagents that execute specific multi-step repo
+operations, see `.claude/agents/` (e.g. `archivist`, which retires code
+to `archive/` — invoke it as soon as what's being retired and why is
+named, not after every sub-decision is resolved by hand). Read this file
+fully before making changes.
 
 ---
 
