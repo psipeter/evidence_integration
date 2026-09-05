@@ -2893,3 +2893,130 @@ last gap.
 ### No data files moved
 
 Nothing in `data/` was touched by this pass.
+
+---
+
+## models/counting_lmu.py archived: orphaned LMU counting testbed (this session)
+
+A review pass over `models/` and `utils/` for dead code found
+`models/counting_lmu.py` (476 lines) with zero live importers anywhere
+in the repo. Its only importer at all was `archive/scripts/counting_accuracy.py`
+(`from models.counting_lmu import _eval_idx, build_network as build_lmu,
+decode_outputs as decode_lmu, simulate_network as simulate_lmu`) --
+already archived itself, so this closes a second, previously-unnoticed
+loose end from that earlier move. Confirmed independently before acting:
+a repo-wide grep (excluding `archive/`, `venv/`, `node_modules/`,
+`.git/`) for `counting_lmu` returned zero hits outside `archive/`, and a
+separate grep for the module's individual exported names
+(`make_pulse_input`, `_compute_lmu_matrices`, `_ideal_stream`,
+`build_network`, `simulate_network`, `decode_outputs`, `_eval_idx`, in
+case something imported a specific function rather than the whole
+module) resolved every live hit to `models/counting_integrator.py` or
+`models/NEF.py` instead -- none to `counting_lmu.py`.
+
+The file is an LMU (Legendre Memory Unit) based alternative to
+`counting_integrator.py`'s counting network: three parallel streams
+(ideal ground truth, an LMU-math Node, and an LMU-neural EnsembleArray)
+decoding both a running count and a power-law weight, plus a
+diagnostic figure comparing them. It also saved figures directly as
+`figures/counting_lmu.png` (raw PNG, no PDF-only guard) -- a second
+independent sign it predates the project's current PDF-only figure
+convention and was never touched again once nothing called it. Likely
+explored during the diederen-era counting work and never adopted over
+the simpler onset-detector-plus-recurrent-integrator design in
+`counting_integrator.py`, which is what `models/NEF.py` actually uses.
+
+### What moved
+
+- `models/counting_lmu.py` -> `archive/models/counting_lmu.py`, via
+  `git mv` (whole-file move, history follows; matches
+  `archive/models/NEF2d.py`'s precedent of a verbatim name with no
+  `archive_` prefix for a whole standalone file that was never split
+  into pieces).
+
+No data files were associated with this file (it's a synthetic-input
+testbed, not a real-data consumer) and no doc (`CLAUDE.md`,
+`docs/SCIENCE.md`, `docs/DECISIONS.md`, `.claude/skills/`) named
+`counting_lmu` anywhere, so none needed updating.
+
+### Verification
+
+- `python -m py_compile archive/models/counting_lmu.py` -- clean.
+- Confirmed `models/counting_integrator.py`, `models/NEF.py`, and
+  `models/math_models.py` (the three active `models/` files) contain no
+  reference to `counting_lmu`.
+- Re-grepped the whole repo (excluding `archive/`, `venv/`,
+  `node_modules/`, `.git/`) after the move for `counting_lmu`: zero
+  hits remain outside `archive/`.
+
+### How to restore
+
+`git mv archive/models/counting_lmu.py models/counting_lmu.py`. Its
+only consumer, `archive/scripts/counting_accuracy.py`, would need
+restoring too (`git mv archive/scripts/counting_accuracy.py
+scripts/counting_accuracy.py`) for the import to resolve to something
+runnable again.
+
+---
+
+## utils/soltani_models.py archived: orphaned by the figure_soltani_*.py retirement above
+
+Downstream consequence of "Legacy per-dataset figure/extras scripts
+retired; make_paper_figures.py is now the sole figure generator" above,
+not a new independent decision: `utils/soltani_models.py` (86 lines) was
+the shared source of truth for which models `figure_soltani_
+{performance,temporal,variability}.py` knew about, could plot via a
+`--models` CLI flag, and which were "stochastic" (eligible for
+within-qid-residual panels). All three of its only importers were
+archived in that earlier pass; `make_paper_figures.py`, their
+replacement, hardcodes its own model roster directly instead of using a
+per-run `--models` flag, so it never imported this file.
+
+Confirmed independently before acting: a repo-wide grep (excluding
+`archive/`, `venv/`, `node_modules/`, `.git/`) for `soltani_models`
+found zero live import statements -- the only non-archive hits are two
+prose comments in `scripts/make_paper_figures.py` crediting where its
+own `MODEL_ORDER` convention originated, not imports. A second grep for
+each of the module's exported names (`MODEL_ORDER`, `DEFAULT_MODELS`,
+`STOCHASTIC_MODELS`, `add_model_args`, `resolve_models`,
+`stochastic_only`, in case something imported a specific name via an
+aliased or wildcard import rather than the whole module) resolved every
+live hit to files that define their own same-named local objects
+(`presentations/make_figures.py` and `scripts/make_paper_figures.py`'s
+own `MODEL_ORDER`/`NLL_MODEL_ORDER`) -- none to an import of this file.
+Also confirmed `utils/plot_style.py` (named in this file's own
+docstring, via `get_palette`), `models/math_models.py`, and
+`fitting/model_params.py` (which define their own, possibly-overlapping
+model rosters) contain no reference to `soltani_models` at all.
+
+### What moved
+
+- `utils/soltani_models.py` -> `archive/utils/soltani_models.py`, via
+  `git mv` (whole-file move, history follows; matches
+  `archive/utils/archive_participant_filters_legacy.py`'s precedent of a
+  standalone file living directly under `archive/utils/`, though that
+  one kept an `archive_` prefix since it was a variant of a
+  still-active file of the same name -- this file has no active
+  counterpart, so no prefix is needed).
+
+No data files were associated with this file and no doc (`CLAUDE.md`,
+`docs/SCIENCE.md`, `docs/DECISIONS.md`, `.claude/skills/`) named
+`soltani_models` anywhere, so none needed updating.
+
+### Verification
+
+- `python -m py_compile archive/utils/soltani_models.py` -- clean.
+- Confirmed `utils/plot_style.py`, `models/math_models.py`, and
+  `fitting/model_params.py` contain no reference to `soltani_models`.
+- Re-grepped the whole repo (excluding `archive/`, `venv/`,
+  `node_modules/`, `.git/`) after the move, both for the module name and
+  each exported name: zero live hits remain outside `archive/`.
+
+### How to restore
+
+`git mv archive/utils/soltani_models.py utils/soltani_models.py`. Its
+three consumers (`archive/scripts/figure_soltani_performance.py`,
+`archive/scripts/figure_soltani_temporal.py`,
+`archive/scripts/figure_soltani_variability.py`) would need restoring
+too (`git mv` each back to `scripts/`) for the imports to resolve to
+something runnable again.
