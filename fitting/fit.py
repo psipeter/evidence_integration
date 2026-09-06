@@ -402,6 +402,15 @@ def fit(
     study.optimize(objective, n_trials=n_trials, callbacks=[_log_callback])
     best_trial = study.best_trial
     best_params = dict(best_trial.params)
+    # best_trial.params is Optuna's own record of only the SUGGESTED (searched)
+    # values -- it never contains a model_spec "fixed" entry (e.g.
+    # init_from_obs1, NEF's architecture constants), since those are set via
+    # plain dict assignment in _suggest_params, never trial.suggest_*. Each
+    # trial's own objective() call got them correctly (per _suggest_params),
+    # but without re-merging here, the FINAL saved responses would silently
+    # drop them. Mirrors _suggest_params' own merge, applied in the same order
+    # (fixed dict first, override pins can still take precedence).
+    best_params.update(MODEL_PARAMS[dataset][model_type].get("fixed", {}))
     best_params.update(fixed_override)  # trial.params never has these -- they
                                         # were pinned directly, not suggested
     best_params.update(
