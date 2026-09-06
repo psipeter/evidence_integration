@@ -185,7 +185,10 @@ evidence_integration/
     counting_activities_n{n}_nc{nc}_{dataset}.pkl
     soltani_{numbers,colors}[_<datafile>].pkl
     runs/
-      carrabin/, yoo/, refit/, rmse/, nll/, nll_noise_only/
+      rmse/ (canonical RMSE fit location for all 4 tasks' active math
+        models + NEF), nll/, nll_noise_only/, carrabin/, yoo/ (legacy:
+        retired-model artifacts + each task's own NLL fits, no longer
+        the active-model RMSE source), refit/
   models/
     math_models.py, NEF.py, counting_integrator.py
   fitting/

@@ -12,30 +12,42 @@ actually run it" reference.
 
 ## RMSE fitting
 
+`data/runs/rmse/` is the canonical RMSE fit location for every task now
+(all 4 active math models + NEF) — this used to be soltani-only, with
+carrabin/yoo's own math models living in `data/runs/carrabin/`/
+`data/runs/yoo/` instead; those two were refit fresh into `rmse` (see
+chat) specifically to remove that split. `data/runs/carrabin/`/
+`data/runs/yoo/` still exist and still hold each task's own NLL fits
+plus retired-model artifacts (`NoisyCounting`, `RNN`, `NoisyRL_lambda`,
+old NEF scans) — just no longer the canonical RMSE source any figure
+script reads.
+
 ```bash
-# Submit (cluster)
-venv/bin/python -m fitting.submit carrabin NEF --n_trials 100 --run_folder carrabin --k 5
-venv/bin/python -m fitting.submit yoo NEF --run_folder yoo --n_trials 100 --k 5
+# Submit (cluster) -- carrabin/yoo use n_trials=100, soltani 300 (established convention)
+venv/bin/python -m fitting.submit carrabin NEF --n_trials 100 --run_folder rmse --k 5
+venv/bin/python -m fitting.submit yoo NEF --run_folder rmse --n_trials 100 --k 5
 
 # Collect params and responses
-venv/bin/python -m fitting.collect carrabin --type params
-venv/bin/python -m fitting.collect carrabin --type responses
+venv/bin/python -m fitting.collect rmse --type params
+venv/bin/python -m fitting.collect rmse --type responses
 
 # Collect activities (after responses; needed for neural figures)
-venv/bin/python -m fitting.collect yoo --type activities --ensembles error --timing once_per_obs
+venv/bin/python -m fitting.collect rmse --type activities --ensembles error --timing once_per_obs
 ```
 
-Run folders in current use: `data/runs/carrabin/`, `data/runs/yoo/`,
-`data/runs/refit/`, `data/runs/rmse/`, `data/runs/nll/`,
-`data/runs/nll_noise_only/`. `--nef_folder` in figure scripts redirects
-NEF data to a separate folder from other models.
+Run folders in current use: `data/runs/rmse/` (canonical RMSE, all 4
+tasks), `data/runs/nll/`, `data/runs/nll_noise_only/` (soltani NLL),
+`data/runs/carrabin/`, `data/runs/yoo/` (legacy RMSE artifacts + each
+task's own NLL fits), `data/runs/refit/`. `--nef_folder` in figure
+scripts redirects NEF data to a separate folder from other models.
 
-## soltani math-model fits
+## math-model fits (any dataset)
 
 RMSE and NLL fits use two separate run folders (`data/runs/rmse/`,
-`data/runs/nll/`) — NOT the older shared `data/runs/soltani/`, which
-holds stale fits made against contaminated/smaller-pid-count data and is
-read by no current figure (why the split happened:
+`data/runs/nll/` for soltani; carrabin/yoo keep their NLL fits alongside
+their own legacy artifacts) — NOT the older shared `data/runs/soltani/`,
+which holds stale fits made against contaminated/smaller-pid-count data
+and is read by no current figure (why the split happened:
 `docs/DECISIONS.md`). Omit `--datafile` for the canonical, unsuffixed
 `data/soltani_{numbers,colors}.pkl` (46 pids, contamination-free,
 registry-stable — see the data-pipeline skill for how it's built).
@@ -50,6 +62,9 @@ done
 venv/bin/python -m fitting.collect rmse --type params
 venv/bin/python -m fitting.collect rmse --type responses
 ```
+
+Same loop works for `carrabin`/`yoo` (use `--n_trials 100`, still
+`--run_folder rmse`).
 
 NLL fits (add `--loss nll`; every model needs its own `_resp_noise`
 suffix — NEF's and `NoisyRL_lambda`'s own NLL branches are retired, see

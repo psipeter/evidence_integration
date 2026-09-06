@@ -115,6 +115,7 @@ def _resolve_jobs(
     n_sims: int = 100,
     override_from_folder: str | None = None,
     time_limit: str | None = None,
+    init_from_obs1: bool | None = None,
 ) -> list[dict]:
     jobs = []
     datasets = (
@@ -152,6 +153,7 @@ def _resolve_jobs(
                         "n_sims": n_sims,
                         "override_from_folder": override_from_folder,
                         "time_limit": time_limit,
+                        "init_from_obs1": init_from_obs1,
                     }
                 )
     return jobs
@@ -196,6 +198,7 @@ def _submit_job(
     loss_fn = job.get("loss_fn", "rmse")
     n_sims = job.get("n_sims", 100)
     override_from_folder = job.get("override_from_folder")
+    init_from_obs1 = job.get("init_from_obs1")
     stem = dataset_stem(ds, datafile)
     cmd = (
         f"python -m fitting.fit {ds} {mt} {pid} --n_trials {n_trials} "
@@ -207,6 +210,8 @@ def _submit_job(
         cmd += f" --loss {loss_fn} --n_sims {n_sims}"
     if override_from_folder:
         cmd += f" --override_from_folder {override_from_folder}"
+    if init_from_obs1 is not None:
+        cmd += f" --init_from_obs1 {'true' if init_from_obs1 else 'false'}"
     # file_stem (with the _nll suffix fitting.fit inserts for loss_fn='nll')
     # matters for the job SCRIPT name too, exactly as it does for fit.py's own
     # output filenames -- otherwise an NLL job and an RMSE job for the same
@@ -234,6 +239,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
     loss_fn = job.get("loss_fn", "rmse")
     n_sims = job.get("n_sims", 100)
     override_from_folder = job.get("override_from_folder")
+    init_from_obs1 = job.get("init_from_obs1")
     stem = dataset_stem(ds, datafile)
     file_stem = f"{stem}_nll" if loss_fn == "nll" else stem
 
@@ -254,6 +260,7 @@ def _run_local(job: dict, run_folder: Path, dry_run: bool = False) -> None:
         loss_fn=loss_fn,
         n_sims=n_sims,
         override_from_folder=override_from_folder,
+        init_from_obs1=init_from_obs1,
     )
 
 
@@ -473,6 +480,13 @@ def main() -> None:
         help="Data-version suffix: fit against data/{dataset}_{datafile}.pkl "
              "and tag every output with it. Omit for data/{dataset}.pkl.",
     )
+    parser.add_argument(
+        "--init_from_obs1", choices=("true", "false"), default=None,
+        help="For the main (non-resubmit) fitting path: override "
+             "MODEL_PARAMS[dataset][model_type]['fixed']'s own "
+             "init_from_obs1 value for this submit -- see fitting.fit's own "
+             "docstring. Omit to use whatever MODEL_PARAMS says.",
+    )
     parser.add_argument("--ensembles", nargs="+", default=["error"])
     parser.add_argument("--timing", type=str, default="once_per_obs")
     parser.add_argument("--dt_sample", type=float, default=0.01)
@@ -511,6 +525,7 @@ def main() -> None:
         n_sims=args.n_sims,
         override_from_folder=args.override_from_folder,
         time_limit=args.time_limit,
+        init_from_obs1=(None if args.init_from_obs1 is None else args.init_from_obs1 == "true"),
     )
     if args.run_folder is not None:
         run_folder = RUNS_DIR / args.run_folder

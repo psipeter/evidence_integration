@@ -383,10 +383,12 @@ def _run_soltani_common(
     subdata = human_pid.query("trial == @trial & observation <= @observation")
     values = subdata["value"].to_numpy()
 
-    # init_from_obs1 (soltani_colors/soltani_numbers only, via MODEL_PARAMS'
-    # "fixed" dict -- see fitting.model_params._INIT_FROM_OBS1's own comment):
-    # anchor RL_lambda's/LeakyIntegrator's persistent state on values[0]
-    # instead of 0.0. The loop below still runs over ALL of `values`
+    # init_from_obs1: anchor RL_lambda's/LeakyIntegrator's persistent state on
+    # values[0] instead of 0.0. Defaults to False (not wired into any
+    # MODEL_PARAMS entry -- see fitting.model_params' own comment just above
+    # MODEL_PARAMS); turn it on per-fit via fitting.fit's/fitting.submit's own
+    # --init_from_obs1 true flag. Relevant only for soltani_colors/
+    # soltani_numbers. The loop below still runs over ALL of `values`
     # (including index 0) unchanged -- both update rules are no-ops when the
     # state already equals the value being fed in, so this only changes the
     # INITIAL condition, never the recursion itself.

@@ -303,31 +303,20 @@ def _model_fit_path(task_key: str, model: str) -> Path:
     (RMSE to human responses), read the same way every working figure does
     (via _get_loss, never a hardcoded column name).
 
-    NEF, all 4 tasks: ALWAYS data/runs/rmse/NEF_{stem}_performance.pkl --
-    this session's fresh weekend fit, run_folder rmse. NOT carrabin's own
-    data/runs/carrabin/ (that fit is INCOMPLETE, 16/21 pids) or yoo's
-    data/runs/refit/ (the old, smaller-n_neurons fit) -- both superseded.
-
-    Every OTHER model keeps its EXISTING location, unchanged by this
-    session's NEF-only submit:
-      balls (carrabin)  -> data/runs/carrabin/{model}_carrabin_performance.pkl
-      snacks (yoo)       -> data/runs/yoo/{model}_yoo_performance.pkl
-      colors/numbers     -> data/runs/rmse/{model}_soltani_{task}_performance.pkl
-                            -- fit against the CORRECTED, contamination-free
-                            46-pid canonical data (see chat: the pilot-4/
-                            pid-registry fixes). NOT data/runs/soltani/,
-                            which holds the earlier, stale fits against the
-                            pre-fix data and is no longer read by any
-                            function in this file.
+    ALWAYS data/runs/rmse/{model}_{dataset}_performance.pkl, all 4 tasks --
+    run_folder rmse is now the canonical RMSE fit location for every task
+    (see chat: balls/snacks's own math models were refit fresh into rmse
+    specifically so this file no longer needs a per-task folder branch;
+    NEF had already been rmse-only since the weekend RMSE pass). NOT
+    data/runs/carrabin/ or data/runs/yoo/ -- those still hold retired-model
+    artifacts (NoisyCounting, RNN, NoisyRL_lambda, old NEF scans) and each
+    task's own NLL fits, but no longer the canonical RMSE fit for any of
+    the 4 active math models + NEF. NOT data/runs/soltani/ either, which
+    holds the earlier, stale fits against the pre-pid-registry-fix data
+    and is read by no function in this file.
     """
     dataset = {"balls": "carrabin", "snacks": "yoo",
                "colors": "soltani_colors", "numbers": "soltani_numbers"}[task_key]
-    if model == "NEF":
-        return RUNS_DIR / "rmse" / f"NEF_{dataset}_performance.pkl"
-    if task_key == "balls":
-        return RUNS_DIR / "carrabin" / f"{model}_carrabin_performance.pkl"
-    if task_key == "snacks":
-        return RUNS_DIR / "yoo" / f"{model}_yoo_performance.pkl"
     return RUNS_DIR / "rmse" / f"{model}_{dataset}_performance.pkl"
 
 
@@ -779,31 +768,17 @@ def _delta_responses_path(task_key: str, model: str) -> Path:
     observation response SEQUENCE (needed to compute a delta), NOT the
     scalar *_performance.pkl loss make_model_performance reads.
 
-    NEF, all 4 tasks: ALWAYS data/runs/rmse/NEF_{stem}_responses.pkl -- the
-    same fresh weekend RMSE fit _model_fit_path reads for
-    make_model_performance. This deliberately DROPS two presentations/
-    make_figures.py quirks: balls' NEF used to come from the MLE-fitted
-    variant (NEF_carrabin_responses_mle.pkl, matching that deck's
-    figure_carrabin_temporal.py panel B), and snacks' NEF used to come from
-    data/runs/refit/ (the old, smaller-n_neurons fit). Both are gone so
-    that "NEF" means the SAME fit, everywhere, in this figure AND in
-    make_model_performance -- a reader shouldn't have to wonder whether
-    two panels showing "NEF" in the same paper are secretly two different
-    fits of it.
-
-    Every other model keeps its existing location, unchanged:
-      balls (carrabin)  -> data/runs/carrabin/{model}_carrabin_responses.pkl
-      snacks (yoo)       -> data/runs/yoo/{model}_yoo_responses.pkl
-      colors/numbers     -> data/runs/rmse/{model}_soltani_{task}_responses.pkl
+    ALWAYS data/runs/rmse/{model}_{dataset}_responses.pkl, all 4 tasks --
+    same canonicalization as _model_fit_path (see its own docstring): NEF
+    had already been rmse-only since the weekend RMSE pass (dropping two
+    presentations/make_figures.py quirks -- balls' old MLE-fitted variant,
+    snacks' old data/runs/refit/ fit -- so "NEF" means the same fit
+    everywhere); balls/snacks's other math models were refit fresh into
+    rmse (see chat) so this file no longer needs their own
+    data/runs/carrabin//data/runs/yoo/ branch either.
     """
     dataset = {"balls": "carrabin", "snacks": "yoo",
                "colors": "soltani_colors", "numbers": "soltani_numbers"}[task_key]
-    if model == "NEF":
-        return RUNS_DIR / "rmse" / f"NEF_{dataset}_responses.pkl"
-    if task_key == "balls":
-        return RUNS_DIR / "carrabin" / f"{model}_carrabin_responses.pkl"
-    if task_key == "snacks":
-        return RUNS_DIR / "yoo" / f"{model}_yoo_responses.pkl"
     return RUNS_DIR / "rmse" / f"{model}_{dataset}_responses.pkl"
 
 

@@ -74,6 +74,7 @@ def _suggest_params(
     pid: int,
     datafile: str | None = None,
     fixed_override: dict | None = None,
+    init_from_obs1: bool | None = None,
 ) -> dict:
     """Sample model parameters for one Optuna trial.
 
@@ -85,6 +86,14 @@ def _suggest_params(
     key is already a searchable range in `MODEL_PARAMS[dataset][model_type]`
     -- overriding REPLACES the search for a param that's normally free,
     and ADDS a param that isn't listed in the spec at all.
+
+    `init_from_obs1`, if not None, OVERRIDES whatever
+    MODEL_PARAMS[dataset][model_type]["fixed"] would otherwise supply for
+    that one key -- lets a caller force it on/off per fit() call (e.g. a
+    quick A/B comparison) without editing MODEL_PARAMS itself, which
+    permanently bakes it in for LeakyIntegrator/RL_lambda on
+    soltani_colors/soltani_numbers. None (the default) means "use whatever
+    MODEL_PARAMS says" -- most callers should never need to pass this.
     """
     params = {
         "model_type": model_type,
@@ -102,6 +111,8 @@ def _suggest_params(
     fixed_params = dict(model_spec.get("fixed", {}))
     if fixed_params:
         params.update(fixed_params)
+    if init_from_obs1 is not None:
+        params["init_from_obs1"] = init_from_obs1
     fixed_override = fixed_override or {}
 
     for param, spec in model_spec.items():
@@ -231,6 +242,7 @@ def fit(
     loss_fn: str = "rmse",
     n_sims: int = 100,
     override_from_folder: str | Path | None = None,
+    init_from_obs1: bool | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit one participant/model combination and persist outputs.
 
@@ -241,6 +253,14 @@ def fit(
     (NoisyRL_lambda) both had their own NLL branches; both are retired (see
     module docstring). Checked up front so a bad combination fails before an
     Optuna study is created, not on the first trial.
+
+    `init_from_obs1`, if not None, OVERRIDES MODEL_PARAMS[dataset]
+    [model_type]["fixed"]'s own init_from_obs1 value (see
+    _suggest_params's own docstring) -- e.g. run a straight fit with it
+    off, then a second fit with it on, into two different run_folders,
+    without touching fitting/model_params.py at all. None (the default)
+    uses whatever MODEL_PARAMS says -- irrelevant for any model/dataset
+    that doesn't set this key at all.
 
     `override_from_folder`, if given, pins this pid's base-model parameters
     (e.g. RL_lambda's alpha_0/lambda_) to their RMSE-fitted values read from
@@ -342,7 +362,8 @@ def fit(
 
     def objective(trial: optuna.trial.Trial) -> float:
         params = _suggest_params(trial, model_type, dataset, pid, datafile,
-                                  fixed_override=fixed_override)
+                                  fixed_override=fixed_override,
+                                  init_from_obs1=init_from_obs1)
         trial_wall_start = time.time()
         if loss_fn == "nll":
             # Simulated ONCE per Optuna trial; _cross_validate_nll partitions the
@@ -411,6 +432,8 @@ def fit(
     # drop them. Mirrors _suggest_params' own merge, applied in the same order
     # (fixed dict first, override pins can still take precedence).
     best_params.update(MODEL_PARAMS[dataset][model_type].get("fixed", {}))
+    if init_from_obs1 is not None:
+        best_params["init_from_obs1"] = init_from_obs1  # same override as _suggest_params
     best_params.update(fixed_override)  # trial.params never has these -- they
                                         # were pinned directly, not suggested
     best_params.update(
@@ -522,6 +545,15 @@ if __name__ == "__main__":
              "Optuna to search. See fit()'s own docstring for exactly which "
              "file gets read and how the override set is determined.",
     )
+    parser.add_argument(
+        "--init_from_obs1", choices=("true", "false"), default=None,
+        help="Override MODEL_PARAMS[dataset][model_type]['fixed']'s own "
+             "init_from_obs1 value for this one fit (e.g. run --run_folder "
+             "rmse with this off, then a second fit with it on into another "
+             "folder, without editing fitting/model_params.py). Omit to use "
+             "whatever MODEL_PARAMS says -- irrelevant for any model/dataset "
+             "that doesn't set this key at all.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -537,6 +569,7 @@ if __name__ == "__main__":
         loss_fn=args.loss_fn,
         n_sims=args.n_sims,
         override_from_folder=args.override_from_folder,
+        init_from_obs1=(None if args.init_from_obs1 is None else args.init_from_obs1 == "true"),
     )
     elapsed = float(performance_df.loc[0, "runtime"])
     logging.info(f"Completed in {elapsed:.2f} min")

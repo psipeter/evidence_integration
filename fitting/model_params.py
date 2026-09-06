@@ -63,19 +63,43 @@ _NEF_RANGES: dict[str, tuple] = {
     "alpha_0": (0.01, 1.0, 0.001),
 }
 
-# soltani_colors/soltani_numbers only: initialize RL_lambda's `expectation`/
-# LeakyIntegrator's `v` at observation 0's raw value instead of 0.0 -- see
-# models.math_models._run_soltani_common's own comment at the init lines.
-# Both tasks' human data shows the overwhelming majority of pids set their
-# very first response to (or within noise of) that trial's first observation
-# rather than a partial step from a neutral prior (see chat), which Mean/
-# PrimacyRecency already reproduce for free (both reduce to exactly
-# value[0] at n=1) but RL_lambda/LeakyIntegrator do not without this flag.
-# NOT set for carrabin/yoo -- carrabin's task asks for the underlying
-# probability (naturally more conservative than value[0]) and yoo's own
-# first observations are confounded by joystick catch-up dynamics that
-# alpha<1 actually helps capture; see chat for both.
-_INIT_FROM_OBS1: dict[str, object] = {"init_from_obs1": True}
+# init_from_obs1 (initialize RL_lambda's `expectation`/LeakyIntegrator's `v`
+# at observation 0's raw value instead of 0.0 -- see
+# models.math_models._run_soltani_common's own comment at the init lines) is
+# NOT wired into any MODEL_PARAMS entry -- defaults to False everywhere via
+# math_models.py's own params.get("init_from_obs1", False). Turn it on
+# per-fit via `fitting.fit`/`fitting.submit`'s own --init_from_obs1 true
+# flag (deliberately NOT a permanent default here, even for
+# soltani_colors/soltani_numbers's LeakyIntegrator/RL_lambda, so the
+# canonical `rmse` run_folder stays a uniform baseline across all 4 tasks;
+# a run with it on belongs in its own separate run_folder). Relevant only
+# for soltani_colors/soltani_numbers -- both tasks' human data shows the
+# overwhelming majority of pids set their very first response to (or
+# within noise of) that trial's first observation rather than a partial
+# step from a neutral prior (see chat), which Mean/PrimacyRecency already
+# reproduce for free (both reduce to exactly value[0] at n=1) but
+# RL_lambda/LeakyIntegrator do not without this flag. NOT relevant for
+# carrabin/yoo -- carrabin's task asks for the underlying probability
+# (naturally more conservative than value[0]) and yoo's own first
+# observations are confounded by joystick catch-up dynamics that alpha<1
+# actually helps capture; see chat for both.
+
+# RL_lambda/RL_lambda_resp_noise's own lambda_ range, all 4 datasets: widened
+# 0.01-1.0 -> 0.01-2.0 (see chat). Verified a large fraction of pids' RMSE
+# fits pin exactly at the old upper bound of 1.0 (colors ~80%, numbers ~10-30%
+# depending on init_from_obs1, carrabin ~14%, yoo 0% -- yoo's own fitted
+# lambda_ never even approached 1.0, so this is not a uniform artifact).
+# Widening it lets Optuna search past a bound that was silently constraining
+# a real fraction of colors/numbers pids toward a slower decay than their own
+# data wants. NOTE this does not, and cannot, let RL_lambda reproduce a
+# genuine LATE-trial recency uptick (a real feature of colors' empirical
+# weighting kernel, see chat) -- alpha_k = alpha_0/k^lambda_ is non-increasing
+# in k for ANY lambda_ >= 0, so the implied weight on the most recent
+# observation can never exceed an earlier one's, regardless of how high
+# lambda_ is allowed to go. This bound widening only lets the model find a
+# better-fitting EARLY/primacy decay rate, not a different functional shape.
+# NEF's own _NEF_RANGES lambda_ (still 0.01-1.0 above) is a SEPARATE
+# architecture-fitting range and is deliberately NOT touched by this change.
 
 MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
     "carrabin": {
@@ -92,7 +116,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -103,7 +127,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         # fitting.losses.compute_nll's docstring).
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 2.0, 0.001),
             "sigma_resp": (0.001, 2.0, 0.001),
         },
         # Same add_noise() wrapper, applied to the other three deterministic
@@ -135,7 +159,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -146,7 +170,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         # fitting.losses.compute_nll's docstring).
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 2.0, 0.001),
             "sigma_resp": (0.001, 2.0, 0.001),
         },
         # Same add_noise() wrapper, applied to the other three deterministic
@@ -176,7 +200,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "Mean": {},
         "LeakyIntegrator": {
             "gamma": (0.001, 0.999, 0.001),
-            "fixed": _INIT_FROM_OBS1,
         },
         "PrimacyRecency": {
             "eps_p": (0.001, 1.0, 0.001),
@@ -184,8 +207,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-            "fixed": _INIT_FROM_OBS1,
+            "lambda_": (0.01, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -196,9 +218,8 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         # fitting.losses.compute_nll's docstring).
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 2.0, 0.001),
             "sigma_resp": (0.001, 2.0, 0.001),
-            "fixed": _INIT_FROM_OBS1,
         },
         # Same add_noise() wrapper, applied to the other three deterministic
         # base models. Bounds mirror each base model's own entry exactly.
@@ -208,7 +229,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "LeakyIntegrator_resp_noise": {
             "gamma": (0.001, 0.999, 0.001),
             "sigma_resp": (0.001, 2.0, 0.001),
-            "fixed": _INIT_FROM_OBS1,
         },
         "PrimacyRecency_resp_noise": {
             "eps_p": (0.001, 1.0, 0.001),
@@ -224,7 +244,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "Mean": {},
         "LeakyIntegrator": {
             "gamma": (0.001, 0.999, 0.001),
-            "fixed": _INIT_FROM_OBS1,
         },
         "PrimacyRecency": {
             "eps_p": (0.001, 1.0, 0.001),
@@ -232,8 +251,7 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         },
         "RL_lambda": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
-            "fixed": _INIT_FROM_OBS1,
+            "lambda_": (0.01, 2.0, 0.001),
         },
         # Generic i.i.d.-response-noise wrapper (models.math_models.add_noise),
         # applied to a plain deterministic RL_lambda. One extra parameter, same
@@ -244,9 +262,8 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         # fitting.losses.compute_nll's docstring).
         "RL_lambda_resp_noise": {
             "alpha_0": (0.01, 1.0, 0.001),
-            "lambda_": (0.01, 1.0, 0.001),
+            "lambda_": (0.01, 2.0, 0.001),
             "sigma_resp": (0.001, 2.0, 0.001),
-            "fixed": _INIT_FROM_OBS1,
         },
         # Same add_noise() wrapper, applied to the other three deterministic
         # base models. Bounds mirror each base model's own entry exactly.
@@ -256,7 +273,6 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "LeakyIntegrator_resp_noise": {
             "gamma": (0.001, 0.999, 0.001),
             "sigma_resp": (0.001, 2.0, 0.001),
-            "fixed": _INIT_FROM_OBS1,
         },
         "PrimacyRecency_resp_noise": {
             "eps_p": (0.001, 1.0, 0.001),
