@@ -455,3 +455,34 @@ less informative than the existing paired per-pid correlation in
 retired as the colors/numbers stochastic stand-in in
 scripts/make_paper_figures.py" entry.
 
+---
+
+## Four standalone human-only figures deleted (not archived) as pure duplicates
+
+**Decision:** `make_lambda_human`, `make_lambda_sanity_human`,
+`make_variability_human`, and `make_sigma_sanity_human` were deleted
+outright from `scripts/make_paper_figures.py` -- not moved to `archive/`,
+unlike every other retirement in this file. `git log --follow` recovers
+them if ever needed; no separate archive copy was made.
+
+**Why deleted rather than archived:** each one is a 100%-content subset of
+a composite figure that already exists -- `lambda_overview`'s own
+docstring says its row 1 is "identical to make_lambda_human" and its row 2
+is the same panels as `make_lambda_sanity_human`; `sigma_overview`'s
+docstring says the same for `make_variability_human` (row 1) and
+`make_sigma_sanity_human` (row 2). Both composites were built by literally
+combining these exact pairs into one 2-row figure. There was no unique
+content left in any of the four standalone versions to preserve, unlike
+the `NoisyRL_lambda` retirement above (real judgment calls, partial
+restoration nuance) -- so the lighter-weight "just delete it" treatment
+fit, rather than archiving code with nothing distinct to restore.
+
+**What was deliberately NOT touched:** `make_variance_autocorr_human` --
+its schematic panel (`AUTOCORR_SCHEMATIC`) was dropped when `sigma_main`
+was built and exists nowhere else, so it is not a pure duplicate of
+anything. `lambda_metric` -- a differently-styled, standalone version of
+the fitting-demo panel, built specifically as an Inkscape-inset source for
+`lambda_main`, not a duplicate. `lambda_overview`/`sigma_overview`
+themselves -- these are the composites the four deleted figures were
+redundant with, obviously kept.
+

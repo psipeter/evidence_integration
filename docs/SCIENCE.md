@@ -209,9 +209,10 @@ rate — `response_change` (main 4-task figure, human + 5 models),
 distributions).
 
 **2.2 Individual differences for humans.** A single fitted λ per person
-locates them on the primacy↔recency spectrum — `lambda_human` (per-task λ
-distributions across participants), `lambda_overview` (adds cross-task
-reliability underneath).
+locates them on the primacy↔recency spectrum — `lambda_overview` (per-task
+λ distributions, row 1; cross-task/split-half reliability, row 2). A
+standalone human-only breakout (`lambda_human`/`lambda_sanity_human`) was
+tried and deleted as a pure duplicate of this composite's own two rows.
 
 **2.3 Running-mean ground truth and the colors/numbers weighting kernel.**
 Redefining ground truth as the running mean of raw observations (rather
@@ -257,10 +258,12 @@ models — is the one that reproduces it.
 
 **3.1 Individual differences in response variability for humans.** How
 noisy is each person's response to a repeated, identical stimulus —
-`variability_human` (per-task KDE, human-only). A model-overlay variant
-(`variability_models`) was tried and retired as redundant — the same
-per-pid model-vs-human comparison is shown, more informatively, by
-`sigma_model_correlation` below.
+`sigma_overview` (per-task KDE, row 1; split-half reliability, row 2).
+Standalone human-only breakouts (`variability_human`/`sigma_sanity_human`)
+and a model-overlay variant (`variability_models`) were all tried and
+removed as redundant: the human KDE/reliability panels duplicate
+`sigma_overview`'s own two rows, and the per-pid model-vs-human comparison
+is shown, more informatively, by `sigma_model_correlation` below.
 
 **3.2 Growth of variability during the early sequence.** Response noise
 should accumulate over the course of a trial if it's state-persistent
@@ -287,9 +290,9 @@ response noise on the same behavioural data the models were fit to.
    since balls doesn't show the expected decay the other three tasks do.
 2. **Lambda and sigma reliability within and across tasks** —
    `lambda_reliability`/`sigma_reliability` (odd/even split-half, within
-   task), `lambda_sigma_crosstask` (colors-vs-numbers, paired),
-   `lambda_sanity_human`/`sigma_sanity_human` (combined reliability +
-   cross-task).
+   task), `lambda_sigma_crosstask` (colors-vs-numbers, paired) — the same
+   reliability/cross-task pair also appears combined in
+   `lambda_overview`/`sigma_overview` row 2.
 3. **Lambda and sigma, human vs model** — `lambda_model_correlation`/
    `lambda_humanvmodel` and `sigma_model_correlation`: how well each
    model's own fitted λ/σ tracks the same participant's.
@@ -335,18 +338,14 @@ testable with future spike-resolved recordings.
 | `response_change` | 2.1 Response change decay | 1×4 |
 | `lambda_metric` | 2.1 Response change decay | 1×1 |
 | `lambda_main` | 2.1 + 2.2 composite | 2×3 |
-| `lambda_human` | 2.2 Individual differences | 1×4 |
 | `lambda_overview` | 2.2 composite | 2×4 |
 | `lambda_balls` | Supplementary | 1×1 |
 | `lambda_reliability` | Supplementary | 1×3 |
 | `sigma_reliability` | Supplementary | 1×3 |
 | `lambda_sigma_crosstask` | Supplementary | 1×2 |
-| `lambda_sanity_human` | Supplementary | 1×4 |
-| `sigma_sanity_human` | Supplementary | 1×4 |
 | `lambda_model_correlation` | Supplementary | 1×3 |
 | `lambda_humanvmodel` | Supplementary | 1×3 |
 | `sigma_model_correlation` | Supplementary | 1×3 |
-| `variability_human` | 3.1 Individual differences | 1×4 |
 | `sigma_overview` | 3.1 composite | 2×4 |
 | `sigma_main` | 3.1 + 3.2 + 3.3 composite | 3×3 |
 | `variance_autocorr_human` | 3.3 Autocorrelation | 1×4 |

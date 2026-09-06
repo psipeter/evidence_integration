@@ -1150,57 +1150,6 @@ def _plot_lambda_distribution(ax, human_lam: pd.Series, task_key: str,
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_lambda_human() -> Path:
-    """1x4 panel: panel 1 demos the power-law fitting PROCEDURE on one
-    representative human pid (see _plot_lambda_demo); panels 2-4 are KDEs of
-    the fitted decay exponent lambda across pids, one per task (snacks,
-    colors, numbers -- balls/carrabin excluded, see LAMBDA_TASK_PANELS).
-    Lambda near 0 means little decay (roughly equal weight to every
-    observation, primacy-leaning); lambda near 1 is close to an optimal/
-    running-mean-like weighting; lambda above 1 over-weights early
-    observations even more steeply -- so the SPREAD of a task's histogram
-    is a direct picture of individual differences in integration strategy,
-    and its rug ticks are literally one mark per real participant.
-
-    Fitting procedure (per _fit_lambda_series/LAMBDA_MIN_OBS/
-    LAMBDA_N_OFFSET): the SAME estimator (A*n^(-lambda), bounded nonlinear
-    least squares, identical p0/bounds/maxfev) as
-    figure_yoo_temporal.py's/figure_soltani_temporal.py's own
-    _fit_lambda_curve_fit, with each task's own min_obs/n_offset copied
-    from that task's own source script rather than reinvented. One genuine
-    inconsistency was found between colors' visual delta panel and its
-    lambda fit (see LAMBDA_MIN_OBS's own comment) and is deliberately left
-    as-is, matching this project's own actual code rather than the
-    stricter threshold used elsewhere.
-
-    Y-AXIS LEGEND: none -- with only "Human" plotted (models were removed
-    from this deck per instruction), a single-entry legend saying "Human"
-    is redundant clutter, same reasoning as make_variability_human's own
-    dropped legend; the panel titles already name each task. No reserved
-    legend slot either, so there's no leftover empty margin at the bottom.
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-
-    _plot_lambda_demo(axes[0], task_key="numbers")
-
-    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
-        ax = axes[i + 1]
-        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
-        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
-        _plot_lambda_distribution(ax, lam, task_key)
-        ax.set_title(title, color=TASK_COLORS[task_key])
-        ax.set_ylabel("Normalized density" if i == 0 else "")
-        ax.tick_params(axis="y", labelleft=(i == 0))
-
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path, _ = _save_fig(fig, "lambda_human")
-    plt.close(fig)
-    return out_path
-
-
-
-
 # ── Sanity check: split-half reliability of lambda + cross-task comparison ──
 
 # Abbreviated legend labels for the sanity-check panels below, which pack up
@@ -1344,37 +1293,6 @@ def _plot_lambda_crosstask_panel(ax) -> None:
     ax.set_xlabel("\u03bb (colors)")
     ax.set_ylabel("\u03bb (numbers)")
     sns.despine(ax=ax, top=True, right=True)
-
-
-def make_lambda_sanity_human() -> Path:
-    """1x4 panel: panels 1-3 are odd/even split-half reliability of fitted
-    lambda for snacks/colors/numbers (matching figure_soltani_temporal.py's
-    own panels E/K -- see _fit_lambda_split_half's own docstring for the one
-    real methodology difference found and resolved), sharing a fixed [0,1.5]
-    x/y range (LAMBDA_XLIM) across all three rather than each autoscaling to
-    its own data. Panel 4 is the colors-vs-numbers cross-task comparison
-    (matching that same script's panel L). Human only throughout -- a
-    models version was tried and then removed per instruction, so this is
-    now the only lambda-reliability figure/slide in the deck.
-
-    PLAIN 1x4 plt.subplots -- NOT the 2-row GridSpec (plots + a dedicated
-    legend row) this figure used before. With only one source per panel,
-    each legend is now just "r=0.xx*" or "n=N", short enough to sit inside
-    its own axes (see _plot_lambda_splithalf_panel/_plot_lambda_crosstask_
-    panel's own docstrings) -- the reserved legend row is no longer needed
-    and left a lot of empty space at the bottom once removed.
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-
-    for i, (ax, (task_key, title)) in enumerate(zip(axes[:3], LAMBDA_TASK_PANELS)):
-        _plot_lambda_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
-    _plot_lambda_crosstask_panel(axes[3])
-
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path, _ = _save_fig(fig, "lambda_sanity_human")
-    plt.close(fig)
-    return out_path
 
 
 def make_lambda_overview() -> Path:
@@ -2166,44 +2084,6 @@ def _rasterize_svg(svg_path: Path, dpi: int = 300):
 VARIABILITY_SCHEMATIC = FIGURES_DIR / "schematics" / "response_noise_schematic.svg"
 
 
-def make_variability_human() -> Path:
-    """1x4 panel: panel A holds VARIABILITY_SCHEMATIC (a hand-made diagram of
-    the metric itself -- repeated identical trials, response spread =
-    "response noise"), rasterized and embedded via ax.imshow (see
-    _rasterize_svg's own docstring for why this replaced the presentation
-    script's SVG-XML-splicing approach: that could only ever produce a
-    correct .svg, never a .pdf); panels B-D are Human-only KDEs of response
-    variability for identical inputs, one per task (balls, colors, numbers
-    -- snacks excluded, see VARIABILITY_TASK_PANELS), each autoscaled to
-    its OWN data range (see _plot_variability_panel's own docstring for
-    why the shared range this used to have was dropped).
-
-    PLAIN 1x4 plt.subplots -- NOT the 2-row GridSpec (plots + a dedicated
-    legend row) the lambda sanity-check figures use. That reserved legend
-    row left a lot of empty space at the bottom once the legend itself
-    stopped being drawn (single-source panels skip it -- see
-    _plot_variability_panel), so it was removed; a legend, if one ever
-    becomes necessary again, is drawn INSIDE each axes instead (no
-    reserved row).
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-
-    axes[0].axis("off")
-    axes[0].set_title("Metric Definition", color="0.3")
-    schematic = _rasterize_svg(VARIABILITY_SCHEMATIC)
-    if schematic is not None:
-        axes[0].imshow(schematic, aspect="auto")
-
-    for i, (ax, (task_key, title)) in enumerate(zip(axes[1:], VARIABILITY_TASK_PANELS)):
-        _plot_variability_panel(ax, task_key, title, include_models=False,
-                                show_ylabel=(i == 0))
-
-    out_path, _ = _save_fig(fig, "variability_human")
-    plt.close(fig)
-    return out_path
-
-
 # make_variability_models (a KDE-with-model-overlay counterpart to
 # make_variability_human) was archived -- see
 # archive/scripts/archive_variability_models.py and
@@ -2380,43 +2260,6 @@ def _plot_sigma_crosstask_panel(ax) -> None:
     ax.set_xlabel("\u03c3 (colors)")
     ax.set_ylabel("\u03c3 (numbers)")
     sns.despine(ax=ax, top=True, right=True)
-
-
-def make_sigma_sanity_human() -> Path:
-    """1x4 panel: mirrors make_lambda_sanity_human exactly, for response
-    noise (sigma) instead of fitted lambda -- per instruction, using
-    "sigma"/"\u03c3" as the shorthand throughout this figure's own labels.
-    Panels 1-3 are odd/even split-half reliability of sigma for balls/
-    colors/numbers (VARIABILITY_TASK_PANELS -- snacks excluded, same
-    reasoning as the main response-noise figure). Panel 4 is the
-    colors-vs-numbers cross-task comparison. Human only, matching the
-    lambda figure's own human-only convention (a models version was tried
-    for lambda and then removed per instruction; not attempted here at
-    all for that same reason).
-
-    UNLIKE lambda's own splithalf panels, sigma's panels 1-3 do NOT share
-    one fixed range across all three tasks -- see
-    _plot_sigma_splithalf_panel's own docstring for why (sigma's natural
-    scale varies far more across tasks than lambda's bounded fit range
-    does; each panel is autoscaled to its OWN combined odd+even data, same
-    convention already established for the main response-noise figure).
-
-    PLAIN 1x4 plt.subplots -- NOT a 2-row GridSpec -- matching
-    make_lambda_sanity_human's own current (simplified) layout: a single-
-    source "r=0.xx*"/"n=N" legend fits inside each panel with no reserved
-    row needed.
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-
-    for i, (ax, (task_key, title)) in enumerate(zip(axes[:3], VARIABILITY_TASK_PANELS)):
-        _plot_sigma_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
-    _plot_sigma_crosstask_panel(axes[3])
-
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out_path, _ = _save_fig(fig, "sigma_sanity_human")
-    plt.close(fig)
-    return out_path
 
 
 def make_sigma_overview() -> Path:
@@ -4503,8 +4346,6 @@ FIGURES = {
     "model_best_fit": make_model_best_fit,
     "model_performance_nll": make_model_performance_nll,
     "response_change": make_response_change,
-    "lambda_human": make_lambda_human,
-    "lambda_sanity_human": make_lambda_sanity_human,
     "lambda_overview": make_lambda_overview,
     "lambda_model_correlation": make_lambda_model_correlation,
     "lambda_main": make_lambda_main,
@@ -4513,8 +4354,6 @@ FIGURES = {
     "lambda_reliability": make_lambda_reliability,
     "lambda_humanvmodel": make_lambda_humanvmodel,
     "lambda_sigma_crosstask": make_lambda_sigma_crosstask,
-    "variability_human": make_variability_human,
-    "sigma_sanity_human": make_sigma_sanity_human,
     "sigma_overview": make_sigma_overview,
     "sigma_main": make_sigma_main,
     "sigma_reliability": make_sigma_reliability,
