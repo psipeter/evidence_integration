@@ -111,6 +111,19 @@ PrimacyRecency, RL_lambda, NEF, and the still-active `_resp_noise`
 i.i.d.-noise wrapper). Code archived under `archive/models/`,
 `archive/fitting/`; full reasoning in `docs/DECISIONS.md`.
 
+**Settled this session:** investigated why LeakyIntegrator/RL_lambda
+underperform PrimacyRecency on colors/numbers specifically, using the
+running-mean-ground-truth reframing below (Metric taxonomy 2.3). Two
+separable causes, resolved differently: colors/numbers pids' very first
+response anchors almost exactly on that trial's raw first observation
+(fixed via an `init_from_obs1` fit flag, kept for LeakyIntegrator, dropped
+for RL_lambda — see `docs/DECISIONS.md`), and RL_lambda's `lambda_` search
+bound was silently capped at 1.0 with ~80% of colors pids pinned there
+(widened to 2.0). Neither fully closes RL_lambda's residual gap to
+PrimacyRecency on colors — a structural, not fitting-range, limitation
+(Metric taxonomy 2.3). Also found and fixed, unrelated: a carrabin-only
+obs-indexing bug in the Laplace-smoothing response transform.
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships; a
 synaptic-vs-working-memory implementation comparison). Model fitting
@@ -185,6 +198,43 @@ distributions).
 locates them on the primacy↔recency spectrum — `lambda_human` (per-task λ
 distributions across participants), `lambda_overview` (adds cross-task
 reliability underneath).
+
+**2.3 Running-mean ground truth and the colors/numbers weighting kernel.**
+Redefining ground truth as the running mean of raw observations (rather
+than the fixed generative parameter) surfaces a distinct signature: human
+colors/numbers error relative to this running mean *increases* over a
+trial (recency-biased divergence) for the large majority of individual
+pids, not just as a population-median artifact. Snacks looks different —
+its apparent population-level U-shape is mostly a joystick-catch-up
+artifact at trial onset (the slider always resets to center, confirmed in
+`task_backend` source, not a UI bug — a genuine motor-control confound
+specific to that task's response device) mixed with a real
+majority/minority split in individual trajectories, not a per-pid U-shape.
+
+Colors' empirical weighting kernel (pooled regression of final response
+on all 15 raw observations, non-anchor-mismatch pids) is genuinely
+double-humped: highest at the first observation, a trough mid-trial, and
+a real recency uptick at the end — the same primacy-and-recency pattern
+Yoo et al. (2025) report for their own (different) task. PrimacyRecency's
+two independent exponentials (`eps_p`, `eps_r`) can represent this shape;
+RL_lambda's single power-law decay rate cannot, for *any* parameter
+value — its implied per-observation weight is mathematically
+non-increasing over the course of a trial, so it can approximate a steep
+early decay but never a late re-elevation. This is a structural
+limitation of the functional form, not something a wider search range can
+fix (see `docs/DECISIONS.md`'s fitting-config entry for the resulting
+decision on `init_from_obs1`/the `lambda_` bound).
+
+Separately: colors/numbers pids' very first response tracks that trial's
+raw first observation almost exactly, rather than a partial update from a
+neutral prior — true for the large majority, but a genuine minority (most
+clearly 2 colors pids, 100% consistent across all 32 of their trials, and
+otherwise indistinguishable from typical end-of-trial performance) instead
+show a stable, low-variance pattern of ignoring a single binary sample
+entirely — plausibly a deliberate skepticism-of-weak-evidence strategy
+rather than a mistake. One further pid shows a genuine within-session
+learning transition (near-total non-anchoring in the first half of their
+session, near-perfect anchoring in the second).
 
 ### 3. Sigma exploration
 Goal 4's novel prediction: spiking noise is qualitatively different from

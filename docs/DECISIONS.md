@@ -300,6 +300,64 @@ switch happened and why.
 
 ---
 
+## `init_from_obs1` kept for LeakyIntegrator, dropped for RL_lambda; RL_lambda's `lambda_` bound widened to 2.0
+
+**Decision:** `init_from_obs1` (initialize LeakyIntegrator's/RL_lambda's
+persistent state at that trial's own raw first observation instead of
+0.0, for soltani_colors/soltani_numbers only) is a `fitting.fit`/
+`fitting.submit` CLI flag (`--init_from_obs1 true`), not a `MODEL_PARAMS`
+default — so it's just a choice of which fits get the flag, not a code
+branch. That choice: **on for LeakyIntegrator, off for RL_lambda**
+(RL_lambda reverts to the original 0-initialized behavior everywhere).
+Separately, RL_lambda's/RL_lambda_resp_noise's own `lambda_` search bound
+was widened from `(0.01, 1.0)` to `(0.01, 2.0)` for all four datasets.
+
+**Why colors/numbers pids' very first response needed a look at all:**
+the overwhelming majority set it to (or within noise of) that trial's raw
+first observation, not a partial step from a neutral prior — which
+Mean/PrimacyRecency already reproduce for free (both reduce to exactly
+`value[0]` at n=1) but LeakyIntegrator/RL_lambda's recursive updates from
+0.0 do not.
+
+**Why the two models benefit so differently:** LeakyIntegrator improves
+substantially and robustly (colors: -13.5% across all pids, -23% once a
+6-pid anchor-mismatch minority is excluded — the effect gets *bigger*,
+not smaller, once removed; numbers: -24%, no anchor-mismatch minority at
+all) — its single `gamma` had to compromise between fitting the first
+observation and fitting the rest of the trial's decay, and the fix
+removes that tension entirely. RL_lambda barely benefits (numbers: ~1%,
+statistically significant but not practically meaningful; colors: net
+*negative* even with the widened `lambda_` bound, driven by the same
+anchor-mismatch pids) because its typically-high fitted `alpha_0`
+(~0.8-0.9 on colors) already lands close to `value[0]` on the first
+update under the old scheme — there wasn't much gap left to close. Judged
+against the standard that the change needed to be substantial to justify
+inclusion, LeakyIntegrator clears that bar and RL_lambda doesn't.
+
+**Why the `lambda_` bound needed widening, separately:** ~80% of colors
+pids' RMSE fits were pinned exactly at the old upper bound of 1.0 (numbers
+~10-30% depending on `init_from_obs1`, carrabin ~14%, yoo 0% — confirming
+this wasn't a uniform optimizer artifact). Widening it recovers real fit
+quality, but does not fully close RL_lambda's residual gap to
+PrimacyRecency on colors — see `docs/SCIENCE.md`'s "Running-mean ground
+truth and the colors/numbers weighting kernel" entry for the structural
+(not fitting-range) reason why.
+
+**Also found and fixed in the same investigation, unrelated to the above:**
+a carrabin-only bug in `utils/binary_transform.py`'s Laplace-smoothing
+transform — `t` was computed as `observation + 1`, silently assuming a
+0-indexed observation column, but carrabin's is already 1-indexed. Live
+since a prior session's commit that generalized this transform from
+carrabin-only code; confirmed by comparing an old carrabin fit's response
+against a fresh refit under the buggy code (identical pre-transform
+values, different post-transform ones, exactly matching the predicted
+off-by-one). Fixed to `t = observation` directly.
+
+**Full investigation:** this session's chat; no `archive/HISTORY_*.md`
+entry (nothing here was retired).
+
+---
+
 ## Legacy per-dataset figure scripts retired in favor of make_paper_figures.py
 
 **Decision:** the split per-dataset P/V/T/N figure scripts
