@@ -59,7 +59,22 @@ _NEF_FIXED: dict[str, object] = {
 }
 
 _NEF_RANGES: dict[str, tuple] = {
-    "lambda_": (0.01, 1.0, 0.001),
+    # Widened 0.01-1.0 -> 0.01-2.0 (see chat), matching RL_lambda's own
+    # lambda_ range widening above -- NEF's counting subnetwork implements
+    # the SAME alpha(t) = alpha_0/t^lambda equation (see docs/SCIENCE.md's
+    # "Central model"), so it shows the identical bound-pinning signature:
+    # colors 83% of pids' RMSE fits pinned exactly at the old ceiling
+    # (median fitted lambda_ was EXACTLY 1.0, even more constrained than
+    # RL_lambda's own ~80%), numbers 4%, carrabin ~14%, yoo 0% (max 0.91,
+    # never approached the old bound) -- not a uniform artifact, same
+    # per-dataset pattern as RL_lambda. Same caveat applies: this cannot
+    # let NEF reproduce colors' genuine late-trial recency uptick (still
+    # mathematically monotonic in k regardless of the bound) -- it only
+    # lets Optuna find a better-fitting early/primacy decay rate. Not yet
+    # refit under this wider bound as of this change (see chat) -- a real
+    # NEF refit is expensive (spiking simulation, minutes-to-hours per
+    # pid), unlike RL_lambda's near-instant math-model refit.
+    "lambda_": (0.01, 2.0, 0.001),
     "alpha_0": (0.01, 1.0, 0.001),
 }
 
