@@ -119,10 +119,21 @@ def apply_binary_transform(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
     else:
         exempt_mask = pd.Series(False, index=df.index)
 
-    # Use (observation+1) as the 1-indexed count so the first obs (0-indexed)
-    # gets factor 1/3 rather than 0/2=0. Matches carrabin convention where
-    # observations index from 1.
-    t = df["observation"] + 1
+    # carrabin's `observation` column is ALREADY 1-indexed (values 1-5,
+    # verified directly against data/carrabin.pkl) -- t is just `observation`
+    # itself, giving factor 1/3 at the first observation (t=1) as intended.
+    # BUG FIXED (see chat): this used to add another +1 on top
+    # (`observation + 1`), a leftover from a same-session commit that
+    # generalized this transform from carrabin-only code and assumed a
+    # 0-indexed observation column (its own comment said "so the first obs
+    # (0-indexed) gets factor 1/3" -- true for a 0-indexed column, but wrong
+    # for carrabin's real 1-indexed one, which the SAME comment also,
+    # confusingly, correctly described). This silently inflated every
+    # carrabin response's transform factor (e.g. first-observation factor
+    # 1/2 instead of 1/3) for any fit run after that commit -- confirmed by
+    # comparing response_raw (identical) against response (not) between an
+    # old carrabin fit and a fresh refit under the buggy code.
+    t = df["observation"]
     df.loc[~exempt_mask, "response"] = (
         df.loc[~exempt_mask, "response_raw"] * t[~exempt_mask] / (t[~exempt_mask] + 2)
     )
