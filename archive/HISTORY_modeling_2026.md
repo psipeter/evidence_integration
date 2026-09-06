@@ -3020,3 +3020,173 @@ three consumers (`archive/scripts/figure_soltani_performance.py`,
 `archive/scripts/figure_soltani_variability.py`) would need restoring
 too (`git mv` each back to `scripts/`) for the imports to resolve to
 something runnable again.
+
+---
+
+## NoisyRL_lambda retired as the colors/numbers stochastic stand-in in scripts/make_paper_figures.py (this session)
+
+Follow-up to this file's own "NoisyRL_lambda: response noise reconciles
+the fitted/descriptive lambda gap" and `docs/DECISIONS.md`'s "State-noise
+models, NoisyCounting, and their MLE/NLL pipelines retired" entries, both
+of which retired `NoisyRL_lambda`'s own model code and fitting pipeline
+but explicitly left `scripts/make_paper_figures.py` untouched at the time
+("every currently-published figure reads pre-computed .pkl files under
+data/runs/ and continues to work unchanged"). `NoisyRL_lambda` had been
+used there as a colors/numbers stand-in for a "genuinely stochastic
+model" comparison point, specifically because NEF hadn't been fit for
+those two tasks yet. NEF has since been fit (RMSE) for all four tasks and
+independently confirmed to reproduce the same state-persistent noise
+signature (`sigma_main` rows 2-3's own established finding), so this
+session closed the loop: swapped NEF in everywhere NoisyRL_lambda was
+used as that stand-in, and archived two figure functions found to be
+redundant along the way.
+
+### Reconnaissance done first
+
+Read every reference to `NoisyRL_lambda` in `scripts/make_paper_figures.py`
+(23 hits before starting) plus `archive/archive_readme.md`,
+`archive/HISTORY_modeling_2026.md`'s own earlier NoisyRL_lambda entries,
+and `docs/DECISIONS.md` in full, to match this repo's established
+conventions before changing anything.
+
+### Part 1: NoisyRL_lambda -> NEF wherever it was a stochastic stand-in
+
+- `VARIABILITY_STOCHASTIC_MODEL`'s colors/numbers entries: `"NoisyRL_lambda"`
+  -> `"NEF"`, matching `balls`' own already-established choice. Verified
+  directly (not assumed) that `NEF_soltani_{colors,numbers}_responses.pkl`
+  exist and produce genuine, non-degenerate per-pid qid-residual response
+  variability (std ~0.007-0.05 colors, ~0.009-0.02 numbers, across all 46
+  pids) -- the same non-degeneracy check NoisyRL_lambda's own original
+  comment described, now passing for NEF instead.
+- `SIGMA_CORR_MODELS`'s colors/numbers 4th slot: same swap. Checked
+  whether `_sigma_model_source_path`'s `model == "NEF"` branch (which
+  dispatches to `_variability_model_path` regardless of `task_key`)
+  already resolved correctly for colors/numbers once the roster changed --
+  it did, with NO code change needed: `_variability_model_path`'s own
+  colors/numbers branch was already model-name-agnostic
+  (`RUNS_DIR / "rmse" / f"{model}_{dataset}_responses.pkl"`), so it had
+  been silently ready for this swap all along.
+- `SIGMA_CORR_COLORS`'s `NoisyRL_lambda` entry/override, `MODEL_COLORS
+  ["NoisyRL_lambda"]`, `MODEL_DISPLAY["NoisyRL_lambda"]`: removed. NEF
+  already has its own established color/label entries used everywhere
+  else in the file.
+- `make_model_performance_nll` turned out to need NO change at all: a
+  repo-read-in-full surfaced that this function had ALREADY been
+  refactored, in an earlier session, off the NoisyRL_lambda-based roster
+  (`NLL_MODEL_ORDER`/`NLL_REFERENCE`) onto a newer one
+  (`NLL_RESP_NOISE_MODELS`, reference `RL_lambda_resp_noise`) -- confirmed
+  directly by grep (`NLL_REFERENCE` had exactly one hit, its own
+  definition; `_nll_perf_path` had zero call sites) rather than assumed
+  from the surrounding comments, which is what the calling conversation's
+  own framing had reasonably (but, it turned out, incorrectly) attributed
+  to `make_model_performance_nll` itself -- that earlier refactor's own
+  comment says so explicitly: "Deliberately NOT touching NLL_MODEL_ORDER/
+  NLL_REFERENCE/NLL_MODEL_COLORS/NLL_LABELS/_nll_perf_path above -- those
+  still serve make_variance_autocorr_human/models exactly as before." So
+  the OLD roster had been silently living on, serving only
+  `make_variance_autocorr_models` and, via a stale default argument,
+  `make_variance_autocorr_human`'s own probe pass -- see Part 3.
+
+### Part 2: make_variability_models archived
+
+Confirmed its own model-overlay branch had never actually been enabled --
+every call site passed `include_models=False` unconditionally, making
+this function BYTE-FOR-BYTE IDENTICAL in output to `make_variability_human`
+(differing only in save filename) even before this session. Checked
+directly whether NEF being wired in made re-enabling `include_models=True`
+worth it (the person's own instruction leaned toward retiring, but asked
+this be checked rather than assumed): NEF's colors/numbers response files
+are real and non-degenerate (see Part 1's own verification), so the fix
+WOULD work -- but the resulting per-pid model-vs-human comparison would
+still be strictly less informative than `make_sigma_model_correlation`'s
+existing paired per-pid scatter (which shows the same underlying
+quantity, correlated per person, not just aggregate KDE overlap). Retired
+rather than fixed. Moved to `archive/scripts/archive_variability_models.py`
+(extracted, `archive_`-prefixed, matching `archive_sigma_giant.py`'s own
+precedent for a retired `make_paper_figures.py` function that still
+depends on that file's own module-level state) and removed its
+`"variability_models"` entry from `FIGURES`.
+
+### Part 3: make_variance_autocorr_models archived, its orphaned roster archived with it
+
+Per the person's own instruction, checked `make_sigma_main` before
+touching anything: its row 3 already calls
+`_load_variance_autocorr_data(models=NLL_RESP_NOISE_MODELS,
+responses_path_fn=_nll_resp_noise_responses_path, include_nef=True)` --
+the exact metric `make_variance_autocorr_models` computed, against the
+exact same models, with NEF (not NoisyRL_lambda) already in the 4th slot.
+So `make_variance_autocorr_models` was fully redundant, not merely
+outdated.
+
+Also checked `make_variance_autocorr_human` (the still-active human-only
+sibling) before touching anything nearby, per instruction. It does NOT
+draw model curves in its own saved output, but its docstring's own
+"IDENTICAL TO make_variance_autocorr_models EXCEPT..." framing revealed a
+real, live dependency: a throwaway PROBE pass (used only to compute a
+shared y-axis range) called `_load_variance_autocorr_data()` with no
+override, which resolved its default argument to `NLL_MODEL_ORDER` --
+the very roster being retired. Left unfixed, this default would have
+raised `NameError` the moment `NLL_MODEL_ORDER` was removed. Fixed by
+updating this ONE call site to pass the current roster explicitly
+(`models=NLL_RESP_NOISE_MODELS, responses_path_fn=
+_nll_resp_noise_responses_path, include_nef=True`, plus the matching
+`models=NLL_RESP_NOISE_MODELS + ["NEF"], model_colors=MODEL_COLORS` on the
+probe's own `_draw_variance_autocorr_panel` call) -- mirroring
+`make_sigma_main`'s row 3 exactly, rather than leaving the probe pass
+targeting an archived sibling figure. `_load_variance_autocorr_data`/
+`_draw_variance_autocorr_panel` themselves (the shared helpers) were NOT
+archived -- both remain active, used by `make_variance_autocorr_human`
+and `make_sigma_main` -- only their own `None`-resolves-to-NLL_MODEL_ORDER/
+NLL_MODEL_COLORS defaults were repointed at NLL_RESP_NOISE_MODELS/
+MODEL_COLORS, so a future no-argument call resolves to the CURRENT roster
+rather than a stale or missing one.
+
+Archived together, into `archive/scripts/archive_variance_autocorr_models.py`:
+`make_variance_autocorr_models` itself, plus `NLL_MODEL_ORDER`,
+`NLL_REFERENCE`, `NLL_LABELS`, `NLL_MODEL_COLORS`, and `_nll_perf_path` --
+all now fully unreferenced by anything left in the live file (re-grepped
+to confirm). `NLL_TASK_PANELS`, defined in the same original block, was
+NOT archived -- confirmed it is still used by `make_model_best_fit` and
+`make_model_performance_nll`, both active. `_nll_responses_path` (used by
+`_sigma_model_source_path` for the three real `_resp_noise` models) was
+NOT archived either -- only its own dead `model == "NoisyRL_lambda"`
+special case was stripped, since no remaining caller passes that model
+name to it anymore.
+
+A genuinely dead function was found along the way and archived with the
+rest: `_nll_perf_path` had ZERO call sites anywhere in the file (only
+comment/docstring mentions referenced it) even before this session --
+presumably left over from whatever earlier refactor introduced
+`_nll_resp_noise_perf_path` to replace it for `make_model_performance_nll`,
+without ever removing the original.
+
+### Verification
+
+- `python -m py_compile` on `scripts/make_paper_figures.py` and both new
+  archive files -- all clean.
+- `import scripts.make_paper_figures` succeeded; confirmed
+  `VARIABILITY_STOCHASTIC_MODEL`, `SIGMA_CORR_MODELS`, `SIGMA_CORR_COLORS`,
+  `MODEL_COLORS`, `MODEL_DISPLAY`, `NLL_RESP_NOISE_MODELS` all hold the
+  expected values (no `NoisyRL_lambda` anywhere; `NLL_MODEL_ORDER`/
+  `NLL_REFERENCE`/`NLL_LABELS`/`NLL_MODEL_COLORS`/`_nll_perf_path` no
+  longer defined at all in the live file).
+- Ran `make_sigma_model_correlation`, `make_variance_autocorr_human`,
+  `make_sigma_main`, `make_variability_human`, and `make_model_performance_nll`
+  directly (`venv/bin/python scripts/make_paper_figures.py <name>`) --
+  all five completed and saved their PDF/SVG output with ZERO "(missing
+  ...)" skip-warnings printed, confirming every path resolution (NEF's
+  colors/numbers response files, the repointed autocorrelation defaults)
+  works against real files on disk, not just in theory.
+- Re-grepped the whole repo (excluding `archive/`, `venv/`,
+  `node_modules/`, `.git/`) for `NoisyRL_lambda`, `variability_models`, and
+  `variance_autocorr_models` after all edits: every remaining hit is
+  either inside `archive/` or is a historical/explanatory comment in
+  `scripts/make_paper_figures.py` itself narrating that the model/figure
+  is retired (no functional reference -- no dict entry, no function
+  call, no live constant -- remains anywhere).
+
+### No data files moved
+
+Nothing in `data/` or `data/runs/` changed -- this session only edited
+`scripts/make_paper_figures.py` (which reads pre-computed `.pkl` files by
+path) and moved code within `scripts/`/`archive/scripts/`.

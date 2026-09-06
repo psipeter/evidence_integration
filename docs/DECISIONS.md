@@ -280,6 +280,12 @@ callers, only the two archived MLE files), is now archived too --
 `archive/fitting/archive_losses_mle.py`. See `archive/HISTORY_modeling_2026.md`'s
 "MLE-pipeline retirement, final loose end" entry.
 
+**Last loose end closed 2026-09-06:** `NoisyRL_lambda`'s own model code was
+retired above, but it was explicitly left in place as a figure-level
+stand-in (colors/numbers hadn't had NEF fit yet). NEF has since been fit
+for those two tasks; see "NoisyRL_lambda retired as the colors/numbers
+stochastic stand-in, NEF takes its place" below for that final cleanup.
+
 ---
 
 ## neural_main replaces neural_giant as the sole neural-parameter-impact figure
@@ -382,4 +388,70 @@ this comparison against the rendered figures themselves before
 archiving.
 
 **Full investigation:** `archive/HISTORY_modeling_2026.md`.
+
+---
+
+## NoisyRL_lambda retired as the colors/numbers stochastic stand-in, NEF takes its place
+
+**Decision:** `NoisyRL_lambda` no longer appears anywhere in
+`scripts/make_paper_figures.py`. NEF now fills its former role as the
+colors/numbers "genuinely stochastic model" stand-in in every figure that
+used it (`VARIABILITY_STOCHASTIC_MODEL`, `SIGMA_CORR_MODELS`), matching
+`balls`' own already-established convention of reading NEF there. Two
+figure functions that depended on the old stand-in, and had become
+redundant, were archived alongside this: `make_variability_models` (its
+own model-overlay branch had been fully disabled -- `include_models=False`
+unconditionally -- since before this session, pending exactly this fix;
+even with NEF wired in and confirmed non-degenerate, the per-pid
+model-vs-human comparison it would show is already covered, more
+informatively, by `make_sigma_model_correlation`'s own paired scatter) and
+`make_variance_autocorr_models` (fully superseded by `make_sigma_main`'s
+row 3, which already shows the same autocorrelation metric against the
+same `_resp_noise` models, with NEF -- not NoisyRL_lambda -- in the 4th
+slot).
+
+**Why:** `NoisyRL_lambda` (RL_lambda plus a compounding `sigma_state`
+noise term) was originally used as this stand-in specifically because NEF
+hadn't been fit for colors/numbers yet at the time these figures were
+built. `NoisyRL_lambda`'s own model code and fitting pipeline were already
+retired from active analysis in an earlier session (see "State-noise
+models, NoisyCounting..." above), which explicitly left its use as a
+figure-level stand-in untouched at the time, since every figure read
+pre-computed `.pkl` files and needed no code change to keep working. NEF
+has since been fit (RMSE) for colors/numbers too, and independently
+reproduces the same state-persistent noise signature (variance growth +
+decaying autocorrelation matching human patterns, which the `_resp_noise`
+models do not) that NoisyRL_lambda was standing in for -- this is
+`sigma_main` rows 2-3's own established finding. So the stand-in is no
+longer needed anywhere in this file.
+
+**A pre-existing drift this closed:** `make_model_performance_nll`'s own
+reference-model roster had ALREADY been superseded, in an earlier session,
+by a different roster (`NLL_RESP_NOISE_MODELS`, reference
+`RL_lambda_resp_noise`) -- confirmed by that earlier refactor's own
+comment ("Deliberately NOT touching NLL_MODEL_ORDER/... above -- those
+still serve make_variance_autocorr_human/models exactly as before"). The
+OLD roster (`NLL_MODEL_ORDER`/`NLL_REFERENCE`/`NLL_LABELS`/
+`NLL_MODEL_COLORS`, built around NoisyRL_lambda) had therefore silently
+kept living on, unused by its apparent namesake figure, serving only
+`make_variance_autocorr_models` (now archived) and, via a stale default
+argument, `make_variance_autocorr_human`'s own shared-y-limit probe pass
+-- fixed in this same session to pass the current roster
+(`NLL_RESP_NOISE_MODELS` + NEF) explicitly instead, matching
+`make_sigma_main`'s own row 3. A fully dead function found along the way,
+`_nll_perf_path` (zero callers even before this cleanup, confirmed by
+grep), was archived alongside the rest of the old roster.
+
+**Alternatives evaluated and rejected:** re-enabling
+`make_variability_models`'s dormant model-overlay branch with NEF instead
+of retiring the function outright -- rejected because the resulting
+KDE-overlay comparison, even genuinely non-degenerate (NEF's colors/
+numbers per-pid qid-residual variability confirmed nonzero and varying
+across all 46 pids -- not collapsed to a floor), would still be strictly
+less informative than the existing paired per-pid correlation in
+`make_sigma_model_correlation`.
+
+**Full investigation:** `archive/HISTORY_modeling_2026.md`'s "NoisyRL_lambda
+retired as the colors/numbers stochastic stand-in in
+scripts/make_paper_figures.py" entry.
 

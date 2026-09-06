@@ -245,25 +245,31 @@ def make_temporal_performance() -> Path:
 
 # Model colors, matching presentations/images/model_palette.svg's own
 # seaborn-colorblind indices for Mean/LeakyIntegrator/PrimacyRecency/
-# RL_lambda/NEF (0-4) and NoisyRL_lambda (5). Presentations/make_figures.py
-# pins RL_lambda and NEF to the SAME color there (#d55e00) because NEF
-# hadn't been fit for 3 of 4 tasks when that file was written, and RL_lambda
-# stood in for it -- same color signaled "playing the same conceptual
-# role". That reason no longer applies here: real NEF RMSE fits now exist
-# for all 4 datasets (this session's weekend submit, run_folder rmse), so
-# NEF gets its own genuine slot back -- seaborn colorblind index 4
-# (#cc78bc, pink), the color it already had everywhere in this palette
-# except where it was being deliberately overridden.
+# RL_lambda/NEF (0-4). Presentations/make_figures.py pins RL_lambda and
+# NEF to the SAME color there (#d55e00) because NEF hadn't been fit for 3
+# of 4 tasks when that file was written, and RL_lambda stood in for it --
+# same color signaled "playing the same conceptual role". That reason no
+# longer applies here: real NEF RMSE fits now exist for all 4 datasets
+# (this session's weekend submit, run_folder rmse), so NEF gets its own
+# genuine slot back -- seaborn colorblind index 4 (#cc78bc, pink), the
+# color it already had everywhere in this palette except where it was
+# being deliberately overridden.
+#
+# NoisyRL_lambda (formerly index 5, #ca9161) is GONE -- it was a
+# stochastic/noise-comparison stand-in for colors/numbers used before NEF
+# had been fit for those two tasks; NEF has since been fit for all four
+# tasks and independently confirmed to reproduce the same state-persistent
+# noise signature NoisyRL_lambda stood in for (see docs/DECISIONS.md's
+# "NoisyRL_lambda retired as the colors/numbers stochastic stand-in, NEF
+# takes its place" entry), so every place that used to read
+# VARIABILITY_STOCHASTIC_MODEL/SIGMA_CORR_MODELS' colors/numbers slot now
+# reads NEF's own #cc78bc instead.
 MODEL_COLORS = {
     "Mean": "#0173b2",
     "LeakyIntegrator": "#de8f05",
     "PrimacyRecency": "#029e73",
     "RL_lambda": "#d55e00",
     "NEF": "#cc78bc",
-    # Index 5 of the same seaborn-colorblind MODEL_ORDER palette (see
-    # utils/soltani_models.py's own module docstring: "NoisyRL_lambda is last
-    # so that adding it left every existing model's colour untouched").
-    "NoisyRL_lambda": "#ca9161",
 }
 
 # RL_lambda's internal Python name (a valid identifier -- used as a dict
@@ -1208,7 +1214,6 @@ MODEL_DISPLAY = {
     "PrimacyRecency": "PR",
     "NEF": "NEF",
     "RL_lambda": _RL_LAMBDA_PRETTY,
-    "NoisyRL_lambda": "Noisy RL",
 }
 
 
@@ -1870,17 +1875,22 @@ VARIABILITY_TASK_PANELS = [
 # The ONE model per task with a genuine noise term -- everything else is
 # exactly deterministic (verified directly: max std 2.3e-16 for Mean/
 # LeakyIntegrator/PrimacyRecency on carrabin, i.e. floating-point zero, not
-# just "small"). NEF for balls (carrabin's own model roster); RL_lambda is
-# deterministic for colors/numbers (see utils/soltani_models.py's own
-# STOCHASTIC_MODELS), so NoisyRL_lambda stands in there instead -- checked
-# directly that its noise did NOT collapse to the zero floor that module's
-# own docstring warns can happen under RMSE fitting (median std 0.33-0.39,
-# not 0), so it is a genuine, non-degenerate stand-in, not a coincidental
-# flat line.
+# just "small"). NEF now fills this slot for ALL THREE tasks, including
+# colors/numbers -- it used to be NoisyRL_lambda there (RL_lambda itself is
+# deterministic for colors/numbers, so NoisyRL_lambda's own state noise
+# stood in before NEF had been fit for those two tasks). NoisyRL_lambda is
+# retired now that NEF has real RMSE fits for colors/numbers too (see
+# docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
+# stochastic stand-in, NEF takes its place"). Checked directly, matching
+# the same non-degeneracy check NoisyRL_lambda's own comment used to
+# describe: NEF's colors/numbers responses do NOT collapse to a zero
+# floor (per-pid qid-residual std ranges ~0.007-0.05 on colors, ~0.009-0.02
+# on numbers, across all 46 pids), so it's a genuine, non-degenerate
+# stochastic model here too, not a coincidental flat line.
 VARIABILITY_STOCHASTIC_MODEL = {
     "balls": "NEF",
-    "colors": "NoisyRL_lambda",
-    "numbers": "NoisyRL_lambda",
+    "colors": "NEF",
+    "numbers": "NEF",
 }
 
 # Every OTHER model for that task -- all exactly deterministic, plotted as
@@ -2194,38 +2204,19 @@ def make_variability_human() -> Path:
     return out_path
 
 
-def make_variability_models() -> Path:
-    """Same layout as make_variability_human (including the panel-A
-    schematic), but panels B-D now add each task's ONE genuinely-stochastic
-    model as a proper KDE, plus every other (deterministic) model as a
-    jittered cluster of points at x=0 -- see _plot_variability_panel's own
-    docstring for why.
-
-    NOTE: NoisyRL_lambda's fit was found to be from an old, pre-quasi-MLE
-    RMSE run (sigma_state/sigma_resp pinned at their manually-chosen floor,
-    not genuinely fit per pid -- see chat); the actual NLL/quasi-MLE fitting
-    work for colors/numbers has been offloaded to another session, so model
-    plotting is DISABLED here for now (include_models=False, same as the
-    human-only figure) rather than showing that stale result. Once a real
-    fit lands, flip include_models back to True below -- the plotting
-    machinery itself is untouched and ready.
-    """
-    _apply_slide_style()
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, constrained_layout=True)
-
-    axes[0].axis("off")
-    axes[0].set_title("Metric Definition", color="0.3")
-    schematic = _rasterize_svg(VARIABILITY_SCHEMATIC)
-    if schematic is not None:
-        axes[0].imshow(schematic, aspect="auto")
-
-    for i, (ax, (task_key, title)) in enumerate(zip(axes[1:], VARIABILITY_TASK_PANELS)):
-        _plot_variability_panel(ax, task_key, title, include_models=False,
-                                show_ylabel=(i == 0))
-
-    out_path, _ = _save_fig(fig, "variability_models")
-    plt.close(fig)
-    return out_path
+# make_variability_models (a KDE-with-model-overlay counterpart to
+# make_variability_human) was archived -- see
+# archive/scripts/archive_variability_models.py and
+# docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
+# stochastic stand-in, NEF takes its place" entry. It was byte-for-byte
+# redundant with make_variability_human (both always called
+# _plot_variability_panel(..., include_models=False, ...) -- the
+# model-overlay path had been disabled pending a real colors/numbers
+# stochastic fit) and, even with NEF now wired in as a real, non-degenerate
+# stand-in (confirmed directly, see VARIABILITY_STOCHASTIC_MODEL's own
+# comment), the same per-pid model-vs-human comparison this would show is
+# already covered, more informatively (paired per-pid correlation, not
+# just aggregate KDE overlap), by make_sigma_model_correlation.
 
 
 # ── Consistent Across Trials & Tasks, for response noise (σ) ───────────────
@@ -2504,13 +2495,16 @@ def make_sigma_overview() -> Path:
 # pid) -- adds a genuine, per-pid-fitted sigma_resp term. Confirmed
 # directly before wiring this in: all three vary meaningfully across pids
 # in every task (e.g. numbers' Mean_resp_noise ranges 0.028-0.459 across
-# 46 pids), not pinned at a shared floor. NEF (balls) / NoisyRL_lambda
-# (colors/numbers) fill the 4th slot, matching SIGMA_CORR's own
-# VARIABILITY_STOCHASTIC_MODEL choice elsewhere in this deck.
+# 46 pids), not pinned at a shared floor. NEF fills the 4th slot for ALL
+# THREE tasks now (colors/numbers used to read NoisyRL_lambda here, before
+# NEF had been fit for those two tasks -- see docs/DECISIONS.md's
+# "NoisyRL_lambda retired as the colors/numbers stochastic stand-in, NEF
+# takes its place"), matching VARIABILITY_STOCHASTIC_MODEL's own choice
+# elsewhere in this deck.
 SIGMA_CORR_MODELS = {
     "balls": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"],
-    "colors": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"],
-    "numbers": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"],
+    "colors": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"],
+    "numbers": ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"],
 }
 
 # Fixed, SHARED x/y range across ALL THREE panels (not per-task anymore) --
@@ -2522,15 +2516,15 @@ SIGMA_CORR_MODELS = {
 # contains every point in every panel.
 SIGMA_CORR_XLIM = 0.6
 
-# Local color override for THIS figure only -- MODEL_COLORS itself is left
-# untouched (NoisyRL_lambda's own tan still applies everywhere else, e.g.
-# make_variability_models). Same reasoning as make_model_performance_nll's
-# own NLL_MODEL_COLORS override, per instruction: NoisyRL_lambda plays
-# RL_lambda's own conceptual role here (the "our model" 4th slot), so it
-# takes RL_lambda's established red-orange rather than its usual tan.
+# Local dict for THIS figure only (rather than reading MODEL_COLORS
+# directly) -- kept as its own dict for parallelism with SIGMA_CORR_MODELS
+# above, though it is now a plain subset of MODEL_COLORS with no override:
+# NEF already has its own established color everywhere in this deck (no
+# borrowed-color trick needed here anymore, unlike when NoisyRL_lambda
+# played RL_lambda's conceptual role in this same slot and borrowed
+# RL_lambda's red-orange instead of its own tan).
 SIGMA_CORR_COLORS = {m: MODEL_COLORS[m] for m in
-                    ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF", "NoisyRL_lambda"]}
-SIGMA_CORR_COLORS["NoisyRL_lambda"] = MODEL_COLORS["RL_lambda"]
+                    ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]}
 
 
 def _sigma_model_source_path(task_key: str, model: str) -> Path:
@@ -2542,17 +2536,23 @@ def _sigma_model_source_path(task_key: str, model: str) -> Path:
     data/runs/nll/, so no extra branching is needed here. NOT their
     bare-name RMSE fit (exactly deterministic, sigma=0 for every pid).
 
-    NEF (balls only): the MLE-fitted variant
-    (NEF_carrabin_responses_mle.pkl, via _variability_model_path) --
-    matching figure_carrabin_variability.py's own panels A/C convention.
-    No NLL fit exists for NEF at all (see make_model_performance_nll's own
-    module comment), so this is the only real option for balls' 4th slot.
-
-    NoisyRL_lambda (colors/numbers only): the fresh NLL fit, also via
-    _nll_responses_path -- deliberately NOT _variability_model_path's own
-    path for these two tasks, which points at NoisyRL_lambda's OLDER,
-    stale pre-quasi-MLE RMSE fit (see make_variability_models' own
-    docstring for why that fit was never trustworthy).
+    NEF (all three tasks now): _variability_model_path -- the MLE-fitted
+    variant for balls (NEF_carrabin_responses_mle.pkl, matching
+    figure_carrabin_variability.py's own panels A/C convention), and the
+    plain RMSE-fitted variant for colors/numbers
+    (NEF_soltani_{colors,numbers}_responses.pkl -- confirmed directly to
+    exist and show genuine, non-degenerate per-pid qid-residual variance,
+    same check VARIABILITY_STOCHASTIC_MODEL's own comment describes). No
+    NLL fit exists for NEF at all (see make_model_performance_nll's own
+    module comment), so this RMSE-fitted response file is the only real
+    option for every task's 4th slot -- NEF replaces NoisyRL_lambda here,
+    which used to read colors/numbers' fresh NLL fit via _nll_responses_path
+    before NEF had been fit for those two tasks (see docs/DECISIONS.md's
+    "NoisyRL_lambda retired as the colors/numbers stochastic stand-in, NEF
+    takes its place"). This branch (model == "NEF") already dispatched to
+    _variability_model_path regardless of task_key, so no code change was
+    needed here beyond SIGMA_CORR_MODELS' own roster swap above -- verified
+    directly rather than assumed.
     """
     if model == "NEF":
         return _variability_model_path(task_key, model)
@@ -2587,13 +2587,14 @@ def _plot_sigma_model_corr_panel(ax, task_key: str, title: str,
     than leaving two near-identical panel functions with two different
     (one fragile) conventions for the same kind of plot.
 
-    Model roster (SIGMA_CORR_MODELS) is UNCHANGED here -- unlike lambda's
-    own model-correlation figure, this one was never a "stand-in because a
-    model hadn't been fit yet" situation: NEF (balls) / NoisyRL_lambda
-    (colors/numbers) are deliberately the ONE model per task with a
-    genuine, non-deterministic sigma term (see SIGMA_CORR_MODELS' own
-    comment), so forcing every task onto an identical 5-model list the way
-    lambda's fix did would put models with EXACTLY ZERO sigma (RL_lambda's
+    Model roster (SIGMA_CORR_MODELS) uses NEF as the 4th slot for every
+    task now (colors/numbers used to read NoisyRL_lambda there -- see
+    SIGMA_CORR_MODELS' own comment) -- unlike lambda's own model-correlation
+    figure, this one was never a "stand-in because a model hadn't been fit
+    yet" situation for balls: NEF is deliberately the ONE model per task
+    with a genuine, non-deterministic sigma term (see SIGMA_CORR_MODELS'
+    own comment), so forcing every task onto an identical 5-model list the
+    way lambda's fix did would put models with EXACTLY ZERO sigma (RL_lambda's
     own bare RMSE fit, for instance) into a sigma-correlation panel, which
     isn't a meaningful comparison to draw.
     """
@@ -2814,17 +2815,6 @@ def make_sigma_model_correlation() -> Path:
 
 # -- Model performance under the new NLL/quasi-MLE metric (all four tasks) --
 
-# Real, fresh fitting output found on disk (see chat) after searching the
-# codebase directly rather than a since-unlocatable "EI#16" chat: a genuine
-# per-pid NLL fit now exists for every task, replacing RMSE's inability to
-# identify a noise term at all (RMSE is minimised by the conditional mean,
-# so any noise parameter collapses to its lower bound -- confirmed earlier
-# this session for NoisyRL_lambda's old RMSE fit: sigma_state pinned at
-# EXACTLY 0.02 for all 35 pids). Verified this NEW fit is genuinely
-# per-pid, not another floor-collapse: NoisyRL_lambda's sigma_state now has
-# 37 distinct values across 45 pids (numbers), ranging 0.017-0.292, not one
-# repeated constant.
-#
 # THE METRIC ITSELF (read from fitting/losses.py's own compute_nll/
 # nll_from_ensemble, models/math_models.py's simulate_ensemble): Gaussian
 # NLL of each observed human response under the model's own SIMULATED
@@ -2838,66 +2828,18 @@ def make_sigma_model_correlation() -> Path:
 # negative, unlike RMSE) is better, same "lower = better" direction RMSE
 # used, so _compute_sig_lines below needs no change.
 #
-# WHY EVERY MODEL NOW HAS AN "_resp_noise" FILE VARIANT: NLL is undefined
-# for a deterministic model (its ensemble SD is exactly 0, an infinite
-# NLL) -- simulate_ensemble refuses to silently paper over this the way an
-# ad hoc sigma floor would. So Mean/LeakyIntegrator/PrimacyRecency/RL_lambda
-# were each given one ADDED free parameter, sigma_resp (i.i.d. Gaussian
-# response noise on top of that model's own deterministic prediction),
-# making every model's NLL well-defined and put on the SAME scale for the
-# first time. NoisyRL_lambda already had its own genuine noise mechanism
-# (sigma_state), so it keeps its own name -- no "_resp_noise" suffix, and no
-# separate sigma_resp column in its own fit (verified directly: its saved
-# nll_params.pkl has only alpha_0/lambda_/sigma_state, three parameters).
+# WHY EVERY MODEL HAS AN "_resp_noise" FILE VARIANT: NLL is undefined for a
+# deterministic model (its ensemble SD is exactly 0, an infinite NLL) --
+# simulate_ensemble refuses to silently paper over this the way an ad hoc
+# sigma floor would. So Mean/LeakyIntegrator/PrimacyRecency/RL_lambda were
+# each given one ADDED free parameter, sigma_resp (i.i.d. Gaussian response
+# noise on top of that model's own deterministic prediction), making every
+# model's NLL well-defined and put on the SAME scale.
 #
 # NO NEF FIT EXISTS UNDER THIS METRIC AT ALL (checked directly: no
 # "*NEF*nll*" file anywhere in data/runs) -- full NEF simulation at
 # n_sims=100 per Optuna trial was presumably judged too expensive to run
-# yet. NoisyRL_lambda is therefore the uniform "best/reference" model for
-# EVERY task here, not split NEF-for-balls/snacks vs RL_lambda-for-colors/
-# numbers the way make_model_performance's own reference was.
-#
-# A REAL DATA-VINTAGE DIFFERENCE FROM make_model_performance, WORTH FLAGGING
-# EXPLICITLY: this fit's own human data has 45 pids for colors/numbers
-# (confirmed against the CURRENT canonical data/soltani_{colors,numbers}.pkl
-# -- both now 45, not the 35 every earlier figure in this deck, including
-# make_model_performance itself, was built against). carrabin (21) and yoo
-# (38) are unchanged. This figure is therefore NOT a strict apples-to-apples
-# re-run of make_model_performance on a different loss -- its colors/
-# numbers panels reflect 10 more participants than the RMSE figure's do.
-#
-# RL_lambda's OWN box is dropped here, per instruction -- NoisyRL_lambda
-# already plays RL_lambda's role at this position (the "our model" entry),
-# so showing both would be redundant. NoisyRL_lambda is recolored to
-# RL_lambda's OWN established color (#d55e00, red-orange) rather than its
-# usual tan (#ca9161, still used elsewhere in this deck, e.g. the
-# variability figures) -- same convention as NEF/RL_lambda sharing one
-# color in make_model_performance: same color signals "playing the same
-# conceptual role", here explicitly replacing RL_lambda's own slot. Legend
-# TEXT stays "Noisy RL" (MODEL_DISPLAY, unchanged) -- only the color, not
-# the label, is borrowed.
-NLL_MODEL_ORDER = ["Mean", "LeakyIntegrator", "PrimacyRecency", "NoisyRL_lambda"]
-NLL_REFERENCE = "NoisyRL_lambda"  # uniform across all four tasks -- see above
-
-# Legend labels for THIS figure specifically -- full (non-abbreviated) names
-# now that the legend only has 4 entries and comfortably fits them, unlike
-# MODEL_DISPLAY's compact "LI"/"PR" abbreviations built for the 5-entry
-# legends elsewhere in this deck. NoisyRL_lambda is labeled "RL_lambda*" per
-# explicit instruction -- the asterisk is a live-talk footnote (explained
-# verbally, not spelled out in the figure itself).
-NLL_LABELS = {
-    "Mean": "Mean",
-    "LeakyIntegrator": "LeakyIntegrator",
-    "PrimacyRecency": "PrimacyRecency",
-    "NoisyRL_lambda": "RL_lambda*",
-}
-
-# Local color override for THIS figure only -- MODEL_COLORS itself is left
-# untouched (NoisyRL_lambda's own tan still applies everywhere else, e.g.
-# make_variability_models).
-NLL_MODEL_COLORS = {m: MODEL_COLORS[m] for m in NLL_MODEL_ORDER}
-NLL_MODEL_COLORS["NoisyRL_lambda"] = MODEL_COLORS["RL_lambda"]
-
+# yet.
 NLL_TASK_PANELS = [
     ("balls", "Balls task"),
     ("snacks", "Snacks task"),
@@ -2905,48 +2847,32 @@ NLL_TASK_PANELS = [
     ("numbers", "Numbers task"),
 ]
 
-
-def _nll_perf_path(task_key: str, model: str) -> Path:
-    """Path to one (task, model)'s *_nll_performance.pkl. Every model except
-    NoisyRL_lambda is fit as its own name PLUS "_resp_noise" on disk (see
-    this section's own module-level comment for why) -- that suffix is
-    purely a file-naming/fitting-pipeline detail, so it's added here rather
-    than exposed to any caller; every other function in this file refers to
-    these models by their plain names (Mean, LeakyIntegrator, ...)."""
-    file_model = model if model == "NoisyRL_lambda" else f"{model}_resp_noise"
-    if task_key == "balls":
-        return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_performance.pkl"
-    if task_key == "snacks":
-        return RUNS_DIR / "yoo" / f"{file_model}_yoo_nll_performance.pkl"
-    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "nll" / f"{file_model}_{dataset}_nll_performance.pkl"
-
-
-# NEW this session: a genuinely UNIFORM roster/location, replacing the
-# split above for THIS figure specifically. All 4 tasks were refit with
-# all 4 "_resp_noise" models (Mean/LeakyIntegrator/PrimacyRecency/
-# RL_lambda) landing in ONE common folder, data/runs/nll/ -- balls/snacks
-# used to live in their own carrabin/yoo folders, and colors/numbers used
-# NoisyRL_lambda (a DIFFERENT, native state-noise mechanism) as their 4th
-# model instead of RL_lambda's own "_resp_noise" fit, which didn't exist
-# for them until this session's refit. RL_lambda_resp_noise now exists for
-# every task, so it plays this figure's "our model" role directly --
-# MODEL_COLORS/MODEL_LABEL already give it a proper color and pretty
-# "RL-lambda" formatting, so no NLL_MODEL_COLORS/NLL_LABELS-style override
-# is needed here the way NoisyRL_lambda required one.
-#
-# Deliberately NOT touching NLL_MODEL_ORDER/NLL_REFERENCE/
-# NLL_MODEL_COLORS/NLL_LABELS/_nll_perf_path above -- those still serve
-# make_variance_autocorr_human/models exactly as before, unchanged by this
-# session's refit, until/unless that figure is updated too.
+# An EARLIER roster (NLL_MODEL_ORDER/NLL_REFERENCE/NLL_LABELS/
+# NLL_MODEL_COLORS/_nll_perf_path) used NoisyRL_lambda as the uniform
+# "our model" 4th slot for every task, standing in for RL_lambda_resp_noise
+# on colors/numbers specifically (which didn't have its own "_resp_noise"
+# NLL fit yet at the time). That roster is now archived -- see
+# archive/scripts/archive_variance_autocorr_models.py and
+# docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
+# stochastic stand-in, NEF takes its place" entry. RL_lambda_resp_noise now
+# has a real fit for every task (below), so nothing in this file still
+# needs the old roster.
 NLL_RESP_NOISE_MODELS = ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda"]
 NLL_RESP_NOISE_REFERENCE = "RL_lambda"
 
 
 def _nll_resp_noise_perf_path(task_key: str, model: str) -> Path:
     """Path to one (task, model)'s *_nll_performance.pkl under the unified
-    data/runs/nll/ folder -- see NLL_RESP_NOISE_MODELS' own comment for
-    why this exists alongside (not instead of) _nll_perf_path."""
+    data/runs/nll/ folder -- ALL FOUR tasks refit with all 4 "_resp_noise"
+    models (Mean/LeakyIntegrator/PrimacyRecency/RL_lambda) landing in ONE
+    common location: balls/snacks used to live in their own carrabin/yoo
+    folders, and colors/numbers used NoisyRL_lambda (a different, native
+    state-noise mechanism, since retired -- see NLL_RESP_NOISE_MODELS' own
+    comment) as their 4th model instead of RL_lambda's own "_resp_noise"
+    fit. RL_lambda_resp_noise now exists for every task, so it plays this
+    figure's "our model" role directly -- MODEL_COLORS/MODEL_LABEL already
+    give it a proper color and pretty "RL-lambda" formatting, no override
+    dict needed here."""
     dataset = {"balls": "carrabin", "snacks": "yoo",
                "colors": "soltani_colors", "numbers": "soltani_numbers"}[task_key]
     return RUNS_DIR / "nll" / f"{model}_resp_noise_{dataset}_nll_performance.pkl"
@@ -3359,12 +3285,20 @@ AUTOCORR_SCHEMATIC = FIGURES_DIR / "schematics" / "autocorr_schematic.svg"
 
 
 def _nll_responses_path(task_key: str, model: str) -> Path:
-    """Path to one (task, model)'s *_nll_responses.pkl -- same "_resp_noise"
-    file-naming quirk as _nll_perf_path (see that function's own
-    docstring), just pointing at the actual per-observation response
-    SEQUENCE (needed to compute a residual) rather than the scalar
-    performance loss."""
-    file_model = model if model == "NoisyRL_lambda" else f"{model}_resp_noise"
+    """Path to one (task, model)'s "_resp_noise" *_nll_responses.pkl --
+    used by _sigma_model_source_path for Mean/LeakyIntegrator/PrimacyRecency
+    (their own genuine per-pid sigma_resp NLL fit; NOT their bare-name,
+    exactly-deterministic RMSE fit), just pointing at the actual
+    per-observation response SEQUENCE (needed to compute a residual) rather
+    than the scalar performance loss.
+
+    Used to also special-case model == "NoisyRL_lambda" (no "_resp_noise"
+    suffix, since that model had its own native sigma_state mechanism
+    instead) -- removed now that NoisyRL_lambda is retired (see
+    docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
+    stochastic stand-in, NEF takes its place"); every remaining caller
+    passes one of the three "_resp_noise" base models only."""
+    file_model = f"{model}_resp_noise"
     if task_key == "balls":
         return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_responses.pkl"
     dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
@@ -3385,35 +3319,40 @@ def _load_variance_autocorr_data(models: list[str] | None = None,
                                  include_nef: bool = False,
                                  pool_all_pairs: bool = True) -> dict:
     """task_key -> (human_res, model_results, lags). Loaded ONCE and shared
-    between the human-only and human+models figure functions below -- same
-    established pattern as _load_response_change_data -- so both read the
-    EXACT same underlying numbers.
+    between every caller below (make_variance_autocorr_human, make_sigma_main)
+    -- same established pattern as _load_response_change_data -- so all of
+    them read the EXACT same underlying numbers for a given (models,
+    responses_path_fn) choice.
 
     `models`/`responses_path_fn` let a caller override the roster/file
-    location (added for make_sigma_giant, which uses NLL_RESP_NOISE_MODELS/
-    _nll_resp_noise_responses_path instead) -- both default to None,
-    resolving to NLL_MODEL_ORDER/_nll_responses_path, so
-    make_variance_autocorr_human/models (which call this with no
-    arguments) are completely unaffected.
+    location -- both default to None, resolving to NLL_RESP_NOISE_MODELS/
+    _nll_resp_noise_responses_path (the real "_resp_noise" NLL fits, the
+    only roster anything in this file still reads for this metric).
+    make_sigma_main passes these explicitly anyway (for clarity, matching
+    its own row-2 loader's call shape); make_variance_autocorr_human's own
+    probe pass relies on this default. An EARLIER default,
+    NLL_MODEL_ORDER/_nll_responses_path (built around NoisyRL_lambda as the
+    colors/numbers "our model" stand-in, and once also read by the
+    now-archived make_variance_autocorr_models), is retired -- see
+    docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
+    stochastic stand-in, NEF takes its place".
 
     `include_nef=True` additionally loads NEF's own residual
     autocorrelation into model_results["NEF"], using the SAME per-task
     path convention row 2's own NEF handling uses
     (_load_variance_growth_data: _variability_model_path's MLE variant
     for balls, _delta_responses_path's RMSE variant for colors/numbers)
-    -- NEF is never IN NLL_RESP_NOISE_MODELS/NLL_MODEL_ORDER itself (no
-    NLL fit uses that roster for NEF), so it can't go through the normal
-    responses_path_fn mechanism the way the math models do. Defaults to
-    False; make_variance_autocorr_human/models (which never pass it) are
-    unaffected.
+    -- NEF is never IN NLL_RESP_NOISE_MODELS itself (no NLL fit uses that
+    roster for NEF), so it can't go through the normal responses_path_fn
+    mechanism the way the math models do. Defaults to False.
 
     `pool_all_pairs` is passed straight through to every _resid_autocorr
     call (Human, each model, NEF) -- see that function's own docstring.
     Defaults to True (the established metric); all existing callers are
     unaffected.
     """
-    models = models if models is not None else NLL_MODEL_ORDER
-    responses_path_fn = responses_path_fn or _nll_responses_path
+    models = models if models is not None else NLL_RESP_NOISE_MODELS
+    responses_path_fn = responses_path_fn or _nll_resp_noise_responses_path
     out = {}
     for task_key, title in RESID_TASK_PANELS:
         qid_map, prefix = _variability_qid_map(task_key)
@@ -3453,20 +3392,22 @@ def _draw_variance_autocorr_panel(ax_ac, task_key: str, title: str, human_res,
                                   include_models: bool, show_ylabel: bool,
                                   models: list[str] | None = None,
                                   model_colors: dict | None = None) -> None:
-    """Draws ONE autocorrelation panel -- the SAME function, called
-    identically by both make_variance_autocorr_human and
-    make_variance_autocorr_models, so the two figures differ ONLY in
-    include_models (whether model curves get drawn) and in the
-    figure-level legend each caller builds afterward -- per instruction.
-    Human is always drawn; models only when include_models=True.
+    """Draws ONE autocorrelation panel -- the SAME function, called by
+    every consumer of this metric (make_variance_autocorr_human's probe
+    pass, make_sigma_main's row 3; make_variance_autocorr_models used to be
+    a third caller, now archived -- see docs/DECISIONS.md's "NoisyRL_lambda
+    retired as the colors/numbers stochastic stand-in, NEF takes its
+    place"). include_models controls whether model curves get drawn; Human
+    is always drawn.
 
-    `models`/`model_colors` default to None, resolving to NLL_MODEL_ORDER/
-    NLL_MODEL_COLORS -- same override mechanism as
-    _load_variance_autocorr_data, added for make_sigma_giant; the two
-    standalone callers pass neither, so their behavior is unchanged.
+    `models`/`model_colors` default to None, resolving to
+    NLL_RESP_NOISE_MODELS/MODEL_COLORS -- same override mechanism as
+    _load_variance_autocorr_data. An EARLIER default, NLL_MODEL_ORDER/
+    NLL_MODEL_COLORS (built around NoisyRL_lambda), is retired; see that
+    function's own docstring.
     """
-    models = models if models is not None else NLL_MODEL_ORDER
-    model_colors = model_colors or NLL_MODEL_COLORS
+    models = models if models is not None else NLL_RESP_NOISE_MODELS
+    model_colors = model_colors or MODEL_COLORS
     ax_ac.set_title(title, color=TASK_COLORS[task_key])
     ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
     if isinstance(human_res, str):
@@ -3638,32 +3579,43 @@ def make_variance_autocorr_human() -> Path:
     colors, numbers] -- snacks excluded, same reasoning as
     VARIABILITY_TASK_PANELS.
 
-    IDENTICAL TO make_variance_autocorr_models EXCEPT FOR THE ADDED MODEL
-    DATA AND LEGEND, per instruction -- both call the exact same
-    _draw_variance_autocorr_panel for every panel, with include_models the
-    only thing that differs (False here). Y-AXIS RANGE IS ALSO SHARED
-    ACROSS BOTH FIGURES, not just within this one's own 4 panels: a
-    throwaway PROBE pass (drawn with include_models=True on a scratch
-    figure, never saved) establishes the SAME y-limits
-    make_variance_autocorr_models' own real run would produce, then that
-    range is applied here explicitly -- mirroring make_response_change's
-    own two-pass shared-ylim mechanism, adapted for two independent
-    top-level functions (callable in either order) rather than one
-    combined function returning both paths.
+    Y-AXIS RANGE is established via a throwaway PROBE pass (drawn with
+    include_models=True on a scratch figure, never saved) that mirrors
+    make_sigma_main's own row 3 -- same roster (NLL_RESP_NOISE_MODELS +
+    NEF, via include_nef=True) -- so this figure's own human-only y-range
+    is set by the SAME human+model data sigma_main's row 3 shows, not by
+    the human curves alone, which would autoscale to a narrower, less
+    informative range. Mirrors make_response_change's own two-pass
+    shared-ylim mechanism, adapted here to one function computing its own
+    reference range internally rather than reading it from a sibling
+    figure.
+
+    (An earlier version of this probe pass matched a NOW-ARCHIVED sibling
+    figure, make_variance_autocorr_models, which stood in NoisyRL_lambda
+    for RL_lambda_resp_noise on colors/numbers before NEF had been fit for
+    those two tasks -- see docs/DECISIONS.md's "NoisyRL_lambda retired as
+    the colors/numbers stochastic stand-in, NEF takes its place". The
+    probe pass now targets the CURRENT roster directly instead.)
 
     VARIANCE GROWTH (an earlier top row) WAS DROPPED, per instruction,
     after checking the actual numbers directly rather than relying on the
-    earlier visual read (which was wrong -- see chat): only Human and
-    NoisyRL_lambda show a genuine, substantial DECAYING autocorrelation
-    (starting well above zero, decaying toward/past it); every
-    "_resp_noise" model stays within about +-0.09 of zero at EVERY lag in
-    EVERY task -- noise scatter around zero, not a real signal.
-    Autocorrelation alone is the metric that actually distinguishes
-    state-persistent noise from pure i.i.d. response noise; variance
-    growth did not.
+    earlier visual read (which was wrong -- see chat): only Human and the
+    genuinely state-persistent stochastic model (NoisyRL_lambda at the
+    time this was checked, since superseded by NEF -- see above) show a
+    genuine, substantial DECAYING autocorrelation (starting well above
+    zero, decaying toward/past it); every "_resp_noise" model stays within
+    about +-0.09 of zero at EVERY lag in EVERY task -- noise scatter around
+    zero, not a real signal. Autocorrelation alone is the metric that
+    actually distinguishes state-persistent noise from pure i.i.d. response
+    noise; variance growth did not. NEF independently reproduces the same
+    decaying-autocorrelation pattern under the CURRENT roster (see
+    make_sigma_main's own row 3), confirming this was never specific to
+    NoisyRL_lambda's own mechanism.
     """
     _apply_slide_style()
-    data = _load_variance_autocorr_data()
+    data = _load_variance_autocorr_data(models=NLL_RESP_NOISE_MODELS,
+                                        responses_path_fn=_nll_resp_noise_responses_path,
+                                        include_nef=True)
 
     fig_probe, axes_probe = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
                                          constrained_layout=True)
@@ -3671,7 +3623,9 @@ def make_variance_autocorr_human() -> Path:
         human_res, model_results, lags = data[task_key]
         _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
                                       model_results, lags, include_models=True,
-                                      show_ylabel=(i == 0))
+                                      show_ylabel=(i == 0),
+                                      models=NLL_RESP_NOISE_MODELS + ["NEF"],
+                                      model_colors=MODEL_COLORS)
     shared_ylim = axes_probe[0].get_ylim()
     plt.close(fig_probe)
 
@@ -3690,11 +3644,11 @@ def make_variance_autocorr_human() -> Path:
                                       show_ylabel=(i == 0))
     axes[0].set_ylim(*shared_ylim)  # identical to the models figure, not autoscaled
 
-    # Same legend SLOT reserved as make_variance_autocorr_models (same
-    # h_pad, same "outside lower center" placement) -- so the figure
-    # doesn't resize/shift when models get added on the follow-up slide;
-    # only "Human" is actually shown yet, matching make_lambda_human's own
-    # human-only stage convention exactly.
+    # Legend SLOT reserved the same way make_lambda_human's own human-only
+    # stage does (same h_pad, same "outside lower center" placement) --
+    # only "Human" is actually shown; this used to also match a sibling
+    # make_variance_autocorr_models figure's own reserved slot before that
+    # figure was archived (see this function's own docstring).
     fig.get_layout_engine().set(h_pad=0.25)
     fig.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")],
                loc="outside lower center", ncol=1, frameon=True, framealpha=0.9)
@@ -3704,61 +3658,20 @@ def make_variance_autocorr_human() -> Path:
     return out_path
 
 
-def make_variance_autocorr_models() -> Path:
-    """Same 1x4 layout as make_variance_autocorr_human (panel A unchanged) --
-    IDENTICAL except for the added model data and legend, per instruction:
-    panels B-D now also overlay Mean/LeakyIntegrator/PrimacyRecency's own
-    "_resp_noise" NLL fits plus NoisyRL_lambda (NLL_MODEL_ORDER -- RL_lambda's
-    own bare/deterministic fit is NOT shown, matching model_performance_nll's
-    own roster exactly, per instruction; it was in an earlier version of
-    this figure and has been dropped). NoisyRL_lambda is recolored to
-    RL_lambda's own established red-orange (NLL_MODEL_COLORS) and labeled
-    "RL_lambda*" in the legend (NLL_LABELS) -- same convention as
-    make_model_performance_nll's own legend, reused here rather than
-    reinvented, per instruction that the last label be "RL_lambda*".
-    Legend uses FULL model names throughout (NLL_LABELS), not
-    MODEL_DISPLAY's abbreviated "LI"/"PR" -- per instruction.
-
-    Confirms directly (not just visually -- an earlier visual read was
-    wrong, see chat) that only NoisyRL_lambda shows genuine decaying
-    autocorrelation resembling Human's own pattern; the three
-    "_resp_noise" models stay within noise of zero at every lag in every
-    task, matching what their own math predicts (i.i.d. response noise,
-    added AFTER the clean deterministic trajectory per
-    models/math_models.py's own add_noise(), has no mechanism to produce
-    lag correlation).
-    """
-    _apply_slide_style()
-    data = _load_variance_autocorr_data()
-
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
-                             constrained_layout=True)
-    axes[0].axis("off")
-    axes[0].set_title("Metric Definition", color="0.3")
-    schematic = _rasterize_svg(AUTOCORR_SCHEMATIC)
-    if schematic is not None:
-        axes[0].imshow(schematic, aspect="auto")
-
-    for i, (ax_ac, (task_key, title)) in enumerate(zip(axes[1:], RESID_TASK_PANELS)):
-        human_res, model_results, lags = data[task_key]
-        _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
-                                      model_results, lags, include_models=True,
-                                      show_ylabel=(i == 0))
-    # sharey autoscales to human+models here -- this IS the range
-    # make_variance_autocorr_human's own probe pass independently
-    # reconstructs and reuses (see that function's own docstring).
-
-    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")]
-    for m in NLL_MODEL_ORDER:
-        legend_handles.append(Line2D([0], [0], color=NLL_MODEL_COLORS[m], lw=2.2,
-                                     label=NLL_LABELS.get(m, m)))
-    fig.get_layout_engine().set(h_pad=0.25)
-    fig.legend(handles=legend_handles, loc="outside lower center", ncol=5,
-               frameon=True, framealpha=0.9)
-
-    out_path, _ = _save_fig(fig, "variance_autocorr_models")
-    plt.close(fig)
-    return out_path
+# make_variance_autocorr_models was archived -- see
+# archive/scripts/archive_variance_autocorr_models.py and
+# docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
+# stochastic stand-in, NEF takes its place" entry. It overlaid
+# Mean/LeakyIntegrator/PrimacyRecency's own "_resp_noise" NLL fits plus
+# NoisyRL_lambda (as the colors/numbers "our model" 4th slot) on top of
+# make_variance_autocorr_human's own human-only panels. make_sigma_main's
+# row 3 already supersedes it: the SAME autocorrelation metric, the SAME
+# "_resp_noise" models, and NEF (not NoisyRL_lambda) in the 4th slot --
+# confirmed to reproduce the same decaying-autocorrelation signature
+# NoisyRL_lambda used to show, now that NEF has been fit for colors/numbers
+# too. _load_variance_autocorr_data/_draw_variance_autocorr_panel (the
+# shared helpers this used) remain active, still used by
+# make_variance_autocorr_human's own probe pass and by make_sigma_main.
 
 
 # ── Neural predictions figures (neural_experiments.py's own outputs) ──────
@@ -4601,7 +4514,6 @@ FIGURES = {
     "lambda_humanvmodel": make_lambda_humanvmodel,
     "lambda_sigma_crosstask": make_lambda_sigma_crosstask,
     "variability_human": make_variability_human,
-    "variability_models": make_variability_models,
     "sigma_sanity_human": make_sigma_sanity_human,
     "sigma_overview": make_sigma_overview,
     "sigma_main": make_sigma_main,
@@ -4609,7 +4521,6 @@ FIGURES = {
     "neural_main": make_neural_main,
     "sigma_model_correlation": make_sigma_model_correlation,
     "variance_autocorr_human": make_variance_autocorr_human,
-    "variance_autocorr_models": make_variance_autocorr_models,
 }
 
 

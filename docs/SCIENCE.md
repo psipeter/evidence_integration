@@ -124,6 +124,20 @@ PrimacyRecency on colors — a structural, not fitting-range, limitation
 (Metric taxonomy 2.3). Also found and fixed, unrelated: a carrabin-only
 obs-indexing bug in the Laplace-smoothing response transform.
 
+**Also settled this session:** the `NoisyRL_lambda` figure-level stand-in
+— left in place when the model itself was retired (above), since
+colors/numbers didn't have real NEF fits yet at the time — is now fully
+closed out. NEF fills that role everywhere it's needed
+(`VARIABILITY_STOCHASTIC_MODEL`, `SIGMA_CORR_MODELS`), matching balls' own
+existing convention. Two figures that depended on the old stand-in and
+had become redundant were archived: `variability_models` (its
+model-overlay branch had been sitting disabled since before this session;
+the same per-pid comparison it would show is already covered by
+`sigma_model_correlation`) and `variance_autocorr_models` (fully
+superseded by `sigma_main` row 3, which already shows the identical
+metric/roster with NEF — not `NoisyRL_lambda` — in the 4th slot). See
+`docs/DECISIONS.md`.
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships; a
 synaptic-vs-working-memory implementation comparison). Model fitting
@@ -243,8 +257,10 @@ models — is the one that reproduces it.
 
 **3.1 Individual differences in response variability for humans.** How
 noisy is each person's response to a repeated, identical stimulus —
-`variability_human` (per-task KDE, human-only) and `variability_models`
-(same, with model overlay).
+`variability_human` (per-task KDE, human-only). A model-overlay variant
+(`variability_models`) was tried and retired as redundant — the same
+per-pid model-vs-human comparison is shown, more informatively, by
+`sigma_model_correlation` below.
 
 **3.2 Growth of variability during the early sequence.** Response noise
 should accumulate over the course of a trial if it's state-persistent
@@ -256,10 +272,11 @@ the human growth pattern; the `_resp_noise` models do not.
 t+k.** The more direct signature of state persistence: genuine
 state-persistent noise produces decaying positive autocorrelation of the
 residual; pure i.i.d. response noise looks like scatter around zero at
-every lag — `variance_autocorr_human`/`variance_autocorr_models`
-(dedicated 4-panel figures) and `sigma_main` row 3 (folded into the
-composite). As with growth, NEF reproduces the human autocorrelation
-pattern; the `_resp_noise` models don't.
+every lag — `variance_autocorr_human` (dedicated 4-panel figure,
+human-only) and `sigma_main` row 3 (the models comparison, folded into the
+composite — a standalone `variance_autocorr_models` figure was tried and
+retired as fully redundant with this row). As with growth, NEF reproduces
+the human autocorrelation pattern; the `_resp_noise` models don't.
 
 Together, 3.2 and 3.3 are the empirical core of Goal 4: two independent
 metrics, both distinguishing NEF's spiking-noise mechanism from ordinary
@@ -330,11 +347,9 @@ testable with future spike-resolved recordings.
 | `lambda_humanvmodel` | Supplementary | 1×3 |
 | `sigma_model_correlation` | Supplementary | 1×3 |
 | `variability_human` | 3.1 Individual differences | 1×4 |
-| `variability_models` | 3.1 Individual differences | 1×4 |
 | `sigma_overview` | 3.1 composite | 2×4 |
 | `sigma_main` | 3.1 + 3.2 + 3.3 composite | 3×3 |
 | `variance_autocorr_human` | 3.3 Autocorrelation | 1×4 |
-| `variance_autocorr_models` | 3.3 Autocorrelation | 1×4 |
 | `neural_main` | 4. Neural predictions | 3×3 |
 
 ---
