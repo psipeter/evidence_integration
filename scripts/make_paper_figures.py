@@ -2869,16 +2869,32 @@ RESID_LAGS = {"balls": [1, 2, 3], "colors": [1, 2, 3, 4], "numbers": [1, 2, 3]}
 # matched within ~0.1-0.2 for every model/task; inverse: this flattens
 # colors' Mean/PrimacyRecency ratio from 1.54/1.37 to 0.98-1.15).
 #
-# Applied ONLY to these (task, base model) pairs -- confirmed, real clip
-# artifacts, not a genuine noise-propagation signature: colors' Mean/
-# PrimacyRecency have an early mu that sits close enough to +-1 (a single
-# binary observation IS the running-mean estimate there) that add_noise's
-# clip(-1,1) truncates real noise variance early in the prefix and
-# inflates the apparent growth ratio. LeakyIntegrator/RL_lambda on colors
-# and every model on balls/numbers were already close to flat under the
-# RAW metric once the shared-seed bug was fixed (see chat) -- correcting
-# those too would just add brentq-inversion noise for no benefit.
-SIGMA_GROWTH_BOUNDARY_CORRECTED = {("colors", "Mean"), ("colors", "PrimacyRecency")}
+# Applied to these (task, base model) pairs -- confirmed, real clip
+# artifacts, not a genuine noise-propagation signature: an early mu that
+# sits close enough to +-1 (a single binary observation IS the running-
+# mean estimate there) means add_noise's clip(-1,1) truncates real noise
+# variance early in the prefix and inflates the apparent growth ratio.
+#
+# colors' LeakyIntegrator/RL_lambda ADDED this session (see chat) --
+# NOT present when this set was first built (comment used to read
+# "LeakyIntegrator/RL_lambda on colors ... were already close to flat"),
+# but this session's fit changes made both genuinely need it: LeakyIntegrator's
+# init_from_obs1 forces its colors mu to exactly value[0] (=+-1) at
+# observation 0 for 100% of trials (was a free 0-init before); RL_lambda's
+# widened lambda_ bound pushes its own colors mu within 0.9 of +-1 at
+# observation 0 for 78% of trials. Confirmed empirically before adding:
+# raw growth ratios were 1.457/1.363 (same range as Mean/PrimacyRecency's
+# own original 1.54/1.37), and the SAME correction flattens them to
+# 0.987/1.110 -- not a coincidence, the same mechanism.
+#
+# Every model on balls/numbers, and colors' Mean/PrimacyRecency/
+# LeakyIntegrator/RL_lambda's pre-refit fits, stay close to flat under the
+# RAW metric -- correcting those too would just add brentq-inversion noise
+# for no benefit.
+SIGMA_GROWTH_BOUNDARY_CORRECTED = {
+    ("colors", "Mean"), ("colors", "PrimacyRecency"),
+    ("colors", "LeakyIntegrator"), ("colors", "RL_lambda"),
+}
 
 
 def _clipped_normal_var(mu, sigma: float, a: float = -1.0, b: float = 1.0):
@@ -3120,13 +3136,6 @@ def _resid_autocorr(resid_df: pd.DataFrame, lags: list[int],
     return lags, means, sems
 
 
-# Hand-made schematic explaining the autocorrelation metric itself -- goes
-# in panel A, same conceptual role VARIABILITY_SCHEMATIC plays for the
-# response-noise figures. Copied into FIGURES_DIR/schematics/ too, same
-# reasoning as VARIABILITY_SCHEMATIC's own comment above.
-AUTOCORR_SCHEMATIC = FIGURES_DIR / "schematics" / "autocorr_schematic.svg"
-
-
 def _nll_responses_path(task_key: str, model: str) -> Path:
     """Path to one (task, model)'s "_resp_noise" *_nll_responses.pkl --
     used by _sigma_model_source_path for Mean/LeakyIntegrator/PrimacyRecency
@@ -3135,17 +3144,24 @@ def _nll_responses_path(task_key: str, model: str) -> Path:
     per-observation response SEQUENCE (needed to compute a residual) rather
     than the scalar performance loss.
 
+    ALWAYS data/runs/nll/, all 3 tasks this is ever called for (balls/
+    colors/numbers -- see SIGMA_CORR_MODELS, which has no snacks entry) --
+    matching _nll_resp_noise_perf_path/_nll_resp_noise_responses_path/
+    _resp_noise_params_path's own already-unified convention. balls used to
+    read data/runs/carrabin/ instead (a stale holdout from before NLL fits
+    were consolidated into one folder for all 4 tasks) -- data/runs/
+    carrabin/*_resp_noise_carrabin_nll_responses.pkl now predates this
+    session's NLL refit entirely and must not be read.
+
     Used to also special-case model == "NoisyRL_lambda" (no "_resp_noise"
     suffix, since that model had its own native sigma_state mechanism
     instead) -- removed now that NoisyRL_lambda is retired (see
     docs/DECISIONS.md's "NoisyRL_lambda retired as the colors/numbers
     stochastic stand-in, NEF takes its place"); every remaining caller
     passes one of the three "_resp_noise" base models only."""
-    file_model = f"{model}_resp_noise"
-    if task_key == "balls":
-        return RUNS_DIR / "carrabin" / f"{file_model}_carrabin_nll_responses.pkl"
-    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
-    return RUNS_DIR / "nll" / f"{file_model}_{dataset}_nll_responses.pkl"
+    dataset = {"balls": "carrabin", "colors": "soltani_colors",
+              "numbers": "soltani_numbers"}[task_key]
+    return RUNS_DIR / "nll" / f"{model}_resp_noise_{dataset}_nll_responses.pkl"
 
 
 def _nll_resp_noise_responses_path(task_key: str, model: str) -> Path:
@@ -3410,95 +3426,6 @@ def _draw_variance_growth_panel(ax, task_key: str, title: str, human_stats,
     ax.set_ylabel("Normalized \u03c3 (baseline = 1)" if show_ylabel else "")
     ax.tick_params(axis="y", labelleft=show_ylabel)
     sns.despine(ax=ax, top=True, right=True)
-
-
-def make_variance_autocorr_human() -> Path:
-    """1x4 panel: panel A holds AUTOCORR_SCHEMATIC (a hand-made diagram of
-    the metric itself), rasterized and embedded via ax.imshow (see
-    _rasterize_svg's own docstring for why this replaced the presentation
-    script's SVG-XML-splicing approach) -- same convention as
-    make_variability_human's own panel A; panels B-D are Human-only
-    within-trial lag-k residual autocorrelation, one per task [balls,
-    colors, numbers] -- snacks excluded, same reasoning as
-    VARIABILITY_TASK_PANELS.
-
-    Y-AXIS RANGE is established via a throwaway PROBE pass (drawn with
-    include_models=True on a scratch figure, never saved) that mirrors
-    make_sigma_main's own row 3 -- same roster (NLL_RESP_NOISE_MODELS +
-    NEF, via include_nef=True) -- so this figure's own human-only y-range
-    is set by the SAME human+model data sigma_main's row 3 shows, not by
-    the human curves alone, which would autoscale to a narrower, less
-    informative range. Mirrors make_response_change's own two-pass
-    shared-ylim mechanism, adapted here to one function computing its own
-    reference range internally rather than reading it from a sibling
-    figure.
-
-    (An earlier version of this probe pass matched a NOW-ARCHIVED sibling
-    figure, make_variance_autocorr_models, which stood in NoisyRL_lambda
-    for RL_lambda_resp_noise on colors/numbers before NEF had been fit for
-    those two tasks -- see docs/DECISIONS.md's "NoisyRL_lambda retired as
-    the colors/numbers stochastic stand-in, NEF takes its place". The
-    probe pass now targets the CURRENT roster directly instead.)
-
-    VARIANCE GROWTH (an earlier top row) WAS DROPPED, per instruction,
-    after checking the actual numbers directly rather than relying on the
-    earlier visual read (which was wrong -- see chat): only Human and the
-    genuinely state-persistent stochastic model (NoisyRL_lambda at the
-    time this was checked, since superseded by NEF -- see above) show a
-    genuine, substantial DECAYING autocorrelation (starting well above
-    zero, decaying toward/past it); every "_resp_noise" model stays within
-    about +-0.09 of zero at EVERY lag in EVERY task -- noise scatter around
-    zero, not a real signal. Autocorrelation alone is the metric that
-    actually distinguishes state-persistent noise from pure i.i.d. response
-    noise; variance growth did not. NEF independently reproduces the same
-    decaying-autocorrelation pattern under the CURRENT roster (see
-    make_sigma_main's own row 3), confirming this was never specific to
-    NoisyRL_lambda's own mechanism.
-    """
-    _apply_slide_style()
-    data = _load_variance_autocorr_data(models=NLL_RESP_NOISE_MODELS,
-                                        responses_path_fn=_nll_resp_noise_responses_path,
-                                        include_nef=True)
-
-    fig_probe, axes_probe = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
-                                         constrained_layout=True)
-    for i, (ax_ac, (task_key, title)) in enumerate(zip(axes_probe[1:], RESID_TASK_PANELS)):
-        human_res, model_results, lags = data[task_key]
-        _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
-                                      model_results, lags, include_models=True,
-                                      show_ylabel=(i == 0),
-                                      models=NLL_RESP_NOISE_MODELS + ["NEF"],
-                                      model_colors=MODEL_COLORS)
-    shared_ylim = axes_probe[0].get_ylim()
-    plt.close(fig_probe)
-
-    fig, axes = plt.subplots(1, 4, figsize=FIGURE_SIZE, sharey=True,
-                             constrained_layout=True)
-    axes[0].axis("off")
-    axes[0].set_title("Metric Definition", color="0.3")
-    schematic = _rasterize_svg(AUTOCORR_SCHEMATIC)
-    if schematic is not None:
-        axes[0].imshow(schematic, aspect="auto")
-
-    for i, (ax_ac, (task_key, title)) in enumerate(zip(axes[1:], RESID_TASK_PANELS)):
-        human_res, model_results, lags = data[task_key]
-        _draw_variance_autocorr_panel(ax_ac, task_key, title, human_res,
-                                      model_results, lags, include_models=False,
-                                      show_ylabel=(i == 0))
-    axes[0].set_ylim(*shared_ylim)  # identical to the models figure, not autoscaled
-
-    # Legend SLOT reserved the same way make_lambda_human's own human-only
-    # stage does (same h_pad, same "outside lower center" placement) --
-    # only "Human" is actually shown; this used to also match a sibling
-    # make_variance_autocorr_models figure's own reserved slot before that
-    # figure was archived (see this function's own docstring).
-    fig.get_layout_engine().set(h_pad=0.25)
-    fig.legend(handles=[Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")],
-               loc="outside lower center", ncol=1, frameon=True, framealpha=0.9)
-
-    out_path, _ = _save_fig(fig, "variance_autocorr_human")
-    plt.close(fig)
-    return out_path
 
 
 # make_variance_autocorr_models was archived -- see
@@ -4359,7 +4286,6 @@ FIGURES = {
     "sigma_reliability": make_sigma_reliability,
     "neural_main": make_neural_main,
     "sigma_model_correlation": make_sigma_model_correlation,
-    "variance_autocorr_human": make_variance_autocorr_human,
 }
 
 

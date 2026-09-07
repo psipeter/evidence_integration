@@ -477,12 +477,93 @@ the `NoisyRL_lambda` retirement above (real judgment calls, partial
 restoration nuance) -- so the lighter-weight "just delete it" treatment
 fit, rather than archiving code with nothing distinct to restore.
 
-**What was deliberately NOT touched:** `make_variance_autocorr_human` --
-its schematic panel (`AUTOCORR_SCHEMATIC`) was dropped when `sigma_main`
-was built and exists nowhere else, so it is not a pure duplicate of
-anything. `lambda_metric` -- a differently-styled, standalone version of
-the fitting-demo panel, built specifically as an Inkscape-inset source for
-`lambda_main`, not a duplicate. `lambda_overview`/`sigma_overview`
-themselves -- these are the composites the four deleted figures were
-redundant with, obviously kept.
+**What was deliberately NOT touched (at the time):** `lambda_metric` -- a
+differently-styled, standalone version of the fitting-demo panel, built
+specifically as an Inkscape-inset source for `lambda_main`, not a
+duplicate. `lambda_overview`/`sigma_overview` themselves -- these are the
+composites the four deleted figures were redundant with, obviously kept.
+
+**Update:** `make_variance_autocorr_human` was subsequently deleted too
+(same treatment as the four above, not archived), on the person's
+explicit instruction after being reminded of the one real difference: its
+panel A held `AUTOCORR_SCHEMATIC`, a hand-made diagram with no other
+current home (`sigma_main` dropped every schematic panel when it was
+built). Everything else in the figure -- the 3 human-only autocorrelation
+panels -- was already a pure duplicate of `sigma_main` row 3's own human
+curves, same reasoning as the four above. `AUTOCORR_SCHEMATIC`'s own
+constant definition was removed alongside it (orphaned, zero other
+callers); the underlying `.svg` source asset itself was not touched, only
+its use inside this one now-deleted figure.
+
+---
+
+## Colors' LeakyIntegrator/RL_lambda added to the sigma-growth boundary-clipping correction
+
+**Decision:** `SIGMA_GROWTH_BOUNDARY_CORRECTED` (`scripts/make_paper_figures.py`,
+controlling `sigma_main` row 2's residual-variance-growth panel) now also
+covers `("colors", "LeakyIntegrator")` and `("colors", "RL_lambda")`,
+alongside the pre-existing `("colors", "Mean")`/`("colors",
+"PrimacyRecency")` entries.
+
+**Why:** the original correction (see
+`archive/HISTORY_modeling_2026.md`'s "Boundary-clipping correction for
+sigma-growth negative control") was scoped to Mean/PrimacyRecency because,
+at the time, LeakyIntegrator/RL_lambda's colors fits were "already close
+to flat under the RAW metric." This session's fit changes broke that:
+LeakyIntegrator's `init_from_obs1` now forces its colors `mu` to exactly
+`value[0]` (±1) at observation 0 for 100% of trials (previously a free
+0-init), and RL_lambda's widened `lambda_` bound pushes its own colors
+`mu` within 0.9 of ±1 at observation 0 for 78% of trials -- both now hit
+the same `add_noise` boundary-clip artifact the original correction
+targets. Confirmed directly, not just by inspection: raw growth ratios
+were 1.457 (LeakyIntegrator) / 1.363 (RL_lambda) -- the same range as
+Mean/PrimacyRecency's own original uncorrected 1.54/1.37 -- and applying
+the existing `_resid_variance_growth_corrected` machinery unchanged
+flattens both to 0.987/1.110, matching Mean/PrimacyRecency's own corrected
+0.98-1.15 range. Same mechanism, not a coincidence.
+
+**What did NOT need touching:** the correction machinery itself
+(`_clipped_normal_var`, `_implied_sigma`, `_resid_variance_growth_corrected`)
+-- fully general over (task, model), already worked correctly for the two
+new pairs once added to the set. Every other (task, model) combination
+remains uncorrected -- confirmed still close to flat under the raw
+metric.
+
+**Also checked, for consistency, whether Human/NEF need the same
+treatment -- Human: not applied; NEF: not needed.**
+
+*Human* -- 85.7% of colors responses at observation 0 are within 0.9 of
+the boundary, same order as the models, so the same concern transfers.
+Feasibility check (not wired in): the correction needs a known `mu` per
+(pid, observation, qid) to invert against -- for the math models that's
+the deterministic model's own re-run output; for Human, the qid-group
+MEAN response (already computed by `_resid_frame` to build the residuals
+in the first place) is the natural empirical stand-in, and re-using
+`_implied_sigma`/`_clipped_normal_var` unchanged with that substitution
+produces a real, computable result. But it doesn't just flatten the
+curve the way it did for the math models -- it changes the SHAPE (raw
+human variance looks like it grows to ~1.3x by the last observation;
+corrected, it looks like it SHRINKS to ~0.88x, dipping to ~0.66x in the
+middle), because human `mu` sits closest to the boundary at observation 0
+specifically, inflating the corrected BASELINE the most. Not applied,
+deliberately: unlike `add_noise`'s known exactly-Gaussian-then-clip
+generative process, assuming Gaussian noise around a "true" human
+response is an unvalidated assumption, and `mu` itself would be estimated
+from only 2 repeats per qid group (`RESID_MIN_REPEATS["colors"]=2`) --
+noisy on its own, unlike the math models' exact, zero-estimation-error
+mu. Applying it would risk revising `docs/SCIENCE.md`'s own reading of
+colors' human variance-growth panel on a shakier methodological footing
+than the math-model correction has.
+
+*NEF* -- checked directly at a stricter >0.98 threshold, all
+observations, all three tasks (not just colors, not just observation 0):
+colors overall 0.02% (1 row out of ~1472 at a handful of observations),
+numbers 0.00% at every single observation, balls (MLE variant) 0.00%.
+Nowhere near significant. NEF's own decoded value essentially never
+approaches the boundary at all -- no analogue correction needed or
+applicable; its row-2 curves stay as the uncorrected, genuine signal.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (nothing here was retired, just a set
+extended).
 

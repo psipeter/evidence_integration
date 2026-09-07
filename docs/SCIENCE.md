@@ -138,6 +138,23 @@ superseded by `sigma_main` row 3, which already shows the identical
 metric/roster with NEF — not `NoisyRL_lambda` — in the 4th slot). See
 `docs/DECISIONS.md`.
 
+Refitting the `_resp_noise` models under the corrected setup (this
+session's carrabin fix, `lambda_` bound, and `init_from_obs1`) also
+surfaced a known artifact in two new places: colors' LeakyIntegrator/
+RL_lambda now hit the same `add_noise` boundary-clipping issue
+Mean/PrimacyRecency's colors fits already needed a correction for (see
+`docs/DECISIONS.md`'s "Colors' LeakyIntegrator/RL_lambda added to the
+sigma-growth boundary-clipping correction") — `sigma_main` row 2 now
+applies that same correction to all four. Checked whether Human/NEF
+needed the same treatment: NEF doesn't (its own decoded value essentially
+never approaches the boundary, any task, any observation). Human's colors
+responses DO show the same near-boundary pattern, and a correction is
+feasible (using each qid group's own mean response in place of a model's
+mu), but is deliberately not applied — unlike the math models' exactly-known
+noise process, this would rest on an unvalidated Gaussian-noise assumption
+about human behavior, and it doesn't just flatten the curve, it reverses
+its apparent direction (see `docs/DECISIONS.md` for the actual numbers).
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships; a
 synaptic-vs-working-memory implementation comparison). Model fitting
@@ -275,11 +292,14 @@ the human growth pattern; the `_resp_noise` models do not.
 t+k.** The more direct signature of state persistence: genuine
 state-persistent noise produces decaying positive autocorrelation of the
 residual; pure i.i.d. response noise looks like scatter around zero at
-every lag — `variance_autocorr_human` (dedicated 4-panel figure,
-human-only) and `sigma_main` row 3 (the models comparison, folded into the
-composite — a standalone `variance_autocorr_models` figure was tried and
-retired as fully redundant with this row). As with growth, NEF reproduces
-the human autocorrelation pattern; the `_resp_noise` models don't.
+every lag — `sigma_main` row 3 (human + models + NEF, all three tasks).
+Two dedicated standalone figures that used to carry this metric were tried
+and deleted as fully redundant with this row: `variance_autocorr_models`
+(overlaid the same models on top of the human panels) and
+`variance_autocorr_human` (the human-only panels alone, plus a schematic
+panel with no other current home — see `docs/DECISIONS.md`). As with
+growth, NEF reproduces the human autocorrelation pattern; the
+`_resp_noise` models don't.
 
 Together, 3.2 and 3.3 are the empirical core of Goal 4: two independent
 metrics, both distinguishing NEF's spiking-noise mechanism from ordinary
@@ -348,7 +368,6 @@ testable with future spike-resolved recordings.
 | `sigma_model_correlation` | Supplementary | 1×3 |
 | `sigma_overview` | 3.1 composite | 2×4 |
 | `sigma_main` | 3.1 + 3.2 + 3.3 composite | 3×3 |
-| `variance_autocorr_human` | 3.3 Autocorrelation | 1×4 |
 | `neural_main` | 4. Neural predictions | 3×3 |
 
 ---
