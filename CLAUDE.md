@@ -186,9 +186,11 @@ evidence_integration/
     soltani_{numbers,colors}[_<datafile>].pkl
     runs/
       rmse/ (canonical RMSE fit location for all 4 tasks' active math
-        models + NEF), nll/, nll_noise_only/, carrabin/, yoo/ (legacy:
-        retired-model artifacts + each task's own NLL fits, no longer
-        the active-model RMSE source), refit/
+        models + NEF), nll/ (canonical NLL fit location, same 4 tasks) --
+        the only two run folders any current figure or fitting default
+        reads. carrabin/, yoo/, refit/, soltani/, nll_old/ are all
+        legacy/stale (retired-model artifacts + pre-consolidation
+        RMSE/NLL fits), held for reference only
   models/
     math_models.py, NEF.py, counting_integrator.py
   fitting/

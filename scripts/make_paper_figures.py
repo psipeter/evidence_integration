@@ -1891,17 +1891,17 @@ def _variability_series(task_key: str, path: Path, qid_map: pd.DataFrame,
 
 
 def _variability_model_path(task_key: str, model: str) -> Path:
-    """Path to one (task, model)'s *_responses.pkl. balls' NEF specifically
-    uses the MLE-fitted variant (NEF_carrabin_responses_mle.pkl), matching
-    figure_carrabin_variability.py's OWN panels A/C convention -- NOT the
-    RMSE-fitted NEF_carrabin_responses.pkl _delta_responses_path uses for
-    ITS (different) panel B. Every other (task, model) is the plain
-    RMSE-fitted response file."""
-    if task_key == "balls":
-        if model == "NEF":
-            return RUNS_DIR / "carrabin" / "NEF_carrabin_responses_mle.pkl"
-        return RUNS_DIR / "carrabin" / f"{model}_carrabin_responses.pkl"
-    dataset = "soltani_colors" if task_key == "colors" else "soltani_numbers"
+    """Path to one (task, model)'s *_responses.pkl -- ALWAYS the RMSE-fitted
+    response file in data/runs/rmse/, all 3 tasks this is ever called for
+    (balls/colors/numbers -- snacks is excluded from this metric, see
+    VARIABILITY_TASK_PANELS). balls used to read data/runs/carrabin/
+    instead -- NEF via its retired MLE-fitted variant
+    (NEF_carrabin_responses_mle.pkl, matching the now-archived
+    figure_carrabin_variability.py's own panels A/C convention), other
+    models via a stale Aug 26 copy -- both superseded by this session's
+    RMSE refit into rmse/, same folder colors/numbers already used."""
+    dataset = {"balls": "carrabin", "colors": "soltani_colors",
+              "numbers": "soltani_numbers"}[task_key]
     return RUNS_DIR / "rmse" / f"{model}_{dataset}_responses.pkl"
 
 
@@ -2374,28 +2374,26 @@ def _sigma_model_source_path(task_key: str, model: str) -> Path:
     """Where to read one model's own response file for THIS figure.
 
     Mean/LeakyIntegrator/PrimacyRecency: their "_resp_noise" NLL fit, via
-    _nll_responses_path -- which already adds that suffix internally and
-    already routes balls to data/runs/carrabin/ vs colors/numbers to
-    data/runs/nll/, so no extra branching is needed here. NOT their
-    bare-name RMSE fit (exactly deterministic, sigma=0 for every pid).
+    _nll_responses_path -- ALWAYS data/runs/nll/, all 3 tasks (see that
+    function's own docstring). NOT their bare-name RMSE fit (exactly
+    deterministic, sigma=0 for every pid).
 
-    NEF (all three tasks now): _variability_model_path -- the MLE-fitted
-    variant for balls (NEF_carrabin_responses_mle.pkl, matching
-    figure_carrabin_variability.py's own panels A/C convention), and the
-    plain RMSE-fitted variant for colors/numbers
-    (NEF_soltani_{colors,numbers}_responses.pkl -- confirmed directly to
-    exist and show genuine, non-degenerate per-pid qid-residual variance,
-    same check VARIABILITY_STOCHASTIC_MODEL's own comment describes). No
-    NLL fit exists for NEF at all (see make_model_performance_nll's own
-    module comment), so this RMSE-fitted response file is the only real
-    option for every task's 4th slot -- NEF replaces NoisyRL_lambda here,
-    which used to read colors/numbers' fresh NLL fit via _nll_responses_path
-    before NEF had been fit for those two tasks (see docs/DECISIONS.md's
-    "NoisyRL_lambda retired as the colors/numbers stochastic stand-in, NEF
-    takes its place"). This branch (model == "NEF") already dispatched to
-    _variability_model_path regardless of task_key, so no code change was
-    needed here beyond SIGMA_CORR_MODELS' own roster swap above -- verified
-    directly rather than assumed.
+    NEF (all three tasks now): _variability_model_path -- ALWAYS the
+    RMSE-fitted response file in data/runs/rmse/
+    (NEF_{carrabin,soltani_colors,soltani_numbers}_responses.pkl --
+    confirmed directly to exist and show genuine, non-degenerate per-pid
+    qid-residual variance, same check VARIABILITY_STOCHASTIC_MODEL's own
+    comment describes). No NLL fit exists for NEF at all (see
+    make_model_performance_nll's own module comment), so this RMSE-fitted
+    response file is the only real option for every task's 4th slot --
+    NEF replaces NoisyRL_lambda here, which used to read colors/numbers'
+    fresh NLL fit via _nll_responses_path before NEF had been fit for
+    those two tasks (see docs/DECISIONS.md's "NoisyRL_lambda retired as
+    the colors/numbers stochastic stand-in, NEF takes its place"). This
+    branch (model == "NEF") already dispatched to _variability_model_path
+    regardless of task_key, so no code change was needed here beyond
+    SIGMA_CORR_MODELS' own roster swap above -- verified directly rather
+    than assumed.
     """
     if model == "NEF":
         return _variability_model_path(task_key, model)
@@ -3199,11 +3197,12 @@ def _load_variance_autocorr_data(models: list[str] | None = None,
     `include_nef=True` additionally loads NEF's own residual
     autocorrelation into model_results["NEF"], using the SAME per-task
     path convention row 2's own NEF handling uses
-    (_load_variance_growth_data: _variability_model_path's MLE variant
-    for balls, _delta_responses_path's RMSE variant for colors/numbers)
-    -- NEF is never IN NLL_RESP_NOISE_MODELS itself (no NLL fit uses that
-    roster for NEF), so it can't go through the normal responses_path_fn
-    mechanism the way the math models do. Defaults to False.
+    (_load_variance_growth_data: _variability_model_path's RMSE-fitted
+    variant for balls, _delta_responses_path's RMSE variant for
+    colors/numbers) -- NEF is never IN NLL_RESP_NOISE_MODELS itself (no
+    NLL fit uses that roster for NEF), so it can't go through the normal
+    responses_path_fn mechanism the way the math models do. Defaults to
+    False.
 
     `pool_all_pairs` is passed straight through to every _resid_autocorr
     call (Human, each model, NEF) -- see that function's own docstring.
@@ -3307,7 +3306,7 @@ def _load_variance_growth_data(models: list[str] | None = None,
     NEF is included here (unlike row 3's NLL_RESP_NOISE_MODELS-only
     roster) since it's the other real positive case for this metric --
     see chat. Uses the SAME NEF path convention as the row-1 variability
-    panels (_variability_model_path's MLE variant for balls,
+    panels (_variability_model_path's RMSE-fitted variant for balls,
     _delta_responses_path's RMSE variant for colors/numbers).
 
     Each model's stats come from _growth_stats_for_source, which

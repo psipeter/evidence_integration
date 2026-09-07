@@ -16,11 +16,14 @@ actually run it" reference.
 (all 4 active math models + NEF) — this used to be soltani-only, with
 carrabin/yoo's own math models living in `data/runs/carrabin/`/
 `data/runs/yoo/` instead; those two were refit fresh into `rmse` (see
-chat) specifically to remove that split. `data/runs/carrabin/`/
-`data/runs/yoo/` still exist and still hold each task's own NLL fits
-plus retired-model artifacts (`NoisyCounting`, `RNN`, `NoisyRL_lambda`,
-old NEF scans) — just no longer the canonical RMSE source any figure
-script reads.
+chat) specifically to remove that split. `data/runs/nll/` is likewise
+now the canonical NLL fit location for every task — carrabin/yoo's own
+NLL fits were also refit fresh into `nll` (see chat), removing that
+split too. `data/runs/carrabin/`/`data/runs/yoo/` still exist but now
+hold ONLY retired-model artifacts (`NoisyCounting`, `RNN`,
+`NoisyRL_lambda`, old NEF scans) and pre-consolidation RMSE/NLL fits —
+no longer the canonical source of anything any current figure script
+reads.
 
 ```bash
 # Submit (cluster) -- carrabin/yoo use n_trials=100, soltani 300 (established convention)
@@ -36,21 +39,23 @@ venv/bin/python -m fitting.collect rmse --type activities --ensembles error --ti
 ```
 
 Run folders in current use: `data/runs/rmse/` (canonical RMSE, all 4
-tasks), `data/runs/nll/`, `data/runs/nll_noise_only/` (soltani NLL),
-`data/runs/carrabin/`, `data/runs/yoo/` (legacy RMSE artifacts + each
-task's own NLL fits), `data/runs/refit/`. `--nef_folder` in figure
-scripts redirects NEF data to a separate folder from other models.
+tasks) and `data/runs/nll/` (canonical NLL, all 4 tasks) — these two are
+the only run folders any current figure or fitting default reads.
+`data/runs/carrabin/`, `data/runs/yoo/`, `data/runs/refit/`,
+`data/runs/soltani/`, `data/runs/nll_old/` are all legacy/stale, held
+for reference only. `--nef_folder` in figure scripts redirects NEF data
+to a separate folder from other models.
 
 ## math-model fits (any dataset)
 
 RMSE and NLL fits use two separate run folders (`data/runs/rmse/`,
-`data/runs/nll/` for soltani; carrabin/yoo keep their NLL fits alongside
-their own legacy artifacts) — NOT the older shared `data/runs/soltani/`,
-which holds stale fits made against contaminated/smaller-pid-count data
-and is read by no current figure (why the split happened:
-`docs/DECISIONS.md`). Omit `--datafile` for the canonical, unsuffixed
-`data/soltani_{numbers,colors}.pkl` (46 pids, contamination-free,
-registry-stable — see the data-pipeline skill for how it's built).
+`data/runs/nll/`), same convention for all 4 tasks — NOT the older
+shared `data/runs/soltani/`, which holds stale fits made against
+contaminated/smaller-pid-count data and is read by no current figure
+(why the split happened: `docs/DECISIONS.md`). Omit `--datafile` for
+the canonical, unsuffixed `data/soltani_{numbers,colors}.pkl` (46 pids,
+contamination-free, registry-stable — see the data-pipeline skill for
+how it's built).
 
 `all` expands to every model including NEF with no skip flag — to fit
 only math models, submit one at a time:
@@ -94,13 +99,15 @@ argparse-based (positional `dataset model_type pid`, then
   never silently overwrite an RMSE fit of the same model_type.
 - **Default method — noise-only override**: NLL fits fix the base
   model's free parameters at their RMSE-fitted values and search ONLY
-  `sigma_resp`, via `--override_from_folder <folder>`. Verified negligible
-  loss/behavior difference vs. a full joint search in 11/12 tested combos
-  — the one exception (RL_lambda on carrabin) is worth re-checking before
-  relying on this for that specific cell.
-  `data/runs/nll_noise_only/` is the canonical location for new fits of
-  this kind; `data/runs/nll/` (full-joint) is kept as the verification
-  baseline, not actively added to.
+  `sigma_resp`, via `--override_from_folder <folder>` (in practice
+  `--override_from_folder rmse`). Verified negligible loss/behavior
+  difference vs. a full joint search in 11/12 tested combos — the one
+  exception (RL_lambda on carrabin) is worth re-checking before relying
+  on this for that specific cell. `data/runs/nll/` is the canonical
+  location for these fits, all 4 tasks — the earlier full-joint search
+  this folder held was superseded by this session's noise-only-override
+  refit (old full-joint results backed up at `data/runs/nll_old/`,
+  read by no current code).
 - **Before trusting any `--loss nll` fit on a new dataset/model
   combination**, run `scripts/verify_ensemble_invariant.py` (after
   touching `add_noise`, `_resp_noise_seed`, or
