@@ -55,7 +55,10 @@ _NEF_FIXED: dict[str, object] = {
     "n_neurons_counting": 100,
     "n_seeds": 1,
     "seed": 0,
-    "pes_learning_rate": 1e-4,
+    "pes_learning_rate": 4e-4,  # NEF_synaptic PES rate -- RMSE-minimizing value split
+    # the difference between carrabin's optimum (5e-4, n_neurons=500/nc=500) and
+    # soltani_numbers' (3e-4, n_neurons=500/nc=2000); see chat for the sweep. NEF
+    # (recurrent) never reads this -- inert for the currently-active model.
 }
 
 _NEF_RANGES: dict[str, tuple] = {

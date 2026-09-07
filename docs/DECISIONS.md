@@ -567,3 +567,57 @@ applicable; its row-2 curves stay as the uncorrected, genuine signal.
 `archive/HISTORY_*.md` entry (nothing here was retired, just a set
 extended).
 
+---
+
+## NEF_synaptic's `pes_learning_rate`: single fixed `4e-4` default, not per-dataset
+
+**Decision:** `pes_learning_rate` (`_NEF_FIXED`, `fitting/model_params.py`)
+set to `4e-4` for all four datasets, replacing a leftover `1e-4` inherited
+unchanged from the pre-May implementation (see NEF_synaptic's
+reimplementation in `docs/SCIENCE.md`'s "Current thread"). Not split into
+per-dataset overrides despite each dataset having its own RMSE-minimizing
+value.
+
+**Why 4e-4, not per-dataset values:** a coordinate sweep of
+`pes_learning_rate` against NEF (recurrent) on identical trials/params
+(`scripts/check_NEF_pipeline.py --compare_synaptic
+--pes_learning_rate_sweep`) found a clean, unimodal RMSE minimum at `5e-4`
+for carrabin (`n_neurons=500`, `n_neurons_counting=500`) and `3e-4` for
+soltani_numbers (`n_neurons=500`, `n_neurons_counting=2000`) -- `4e-4`
+splits the two. The gap was deliberately checked against the
+`n_neurons`/`n_neurons_counting` question this reimplementation raised:
+Nengo's own `PES` builder (`nengo.builder.learning_rules.SimPES`)
+normalizes its per-step decoder update by the *presynaptic* population's
+`n_neurons` (`alpha = -learning_rate * dt / n_neurons`), so the learned
+readout's effective speed should already be architecturally invariant to
+population size. Both sweep points held `n_neurons=500` fixed and only
+varied `n_neurons_counting` (500 vs. 2000, a 4x difference) alongside
+dataset -- the optimum moved by <2x, far smaller than the 3x+ RMSE swings
+seen scanning `pes_learning_rate` itself over a decade in either sweep.
+That rules out population size as the driver and points instead at
+dataset-specific factors not yet disentangled (most likely trial length --
+soltani_numbers trials run 15 observations vs. carrabin's 5, and
+`models.NEF._simulate_trial` rebuilds the network, resetting PES's learned
+weights, fresh every trial -- giving the synaptic connection 3x longer to
+learn before reset; observation-value statistics also differ between
+carrabin's binary-probability scale and soltani's continuous [-1,1] scale
+and weren't independently ruled out).
+
+**Why not chase this further with per-dataset overrides now:** the shared
+`fixed` dict already supports per-dataset overrides for exactly this kind
+of architecture constant (carrabin already overrides `n_neurons`/
+`n_neurons_counting`/`radius_c` relative to `_NEF_FIXED`'s defaults), so
+adding dataset-specific `pes_learning_rate` values later is a trivial,
+idiomatic extension if it turns out to matter -- no dynamic-scaling
+formula needed. It doesn't matter yet either way: `NEF` (recurrent) never
+reads `pes_learning_rate`, and `NEF_synaptic` has no `MODEL_PARAMS` entry
+or Optuna fit of its own yet (deliberately deferred -- see
+`docs/SCIENCE.md`). A single shared default that gets both datasets' RMSE
+within ~2x of their own individual optimum is more than adequate for the
+current qualitative-baseline-consistency check; revisit once
+`NEF_synaptic` gets a real per-pid fit.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (NEF_synaptic was reimplemented, not
+retired).
+

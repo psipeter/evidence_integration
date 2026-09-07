@@ -138,6 +138,46 @@ superseded by `sigma_main` row 3, which already shows the identical
 metric/roster with NEF — not `NoisyRL_lambda` — in the 4th slot). See
 `docs/DECISIONS.md`.
 
+**Also settled this session (new, separate thread): NEF_synaptic
+reimplemented.** Retired in May (`e5281f6`) when the project consolidated
+to a single active NEF variant; revived per this doc's own "Future
+extensions" entry below. Same architecture as NEF (recurrent) except the
+value-dynamics block: a `background` population (fires from bias only)
+connects to `value` via a PES-learned connection, driven by `error`'s
+product signal through the learning rule (`transform=-T_error`) instead of
+a direct multiplicative connection plus a `value` self-recurrence.
+Branches on `nef_type` (derived from `model_type`, `"synaptic" in
+model_type`) inside `models.NEF.build_network` itself, not a separate
+model file — the counting-subnetwork/activity-loading/dataset-dispatch
+machinery that's historically been the real source of bugs here (see
+CLAUDE.md's session-start checklist) stays single-sourced.
+`scripts/check_NEF_pipeline.py` gained `--model_type`, `--compare_synaptic`,
+and `--pes_learning_rate_sweep` for exactly this kind of diagnostic.
+
+Baseline check (reusing NEF (recurrent)'s own already-fitted alpha_0/
+lambda_, not an independent fit): NEF_synaptic tracks the same qualitative
+integration direction as NEF (recurrent) on every sampled trial, visually
+confirmed across all four datasets, but consistently lags/underweights
+sudden evidence swings — smoother, slower-responding dynamics, as expected
+for a PES-learned ("activity-silent"/synaptic-trace) mechanism versus a
+persistent-recurrent-activity one. `pes_learning_rate` (fixed,
+`_NEF_FIXED`) was swept and set to `4e-4` (was a leftover `1e-4` from the
+pre-May implementation — see `docs/DECISIONS.md` for the tuning). At that
+value, NEF_synaptic vs. NEF (recurrent) RMSE runs 0.03–0.09 depending on
+dataset, and NEF_synaptic vs. RL_lambda RMSE is comparable in magnitude to
+NEF (recurrent)'s own RL_lambda RMSE (~0.05) — i.e. NEF_synaptic is a
+credible fit to the same underlying computation, not a broken
+reimplementation, with the expected mechanistic difference in dynamics.
+
+**Not yet a real quantitative comparison:** NEF_synaptic has no Optuna fit
+of its own (no `MODEL_PARAMS` entry, and `fitting/fit.py`'s objective
+dispatch is still `model_type == "NEF"` exact-match — would need
+`.startswith("NEF")`, matching the convention `fitting/submit.py`/
+`utils/run_params.py` already use). Before any real synaptic-vs-recurrent
+behavioural claim, NEF_synaptic needs its own per-pid RMSE fit (own
+alpha_0/lambda_, not NEF (recurrent)'s borrowed values) — see "Future
+extensions" below.
+
 Refitting the `_resp_noise` models under the corrected setup (this
 session's carrabin fix, `lambda_` bound, and `init_from_obs1`) also
 surfaced a known artifact in two new places: colors' LeakyIntegrator/
@@ -156,10 +196,13 @@ about human behavior, and it doesn't just flatten the curve, it reverses
 its apparent direction (see `docs/DECISIONS.md` for the actual numbers).
 
 **Not yet started:** the "Future extensions" below (ablation/statistical
-validation of `neural_main`'s parameter-vs-outcome relationships; a
-synaptic-vs-working-memory implementation comparison). Model fitting
-against real `task_backend` (soltani) data — the human-only pilot figures
-exist, but NEF/math-model fits to that data haven't been run yet.
+validation of `neural_main`'s parameter-vs-outcome relationships). Model
+fitting against real `task_backend` (soltani) data — the human-only pilot
+figures exist, but NEF/math-model fits to that data haven't been run yet.
+The synaptic-vs-working-memory implementation comparison is now underway
+(see above) — NEF_synaptic reimplemented and baseline-checked; an
+independent Optuna fit is the remaining prerequisite before the actual
+comparison experiment.
 
 ---
 
@@ -383,7 +426,16 @@ testable with future spike-resolved recordings.
   controlling for the other parameters, and, where feasible, a mechanistic
   ablation (forcing a parameter to null and showing the correlation
   collapses) — direct causal validation of the current rows.
-- **Synaptic vs. working-memory implementation comparison** (not
-  started, separate downstream scope) — `neural_main`'s row 5. Different
-  predictions under an ITI manipulation depending on which implementation
-  of the learning rule is assumed. Deliberately out of scope for now.
+- **Synaptic vs. working-memory implementation comparison** (in
+  progress) — `neural_main`'s row 5. NEF_synaptic reimplemented and
+  baseline-checked against NEF (recurrent) this session (see "Current
+  thread" above): qualitatively consistent integration direction, same
+  order-of-magnitude RL_lambda agreement, but smoother/lagged dynamics, as
+  expected. Remaining before the actual ITI-manipulation experiment: (1)
+  NEF_synaptic needs its own Optuna RMSE fit (own alpha_0/lambda_, not NEF
+  (recurrent)'s borrowed values) — requires a `MODEL_PARAMS` entry and
+  fixing `fitting/fit.py`'s `model_type == "NEF"` exact-match dispatch
+  (should be `.startswith("NEF")`, matching `fitting/submit.py`'s own
+  convention); (2) `archive/scripts/iti_perturbation.py`'s gated ITI-noise
+  injection (already built, currently archived) would need reviving to
+  actually run the manipulation.

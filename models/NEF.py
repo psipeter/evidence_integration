@@ -12,8 +12,9 @@ Architecture (per trial):
     node_input[1] → error.neurons  (ITI inhibition)
     value → error[dim 1]      (transform=-1, subtracts v)
 
-Recurrent value dynamics: multiplicative error→value connection and recurrent
-self-connection on ``value``.
+``nef_type`` (from ``model_type``): ``recurrent`` uses multiplicative
+error→value and a recurrent self-connection on ``value``; ``synaptic`` uses a
+``background`` population and PES learning onto ``value``.
 
 Usage:
     from models.NEF import run
@@ -234,20 +235,51 @@ def build_network(
             seed=seed,
         )
 
-        nengo.Connection(
-            net.error,
-            net.value,
-            function=lambda x: x[0] * x[1],
-            transform=T_error,
-            synapse=tau_fb,
-            seed=seed,
-        )
-        nengo.Connection(
-            net.value,
-            net.value,
-            synapse=tau_fb,
-            seed=seed,
-        )
+        if params["nef_type"] == "recurrent":
+            nengo.Connection(
+                net.error,
+                net.value,
+                function=lambda x: x[0] * x[1],
+                transform=T_error,
+                synapse=tau_fb,
+                seed=seed,
+            )
+            nengo.Connection(
+                net.value,
+                net.value,
+                synapse=tau_fb,
+                seed=seed,
+            )
+
+        elif params["nef_type"] == "synaptic":
+            net.background = nengo.Ensemble(
+                n_neurons=int(params["n_neurons"]),
+                dimensions=1,
+                seed=seed,
+                label="background",
+            )
+            conn_value = nengo.Connection(
+                net.background,
+                net.value,
+                synapse=tau_fb,
+                learning_rule_type=nengo.PES(
+                    learning_rate=float(params["pes_learning_rate"])
+                ),
+                function=lambda x: 0.0,
+                seed=seed,
+            )
+            nengo.Connection(
+                net.error,
+                conn_value.learning_rule,
+                function=lambda x: x[0] * x[1],
+                transform=-T_error,
+                synapse=tau_fb,
+                seed=seed,
+            )
+        else:
+            raise ValueError(
+                f"nef_type must be 'recurrent' or 'synaptic', got {params['nef_type']!r}"
+            )
 
         net.probe_value = nengo.Probe(
             net.value,
@@ -339,7 +371,7 @@ def run(
 ) -> pd.DataFrame:
     """Run the NEF model for a single participant."""
     pfull = {**PARAM_DEFAULTS, **params}
-    pfull["nef_type"] = "recurrent"
+    pfull["nef_type"] = "synaptic" if "synaptic" in pfull["model_type"] else "recurrent"
 
     required = (
         "model_type",

@@ -11,6 +11,27 @@ activity-loading/fast_decode/build_network machinery a real fit uses, so a
 broken activity file, a seed mismatch, or a bad decoder shows up here
 before it shows up in an expensive cluster fit.
 
+Optional (--compare_synaptic): also runs NEF_synaptic on the same sampled
+trials with otherwise identical params (same alpha_0/lambda_/n_neurons/
+fixed dict -- only model_type, and therefore nef_type, differs) and reports/
+plots its response-level agreement with NEF (recurrent), the same way the
+RL_lambda comparison does. This is the baseline consistency check for the
+reimplemented synaptic variant -- see docs/SCIENCE.md's "Future extensions"
+entry for the synaptic-vs-working-memory comparison this feeds into.
+
+Optional (--compare_synaptic --pes_learning_rate_sweep V1 V2 ...): instead of
+a single comparison, runs NEF (recurrent) vs NEF_synaptic once per candidate
+pes_learning_rate on the same sampled trials/activity map, printing a compact
+overall-RMSE table (no plot -- diagnostic only, does not touch
+fitting/model_params.py's _NEF_FIXED). Nengo's own PES implementation
+normalizes its per-step decoder update by the presynaptic (``background``)
+population's n_neurons (see nengo.builder.learning_rules.SimPES), so the
+learned readout's effective speed should already be roughly invariant to
+n_neurons/n_neurons_counting -- this sweep is where that assumption gets
+checked empirically (re-run at a second --n_neurons with the winning rate)
+before deciding whether pes_learning_rate needs to be set dynamically from
+(n_neurons, n_neurons_counting) at load time.
+
 Always ad hoc -- there is no --run_folder path and no completed fit is ever
 read. The point of this tool is checking NEF's general behaviour across
 parameter combinations, not validating one specific prior fit.
@@ -643,7 +664,9 @@ def _panel_count(
 
 # ── Param loading (always ad hoc -- no completed fit is read) ──────────────
 
-MODEL_TYPE = "NEF"  # this script only ever tests NEF; RL_lambda is the comparison target, not an alternative subject
+MODEL_TYPE = "NEF"  # fixed-dict source only -- NEF_synaptic isn't its own MODEL_PARAMS
+# entry (shares NEF's architecture params, see models/NEF.py's run()); --model_type
+# below selects which nef_type build_network actually takes, independent of this
 
 
 def _load_params(
@@ -654,12 +677,15 @@ def _load_params(
     n_neurons: int,
     n_neurons_counting: int,
     datafile: str | None,
+    model_type: str = MODEL_TYPE,
 ) -> dict:
     """Build a full NEF params dict from explicit CLI values. No completed
     fit is ever read -- merge order is PARAM_DEFAULTS < dataset's fixed
     params < the CLI values (the same convention utils.run_params.
     load_run_params uses, with the CLI values playing the role a fitted
-    Optuna trial's params would play)."""
+    Optuna trial's params would play). The fixed dict always comes from
+    MODEL_PARAMS[dataset]["NEF"] regardless of model_type -- see MODEL_TYPE's
+    own comment above."""
     fixed = MODEL_PARAMS.get(dataset, {}).get(MODEL_TYPE, {}).get("fixed", {})
     merged = {**PARAM_DEFAULTS, **fixed}
     merged.update(
@@ -672,9 +698,9 @@ def _load_params(
     )
     merged["dataset"] = dataset
     merged["datafile"] = datafile
-    merged["model_type"] = MODEL_TYPE
+    merged["model_type"] = model_type
     merged["pid"] = int(pid)
-    merged["nef_type"] = "recurrent"
+    merged["nef_type"] = "synaptic" if "synaptic" in model_type else "recurrent"
     return merged
 
 
@@ -735,15 +761,55 @@ def score_vs_rl_lambda(params: dict, trials: list[int]) -> dict:
     }
 
 
-def print_report(params: dict, trials: list[int], result: dict) -> None:
+def score_recurrent_vs_synaptic(params: dict, trials: list[int]) -> dict:
+    """Run the REAL models.NEF.run() twice over the same sampled trials with
+    identical params -- only model_type (NEF vs NEF_synaptic), and therefore
+    the nef_type branch build_network takes, differs. Same alpha_0/lambda_,
+    same fixed dict (including pes_learning_rate, tau_fb, T_error,
+    n_neurons/n_neurons_counting), same per-trial activity-key/seed via
+    activity_key_for_trial inside run() -- so any response difference comes
+    from the value-dynamics branch itself (recurrent line attractor vs.
+    PES-learned background->value connection), not a confound elsewhere in
+    the pipeline. Mirrors score_vs_rl_lambda's shape so print_report/
+    plot_comparison can be reused for either comparison."""
+    rec_df = nef_run({**params, "model_type": "NEF"}, trials=trials)
+    syn_df = nef_run({**params, "model_type": "NEF_synaptic"}, trials=trials)
+
+    merged = rec_df.merge(
+        syn_df, on=["trial", "observation"], suffixes=("_recurrent", "_synaptic")
+    )
+    merged["residual"] = merged["response_recurrent"] - merged["response_synaptic"]
+
+    overall_rmse = float(np.sqrt(np.mean(merged["residual"] ** 2)))
+    per_trial_rmse = (
+        merged.groupby("trial")["residual"]
+        .apply(lambda r: float(np.sqrt(np.mean(r ** 2))))
+        .to_dict()
+    )
+    per_obs_rmse = (
+        merged.groupby("observation")["residual"]
+        .apply(lambda r: float(np.sqrt(np.mean(r ** 2))))
+        .to_dict()
+    )
+    return {
+        "merged": merged,
+        "overall_rmse": overall_rmse,
+        "per_trial_rmse": per_trial_rmse,
+        "per_obs_rmse": per_obs_rmse,
+    }
+
+
+def print_report(
+    params: dict, trials: list[int], result: dict, *, label: str = "NEF vs RL_lambda",
+) -> None:
     print(
-        f"\nNEF vs RL_lambda  |  dataset={params['dataset']} pid={params['pid']} "
+        f"\n{label}  |  dataset={params['dataset']} pid={params['pid']} "
         f"n_neurons={int(params['n_neurons'])} "
         f"n_neurons_counting={int(params['n_neurons_counting'])} "
         f"alpha_0={float(params['alpha_0']):.3f} lambda_={float(params['lambda_']):.3f}"
     )
     print(f"  trials sampled ({len(trials)}): {trials}")
-    print(f"  overall RMSE (NEF vs RL_lambda): {result['overall_rmse']:.4f}")
+    print(f"  overall RMSE ({label}): {result['overall_rmse']:.4f}")
     print("  per-trial RMSE:")
     for t, v in sorted(result["per_trial_rmse"].items()):
         print(f"    trial {t}: {v:.4f}")
@@ -755,7 +821,16 @@ def print_report(params: dict, trials: list[int], result: dict) -> None:
 # check_ensemble_invariant() (real Nengo check of the retired
 # NEF.simulate_ensemble against NEF.run()) was removed along with that
 # ensemble branch -- see docs/DECISIONS.md.
-def plot_comparison(params: dict, result: dict, out_stem: str) -> None:
+def plot_comparison(
+    params: dict,
+    result: dict,
+    out_stem: str,
+    *,
+    col_a: str = "response_nef",
+    col_b: str = "response_rl",
+    label_a: str = "NEF",
+    label_b: str = "RL_lambda",
+) -> None:
     apply_style()
     merged = result["merged"].sort_values(["trial", "observation"])
     trials = sorted(merged["trial"].unique())
@@ -768,13 +843,13 @@ def plot_comparison(params: dict, result: dict, out_stem: str) -> None:
     for i, trial in enumerate(trials):
         g = merged[merged["trial"] == trial]
         color = pal[i % len(pal)]
-        ax0.plot(g["observation"], g["response_nef"], color=color, linewidth=1.2)
+        ax0.plot(g["observation"], g[col_a], color=color, linewidth=1.2)
         ax0.plot(
-            g["observation"], g["response_rl"], color=color, linewidth=1.0,
+            g["observation"], g[col_b], color=color, linewidth=1.0,
             linestyle="--",
         )
-    ax0.plot([], [], color="0.3", linewidth=1.2, label="NEF")
-    ax0.plot([], [], color="0.3", linewidth=1.0, linestyle="--", label="RL_lambda")
+    ax0.plot([], [], color="0.3", linewidth=1.2, label=label_a)
+    ax0.plot([], [], color="0.3", linewidth=1.0, linestyle="--", label=label_b)
     ax0.set_xlabel("Observation")
     ax0.set_ylabel("Response")
     ax0.set_title(f"{len(trials)} sampled trials (colour = trial)")
@@ -783,11 +858,11 @@ def plot_comparison(params: dict, result: dict, out_stem: str) -> None:
 
     ax1.axline((0, 0), slope=1, color="0.7", linestyle="--", linewidth=1, zorder=0)
     sc = ax1.scatter(
-        merged["response_rl"], merged["response_nef"],
+        merged[col_b], merged[col_a],
         c=merged["observation"], cmap="viridis", s=10, alpha=0.7,
     )
-    ax1.set_xlabel("RL_lambda response")
-    ax1.set_ylabel("NEF response")
+    ax1.set_xlabel(f"{label_b} response")
+    ax1.set_ylabel(f"{label_a} response")
     ax1.set_title(f"RMSE = {result['overall_rmse']:.4f}")
     cbar = fig.colorbar(sc, ax=ax1)
     cbar.set_label("Observation")
@@ -922,6 +997,12 @@ def main() -> None:
     p.add_argument("--dataset", type=str, required=True, choices=DATASETS)
     p.add_argument("--pid", type=int, required=True)
     p.add_argument("--datafile", type=str, default=None)
+    p.add_argument("--model_type", type=str, default=MODEL_TYPE,
+                    help="model_type to actually simulate (e.g. NEF or NEF_synaptic) "
+                         "-- selects nef_type via the same 'synaptic' in model_type "
+                         "convention models/NEF.py's run() uses. Only affects which "
+                         "network build_network constructs; fixed params always come "
+                         "from MODEL_PARAMS[dataset]['NEF']")
 
     p.add_argument("--alpha_0", type=float, required=True)
     p.add_argument("--lambda_", type=float, required=True)
@@ -937,12 +1018,21 @@ def main() -> None:
     p.add_argument("--save_panels", action="store_true", default=False,
                     help="Also export individual per-panel PDFs for the "
                          "plotted trials (slide-deck use)")
+    p.add_argument("--compare_synaptic", action="store_true", default=False,
+                    help="Also run NEF_synaptic on the same sampled trials/params "
+                         "and compare its responses against NEF (recurrent) -- "
+                         "doubles NEF simulation cost when enabled")
+    p.add_argument("--pes_learning_rate_sweep", type=float, nargs="+", default=None,
+                    help="Requires --compare_synaptic. Run the NEF (recurrent) vs "
+                         "NEF_synaptic comparison once per pes_learning_rate value "
+                         "given here (overriding the fixed-dict default), printing a "
+                         "compact RMSE table instead of a single comparison/plot")
     args = p.parse_args()
 
     params = _load_params(
         args.dataset, args.pid,
         args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting,
-        args.datafile,
+        args.datafile, args.model_type,
     )
 
     n_neurons = int(params["n_neurons"])
@@ -967,11 +1057,46 @@ def main() -> None:
 
     # ── Score NEF vs RL_lambda across all sampled trials (real pipeline) ────
     result = score_vs_rl_lambda(params, sampled)
-    print_report(params, sampled, result)
+    print_report(params, sampled, result, label=f"{args.model_type} vs RL_lambda")
     out_stem = (
-        f"nef_vs_rl_lambda_{args.dataset}_{args.pid}_n{n_neurons}_nc{n_neurons_counting}"
+        f"{args.model_type.lower()}_vs_rl_lambda_{args.dataset}_{args.pid}"
+        f"_n{n_neurons}_nc{n_neurons_counting}"
     )
-    plot_comparison(params, result, out_stem)
+    plot_comparison(
+        params, result, out_stem,
+        label_a=args.model_type,
+    )
+
+    # ── Optional: NEF (recurrent) vs NEF_synaptic, identical params ─────────
+    if args.compare_synaptic:
+        sweep = args.pes_learning_rate_sweep
+        if sweep is None:
+            syn_result = score_recurrent_vs_synaptic(params, sampled)
+            print_report(
+                params, sampled, syn_result,
+                label="NEF (recurrent) vs NEF_synaptic",
+            )
+            syn_out_stem = (
+                f"nef_recurrent_vs_synaptic_{args.dataset}_{args.pid}"
+                f"_n{n_neurons}_nc{n_neurons_counting}"
+            )
+            plot_comparison(
+                params, syn_result, syn_out_stem,
+                col_a="response_recurrent", col_b="response_synaptic",
+                label_a="NEF (recurrent)", label_b="NEF_synaptic",
+            )
+        else:
+            print(
+                f"\nNEF (recurrent) vs NEF_synaptic  |  pes_learning_rate sweep  |  "
+                f"dataset={args.dataset} pid={args.pid} n_neurons={n_neurons} "
+                f"n_neurons_counting={n_neurons_counting} "
+                f"alpha_0={float(params['alpha_0']):.3f} lambda_={float(params['lambda_']):.3f}"
+            )
+            print(f"  trials sampled ({len(sampled)}): {sampled}")
+            for rate in sweep:
+                rate_params = {**params, "pes_learning_rate": float(rate)}
+                rate_result = score_recurrent_vs_synaptic(rate_params, sampled)
+                print(f"  pes_learning_rate={rate:.1e}: overall RMSE = {rate_result['overall_rmse']:.4f}")
 
     # ── Full dynamics figures for a small subset ────────────────────────────
     for trial in plotted:
