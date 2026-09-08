@@ -3190,3 +3190,122 @@ without ever removing the original.
 Nothing in `data/` or `data/runs/` changed -- this session only edited
 `scripts/make_paper_figures.py` (which reads pre-computed `.pkl` files by
 path) and moved code within `scripts/`/`archive/scripts/`.
+
+---
+
+## Standalone `plot_iti_perturbation.py`/`plot_recurrent_vs_synaptic_dynamics.py` retired: fully duplicated by `make_synaptic_main` (this session)
+
+### What moved
+
+Two standalone plotting scripts, `git mv`'d verbatim into
+`archive/scripts/` (same filenames, no `archive_` prefix -- complete,
+independently-runnable scripts, not extracted pieces of a larger file):
+
+- `scripts/plot_iti_perturbation.py` -> `archive/scripts/plot_iti_perturbation.py`
+  (tracked; moved via `git mv`, history follows).
+- `scripts/plot_recurrent_vs_synaptic_dynamics.py` -> `archive/scripts/plot_recurrent_vs_synaptic_dynamics.py`
+  (untracked -- a new file from earlier this session, never committed;
+  no git history to preserve, so moved with plain `mv` + `git add` at
+  the new path instead of `git mv`, which refuses an untracked source).
+
+### Why
+
+Earlier this session, `make_synaptic_main` (a new composite figure in
+`scripts/make_paper_figures.py`) was built to introduce `NEF_synaptic`
+alongside `NEF` ("recurrent"). Its panel helpers fully reimplement (not
+import) the same visual content these two standalone scripts produced:
+
+- `plot_iti_perturbation.py`'s `plot_dose_response`/`plot_dynamics`
+  (`--mode dose_response`/`dynamics`) -> `_plot_synaptic_dose_response_panel`/
+  `_plot_synaptic_iti_dynamics_panel`.
+- `plot_recurrent_vs_synaptic_dynamics.py`'s
+  `plot_recurrent_vs_synaptic_dynamics` -> `_plot_recurrent_vs_synaptic_panel`.
+
+The two standalone scripts existed to produce STANDALONE half-column-
+width (5.3x2.65in) versions of these same panels, for potential reuse
+outside the composite figure -- a capability the PI confirmed isn't
+currently needed, and is fine to rebuild later with a fresh command if
+it comes up again. The underlying DATA-GENERATING functions
+(`run_iti_perturbation`, `run_iti_perturbation_dynamics`,
+`run_recurrent_vs_synaptic_dynamics`) and the shared aggregation helper
+`_session_level_stats`, all in `scripts/neural_experiments.py`, are NOT
+retired -- `make_synaptic_main`'s own panel helpers are their only
+remaining consumer going forward.
+
+A repo-wide grep (excluding `archive/`, `venv/`, `node_modules/`, `.git/`)
+before moving anything confirmed nothing else imports from or depends on
+either script -- no skill, no doc, no other script. Only descriptive/
+pointer comments in `scripts/neural_experiments.py` and
+`scripts/make_paper_figures.py` referenced them by name (e.g. "same fix
+as `scripts/plot_iti_perturbation.py`'s own `_alpha_for_strengths`"),
+all now stale once the file is gone; each was rephrased as pure
+self-description (dropping the now-meaningless comparison) rather than
+left to rot, except `make_synaptic_main`'s own docstring, which explains
+the reimplement-not-import design decision -- that paragraph was kept
+but updated to describe the two scripts as retired, with a pointer to
+this entry.
+
+### Known cross-dependency, verified intact after the move
+
+`plot_recurrent_vs_synaptic_dynamics.py`'s own `from
+scripts.plot_iti_perturbation import (HALF_COLUMN_WIDTH, IMPL_COLUMN,
+IMPL_LABELS, _MODEL_TYPE_COLORS, _iti_shading, _with_impl_column)` still
+resolves post-move, via the same namespace-package trick as the earlier
+"Legacy per-dataset figure/extras scripts retired" entry's
+`figure_yoo_neural.py`/`figure_yoo_temporal.py` pair above: both files
+now live in `archive/scripts/`, and
+`plot_recurrent_vs_synaptic_dynamics.py`'s own `sys.path.insert(0,
+str(Path(__file__).resolve().parent.parent))` inserts `archive/` (not
+the repo root); `scripts.plot_iti_perturbation` then resolves to
+`archive/scripts/plot_iti_perturbation.py` since neither `archive/scripts/`
+nor the repo-root `scripts/` has an `__init__.py` (both are portions of
+one namespace package named `scripts`). Verified directly, not assumed:
+`import archive.scripts.plot_recurrent_vs_synaptic_dynamics` from the
+repo root succeeded and returned the expected `HALF_COLUMN_WIDTH`/
+`IMPL_LABELS` values.
+
+### How to restore
+
+`git mv` `archive/scripts/plot_iti_perturbation.py` back to
+`scripts/plot_iti_perturbation.py` (plain `mv` + `git add` for
+`plot_recurrent_vs_synaptic_dynamics.py`, which re-enters the repo with
+no prior history either way). No other code changes needed -- nothing
+outside these two files ever imported or called them; `make_synaptic_main`
+and its panel helpers would keep running unchanged since they never
+imported from either script to begin with.
+
+### Verification
+
+- `python -m py_compile` on `scripts/neural_experiments.py`,
+  `scripts/make_paper_figures.py`, and both archived files -- all clean.
+- `import scripts.make_paper_figures` succeeded.
+- `import archive.scripts.plot_recurrent_vs_synaptic_dynamics` succeeded
+  (see "Known cross-dependency" above).
+- `venv/bin/python scripts/make_paper_figures.py synaptic_main` ran
+  end-to-end and saved `figures/synaptic_main.pdf`/`.svg` with no errors,
+  confirming `make_synaptic_main` and its panel helpers
+  (`_plot_recurrent_vs_synaptic_panel`, `_plot_synaptic_iti_dynamics_panel`,
+  `_plot_synaptic_dose_response_panel`, and their shared helpers) still
+  work unchanged after the move.
+- Re-grepped the whole repo (excluding `archive/`, `venv/`, `node_modules/`,
+  `.git/`) for `plot_iti_perturbation`/`plot_recurrent_vs_synaptic_dynamics`
+  after all edits: the only remaining hits are inside the two archived
+  files themselves (self-reference/usage text, left as-is per this
+  project's own convention -- see "How to restore" above, which makes
+  them accurate again), an already-archived, unrelated earlier prototype
+  (`archive/scripts/iti_perturbation.py`, predating and distinct from
+  `run_iti_perturbation` in `scripts/neural_experiments.py`, whose own
+  comments happened to mention `plot_iti_perturbation.py` by name before
+  it existed as a real file), and this entry's own historical account in
+  `scripts/make_paper_figures.py`'s `make_synaptic_main` docstring
+  (intentional, pointing back here).
+
+### No data files moved
+
+Nothing in `data/` or `data/runs/` changed. The output PDFs these
+scripts produced (`figures/iti_perturbation_soltani_numbers.pdf`,
+`figures/iti_perturbation_dynamics_soltani_numbers.pdf`,
+`figures/recurrent_vs_synaptic_dynamics_soltani_numbers.pdf`) live under
+`figures/`, which is entirely gitignored -- nothing there was ever
+git-tracked, so nothing was archived or deleted for them; left on disk
+as-is.

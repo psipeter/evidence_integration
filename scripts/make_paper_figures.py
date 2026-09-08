@@ -39,6 +39,12 @@ from scipy.stats import gaussian_kde, pearsonr, wilcoxon, norm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from fitting.model_params import MODEL_PARAMS
+from scripts.neural_experiments import (
+    ITI_PERTURBATION_PREFIX_LENGTH,
+    OUT_DIR as NEURAL_EXPERIMENTS_OUT_DIR,
+    _session_level_stats,
+)
 from utils.paths import data_path, RUNS_DIR, FIGURES_DIR
 from utils.aggregate import plot_error_aggregate, plot_delta_aggregate
 from utils.plot_style import draw_sig_line, pvalue_to_stars, get_palette
@@ -4264,6 +4270,254 @@ def make_neural_main() -> Path:
     return out_path
 
 
+# ── Synaptic (NEF_synaptic) vs recurrent (NEF) comparison ──────────────────
+
+# NOT the global MODEL_COLORS -- NEF's slot here happens to already equal
+# MODEL_COLORS["NEF"] (both are the standard palette's pink, index 4), but
+# NEF_synaptic isn't in MODEL_COLORS at all (no RMSE fit yet -- see
+# make_synaptic_main's own r1c3 stub), so this figure gets its own small
+# color dict rather than partially relying on the global one. Per
+# instruction: pink for recurrent, then whatever color is NEXT in the
+# palette (index 5, brown) for synaptic -- not a hand-picked "different
+# part of color space" pair.
+_SYNAPTIC_PALETTE = get_palette(6)
+SYNAPTIC_COLORS = {"NEF": _SYNAPTIC_PALETTE[4], "NEF_synaptic": _SYNAPTIC_PALETTE[5]}
+SYNAPTIC_LABELS = {"NEF": "working memory", "NEF_synaptic": "synaptic"}
+SYNAPTIC_IMPL_COLUMN = "NEF implementation"
+
+# Beyond this strength, RMSE/sigma turn nonmonotonic (an artifact of
+# implausibly large injected noise, not a real dose-response regime) --
+# see chat for the visual confirmation this was based on.
+SYNAPTIC_DOSE_RESPONSE_MAX_STRENGTH = 0.5
+
+SYNAPTIC_OVERVIEW_SCHEMATIC = FIGURES_DIR / "schematics" / "synaptic_overview.svg"
+
+
+def _synaptic_with_impl_column(df: pd.DataFrame) -> pd.DataFrame:
+    return df.assign(**{SYNAPTIC_IMPL_COLUMN: df["model_type"].map(lambda m: SYNAPTIC_LABELS.get(m, m))})
+
+
+def _synaptic_iti_shading(ax, n_obs: int, t_iti: float, t_step: float, t_obs: float) -> None:
+    """Shade every ITI window, including the pre-obs-1 one (not
+    perturbed, but still architecturally an ITI)."""
+    ax.axvspan(0, t_iti, alpha=0.08, color="gray", linewidth=0, zorder=0)
+    for i in range(n_obs):
+        start = t_iti + i * t_step + t_obs
+        ax.axvspan(start, start + t_iti, alpha=0.08, color="gray", linewidth=0, zorder=0)
+
+
+def _synaptic_missing_panel(ax, missing_path: Path) -> None:
+    """Shared placeholder for a synaptic_main panel whose source pkl
+    doesn't exist yet -- never crash the whole figure over one missing
+    panel's data, matching _rasterize_svg's own missing-schematic
+    convention elsewhere in this file."""
+    ax.text(0.5, 0.5, f"Missing {missing_path.name}", ha="center", va="center",
+            transform=ax.transAxes, color="0.5", style="italic", fontsize=8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def _plot_recurrent_vs_synaptic_panel(ax, df: pd.DataFrame, task: str) -> None:
+    """r1c3 of make_synaptic_main: mean +/- 95% CI decoded `value` trace
+    for NEF vs NEF_synaptic on one fixed pool sequence, NO perturbation --
+    the baseline consistency check (scripts/neural_experiments.py's
+    run_recurrent_vs_synaptic_dynamics)."""
+    plot_df = _synaptic_with_impl_column(df)
+    impl_order = [SYNAPTIC_LABELS.get(mt, mt) for mt in sorted(df["model_type"].unique())]
+    palette = {SYNAPTIC_LABELS.get(mt, mt): c for mt, c in SYNAPTIC_COLORS.items()}
+
+    fixed = MODEL_PARAMS[task]["NEF"]["fixed"]
+    t_obs, t_iti = float(fixed["t_obs"]), float(fixed["t_iti"])
+    t_step = t_obs + t_iti
+    n_obs = ITI_PERTURBATION_PREFIX_LENGTH[task]
+
+    _synaptic_iti_shading(ax, n_obs, t_iti, t_step, t_obs)
+    sns.lineplot(
+        data=plot_df, x="t", y="value",
+        hue=SYNAPTIC_IMPL_COLUMN, hue_order=impl_order, palette=palette,
+        estimator="mean", errorbar=("ci", 95),
+        linewidth=1.6, ax=ax,
+    )
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Decoded value")
+    ax.margins(x=0)
+    sns.despine(ax=ax)
+    ax.legend(fontsize=7, frameon=True, framealpha=0.85)
+
+
+def _synaptic_alpha_for_strengths(strengths: list, lo: float = 0.35, hi: float = 1.0) -> dict:
+    """Map each strength to an opacity level, highest strength -> most
+    opaque (hi) since the perturbed condition is the main story here,
+    lowest -> most faded (lo), linear in between. NOT linestyle: dashes
+    visually alias into a solid line at this trace's own high-frequency
+    oscillation (dash spacing << the value trace's own wiggle period), so
+    alpha is the channel that actually reads here."""
+    if len(strengths) == 1:
+        return {strengths[0]: hi}
+    return {s: lo + (hi - lo) * i / (len(strengths) - 1) for i, s in enumerate(strengths)}
+
+
+def _plot_synaptic_iti_dynamics_panel(ax, df: pd.DataFrame, task: str) -> None:
+    """r2c2 of make_synaptic_main: single-trial full decoded-`value`
+    traces, color = model_type, alpha = strength (see
+    _synaptic_alpha_for_strengths)."""
+    plot_df = _synaptic_with_impl_column(df)
+    impl_order = [SYNAPTIC_LABELS.get(mt, mt) for mt in sorted(df["model_type"].unique())]
+    strengths = sorted(df["strength"].unique())
+    alpha_for_strength = _synaptic_alpha_for_strengths(strengths)
+    palette = {SYNAPTIC_LABELS.get(mt, mt): c for mt, c in SYNAPTIC_COLORS.items()}
+
+    fixed = MODEL_PARAMS[task]["NEF"]["fixed"]
+    t_obs, t_iti = float(fixed["t_obs"]), float(fixed["t_iti"])
+    t_step = t_obs + t_iti
+    n_obs = ITI_PERTURBATION_PREFIX_LENGTH[task]
+
+    _synaptic_iti_shading(ax, n_obs, t_iti, t_step, t_obs)
+    for strength in strengths:
+        g = plot_df[plot_df["strength"] == strength]
+        sns.lineplot(
+            data=g, x="t", y="value",
+            hue=SYNAPTIC_IMPL_COLUMN, hue_order=impl_order, palette=palette,
+            estimator=None, linewidth=1.2, alpha=alpha_for_strength[strength],
+            ax=ax, legend=False,
+        )
+    handles = [Line2D([0], [0], color=c, lw=1.6, label=SYNAPTIC_LABELS.get(mt, mt))
+               for mt, c in SYNAPTIC_COLORS.items()]
+    handles += [Line2D([0], [0], color="0.3", lw=1.6, alpha=a, label=f"strength={s:g}")
+                for s, a in alpha_for_strength.items()]
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Decoded value")
+    ax.margins(x=0)
+    sns.despine(ax=ax)
+    ax.legend(handles=handles, fontsize=7, frameon=True, framealpha=0.85)
+
+
+def _plot_synaptic_dose_response_panel(ax_rmse, ax_sigma, raw_df: pd.DataFrame) -> None:
+    """r2c3 of make_synaptic_main: RMSE (solid) and sigma (dashed) vs
+    perturbation strength, sharing one panel via a dual y-axis (RMSE left,
+    sigma right). Reads _session_level_stats directly from
+    scripts/neural_experiments.py."""
+    stats_df = _synaptic_with_impl_column(_session_level_stats(raw_df))
+    stats_df = stats_df[stats_df["strength"] <= SYNAPTIC_DOSE_RESPONSE_MAX_STRENGTH]
+    model_types = sorted(raw_df["model_type"].unique())
+
+    handles = []
+    for model_type in model_types:
+        color = SYNAPTIC_COLORS.get(model_type, "gray")
+        g = stats_df[stats_df["model_type"] == model_type]
+        sns.lineplot(
+            data=g, x="strength", y="rmse", color=color, linestyle="-",
+            estimator="mean", errorbar="se",
+            linewidth=1.6, ax=ax_rmse, legend=False,
+        )
+        sns.lineplot(
+            data=g, x="strength", y="sigma", color=color, linestyle="--",
+            estimator="mean", errorbar="se",
+            linewidth=1.6, ax=ax_sigma, legend=False,
+        )
+        handles.append(Line2D([0], [0], color=color, lw=1.6,
+                               label=SYNAPTIC_LABELS.get(model_type, model_type)))
+    handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="-", label="RMSE"))
+    handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="--", label="Sigma"))
+
+    ax_rmse.set_xlabel("Perturbation strength")
+    ax_rmse.set_ylabel("Model RMSE")
+    ax_sigma.set_ylabel(r"Model $\sigma_R$")
+    ax_rmse.set_xticks([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    sns.despine(ax=ax_rmse, right=True)
+    sns.despine(ax=ax_sigma, top=True, right=False, left=True, bottom=True)
+    ax_sigma.tick_params(axis="y", which="both", right=True, left=False)
+    ax_rmse.legend(handles=handles, frameon=True, framealpha=0.85, fontsize=7)
+
+
+def make_synaptic_main() -> Path:
+    """2x3 figure introducing NEF_synaptic (the PES-learned "synaptic"
+    value mechanism) alongside NEF ("recurrent") -- soltani_numbers only,
+    the one task with an end-to-end NEF_synaptic pipeline so far.
+
+      r1c1-c2 (merged): hand-made schematic (SYNAPTIC_OVERVIEW_SCHEMATIC)
+        contrasting the recurrent-attractor vs PES-learned-synapse value
+        mechanisms -- spans both top-row columns, since it's wider than a
+        single column's worth of detail.
+      r1c3: recurrent vs synaptic mean +/- 95% CI decoded-value trace on a
+        fixed pool sequence, NO perturbation -- the baseline consistency
+        check.
+      r2c1: STUB -- per-pid RMSE boxplot (NEF vs NEF_synaptic) once
+        NEF_synaptic has its own fitted alpha_0/lambda_ (currently borrows
+        NEF's, see docs/SCIENCE.md's NEF_synaptic entry); swap in
+        _gather_metric_data + _draw_metric_boxplot once that fit exists --
+        both already generic over the model list, no new plotting code
+        needed then.
+      r2c2: ITI-perturbation single-trial dynamics (color = model_type,
+        alpha = strength).
+      r2c3: ITI-perturbation dose-response, dual y-axis (RMSE left, sigma
+        right), x restricted to [0, SYNAPTIC_DOSE_RESPONSE_MAX_STRENGTH].
+
+    No panel titles -- caption/position carries panel identity instead
+    (per instruction), matching e.g. make_lambda_main's own row 2.
+
+    This figure's code lives entirely in neural_experiments.py (data)
+    and make_paper_figures.py (plotting), per this project's convention
+    for composite "_main" figures -- same as
+    make_neural_main/make_sigma_overview/make_lambda_main, no import
+    from a standalone plotting script. Two standalone scripts,
+    scripts/plot_iti_perturbation.py and
+    scripts/plot_recurrent_vs_synaptic_dynamics.py, once independently
+    reproduced this same visual content as standalone half-column-width
+    figures; both are now retired (superseded by this figure) -- see
+    archive/HISTORY_modeling_2026.md for the full account.
+    """
+    _apply_slide_style()
+    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
+                     constrained_layout=True)
+    gs = fig.add_gridspec(2, 3)
+    ax_schematic = fig.add_subplot(gs[0, 0:2])
+    ax_rvs = fig.add_subplot(gs[0, 2])
+    ax_stub = fig.add_subplot(gs[1, 0])
+    ax_dyn = fig.add_subplot(gs[1, 1])
+    ax_dose = fig.add_subplot(gs[1, 2])
+    task = "soltani_numbers"
+
+    # r1c1-c2 -- schematic (merged).
+    ax_schematic.axis("off")
+    schematic = _rasterize_svg(SYNAPTIC_OVERVIEW_SCHEMATIC)
+    if schematic is not None:
+        ax_schematic.imshow(schematic, aspect="auto")
+
+    # r1c3 -- recurrent vs synaptic dynamics (no perturbation).
+    rvs_path = NEURAL_EXPERIMENTS_OUT_DIR / f"recurrent_vs_synaptic_dynamics_{task}.pkl"
+    if rvs_path.exists():
+        _plot_recurrent_vs_synaptic_panel(ax_rvs, pd.read_pickle(rvs_path), task)
+    else:
+        _synaptic_missing_panel(ax_rvs, rvs_path)
+
+    # r2c1 -- STUB: per-pid RMSE boxplot, pending NEF_synaptic's own fit.
+    ax_stub.text(
+        0.5, 0.5, "Model fit comparison\n(pending NEF_synaptic RMSE fit)",
+        ha="center", va="center", transform=ax_stub.transAxes,
+        color="0.5", style="italic", fontsize=8,
+    )
+    ax_stub.set_xticks([])
+    ax_stub.set_yticks([])
+
+    # r2c2 -- ITI-perturbation single-trial dynamics.
+    dyn_path = NEURAL_EXPERIMENTS_OUT_DIR / f"iti_perturbation_dynamics_{task}.pkl"
+    if dyn_path.exists():
+        _plot_synaptic_iti_dynamics_panel(ax_dyn, pd.read_pickle(dyn_path), task)
+    else:
+        _synaptic_missing_panel(ax_dyn, dyn_path)
+
+    # r2c3 -- ITI-perturbation dose-response, dual y-axis.
+    raw_path = NEURAL_EXPERIMENTS_OUT_DIR / f"iti_perturbation_{task}_raw.pkl"
+    if raw_path.exists():
+        ax_sigma = ax_dose.twinx()
+        _plot_synaptic_dose_response_panel(ax_dose, ax_sigma, pd.read_pickle(raw_path))
+    else:
+        _synaptic_missing_panel(ax_dose, raw_path)
+
+    out_path, _ = _save_fig(fig, "synaptic_main")
+    plt.close(fig)
+    return out_path
 
 
 FIGURES = {
@@ -4285,6 +4539,7 @@ FIGURES = {
     "sigma_reliability": make_sigma_reliability,
     "neural_main": make_neural_main,
     "sigma_model_correlation": make_sigma_model_correlation,
+    "synaptic_main": make_synaptic_main,
 }
 
 

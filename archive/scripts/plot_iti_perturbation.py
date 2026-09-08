@@ -34,7 +34,6 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.lines import Line2D
@@ -42,7 +41,11 @@ from matplotlib.lines import Line2D
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.model_params import MODEL_PARAMS
-from scripts.neural_experiments import ITI_PERTURBATION_PREFIX_LENGTH, OUT_DIR
+from scripts.neural_experiments import (
+    ITI_PERTURBATION_PREFIX_LENGTH,
+    OUT_DIR,
+    _session_level_stats,
+)
 from utils.paths import FIGURES_DIR
 from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
@@ -57,73 +60,26 @@ IMPL_LABELS = {"NEF": "working memory", "NEF_synaptic": "synaptic"}
 PAPER_WIDTH = 10.6
 HALF_COLUMN_WIDTH = PAPER_WIDTH / 2
 
-# 2 colors per implementation (strength[0] -> first, strength[1] -> second),
-# drawn from the standard colorblind palette's first 4 entries (get_palette)
-# so the two strengths within a model_type read as a family while the two
-# model_types stay visually distinct: NEF ("recurrent") takes the cool
-# blue/green pair (indices 0, 2); NEF_synaptic takes the warm yellow/orange
-# pair (indices 1, 3) -- a different part of color space from NEF's
-# blue/green. ONLY valid for exactly 2 strengths, matching --mode dynamics'
-# own 2-implementation x 2-strength = 4-line design. Shared with --mode
-# dose_response (via _DOSE_RESPONSE_COLORS below) so both modes' figures
-# use the same per-model_type color.
-_PALETTE = get_palette(4)
-_DYNAMICS_COLOR_PAIRS = {
-    "NEF": (_PALETTE[0], _PALETTE[2]),
-    "NEF_synaptic": (_PALETTE[1], _PALETTE[3]),
-}
+# One color per model_type, shared by both --mode dose_response and
+# --mode dynamics: NEF ("recurrent") takes the standard colorblind
+# palette's pink (index 4 -- matching make_paper_figures.py's own
+# MODEL_COLORS["NEF"]); NEF_synaptic takes the next color in that same
+# palette (index 5, brown) -- not a hand-picked "different part of color
+# space" pair, just "pink, then whichever color is next", per instruction.
+# --mode dynamics' own strength dimension is now carried by LINESTYLE
+# (sns.lineplot's `style`) instead of a second color per model_type.
+_PALETTE = get_palette(6)
+_MODEL_TYPE_COLORS = {"NEF": _PALETTE[4], "NEF_synaptic": _PALETTE[5]}
 
 
 def _with_impl_column(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(**{IMPL_COLUMN: df["model_type"].map(lambda m: IMPL_LABELS.get(m, m))})
 
 
-def _session_level_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
-    """Two-stage, qid-aware per-session sigma + flat per-session RMSE --
-    mirrors scripts/make_paper_figures.py's own _qid_response_std (sigma:
-    std of response across a qid's repeats, averaged across that session's
-    8 qids) and utils/aggregate.py's hier_mean_sem convention (RMSE:
-    per-session RMSE first, mean +/- SEM across sessions at plot time,
-    not a pooled/bootstrapped statistic) -- see chat for the full
-    precedent this was modeled on.
-
-    Sigma needs the qid-stratified stage (repeats of the SAME stimulus
-    only exist WITHIN a qid); RMSE doesn't (every row already carries its
-    own correct true_mean, so no cross-qid conflation risk from pooling
-    within a session).
-
-    Returns one row per (model_type, strength, session) with `sigma` and
-    `rmse` columns, ready for sns.lineplot's default mean/errorbar='se'
-    aggregation treating session as the replication unit.
-    """
-    per_qid_std = (
-        raw_df.groupby(["model_type", "strength", "session", "qid"])["response"].std()
-    )
-    sigma = (
-        per_qid_std.groupby(["model_type", "strength", "session"]).mean().rename("sigma")
-    )
-
-    rmse = (
-        raw_df.assign(sq_err=(raw_df["response"] - raw_df["true_mean"]) ** 2)
-        .groupby(["model_type", "strength", "session"])["sq_err"]
-        .mean()
-        .apply(np.sqrt)
-        .rename("rmse")
-    )
-
-    return pd.concat([sigma, rmse], axis=1).reset_index()
-
-
 # Beyond this strength, RMSE/sigma turn nonmonotonic (an artifact of
 # implausibly large injected noise, not a real dose-response regime) --
 # see chat for the visual confirmation this was based on.
 DOSE_RESPONSE_MAX_STRENGTH = 0.5
-
-# One color per model_type (metric is distinguished by linestyle instead --
-# solid RMSE, dashed sigma -- since both metrics share one dual-y-axis
-# panel here). Reuses _DYNAMICS_COLOR_PAIRS' own family split's first color
-# per model_type, so this panel's palette matches --mode dynamics' one.
-_DOSE_RESPONSE_COLORS = {mt: pair[0] for mt, pair in _DYNAMICS_COLOR_PAIRS.items()}
 
 
 def plot_dose_response(raw_df: pd.DataFrame, task: str) -> None:
@@ -147,7 +103,7 @@ def plot_dose_response(raw_df: pd.DataFrame, task: str) -> None:
 
     handles = []
     for model_type in model_types:
-        color = _DOSE_RESPONSE_COLORS.get(model_type, "gray")
+        color = _MODEL_TYPE_COLORS.get(model_type, "gray")
         g = stats_df[stats_df["model_type"] == model_type]
         sns.lineplot(
             data=g, x="strength", y="rmse", color=color, linestyle="-",
@@ -164,8 +120,9 @@ def plot_dose_response(raw_df: pd.DataFrame, task: str) -> None:
     handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="--", label="Sigma"))
 
     ax_rmse.set_xlabel("Perturbation strength")
-    ax_rmse.set_ylabel("Model RMSE (vs running mean)")
-    ax_sigma.set_ylabel(r"Model $\sigma$")
+    ax_rmse.set_ylabel("Model RMSE")
+    ax_sigma.set_ylabel(r"Model $\sigma_R$")
+    ax_rmse.set_xticks([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
     sns.despine(ax=ax_rmse, right=True)
     sns.despine(ax=ax_sigma, top=True, right=False, left=True, bottom=True)
     ax_sigma.tick_params(axis="y", which="both", right=True, left=False)
@@ -188,15 +145,27 @@ def _iti_shading(ax, n_obs: int, t_iti: float, t_step: float, t_obs: float) -> N
         ax.axvspan(start, start + t_iti, alpha=0.08, color="gray", linewidth=0, zorder=0)
 
 
+def _alpha_for_strengths(strengths: list, lo: float = 0.35, hi: float = 1.0) -> dict:
+    """Map each strength to an opacity level, highest strength -> most
+    opaque (hi) since the perturbed condition is the main story here,
+    lowest -> most faded (lo), linear in between. NOT linestyle: dashes
+    visually alias into a solid line at this trace's own high-frequency
+    oscillation (dash spacing << the value trace's own wiggle period), so
+    alpha is the channel that actually reads here."""
+    if len(strengths) == 1:
+        return {strengths[0]: hi}
+    return {s: lo + (hi - lo) * i / (len(strengths) - 1) for i, s in enumerate(strengths)}
+
+
 def plot_dynamics(df: pd.DataFrame, task: str) -> None:
+    """Single-trial full decoded-`value` traces: color = model_type (via
+    _MODEL_TYPE_COLORS), alpha = strength (see _alpha_for_strengths)."""
     apply_style()
-    model_types = sorted(df["model_type"].unique())
+    plot_df = _with_impl_column(df)
+    impl_order = [IMPL_LABELS.get(mt, mt) for mt in sorted(df["model_type"].unique())]
     strengths = sorted(df["strength"].unique())
-    if len(strengths) != 2:
-        raise ValueError(
-            f"plot_dynamics' 4-line color scheme assumes exactly 2 strengths, got {strengths} "
-            f"-- re-run iti_perturbation_dynamics with exactly 2 --strengths."
-        )
+    alpha_for_strength = _alpha_for_strengths(strengths)
+    palette = {IMPL_LABELS.get(mt, mt): c for mt, c in _MODEL_TYPE_COLORS.items()}
 
     fixed = MODEL_PARAMS[task]["NEF"]["fixed"]
     t_obs, t_iti = float(fixed["t_obs"]), float(fixed["t_iti"])
@@ -210,19 +179,23 @@ def plot_dynamics(df: pd.DataFrame, task: str) -> None:
         constrained_layout=True,
     )
     _iti_shading(ax, n_obs, t_iti, t_step, t_obs)
-    for model_type in model_types:
-        colors = _DYNAMICS_COLOR_PAIRS.get(model_type, ("tab:gray", "tab:pink"))
-        label_base = IMPL_LABELS.get(model_type, model_type)
-        g_model = df[df["model_type"] == model_type]
-        for strength, color in zip(strengths, colors):
-            g = g_model[g_model["strength"] == strength].sort_values("t")
-            ax.plot(g["t"], g["value"], color=color, linewidth=1.2,
-                    label=f"{label_base}, strength={strength:g}")
+    for strength in strengths:
+        g = plot_df[plot_df["strength"] == strength]
+        sns.lineplot(
+            data=g, x="t", y="value",
+            hue=IMPL_COLUMN, hue_order=impl_order, palette=palette,
+            estimator=None, linewidth=1.2, alpha=alpha_for_strength[strength],
+            ax=ax, legend=False,
+        )
+    handles = [Line2D([0], [0], color=c, lw=1.6, label=IMPL_LABELS.get(mt, mt))
+               for mt, c in _MODEL_TYPE_COLORS.items()]
+    handles += [Line2D([0], [0], color="0.3", lw=1.6, alpha=a, label=f"strength={s:g}")
+                for s, a in alpha_for_strength.items()]
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Decoded value")
     ax.margins(x=0)
     sns.despine(ax=ax)
-    ax.legend(title=IMPL_COLUMN, title_fontsize=7, fontsize=7, frameon=True, framealpha=0.85)
+    ax.legend(handles=handles, fontsize=7, frameon=True, framealpha=0.85)
     fig.suptitle("ITI Perturbation Dynamics", fontsize=10)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

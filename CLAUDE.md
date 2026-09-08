@@ -381,7 +381,11 @@ platform evaluations, methodology choices made before any code existed.
 - Do not use `trial_seed`/`base_seed` for NEF — `seed = int(trial)` directly.
 - Do not read `cv_loss_mean` directly — use `_get_loss`.
 - Do not create scripts outside `scripts/`.
-- Do not add `NEF_synaptic`, an LMU counting variant, or an `ADM` model name.
+- Do not add an LMU counting variant or an `ADM` model name. `NEF_synaptic`
+  is no longer prohibited — it was reimplemented as a real experimental
+  branch (see `docs/SCIENCE.md`'s NEF_synaptic entry); it just has no
+  `MODEL_PARAMS` entry or per-pid RMSE fit of its own yet (see
+  `docs/DECISIONS.md`).
 - Do not double-apply the carrabin transform.
 - Do not pass a full path as `run_folder` — always a short name.
 - Do not commit or push without being asked.

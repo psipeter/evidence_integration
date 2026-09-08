@@ -90,9 +90,9 @@ predate this docstring's last update; see --help for the full set):
                  raw per-trial responses in one long-form dataframe; the
                  sigma/rmse aggregation (a two-stage, qid-aware hierarchy
                  mirroring how human data is aggregated elsewhere in this
-                 project) and plotting both live separately in
-                 scripts/plot_iti_perturbation.py. See
-                 run_iti_perturbation's own docstring for the full design
+                 project, see `_session_level_stats` below) and plotting
+                 both live in make_paper_figures.py's make_synaptic_main.
+                 See run_iti_perturbation's own docstring for the full design
                  and why error/background/counting.memory were tried and
                  dropped as perturbation targets.
 
@@ -102,6 +102,14 @@ predate this docstring's last update; see --help for the full set):
                  model_types, so the perturbation's effect can be inspected
                  visually trial-by-trial rather than only through its
                  aggregate statistic. Cheap (a handful of short sims).
+
+  recurrent_vs_synaptic_dynamics — NO perturbation (strength fixed at 0.0):
+                 full per-timestep decoded `value` traces for NEF vs
+                 NEF_synaptic on ONE fixed 4-observation pool sequence,
+                 across --n_seeds independent repeat-seeds per model_type
+                 -- the properly-powered baseline-consistency check (mean
+                 +/- CI across seeds at plot time, not eyeballing single
+                 traces). Cheap (n_seeds x 2 short sims).
 
 Run examples:
     python scripts/neural_experiments.py raster_demo --task soltani_numbers \\
@@ -132,6 +140,9 @@ Run examples:
     python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
         --mode collect
 
+    python scripts/neural_experiments.py recurrent_vs_synaptic_dynamics \\
+        --task soltani_numbers --alpha_0 0.7 --lambda_ 0.7 --n_seeds 10
+
 Output: data/runs/neural_experiments/
     raster_demo_{task}.pkl
     sweep_{task}_{sweep_param}.pkl
@@ -142,6 +153,7 @@ Output: data/runs/neural_experiments/
     iti_perturbation_pool_{task}_session{session}_strength{tag}.pkl  (per-cell, --mode run)
     iti_perturbation_{task}_raw.pkl                                 (combined, --mode collect)
     iti_perturbation_dynamics_{task}.pkl (long-form, one row per model_type/strength/timestep)
+    recurrent_vs_synaptic_dynamics_{task}.pkl (long-form, one row per model_type/seed/timestep)
 """
 from __future__ import annotations
 
@@ -1936,16 +1948,56 @@ def run_iti_perturbation(args) -> None:
               f"strengths, {len(df):,} rows -> {out_path}")
 
 
+def _session_level_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Two-stage, qid-aware per-session sigma + flat per-session RMSE, over
+    `run_iti_perturbation`'s own collected raw output -- mirrors
+    scripts/make_paper_figures.py's own _qid_response_std (sigma: std of
+    response across a qid's repeats, averaged across that session's 8
+    qids) and utils/aggregate.py's hier_mean_sem convention (RMSE:
+    per-session RMSE first, mean +/- SEM across sessions at plot time, not
+    a pooled/bootstrapped statistic). Read directly by make_paper_figures.py's
+    make_synaptic_main, so plotting and this aggregation never drift apart.
+
+    Sigma needs the qid-stratified stage (repeats of the SAME stimulus
+    only exist WITHIN a qid); RMSE doesn't (every row already carries its
+    own correct true_mean, so no cross-qid conflation risk from pooling
+    within a session).
+
+    Returns one row per (model_type, strength, session) with `sigma` and
+    `rmse` columns, ready for sns.lineplot's default mean/errorbar='se'
+    aggregation treating session as the replication unit.
+    """
+    per_qid_std = (
+        raw_df.groupby(["model_type", "strength", "session", "qid"])["response"].std()
+    )
+    sigma = (
+        per_qid_std.groupby(["model_type", "strength", "session"]).mean().rename("sigma")
+    )
+
+    rmse = (
+        raw_df.assign(sq_err=(raw_df["response"] - raw_df["true_mean"]) ** 2)
+        .groupby(["model_type", "strength", "session"])["sq_err"]
+        .mean()
+        .apply(np.sqrt)
+        .rename("rmse")
+    )
+
+    return pd.concat([sigma, rmse], axis=1).reset_index()
+
+
 def _iti_perturbation_dynamics_worker(
     task: str, model_type: str, strength: float, session: int, qid: int,
     alpha_0: float, lambda_: float, n_neurons: int, n_neurons_counting: int,
-    activity_map: dict,
+    activity_map: dict, repeat: int = 0,
 ) -> dict:
     """Full per-timestep decoded `value` trace for ONE (model_type,
-    strength) on ONE specific (session, qid)'s trial -- for visually
-    inspecting what the perturbation does to value's own trajectory. Picks
-    the FIRST trial in that session sharing `qid` (all of that qid's trials
-    share an identical prefix anyway, so any one gives the same stimulus)."""
+    strength) on ONE specific (session, qid)'s trial, at repeat-seed
+    `repeat` (via _toy_activity_key -- default 0, a single fixed repeat,
+    for run_iti_perturbation_dynamics' own same-seed-across-conditions
+    comparison; run_recurrent_vs_synaptic_dynamics instead varies `repeat`
+    across --n_seeds calls). Picks the FIRST trial in that session sharing
+    `qid` (all of that qid's trials share an identical prefix anyway, so
+    any one gives the same stimulus)."""
     import nengo
     from models.NEF import build_network
     from scripts.build_model_inputs import _rescale_0_100_to_neg1_1
@@ -1970,7 +2022,7 @@ def _iti_perturbation_dynamics_worker(
         task, alpha_0, n_neurons, lambda_,
         n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
     )
-    akey = _toy_activity_key(0)  # one fixed repeat -- the dynamics plot only needs one
+    akey = _toy_activity_key(repeat)
     decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
     p = {**base_params, "seed": akey}
     net = build_network(obs_values, p, decoders)
@@ -1992,8 +2044,8 @@ def run_iti_perturbation_dynamics(args) -> None:
     aggregated accuracy/reliability analysis, for manually inspecting what
     the perturbation is actually doing rather than only its aggregate
     statistical effect. Saved as ONE long-form dataframe (model_type,
-    strength, t, value); plotted separately via
-    scripts/plot_iti_perturbation.py --mode dynamics.
+    strength, t, value); plotted separately via make_paper_figures.py's
+    make_synaptic_main (r2c2).
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     from models.counting_integrator import load_activities
@@ -2017,6 +2069,59 @@ def run_iti_perturbation_dynamics(args) -> None:
 
     df = pd.DataFrame(rows)
     out_path = OUT_DIR / f"iti_perturbation_dynamics_{args.task}.pkl"
+    df.to_pickle(out_path)
+    print(f"Saved {len(df):,} rows -> {out_path}")
+
+
+# ── recurrent_vs_synaptic_dynamics (baseline consistency, no perturbation) ─────
+
+def run_recurrent_vs_synaptic_dynamics(args) -> None:
+    """Baseline (NO perturbation -- strength fixed at 0.0) comparison of
+    NEF (recurrent) vs NEF_synaptic's full decoded-`value` dynamics on ONE
+    fixed 4-observation sequence from the synthetic pool, across
+    --n_seeds independent repeat-seeds per model_type -- the mature,
+    properly-powered version of this session's original baseline-
+    consistency check (see docs/SCIENCE.md's "Current thread"), now using
+    the same pool-based sequence selection this module's iti_perturbation
+    experiments already established, plus seaborn's own mean+CI machinery
+    at plot time (make_paper_figures.py's make_synaptic_main, r1c3) instead
+    of eyeballing single traces.
+
+    Default --session/--qid (102, 2) were picked by ONE random draw, not
+    hand-picked for any property -- see that trial's own values in this
+    module's own history if ever needed again (session 102's qid=2:
+    prefix [42, 26, 40, 52] raw, true_mean 39.84 over the full 15-obs
+    trial the pool happens to store, though only the 4-obs prefix is ever
+    simulated here).
+
+    Reuses _iti_perturbation_dynamics_worker at strength=0.0 (a no-op --
+    see _add_iti_neuron_noise's own early return), varying `repeat`
+    instead of holding it fixed at 0 like run_iti_perturbation_dynamics
+    does. Saved as ONE long-form dataframe (model_type, seed, t, value).
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    from models.counting_integrator import load_activities
+
+    activity_map = load_activities(
+        n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
+    )
+    rows = []
+    for model_type in args.model_types:
+        for seed in range(args.n_seeds):
+            result = _iti_perturbation_dynamics_worker(
+                args.task, model_type, 0.0, args.session, args.qid,
+                args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting,
+                activity_map, repeat=seed,
+            )
+            for t, v in zip(result["t"], result["value"]):
+                rows.append({
+                    "model_type": model_type, "seed": seed,
+                    "t": float(t), "value": float(v),
+                })
+        print(f"{model_type}: {args.n_seeds} seeds simulated", flush=True)
+
+    df = pd.DataFrame(rows)
+    out_path = OUT_DIR / f"recurrent_vs_synaptic_dynamics_{args.task}.pkl"
     df.to_pickle(out_path)
     print(f"Saved {len(df):,} rows -> {out_path}")
 
@@ -2201,6 +2306,21 @@ def main() -> None:
     p_itid.add_argument("--strengths", type=float, nargs="+", default=[0.0, 1.0])
     p_itid.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
     p_itid.set_defaults(func=run_iti_perturbation_dynamics)
+
+    p_rvs = sub.add_parser("recurrent_vs_synaptic_dynamics")
+    p_rvs.add_argument("--task", required=True, choices=list(ITI_PERTURBATION_PREFIX_LENGTH))
+    p_rvs.add_argument("--session", type=int, default=102,
+                       help="Pool session (default picked by one random draw, see "
+                            "run_recurrent_vs_synaptic_dynamics' own docstring)")
+    p_rvs.add_argument("--qid", type=int, default=2, help="Which of that session's 8 qids to use")
+    p_rvs.add_argument("--n_seeds", type=int, default=10,
+                       help="Independent repeat-seeds per model_type")
+    p_rvs.add_argument("--alpha_0", type=float, required=True)
+    p_rvs.add_argument("--lambda_", type=float, required=True)
+    p_rvs.add_argument("--n_neurons", type=int, default=500)
+    p_rvs.add_argument("--n_neurons_counting", type=int, default=2000)
+    p_rvs.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
+    p_rvs.set_defaults(func=run_recurrent_vs_synaptic_dynamics)
 
     args = parser.parse_args()
     args.func(args)
