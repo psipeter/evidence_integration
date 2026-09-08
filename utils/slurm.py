@@ -14,6 +14,7 @@ DEFAULT_TIME_LIMITS = {
     "PrimacyRecency": "2:0:0",
     "PearceHall": "2:0:0",
     "NEF": "72:0:0",
+    "NEF_synaptic": "72:0:0",
 }
 # NoisyCounting/NoisyRL_lambda entries removed -- both retired, see docs/DECISIONS.md.
 
@@ -25,6 +26,7 @@ DEFAULT_MEM_LIMITS = {
     "PrimacyRecency": "8G",
     "PearceHall": "8G",
     "NEF": "32G",
+    "NEF_synaptic": "32G",
 }
 
 # DEFAULT_TIME_LIMITS["NEF"]=72h is sized for a full 200-trial Optuna fit --
