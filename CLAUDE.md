@@ -29,10 +29,15 @@ fully before making changes.
   unless a genuine visual judgment call is needed (see "Figure
   iteration" below). Don't upload Playwright screenshots either — use
   DOM/computed-style assertions instead.
-- **NEF simulation runtime varies from minutes to hours.** Never run one
-  directly — write the script, then give the person the exact command
-  so they can judge expected runtime themselves before running it (on
-  cluster or locally).
+- **NEF simulation runtime varies from minutes to hours.** For a real
+  fit or the actual scientific simulation, never run one directly —
+  write the script, then give the person the exact command so they can
+  judge expected runtime themselves before running it (on cluster or
+  locally). For a short, intentionally small debug/sanity check on
+  new or changed NEF code, delegate to the `nef-debug-runner` subagent
+  instead — see `.claude/skills/neural-simulation-pipeline/SKILL.md`
+  for sizing/timeout conventions; proven working in practice, not just
+  a theoretical exception.
 - All NEF simulation data → `data/runs/`; figures → `figures/`.
 - **Never let a NEF/counting-integrator simulation silently fall back to
   a live `_pretrain()` training run** when a precomputed counting-activity
@@ -172,7 +177,10 @@ For generating counting activity files or neural predictions figure
 (`neural_main`) data, see `.claude/skills/neural-simulation-pipeline/SKILL.md`.
 Always generate locally (or via cluster if slow), then scp to the
 cluster. Runtime varies minutes-to-hours — write the script, give the
-person the exact command, let them run it themselves.
+person the exact command, let them run it themselves for anything real.
+For a quick debug/sanity check on new NEF code, use the
+`nef-debug-runner` subagent instead — see the skill above for
+conventions.
 
 ---
 
@@ -279,12 +287,20 @@ not explicitly requested. Only implement immediately when explicitly
 asked for a specific change ("change X to Y", "add Z", "remove W").
 
 ### Figure iteration
-After any figure change, render via `pdftoppm` and inspect with the
-`Read` tool — sparingly, since each image read costs context. Prefer
-running analysis via Bash to check numerical results first; only read
-an image when visual layout/style review is genuinely needed; delete
-the temporary PNG immediately after.
+After any figure change, prefer checking numerical results via Bash
+first. When a genuine visual judgment call is actually needed (layout,
+overlap, legend placement, whether a change looks right), delegate to
+the `figure-viewer` subagent rather than rendering and reading the PNG
+inline — keeps image tokens out of the main thread's context.
 
+Give it the exact PDF path(s) and the specific question(s) to answer
+(e.g. "does panel B's legend overlap the boxplot now") — it renders at
+150 DPI by default (escalating the DPI itself if that's not legible for
+what you asked), reports back in text, and always cleans up its own
+temp PNG. See `.claude/agents/figure-viewer.md` for its exact steps.
+
+Manual equivalent, for reference or if subagent delegation genuinely
+isn't available in the current context:
 ```bash
 pdftoppm -png -singlefile -r 150 figures/figure_X.pdf figures/_prev
 # then Read figures/_prev.png
@@ -369,8 +385,11 @@ platform evaluations, methodology choices made before any code existed.
 - Do not double-apply the carrabin transform.
 - Do not pass a full path as `run_folder` — always a short name.
 - Do not commit or push without being asked.
-- Do not run NEF simulations directly — runtime varies minutes-to-hours;
-  hand the person the exact command and let them judge when to run it.
+- Do not run a real NEF fit or scientific simulation directly — runtime
+  varies minutes-to-hours; hand the person the exact command and let
+  them judge when to run it. A short debug/sanity check on new code is
+  the one exception — delegate that to the `nef-debug-runner` subagent
+  rather than running it in the main thread or skipping the check.
 - Do not use RNN-based sigma as a noise metric — use qid-grouped response
   std for soltani (the RNN estimator itself is retired; see
   `docs/DECISIONS.md`).

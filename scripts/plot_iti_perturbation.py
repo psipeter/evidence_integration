@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """Plot scripts/neural_experiments.py's `iti_perturbation*` output.
 
---mode summary (default): TWO panels vs observation, one line per
-(model_type, strength) in each -- rmse (vs the sequence's own fixed
-true_mean) on the left, sigma (response std across repeats) on the right.
-Both panels are built from the SAME per-repeat raw responses via
-sns.lineplot's estimator/errorbar machinery (a closure over true_mean for
-rmse, estimator=np.std for sigma), so both get a seaborn-bootstrapped 95%
-CI, not just a point estimate. Reported together deliberately -- sigma
-alone can't distinguish "protected from noise" from "responses collapsed
-toward a common wrong answer" (rmse would still get worse in the latter
-case even as sigma shrinks). See run_iti_perturbation's own docstring for
-the experiment design.
-
---mode dose_response: same rmse/sigma pair, but collapsed to ONLY the last
-observation (i.e. after the full fixed sequence has been seen) and with
-perturbation STRENGTH on the x-axis instead of observation -- "how does
-strength affect accuracy/variance after viewing a fixed sequence" rather
-than "how do these quantities grow across observations within a fixed
-strength". Reuses the exact same raw dataframe as --mode summary, no new
-simulation needed as long as the strengths you want were included in the
-run_iti_perturbation call that produced it.
+--mode dose_response (default): RMSE (left) and sigma (right) vs
+perturbation strength, one line per NEF implementation -- "how does
+strength affect accuracy/reliability across the synthetic pool" (200
+sessions x 32 trials each). Built via a two-stage, qid-aware hierarchy
+mirroring how human data is aggregated elsewhere in this project (see
+_session_level_stats' own docstring): each SESSION reduces to one sigma
+value and one rmse value, then sns.lineplot's default mean/errorbar='se'
+shows mean +/- SEM across the 200 sessions -- NOT a bootstrap over raw
+rows. Reported together deliberately -- sigma alone can't distinguish
+"protected from noise" from "responses collapsed toward a common wrong
+answer" (rmse would still get worse in the latter case even as sigma
+shrinks). See run_iti_perturbation's own docstring for the experiment
+design.
 
 --mode dynamics: single-trial full decoded-`value` traces in ONE panel,
 color distinguishing both NEF implementation and strength (2 implementations
@@ -31,7 +24,6 @@ run_iti_perturbation_dynamics' docstring.
 
 Usage:
     python scripts/plot_iti_perturbation.py --task soltani_numbers
-    python scripts/plot_iti_perturbation.py --task soltani_numbers --mode dose_response
     python scripts/plot_iti_perturbation.py --task soltani_numbers --mode dynamics
 """
 
@@ -45,121 +37,143 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.lines import Line2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fitting.model_params import MODEL_PARAMS
-from scripts.neural_experiments import (
-    ITI_PERTURBATION_FREQ_HZ,
-    ITI_PERTURBATION_SEQUENCES,
-    OUT_DIR,
-)
+from scripts.neural_experiments import ITI_PERTURBATION_PREFIX_LENGTH, OUT_DIR
 from utils.paths import FIGURES_DIR
-from utils.plot_style import FIGURE_SIZE, apply_style
+from utils.plot_style import FIGURE_SIZE, apply_style, get_palette
 
-# Shared across all three plot modes -- "NEF implementation" as the one
+# Shared across both plot modes -- "NEF implementation" as the one
 # legend/column concept spanning model_type's two values.
 IMPL_COLUMN = "NEF implementation"
 IMPL_LABELS = {"NEF": "working memory", "NEF_synaptic": "synaptic"}
+
+# Paper-wide standard width (make_paper_figures.py's own FIGURE_SIZE[0]) --
+# this plot's --mode dynamics is sized to sit as one of two side-by-side
+# columns within that width, not a standalone full-width figure.
+PAPER_WIDTH = 10.6
+HALF_COLUMN_WIDTH = PAPER_WIDTH / 2
+
+# 2 colors per implementation (strength[0] -> first, strength[1] -> second),
+# drawn from the standard colorblind palette's first 4 entries (get_palette)
+# so the two strengths within a model_type read as a family while the two
+# model_types stay visually distinct: NEF ("recurrent") takes the cool
+# blue/green pair (indices 0, 2); NEF_synaptic takes the warm yellow/orange
+# pair (indices 1, 3) -- a different part of color space from NEF's
+# blue/green. ONLY valid for exactly 2 strengths, matching --mode dynamics'
+# own 2-implementation x 2-strength = 4-line design. Shared with --mode
+# dose_response (via _DOSE_RESPONSE_COLORS below) so both modes' figures
+# use the same per-model_type color.
+_PALETTE = get_palette(4)
+_DYNAMICS_COLOR_PAIRS = {
+    "NEF": (_PALETTE[0], _PALETTE[2]),
+    "NEF_synaptic": (_PALETTE[1], _PALETTE[3]),
+}
 
 
 def _with_impl_column(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(**{IMPL_COLUMN: df["model_type"].map(lambda m: IMPL_LABELS.get(m, m))})
 
 
-def _rmse_estimator_for(true_mean: float):
-    def _estimator(y: np.ndarray) -> float:
-        y = np.asarray(y)
-        return float(np.sqrt(np.mean((y - true_mean) ** 2)))
-    return _estimator
+def _session_level_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Two-stage, qid-aware per-session sigma + flat per-session RMSE --
+    mirrors scripts/make_paper_figures.py's own _qid_response_std (sigma:
+    std of response across a qid's repeats, averaged across that session's
+    8 qids) and utils/aggregate.py's hier_mean_sem convention (RMSE:
+    per-session RMSE first, mean +/- SEM across sessions at plot time,
+    not a pooled/bootstrapped statistic) -- see chat for the full
+    precedent this was modeled on.
 
+    Sigma needs the qid-stratified stage (repeats of the SAME stimulus
+    only exist WITHIN a qid); RMSE doesn't (every row already carries its
+    own correct true_mean, so no cross-qid conflation risk from pooling
+    within a session).
 
-def plot_summary(raw_df: pd.DataFrame, task: str) -> None:
-    """RMSE (left) and sigma (right) vs observation, both bootstrapped by
-    seaborn directly from the per-repeat raw responses -- see this module's
-    own top-of-file note on why both are shown together."""
-    apply_style()
-    plot_df = _with_impl_column(raw_df)
-    strengths = sorted(raw_df["strength"].unique())
-    impl_order = [IMPL_LABELS.get(mt, mt) for mt in sorted(raw_df["model_type"].unique())]
-    palette = dict(zip(strengths, sns.color_palette("viridis", n_colors=len(strengths))))
-    dashes = {"working memory": (1, 0), "synaptic": (4, 1.5)}
-    true_mean = float(raw_df["true_mean"].iloc[0])
-    rmse_estimator = _rmse_estimator_for(true_mean)
-
-    fig, (ax_rmse, ax_sigma) = plt.subplots(
-        1, 2, figsize=(FIGURE_SIZE[0] * 1.8, FIGURE_SIZE[1]), constrained_layout=True,
+    Returns one row per (model_type, strength, session) with `sigma` and
+    `rmse` columns, ready for sns.lineplot's default mean/errorbar='se'
+    aggregation treating session as the replication unit.
+    """
+    per_qid_std = (
+        raw_df.groupby(["model_type", "strength", "session", "qid"])["response"].std()
     )
-    panels = [
-        (ax_rmse, rmse_estimator, "RMSE vs true_mean (95% CI)", False),
-        (ax_sigma, np.std, "Sigma (response std across repeats, 95% CI)", True),
-    ]
-    for ax, estimator, ylabel, show_legend in panels:
-        sns.lineplot(
-            data=plot_df,
-            x="observation", y="response",
-            hue="strength", hue_order=strengths, palette=palette,
-            style=IMPL_COLUMN, style_order=impl_order,
-            dashes={mt: dashes.get(mt, (1, 0)) for mt in impl_order},
-            estimator=estimator, errorbar=("ci", 95), seed=0,
-            linewidth=1.6, ax=ax, legend=show_legend,
-        )
-        ax.set_xlabel("Observation")
-        ax.set_ylabel(ylabel)
-        sns.despine(ax=ax)
-    ax_rmse.set_title("Task accuracy (vs ground truth)")
-    ax_sigma.set_title("Response variability across repeats")
-    ax_sigma.legend(frameon=False, fontsize=8)
-    fig.suptitle(f"ITI-perturbation: {task}, {ITI_PERTURBATION_FREQ_HZ:g} Hz", fontsize=10)
+    sigma = (
+        per_qid_std.groupby(["model_type", "strength", "session"]).mean().rename("sigma")
+    )
 
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out = FIGURES_DIR / f"iti_perturbation_{task}.pdf"
-    fig.savefig(out)
-    plt.close(fig)
-    print(f"Saved {out}")
+    rmse = (
+        raw_df.assign(sq_err=(raw_df["response"] - raw_df["true_mean"]) ** 2)
+        .groupby(["model_type", "strength", "session"])["sq_err"]
+        .mean()
+        .apply(np.sqrt)
+        .rename("rmse")
+    )
+
+    return pd.concat([sigma, rmse], axis=1).reset_index()
+
+
+# Beyond this strength, RMSE/sigma turn nonmonotonic (an artifact of
+# implausibly large injected noise, not a real dose-response regime) --
+# see chat for the visual confirmation this was based on.
+DOSE_RESPONSE_MAX_STRENGTH = 0.5
+
+# One color per model_type (metric is distinguished by linestyle instead --
+# solid RMSE, dashed sigma -- since both metrics share one dual-y-axis
+# panel here). Reuses _DYNAMICS_COLOR_PAIRS' own family split's first color
+# per model_type, so this panel's palette matches --mode dynamics' one.
+_DOSE_RESPONSE_COLORS = {mt: pair[0] for mt, pair in _DYNAMICS_COLOR_PAIRS.items()}
 
 
 def plot_dose_response(raw_df: pd.DataFrame, task: str) -> None:
-    """RMSE (left) and sigma (right) vs perturbation STRENGTH, using only
-    the last observation's response (i.e. after the full fixed sequence has
-    been seen) -- "how does strength affect accuracy/variance after
-    viewing a fixed sequence", as opposed to plot_summary's own "how do
-    these grow across observations within a fixed strength"."""
+    """RMSE (solid) and sigma (dashed) vs perturbation strength, sharing
+    one panel via a dual y-axis (RMSE left, sigma right) -- see
+    _session_level_stats' own docstring for the aggregation hierarchy.
+    x-axis restricted to [0, DOSE_RESPONSE_MAX_STRENGTH] (see that
+    constant's own comment)."""
     apply_style()
-    last_obs = int(raw_df["observation"].max())
-    final_df = _with_impl_column(raw_df[raw_df["observation"] == last_obs])
-    impl_order = [IMPL_LABELS.get(mt, mt) for mt in sorted(raw_df["model_type"].unique())]
-    true_mean = float(raw_df["true_mean"].iloc[0])
-    rmse_estimator = _rmse_estimator_for(true_mean)
+    stats_df = _with_impl_column(_session_level_stats(raw_df))
+    stats_df = stats_df[stats_df["strength"] <= DOSE_RESPONSE_MAX_STRENGTH]
+    model_types = sorted(raw_df["model_type"].unique())
 
-    fig, (ax_rmse, ax_sigma) = plt.subplots(
-        1, 2, figsize=(FIGURE_SIZE[0] * 1.8, FIGURE_SIZE[1]), constrained_layout=True,
+    # Sized as one of two side-by-side columns within the paper's standard
+    # 10.6in width (see HALF_COLUMN_WIDTH) -- not a standalone full-width figure.
+    fig, ax_rmse = plt.subplots(
+        figsize=(HALF_COLUMN_WIDTH, HALF_COLUMN_WIDTH * FIGURE_SIZE[1] / FIGURE_SIZE[0]),
+        constrained_layout=True,
     )
-    panels = [
-        (ax_rmse, rmse_estimator, "RMSE vs true_mean (95% CI)", False),
-        (ax_sigma, np.std, "Sigma (response std across repeats, 95% CI)", True),
-    ]
-    for ax, estimator, ylabel, show_legend in panels:
+    ax_sigma = ax_rmse.twinx()
+
+    handles = []
+    for model_type in model_types:
+        color = _DOSE_RESPONSE_COLORS.get(model_type, "gray")
+        g = stats_df[stats_df["model_type"] == model_type]
         sns.lineplot(
-            data=final_df,
-            x="strength", y="response",
-            hue=IMPL_COLUMN, hue_order=impl_order,
-            estimator=estimator, errorbar=("ci", 95), seed=0,
-            marker="o", linewidth=1.6, ax=ax, legend=show_legend,
+            data=g, x="strength", y="rmse", color=color, linestyle="-",
+            estimator="mean", errorbar="se",
+            linewidth=1.6, ax=ax_rmse, legend=False,
         )
-        ax.set_xlabel("Perturbation strength")
-        ax.set_ylabel(ylabel)
-        sns.despine(ax=ax)
-    ax_rmse.set_title("Task accuracy after full sequence")
-    ax_sigma.set_title("Response variability after full sequence")
-    ax_sigma.legend(frameon=False, fontsize=8)
-    fig.suptitle(
-        f"ITI-perturbation dose-response: {task}, obs={last_obs} (after full sequence)",
-        fontsize=10,
-    )
+        sns.lineplot(
+            data=g, x="strength", y="sigma", color=color, linestyle="--",
+            estimator="mean", errorbar="se",
+            linewidth=1.6, ax=ax_sigma, legend=False,
+        )
+        handles.append(Line2D([0], [0], color=color, lw=1.6, label=IMPL_LABELS.get(model_type, model_type)))
+    handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="-", label="RMSE"))
+    handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="--", label="Sigma"))
+
+    ax_rmse.set_xlabel("Perturbation strength")
+    ax_rmse.set_ylabel("Model RMSE (vs running mean)")
+    ax_sigma.set_ylabel(r"Model $\sigma$")
+    sns.despine(ax=ax_rmse, right=True)
+    sns.despine(ax=ax_sigma, top=True, right=False, left=True, bottom=True)
+    ax_sigma.tick_params(axis="y", which="both", right=True, left=False)
+    ax_rmse.legend(handles=handles, frameon=True, framealpha=0.85, fontsize=7)
+    fig.suptitle("ITI perturbation dose-response", fontsize=10)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    out = FIGURES_DIR / f"iti_perturbation_dose_response_{task}.pdf"
+    out = FIGURES_DIR / f"iti_perturbation_{task}.pdf"
     fig.savefig(out)
     plt.close(fig)
     print(f"Saved {out}")
@@ -172,12 +186,6 @@ def _iti_shading(ax, n_obs: int, t_iti: float, t_step: float, t_obs: float) -> N
     for i in range(n_obs):
         start = t_iti + i * t_step + t_obs
         ax.axvspan(start, start + t_iti, alpha=0.08, color="gray", linewidth=0, zorder=0)
-
-
-# 2 colors per implementation (strength[0] -> first, strength[1] -> second)
-# -- ONLY valid for exactly 2 strengths, matching this plot's own
-# 2-implementation x 2-strength = 4-line design.
-_DYNAMICS_COLOR_PAIRS = {"NEF": ("tab:blue", "tab:green"), "NEF_synaptic": ("tab:orange", "gold")}
 
 
 def plot_dynamics(df: pd.DataFrame, task: str) -> None:
@@ -193,9 +201,14 @@ def plot_dynamics(df: pd.DataFrame, task: str) -> None:
     fixed = MODEL_PARAMS[task]["NEF"]["fixed"]
     t_obs, t_iti = float(fixed["t_obs"]), float(fixed["t_iti"])
     t_step = t_obs + t_iti
-    n_obs = len(ITI_PERTURBATION_SEQUENCES[task])
+    n_obs = ITI_PERTURBATION_PREFIX_LENGTH[task]
 
-    fig, ax = plt.subplots(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 0.7), constrained_layout=True)
+    # Sized as one of two side-by-side columns within the paper's standard
+    # 10.6in width (see HALF_COLUMN_WIDTH) -- not a standalone full-width figure.
+    fig, ax = plt.subplots(
+        figsize=(HALF_COLUMN_WIDTH, HALF_COLUMN_WIDTH * FIGURE_SIZE[1] / FIGURE_SIZE[0]),
+        constrained_layout=True,
+    )
     _iti_shading(ax, n_obs, t_iti, t_step, t_obs)
     for model_type in model_types:
         colors = _DYNAMICS_COLOR_PAIRS.get(model_type, ("tab:gray", "tab:pink"))
@@ -209,8 +222,8 @@ def plot_dynamics(df: pd.DataFrame, task: str) -> None:
     ax.set_ylabel("Decoded value")
     ax.margins(x=0)
     sns.despine(ax=ax)
-    ax.legend(title=IMPL_COLUMN, frameon=False, fontsize=8)
-    fig.suptitle(f"ITI-perturbation single-trial dynamics: {task}", fontsize=10)
+    ax.legend(title=IMPL_COLUMN, title_fontsize=7, fontsize=7, frameon=True, framealpha=0.85)
+    fig.suptitle("ITI Perturbation Dynamics", fontsize=10)
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     out = FIGURES_DIR / f"iti_perturbation_dynamics_{task}.pdf"
@@ -222,21 +235,17 @@ def plot_dynamics(df: pd.DataFrame, task: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", required=True)
-    p.add_argument("--mode", choices=["summary", "dose_response", "dynamics"], default="summary")
+    p.add_argument("--mode", choices=["dose_response", "dynamics"], default="dose_response")
     args = p.parse_args()
 
-    if args.mode in ("summary", "dose_response"):
+    if args.mode == "dose_response":
         raw_path = OUT_DIR / f"iti_perturbation_{args.task}_raw.pkl"
         if not raw_path.exists():
             raise FileNotFoundError(
                 f"No {raw_path} -- run scripts/neural_experiments.py iti_perturbation "
-                f"--task {args.task} first."
+                f"--task {args.task} --mode collect first."
             )
-        raw_df = pd.read_pickle(raw_path)
-        if args.mode == "summary":
-            plot_summary(raw_df, args.task)
-        else:
-            plot_dose_response(raw_df, args.task)
+        plot_dose_response(pd.read_pickle(raw_path), args.task)
     else:
         dyn_path = OUT_DIR / f"iti_perturbation_dynamics_{args.task}.pkl"
         if not dyn_path.exists():

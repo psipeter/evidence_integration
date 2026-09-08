@@ -95,10 +95,13 @@ rather than guessing).
      `pull_soltani_data.py --list_candidates` — never a guessed/made-up
      pid. This is fast and local, run it yourself without asking.
    - **`scripts/check_NEF_pipeline.py`** if NEF/activity-loading code was
-     touched. Do NOT run this yourself — its runtime is variable and
-     `CLAUDE.md`'s simulation policy has the person judge NEF-adjacent
-     runtime themselves. Construct the exact command (dataset, pid,
-     params) and hand it to the person to run.
+     touched. Do NOT run this yourself — you don't have Agent-tool
+     access to invoke subagents, and a real NEF run's runtime is
+     variable. Construct the exact command (dataset, pid, small params)
+     and report back that the calling thread should either delegate it
+     to the `nef-debug-runner` subagent for a debug-sized check (see the
+     neural-simulation-pipeline skill for sizing/timeout conventions) or
+     hand it to the person for anything larger.
 
 ## Boundaries
 
