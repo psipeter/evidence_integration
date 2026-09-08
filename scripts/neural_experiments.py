@@ -1866,6 +1866,8 @@ def run_iti_perturbation(args) -> None:
             raise SystemExit("--session required for --mode run")
         if args.strength is None:
             raise SystemExit("--strength required for --mode run")
+        if args.alpha_0 is None or args.lambda_ is None:
+            raise SystemExit("--alpha_0/--lambda_ required for --mode run")
         tag = _oddball_value_tag(args.strength)
         out_path = (
             OUT_DIR / f"iti_perturbation_pool_{args.task}_session{args.session}_strength{tag}.pkl"
@@ -1889,6 +1891,8 @@ def run_iti_perturbation(args) -> None:
               f"{time.time() - t0:.0f}s -> {out_path}")
 
     elif args.mode == "submit":
+        if args.alpha_0 is None or args.lambda_ is None:
+            raise SystemExit("--alpha_0/--lambda_ required for --mode submit")
         root = str(Path(__file__).resolve().parent.parent)
         n_jobs = args.n_sessions * len(args.strengths)
         print(f"Submitting {n_jobs} iti_perturbation jobs for task={args.task} "
@@ -2174,8 +2178,10 @@ def main() -> None:
     p_iti.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0],
                        help="Full strength grid for --mode submit -- one job per (session, "
                             "strength) pair")
-    p_iti.add_argument("--alpha_0", type=float, required=True)
-    p_iti.add_argument("--lambda_", type=float, required=True)
+    p_iti.add_argument("--alpha_0", type=float, default=None,
+                       help="Required for --mode run/submit; unused by --mode collect")
+    p_iti.add_argument("--lambda_", type=float, default=None,
+                       help="Required for --mode run/submit; unused by --mode collect")
     p_iti.add_argument("--n_neurons", type=int, default=500)
     p_iti.add_argument("--n_neurons_counting", type=int, default=2000)
     p_iti.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
