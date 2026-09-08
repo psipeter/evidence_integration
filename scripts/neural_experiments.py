@@ -126,7 +126,7 @@ Run examples:
         --mode collect
 
     python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
-        --mode run --session 1 --alpha_0 0.7 --lambda_ 0.7 --strengths 0.0 0.5 1.0
+        --mode run --session 1 --strength 0.5 --alpha_0 0.7 --lambda_ 0.7
     python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
         --mode submit --n_sessions 200 --alpha_0 0.7 --lambda_ 0.7 --strengths 0.0 0.5 1.0 --dry_run
     python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
@@ -139,8 +139,8 @@ Output: data/runs/neural_experiments/
     probe_{task}.pkl                 (combined, --mode collect)
     synthetic_{task}_{probe,activity,encoders,params}_pid{pid}.pkl  (per-pid)
     synthetic_{task}_{probe,activity,encoders,params}.pkl           (combined)
-    iti_perturbation_pool_{task}_session{session}.pkl  (per-session, --mode run)
-    iti_perturbation_{task}_raw.pkl                    (combined, --mode collect)
+    iti_perturbation_pool_{task}_session{session}_strength{tag}.pkl  (per-cell, --mode run)
+    iti_perturbation_{task}_raw.pkl                                 (combined, --mode collect)
     iti_perturbation_dynamics_{task}.pkl (long-form, one row per model_type/strength/timestep)
 """
 from __future__ import annotations
@@ -1743,17 +1743,19 @@ def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_
 def _iti_perturbation_session_worker(
     task: str, session: int, alpha_0: float, lambda_: float,
     n_neurons: int, n_neurons_counting: int,
-    model_types: list, strengths: list, activity_map: dict,
+    model_types: list, strength: float, activity_map: dict,
 ) -> pd.DataFrame:
     """Simulate ONE synthetic session's full 32 trials -- 8 qids x 4
     repeats, matching a real participant's own session exactly (see
     task_backend/generate_sequences.py's own docstring: "each participant
     is assigned one independently-generated pool member") -- across every
-    requested model_type x strength. Only the LAST observation of each
-    trial's prefix is kept ("after the full prefix has been seen") -- no
-    per-observation breakdown, per instruction; the earlier single-
-    sequence design's own per-observation growth curve is superseded by
-    this pool-based dose-response design.
+    requested model_type, at ONE fixed perturbation strength (see
+    run_iti_perturbation's own docstring for why strength is split into
+    its own job rather than looped over here). Only the LAST observation
+    of each trial's prefix is kept ("after the full prefix has been
+    seen") -- no per-observation breakdown, per instruction; the earlier
+    single-sequence design's own per-observation growth curve is
+    superseded by this pool-based dose-response design.
 
     Same (alpha_0, lambda_, n_neurons, n_neurons_counting) for EVERY
     model_type and every session -- this experiment asks how nef_type and
@@ -1761,10 +1763,10 @@ def _iti_perturbation_session_worker(
     computational setting, not how individually-fitted params compare
     (NEF_synaptic has no fit of its own yet -- see docs/SCIENCE.md).
 
-    Returns one row per (model_type, strength, trial) with that trial's
-    own qid and true_mean (mean of ITS OWN simulated prefix -- NOT the
-    pool entry's full-15-observation true_mean field, since only the
-    prefix is ever fed to the model).
+    Returns one row per (model_type, trial) with that trial's own qid and
+    true_mean (mean of ITS OWN simulated prefix -- NOT the pool entry's
+    full-15-observation true_mean field, since only the prefix is ever
+    fed to the model).
     """
     import nengo
     from models.NEF import _extract_responses, build_network
@@ -1787,43 +1789,43 @@ def _iti_perturbation_session_worker(
             task, alpha_0, n_neurons, lambda_,
             n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
         )
-        for strength in strengths:
-            for trial_idx, trial_data in enumerate(trials):
-                raw_prefix = np.array(trial_data["values"][:prefix_length], dtype=float)
-                obs_values = nef_obs_values(_rescale_0_100_to_neg1_1(raw_prefix), task)
-                n_obs = len(obs_values)
-                true_mean = float(np.mean(obs_values))
+        for trial_idx, trial_data in enumerate(trials):
+            raw_prefix = np.array(trial_data["values"][:prefix_length], dtype=float)
+            obs_values = nef_obs_values(_rescale_0_100_to_neg1_1(raw_prefix), task)
+            n_obs = len(obs_values)
+            true_mean = float(np.mean(obs_values))
 
-                # Global, deterministic seed index -- independent of job
-                # scheduling order (SLURM jobs run out of order) and of
-                # which model_type/strength is being simulated, so the
-                # SAME trial gets the SAME tuning-curve draw across every
-                # (model_type, strength) cell -- isolating the causal
-                # effect of nef_type/strength rather than confounding it
-                # with a different random network per condition. Cycles
-                # through the activity file's own keys (fewer keys than
-                # trials across the full 200-session sweep).
-                global_idx = (session - 1) * len(trials) + trial_idx
-                akey = _toy_activity_key(global_idx % n_keys)
-                decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
-                p = {**base_params, "seed": akey}
-                net = build_network(obs_values, p, decoders)
-                _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey)
-                with nengo.Simulator(
-                    net, dt=float(p["dt"]), seed=int(akey), progress_bar=False
-                ) as sim:
-                    sim.run(n_obs * (float(p["t_obs"]) + float(p["t_iti"])))
-                t_arr = np.arange(len(sim.data[net.probe_value])) * float(p["dt"])
-                value_decoded = sim.data[net.probe_value].squeeze()
-                resp = _extract_responses(t_arr, value_decoded, n_obs, p)
-                response = nef_response_to_model_scale(float(resp[-1]), task)
+            # Global, deterministic seed index -- independent of job
+            # scheduling order (SLURM jobs run out of order), of which
+            # model_type is being simulated, AND of strength (this
+            # function no longer loops over it), so the SAME trial gets
+            # the SAME tuning-curve draw across every (model_type,
+            # strength) cell -- isolating the causal effect of nef_type/
+            # strength rather than confounding it with a different random
+            # network per condition. Cycles through the activity file's
+            # own keys (fewer keys than trials across the full 200-session
+            # sweep).
+            global_idx = (session - 1) * len(trials) + trial_idx
+            akey = _toy_activity_key(global_idx % n_keys)
+            decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
+            p = {**base_params, "seed": akey}
+            net = build_network(obs_values, p, decoders)
+            _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey)
+            with nengo.Simulator(
+                net, dt=float(p["dt"]), seed=int(akey), progress_bar=False
+            ) as sim:
+                sim.run(n_obs * (float(p["t_obs"]) + float(p["t_iti"])))
+            t_arr = np.arange(len(sim.data[net.probe_value])) * float(p["dt"])
+            value_decoded = sim.data[net.probe_value].squeeze()
+            resp = _extract_responses(t_arr, value_decoded, n_obs, p)
+            response = nef_response_to_model_scale(float(resp[-1]), task)
 
-                rows.append({
-                    "model_type": model_type, "strength": strength,
-                    "session": session, "trial": trial_idx, "qid": trial_data["qid"],
-                    "response": response, "true_mean": true_mean,
-                })
-        print(f"  session={session} model_type={model_type}: done", flush=True)
+            rows.append({
+                "model_type": model_type, "strength": strength,
+                "session": session, "trial": trial_idx, "qid": trial_data["qid"],
+                "response": response, "true_mean": true_mean,
+            })
+        print(f"  session={session} strength={strength} model_type={model_type}: done", flush=True)
     return pd.DataFrame(rows)
 
 
@@ -1837,16 +1839,22 @@ def run_iti_perturbation(args) -> None:
     and docs/SCIENCE.md for how this follows from the baseline-consistency
     check.
 
-    --mode run: one session's worth of work (every requested model_type x
-    strength, all 32 trials) -- cheap enough to run locally for a handful
-    of sessions as a pilot, but the full --n_sessions sweep is cluster-
-    dispatched (--mode submit), one job per session, matching `synthetic`'s
-    own per-virtual-pid job granularity.
-    --mode submit: submits one job per session in 1..--n_sessions.
-    --mode collect: concatenates every session's raw file into ONE
-    long-form dataframe (iti_perturbation_{task}_raw.pkl) -- NO stats
-    computed here. sigma/rmse need a two-stage, qid-aware aggregation
-    (mirroring scripts/make_paper_figures.py's own _qid_response_std and
+    Job granularity is (session, strength) -- NOT one job per session
+    covering every strength -- specifically so widening the strength grid
+    doesn't cost more wall-clock per job, only more (still-fast, ~10 min)
+    jobs running in parallel. Mirrors how `oddball`/`n_neurons_snr` already
+    split their own grids into one job per cell.
+
+    --mode run: one (session, strength) cell's worth of work (every
+    requested model_type, all 32 trials) -- cheap enough to run locally for
+    a handful of cells as a pilot, but the full sweep is cluster-dispatched
+    (--mode submit).
+    --mode submit: submits one job per (session, strength) pair in
+    1..--n_sessions x --strengths.
+    --mode collect: concatenates every cell's raw file into ONE long-form
+    dataframe (iti_perturbation_{task}_raw.pkl) -- NO stats computed here.
+    sigma/rmse need a two-stage, qid-aware aggregation (mirroring
+    scripts/make_paper_figures.py's own _qid_response_std and
     utils/aggregate.py's hier_mean_sem convention for human data -- see
     chat) that belongs in the figure script, matching this module's own
     never-plot-here / save-raw-compute-in-figures convention.
@@ -1856,9 +1864,15 @@ def run_iti_perturbation(args) -> None:
     if args.mode == "run":
         if args.session is None:
             raise SystemExit("--session required for --mode run")
-        out_path = OUT_DIR / f"iti_perturbation_pool_{args.task}_session{args.session}.pkl"
+        if args.strength is None:
+            raise SystemExit("--strength required for --mode run")
+        tag = _oddball_value_tag(args.strength)
+        out_path = (
+            OUT_DIR / f"iti_perturbation_pool_{args.task}_session{args.session}_strength{tag}.pkl"
+        )
         if out_path.exists():
-            print(f"Already exists: session={args.session} -- skipping (delete to rerun)")
+            print(f"Already exists: session={args.session} strength={args.strength} "
+                  f"-- skipping (delete to rerun)")
             return
         from models.counting_integrator import load_activities
 
@@ -1868,43 +1882,54 @@ def run_iti_perturbation(args) -> None:
         t0 = time.time()
         df = _iti_perturbation_session_worker(
             args.task, args.session, args.alpha_0, args.lambda_,
-            args.n_neurons, args.n_neurons_counting, args.model_types, args.strengths, activity_map,
+            args.n_neurons, args.n_neurons_counting, args.model_types, args.strength, activity_map,
         )
         df.to_pickle(out_path)
-        print(f"session={args.session}: {len(df)} rows in {time.time() - t0:.0f}s -> {out_path}")
+        print(f"session={args.session} strength={args.strength}: {len(df)} rows in "
+              f"{time.time() - t0:.0f}s -> {out_path}")
 
     elif args.mode == "submit":
         root = str(Path(__file__).resolve().parent.parent)
-        print(f"Submitting {args.n_sessions} iti_perturbation jobs for task={args.task}")
+        n_jobs = args.n_sessions * len(args.strengths)
+        print(f"Submitting {n_jobs} iti_perturbation jobs for task={args.task} "
+              f"({args.n_sessions} sessions x {len(args.strengths)} strengths)")
         for session in range(1, args.n_sessions + 1):
-            out_path = OUT_DIR / f"iti_perturbation_pool_{args.task}_session{session}.pkl"
-            if out_path.exists():
-                print(f"  session={session}: already exists -- skipping")
-                continue
-            cmd = (
-                f"venv/bin/python scripts/neural_experiments.py iti_perturbation "
-                f"--task {args.task} --mode run --session {session} "
-                f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} "
-                f"--n_neurons {args.n_neurons} --n_neurons_counting {args.n_neurons_counting} "
-                f"--strengths {' '.join(str(s) for s in args.strengths)} "
-                f"--model_types {' '.join(args.model_types)}"
-            )
-            script = make_job_script(root, [cmd], time_limit="2:0:0", mem="16G")
-            script_path = OUT_DIR / f"_job_iti_perturbation_{args.task}_session{session}.sh"
-            script_path.write_text(script)
-            submit_script(script_path, dry_run=args.dry_run)
+            for strength in args.strengths:
+                tag = _oddball_value_tag(strength)
+                out_path = (
+                    OUT_DIR
+                    / f"iti_perturbation_pool_{args.task}_session{session}_strength{tag}.pkl"
+                )
+                if out_path.exists():
+                    print(f"  session={session} strength={strength}: already exists -- skipping")
+                    continue
+                cmd = (
+                    f"venv/bin/python scripts/neural_experiments.py iti_perturbation "
+                    f"--task {args.task} --mode run --session {session} --strength {strength} "
+                    f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} "
+                    f"--n_neurons {args.n_neurons} --n_neurons_counting {args.n_neurons_counting} "
+                    f"--model_types {' '.join(args.model_types)}"
+                )
+                script = make_job_script(root, [cmd], time_limit="0:30:0", mem="16G")
+                script_path = (
+                    OUT_DIR / f"_job_iti_perturbation_{args.task}_session{session}_strength{tag}.sh"
+                )
+                script_path.write_text(script)
+                submit_script(script_path, dry_run=args.dry_run)
 
     elif args.mode == "collect":
-        files = sorted(OUT_DIR.glob(f"iti_perturbation_pool_{args.task}_session*.pkl"))
+        files = sorted(OUT_DIR.glob(f"iti_perturbation_pool_{args.task}_session*_strength*.pkl"))
         if not files:
-            print(f"No iti_perturbation_pool_{args.task}_session*.pkl files found in {OUT_DIR}")
+            print(f"No iti_perturbation_pool_{args.task}_session*_strength*.pkl files found "
+                  f"in {OUT_DIR}")
             return
         df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
         out_path = OUT_DIR / f"iti_perturbation_{args.task}_raw.pkl"
         df.to_pickle(out_path)
         n_sessions = df["session"].nunique()
-        print(f"Collected {len(files)} session file(s), {n_sessions} sessions, "
-              f"{len(df):,} rows -> {out_path}")
+        n_strengths = df["strength"].nunique()
+        print(f"Collected {len(files)} cell file(s), {n_sessions} sessions x {n_strengths} "
+              f"strengths, {len(df):,} rows -> {out_path}")
 
 
 def _iti_perturbation_dynamics_worker(
@@ -2142,11 +2167,17 @@ def main() -> None:
                        help="Session 1..--n_sessions -- required for --mode run")
     p_iti.add_argument("--n_sessions", type=int, default=200,
                        help="Total sessions to submit (--mode submit); pool has 200 available")
+    p_iti.add_argument("--strength", type=float, default=None,
+                       help="Single perturbation strength for this job -- required for --mode run "
+                            "(one job simulates exactly one strength; see run_iti_perturbation's "
+                            "own docstring for why)")
+    p_iti.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0],
+                       help="Full strength grid for --mode submit -- one job per (session, "
+                            "strength) pair")
     p_iti.add_argument("--alpha_0", type=float, required=True)
     p_iti.add_argument("--lambda_", type=float, required=True)
     p_iti.add_argument("--n_neurons", type=int, default=500)
     p_iti.add_argument("--n_neurons_counting", type=int, default=2000)
-    p_iti.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0])
     p_iti.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
     p_iti.add_argument("--dry_run", action="store_true")
     p_iti.set_defaults(func=run_iti_perturbation)
