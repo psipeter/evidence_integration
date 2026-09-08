@@ -31,7 +31,8 @@ _decoders_for_seed() (or the equivalent in models.NEF/counting_integrator)
 and let a missing file/key raise. Do not add a new _pretrain() fallback,
 here or anywhere else that touches NEF simulation.
 
-Four experiments:
+Experiments (partial list -- n_neurons_demo/n_neurons_snr/oddball/param_scan
+predate this docstring's last update; see --help for the full set):
 
   raster_demo  — ONE trial, arbitrary (alpha_0, n_neurons, lambda_), full
                  per-timestep trace of the error population's raw neuron
@@ -76,6 +77,32 @@ Four experiments:
                  further commands are needed afterward. Has the same
                  --mode run/submit/collect lifecycle as `probe`.
 
+  iti_perturbation — NEF (recurrent) vs NEF_synaptic accuracy/reliability
+                 under neuron-level noise gated to fire only during the ITI,
+                 injected into .neurons of `value` only, evaluated across
+                 the FULL synthetic pool (200 sessions x 32 trials each, 8
+                 qids x 4 repeats -- matching a real participant's own
+                 session exactly). Only the last observation of each
+                 trial's shared prefix is kept. Has a --mode run/submit/
+                 collect lifecycle, one job per session (matching
+                 `synthetic`'s own per-virtual-pid job granularity) --
+                 the full 200-session sweep is cluster-dispatched. Saves
+                 raw per-trial responses in one long-form dataframe; the
+                 sigma/rmse aggregation (a two-stage, qid-aware hierarchy
+                 mirroring how human data is aggregated elsewhere in this
+                 project) and plotting both live separately in
+                 scripts/plot_iti_perturbation.py. See
+                 run_iti_perturbation's own docstring for the full design
+                 and why error/background/counting.memory were tried and
+                 dropped as perturbation targets.
+
+  iti_perturbation_dynamics — lightweight companion to `iti_perturbation`:
+                 full per-timestep decoded `value` traces (not aggregated
+                 sigma) for a SINGLE fixed repeat-seed across strengths/
+                 model_types, so the perturbation's effect can be inspected
+                 visually trial-by-trial rather than only through its
+                 aggregate statistic. Cheap (a handful of short sims).
+
 Run examples:
     python scripts/neural_experiments.py raster_demo --task soltani_numbers \\
         --alpha_0 0.5 --n_neurons 200 --lambda_ 0.5 --n_obs 5
@@ -98,6 +125,13 @@ Run examples:
     python scripts/neural_experiments.py synthetic --task soltani_numbers \\
         --mode collect
 
+    python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
+        --mode run --session 1 --alpha_0 0.7 --lambda_ 0.7 --strengths 0.0 0.5 1.0
+    python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
+        --mode submit --n_sessions 200 --alpha_0 0.7 --lambda_ 0.7 --strengths 0.0 0.5 1.0 --dry_run
+    python scripts/neural_experiments.py iti_perturbation --task soltani_numbers \\
+        --mode collect
+
 Output: data/runs/neural_experiments/
     raster_demo_{task}.pkl
     sweep_{task}_{sweep_param}.pkl
@@ -105,11 +139,15 @@ Output: data/runs/neural_experiments/
     probe_{task}.pkl                 (combined, --mode collect)
     synthetic_{task}_{probe,activity,encoders,params}_pid{pid}.pkl  (per-pid)
     synthetic_{task}_{probe,activity,encoders,params}.pkl           (combined)
+    iti_perturbation_pool_{task}_session{session}.pkl  (per-session, --mode run)
+    iti_perturbation_{task}_raw.pkl                    (combined, --mode collect)
+    iti_perturbation_dynamics_{task}.pkl (long-form, one row per model_type/strength/timestep)
 """
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -1645,6 +1683,315 @@ def run_param_scan(args) -> None:
         print(df.groupby("pid")["sweep_value"].first().describe())
 
 
+# ── iti_perturbation (synaptic-vs-recurrent robustness to ITI noise) ───────────
+
+# Only the PREFIX of a trial is genuinely repeated across a qid's 4 trials
+# within a session (confirmed directly against data/soltani_numbers.pkl and
+# the pool itself -- e.g. a session's qid=0 trials share obs 0-3 exactly,
+# then diverge), matching the pool's own prefix_length field. Only
+# soltani_numbers is covered for now.
+ITI_PERTURBATION_PREFIX_LENGTH = {"soltani_numbers": 4}
+ITI_PERTURBATION_FREQ_HZ = 30.0  # fixed for this experiment (a free param elsewhere)
+
+
+def _iti_perturbation_gate(t_iti: float, t_step: float, t_obs: float):
+    def _gate(t):
+        if t < t_iti:
+            return 0.0
+        t_in_step = (t - t_iti) % t_step
+        return 1.0 if t_in_step >= t_obs else 0.0
+
+    return _gate
+
+
+def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_seed: int) -> None:
+    """Inject one gated WhiteSignal into .neurons of `value` ONLY (both
+    nef_types), synapse=None so WhiteSignal's own `high` cutoff is the only
+    frequency control. Originally also targeted error/background/
+    counting.memory; dropped -- memory is a leakless integrator and gets
+    CORRUPTED (not perturbed) by any sustained current (confirmed: its count
+    readout collapsed from ~15 to ~2.9 at strength=1.0, since nothing decays
+    it back), and error/background were cut afterward to isolate value's own
+    persistent-recurrence-vs-learned-readout distinction cleanly (see chat
+    for the full diagnostic). No-op when strength == 0.0 (baseline)."""
+    import nengo
+
+    if strength == 0.0:
+        return
+    t_obs = float(params["t_obs"])
+    t_iti = float(params["t_iti"])
+    t_step = t_obs + t_iti
+
+    with net:
+        noise_node = nengo.Node(
+            nengo.processes.WhiteSignal(
+                period=float(n_obs * t_step), high=ITI_PERTURBATION_FREQ_HZ,
+                rms=1.0, seed=int(noise_seed),
+            ),
+            size_out=1, label="iti_noise",
+        )
+        gate_node = nengo.Node(_iti_perturbation_gate(t_iti, t_step, t_obs), label="iti_gate")
+        gated_node = nengo.Node(lambda t, x: x[0] * x[1], size_in=2, label="iti_gated")
+        nengo.Connection(noise_node, gated_node[0], synapse=None)
+        nengo.Connection(gate_node, gated_node[1], synapse=None)
+        nengo.Connection(
+            gated_node, net.value.neurons,
+            transform=strength * np.ones((net.value.n_neurons, 1)), synapse=None,
+        )
+
+
+def _iti_perturbation_session_worker(
+    task: str, session: int, alpha_0: float, lambda_: float,
+    n_neurons: int, n_neurons_counting: int,
+    model_types: list, strengths: list, activity_map: dict,
+) -> pd.DataFrame:
+    """Simulate ONE synthetic session's full 32 trials -- 8 qids x 4
+    repeats, matching a real participant's own session exactly (see
+    task_backend/generate_sequences.py's own docstring: "each participant
+    is assigned one independently-generated pool member") -- across every
+    requested model_type x strength. Only the LAST observation of each
+    trial's prefix is kept ("after the full prefix has been seen") -- no
+    per-observation breakdown, per instruction; the earlier single-
+    sequence design's own per-observation growth curve is superseded by
+    this pool-based dose-response design.
+
+    Same (alpha_0, lambda_, n_neurons, n_neurons_counting) for EVERY
+    model_type and every session -- this experiment asks how nef_type and
+    perturbation strength affect accuracy/reliability at one fixed
+    computational setting, not how individually-fitted params compare
+    (NEF_synaptic has no fit of its own yet -- see docs/SCIENCE.md).
+
+    Returns one row per (model_type, strength, trial) with that trial's
+    own qid and true_mean (mean of ITS OWN simulated prefix -- NOT the
+    pool entry's full-15-observation true_mean field, since only the
+    prefix is ever fed to the model).
+    """
+    import nengo
+    from models.NEF import _extract_responses, build_network
+    from scripts.build_model_inputs import _rescale_0_100_to_neg1_1
+    from utils.binary_transform import nef_obs_values, nef_response_to_model_scale
+
+    if task not in ITI_PERTURBATION_PREFIX_LENGTH:
+        raise ValueError(
+            f"No prefix length defined for task={task!r} -- "
+            f"ITI_PERTURBATION_PREFIX_LENGTH only covers {list(ITI_PERTURBATION_PREFIX_LENGTH)}."
+        )
+    prefix_length = ITI_PERTURBATION_PREFIX_LENGTH[task]
+    trials = _load_synthetic_trials(task, session)
+    n_keys = max(activity_map)
+
+    rows = []
+    for model_type in model_types:
+        nef_type = "synaptic" if "synaptic" in model_type else "recurrent"
+        base_params = _base_params(
+            task, alpha_0, n_neurons, lambda_,
+            n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
+        )
+        for strength in strengths:
+            for trial_idx, trial_data in enumerate(trials):
+                raw_prefix = np.array(trial_data["values"][:prefix_length], dtype=float)
+                obs_values = nef_obs_values(_rescale_0_100_to_neg1_1(raw_prefix), task)
+                n_obs = len(obs_values)
+                true_mean = float(np.mean(obs_values))
+
+                # Global, deterministic seed index -- independent of job
+                # scheduling order (SLURM jobs run out of order) and of
+                # which model_type/strength is being simulated, so the
+                # SAME trial gets the SAME tuning-curve draw across every
+                # (model_type, strength) cell -- isolating the causal
+                # effect of nef_type/strength rather than confounding it
+                # with a different random network per condition. Cycles
+                # through the activity file's own keys (fewer keys than
+                # trials across the full 200-session sweep).
+                global_idx = (session - 1) * len(trials) + trial_idx
+                akey = _toy_activity_key(global_idx % n_keys)
+                decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
+                p = {**base_params, "seed": akey}
+                net = build_network(obs_values, p, decoders)
+                _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey)
+                with nengo.Simulator(
+                    net, dt=float(p["dt"]), seed=int(akey), progress_bar=False
+                ) as sim:
+                    sim.run(n_obs * (float(p["t_obs"]) + float(p["t_iti"])))
+                t_arr = np.arange(len(sim.data[net.probe_value])) * float(p["dt"])
+                value_decoded = sim.data[net.probe_value].squeeze()
+                resp = _extract_responses(t_arr, value_decoded, n_obs, p)
+                response = nef_response_to_model_scale(float(resp[-1]), task)
+
+                rows.append({
+                    "model_type": model_type, "strength": strength,
+                    "session": session, "trial": trial_idx, "qid": trial_data["qid"],
+                    "response": response, "true_mean": true_mean,
+                })
+        print(f"  session={session} model_type={model_type}: done", flush=True)
+    return pd.DataFrame(rows)
+
+
+def run_iti_perturbation(args) -> None:
+    """NEF (recurrent) vs NEF_synaptic accuracy/reliability under
+    neuron-level noise gated to fire only during the ITI, evaluated across
+    the FULL synthetic pool -- 200 sessions x 32 trials each (8 qids x 4
+    repeats), matching a real human's own session structure exactly. Only
+    the last observation of each trial's shared prefix is kept -- see
+    _iti_perturbation_session_worker's own docstring for the full design
+    and docs/SCIENCE.md for how this follows from the baseline-consistency
+    check.
+
+    --mode run: one session's worth of work (every requested model_type x
+    strength, all 32 trials) -- cheap enough to run locally for a handful
+    of sessions as a pilot, but the full --n_sessions sweep is cluster-
+    dispatched (--mode submit), one job per session, matching `synthetic`'s
+    own per-virtual-pid job granularity.
+    --mode submit: submits one job per session in 1..--n_sessions.
+    --mode collect: concatenates every session's raw file into ONE
+    long-form dataframe (iti_perturbation_{task}_raw.pkl) -- NO stats
+    computed here. sigma/rmse need a two-stage, qid-aware aggregation
+    (mirroring scripts/make_paper_figures.py's own _qid_response_std and
+    utils/aggregate.py's hier_mean_sem convention for human data -- see
+    chat) that belongs in the figure script, matching this module's own
+    never-plot-here / save-raw-compute-in-figures convention.
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if args.mode == "run":
+        if args.session is None:
+            raise SystemExit("--session required for --mode run")
+        out_path = OUT_DIR / f"iti_perturbation_pool_{args.task}_session{args.session}.pkl"
+        if out_path.exists():
+            print(f"Already exists: session={args.session} -- skipping (delete to rerun)")
+            return
+        from models.counting_integrator import load_activities
+
+        activity_map = load_activities(
+            n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
+        )
+        t0 = time.time()
+        df = _iti_perturbation_session_worker(
+            args.task, args.session, args.alpha_0, args.lambda_,
+            args.n_neurons, args.n_neurons_counting, args.model_types, args.strengths, activity_map,
+        )
+        df.to_pickle(out_path)
+        print(f"session={args.session}: {len(df)} rows in {time.time() - t0:.0f}s -> {out_path}")
+
+    elif args.mode == "submit":
+        root = str(Path(__file__).resolve().parent.parent)
+        print(f"Submitting {args.n_sessions} iti_perturbation jobs for task={args.task}")
+        for session in range(1, args.n_sessions + 1):
+            out_path = OUT_DIR / f"iti_perturbation_pool_{args.task}_session{session}.pkl"
+            if out_path.exists():
+                print(f"  session={session}: already exists -- skipping")
+                continue
+            cmd = (
+                f"venv/bin/python scripts/neural_experiments.py iti_perturbation "
+                f"--task {args.task} --mode run --session {session} "
+                f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} "
+                f"--n_neurons {args.n_neurons} --n_neurons_counting {args.n_neurons_counting} "
+                f"--strengths {' '.join(str(s) for s in args.strengths)} "
+                f"--model_types {' '.join(args.model_types)}"
+            )
+            script = make_job_script(root, [cmd], time_limit="2:0:0", mem="16G")
+            script_path = OUT_DIR / f"_job_iti_perturbation_{args.task}_session{session}.sh"
+            script_path.write_text(script)
+            submit_script(script_path, dry_run=args.dry_run)
+
+    elif args.mode == "collect":
+        files = sorted(OUT_DIR.glob(f"iti_perturbation_pool_{args.task}_session*.pkl"))
+        if not files:
+            print(f"No iti_perturbation_pool_{args.task}_session*.pkl files found in {OUT_DIR}")
+            return
+        df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
+        out_path = OUT_DIR / f"iti_perturbation_{args.task}_raw.pkl"
+        df.to_pickle(out_path)
+        n_sessions = df["session"].nunique()
+        print(f"Collected {len(files)} session file(s), {n_sessions} sessions, "
+              f"{len(df):,} rows -> {out_path}")
+
+
+def _iti_perturbation_dynamics_worker(
+    task: str, model_type: str, strength: float, session: int, qid: int,
+    alpha_0: float, lambda_: float, n_neurons: int, n_neurons_counting: int,
+    activity_map: dict,
+) -> dict:
+    """Full per-timestep decoded `value` trace for ONE (model_type,
+    strength) on ONE specific (session, qid)'s trial -- for visually
+    inspecting what the perturbation does to value's own trajectory. Picks
+    the FIRST trial in that session sharing `qid` (all of that qid's trials
+    share an identical prefix anyway, so any one gives the same stimulus)."""
+    import nengo
+    from models.NEF import build_network
+    from scripts.build_model_inputs import _rescale_0_100_to_neg1_1
+    from utils.binary_transform import nef_obs_values
+
+    if task not in ITI_PERTURBATION_PREFIX_LENGTH:
+        raise ValueError(
+            f"No prefix length defined for task={task!r} -- "
+            f"ITI_PERTURBATION_PREFIX_LENGTH only covers {list(ITI_PERTURBATION_PREFIX_LENGTH)}."
+        )
+    prefix_length = ITI_PERTURBATION_PREFIX_LENGTH[task]
+    trials = _load_synthetic_trials(task, session)
+    trial_data = next((t for t in trials if t["qid"] == qid), None)
+    if trial_data is None:
+        raise ValueError(f"No trial with qid={qid} in session={session} for task={task!r}")
+    raw_prefix = np.array(trial_data["values"][:prefix_length], dtype=float)
+    obs_values = nef_obs_values(_rescale_0_100_to_neg1_1(raw_prefix), task)
+    n_obs = len(obs_values)
+
+    nef_type = "synaptic" if "synaptic" in model_type else "recurrent"
+    base_params = _base_params(
+        task, alpha_0, n_neurons, lambda_,
+        n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
+    )
+    akey = _toy_activity_key(0)  # one fixed repeat -- the dynamics plot only needs one
+    decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
+    p = {**base_params, "seed": akey}
+    net = build_network(obs_values, p, decoders)
+    _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey)
+    with nengo.Simulator(net, dt=float(p["dt"]), seed=int(akey), progress_bar=False) as sim:
+        sim.run(n_obs * (float(p["t_obs"]) + float(p["t_iti"])))
+    t_arr = np.arange(len(sim.data[net.probe_value])) * float(p["dt"])
+    value_decoded = sim.data[net.probe_value].squeeze()
+    return {
+        "t": t_arr, "value": value_decoded,
+        "t_obs": float(p["t_obs"]), "t_iti": float(p["t_iti"]), "n_obs": n_obs,
+    }
+
+
+def run_iti_perturbation_dynamics(args) -> None:
+    """Single-trial full `value` dynamics traces on one (session, qid)'s
+    trial, SAME repeat-seed across strengths/model_types for direct visual
+    comparability -- a lightweight companion to run_iti_perturbation's own
+    aggregated accuracy/reliability analysis, for manually inspecting what
+    the perturbation is actually doing rather than only its aggregate
+    statistical effect. Saved as ONE long-form dataframe (model_type,
+    strength, t, value); plotted separately via
+    scripts/plot_iti_perturbation.py --mode dynamics.
+    """
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    from models.counting_integrator import load_activities
+
+    activity_map = load_activities(
+        n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
+    )
+    rows = []
+    for model_type in args.model_types:
+        for strength in args.strengths:
+            result = _iti_perturbation_dynamics_worker(
+                args.task, model_type, strength, args.session, args.qid,
+                args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting, activity_map,
+            )
+            for t, v in zip(result["t"], result["value"]):
+                rows.append({
+                    "model_type": model_type, "strength": strength,
+                    "t": float(t), "value": float(v),
+                })
+            print(f"{model_type} strength={strength}: simulated ({len(result['t'])} timesteps)")
+
+    df = pd.DataFrame(rows)
+    out_path = OUT_DIR / f"iti_perturbation_dynamics_{args.task}.pkl"
+    df.to_pickle(out_path)
+    print(f"Saved {len(df):,} rows -> {out_path}")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -1787,6 +2134,36 @@ def main() -> None:
     p_scan.add_argument("--base_n_neurons", type=int, required=True)
     p_scan.add_argument("--dry_run", action="store_true")
     p_scan.set_defaults(func=run_param_scan)
+
+    p_iti = sub.add_parser("iti_perturbation")
+    p_iti.add_argument("--task", required=True, choices=list(ITI_PERTURBATION_PREFIX_LENGTH))
+    p_iti.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
+    p_iti.add_argument("--session", type=int, default=None,
+                       help="Session 1..--n_sessions -- required for --mode run")
+    p_iti.add_argument("--n_sessions", type=int, default=200,
+                       help="Total sessions to submit (--mode submit); pool has 200 available")
+    p_iti.add_argument("--alpha_0", type=float, required=True)
+    p_iti.add_argument("--lambda_", type=float, required=True)
+    p_iti.add_argument("--n_neurons", type=int, default=500)
+    p_iti.add_argument("--n_neurons_counting", type=int, default=2000)
+    p_iti.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0])
+    p_iti.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
+    p_iti.add_argument("--dry_run", action="store_true")
+    p_iti.set_defaults(func=run_iti_perturbation)
+
+    p_itid = sub.add_parser("iti_perturbation_dynamics")
+    p_itid.add_argument("--task", required=True, choices=list(ITI_PERTURBATION_PREFIX_LENGTH))
+    p_itid.add_argument("--session", type=int, default=1,
+                        help="Which pool session's trial to use for the single-trial visual")
+    p_itid.add_argument("--qid", type=int, default=0,
+                        help="Which of that session's 8 qids to use")
+    p_itid.add_argument("--alpha_0", type=float, required=True)
+    p_itid.add_argument("--lambda_", type=float, required=True)
+    p_itid.add_argument("--n_neurons", type=int, default=500)
+    p_itid.add_argument("--n_neurons_counting", type=int, default=2000)
+    p_itid.add_argument("--strengths", type=float, nargs="+", default=[0.0, 1.0])
+    p_itid.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
+    p_itid.set_defaults(func=run_iti_perturbation_dynamics)
 
     args = parser.parse_args()
     args.func(args)

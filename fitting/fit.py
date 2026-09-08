@@ -15,8 +15,9 @@ optimum (sigma_resp ~0.04-0.05, NLL falling from 389 at sigma_resp=0.001 to
 NEF's own NLL/multi-seed-ensemble branch, and the math-model stochastic-
 ensemble path (NoisyRL_lambda), were both retired -- too expensive to run
 (NEF) or phased out of active analysis (NoisyRL_lambda). See
-docs/DECISIONS.md. NEF still fits under RMSE via NEF.run(); only the NLL
-path is gone. If ever restored, see archive/fitting/archive_fit_nll_nef.py
+docs/DECISIONS.md. NEF (and NEF_synaptic, dispatched by
+model_type.startswith("NEF")) still fit under RMSE via NEF.run(); only the
+NLL path is gone. If ever restored, see archive/fitting/archive_fit_nll_nef.py
 and archive/models/archive_math_models_noise.py for the removed code.
 
 Entry point::
@@ -379,7 +380,7 @@ def fit(
             mean_loss, fold_losses = _cross_validate_nll(
                 params, ens, row_index, human, k=k)
         else:
-            if model_type == "NEF":
+            if model_type.startswith("NEF"):
                 model_responses_full = NEF.run(params)
             else:
                 model_responses_full = math_models.run(params)
@@ -471,7 +472,7 @@ def fit(
         run_folder / f"{model_type}_{file_stem}_{pid}_performance.pkl"
     )
 
-    if model_type == "NEF":
+    if model_type.startswith("NEF"):
         save_responses(pid, dataset, run_folder, model_type, datafile)
     elif is_resp_noise_model(model_type):
         # run() cannot be called directly with a suffixed model_type -- its

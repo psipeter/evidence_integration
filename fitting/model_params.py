@@ -166,6 +166,13 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 5, "n_neurons": 500, "n_neurons_counting": 500},  # 5 obs/trial; large-n RMSE pass (this session) -- nc=500 not 2000: carrabin precomputes 200 trial-seeds vs yoo's 30/soltani's 40, so nc=2000 would cost ~6.4GB here vs ~1-1.3GB there
         },
+        # Identical to NEF -- shares every architecture param, only nef_type
+        # (derived from model_type at simulate time, see models/NEF.py's
+        # run()) differs. See docs/SCIENCE.md's NEF_synaptic entry.
+        "NEF_synaptic": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 5, "n_neurons": 500, "n_neurons_counting": 500},
+        },
     },
     "yoo": {
         "Mean": {},
@@ -213,6 +220,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons": 500, "n_neurons_counting": 2000},  # 30 obs/trial; large-n RMSE pass (this session)
         },
+        "NEF_synaptic": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 30, "n_neurons": 500, "n_neurons_counting": 2000},
+        },
     },
     "soltani_numbers": {
         "Mean": {},
@@ -257,6 +268,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 500, "n_neurons_counting": 2000},  # 15 obs/trial; large-n RMSE pass (this session)
         },
+        "NEF_synaptic": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 500, "n_neurons_counting": 2000},
+        },
     },
     "soltani_colors": {
         "Mean": {},
@@ -300,6 +315,10 @@ MODEL_PARAMS: dict[str, dict[str, dict[str, object]]] = {
         "NEF": {
             **_NEF_RANGES,
             "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 500, "n_neurons_counting": 2000},  # 15 obs/trial; large-n RMSE pass (this session)
+        },
+        "NEF_synaptic": {
+            **_NEF_RANGES,
+            "fixed": {**_NEF_FIXED, "radius_c": 15, "n_neurons": 500, "n_neurons_counting": 2000},
         },
     },
 }
