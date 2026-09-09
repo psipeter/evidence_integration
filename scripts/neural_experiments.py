@@ -206,6 +206,15 @@ def _base_params(task: str, alpha_0: float, n_neurons: float, lambda_: float,
         **fixed,
         "dataset": task,
         "model_type": "NEF",
+        # Matches models.NEF.run()'s own nef_type derivation from
+        # model_type (NEF.py:374) -- always "recurrent" here since
+        # model_type is hardcoded to "NEF" above, never "...synaptic".
+        # _simulate_full() calls build_network() directly, bypassing
+        # run()'s own derivation, so build_network's own nef_type
+        # requirement (added for NEF_synaptic) needs it set explicitly.
+        # Overridable via **overrides -- the two synaptic-comparison
+        # experiments already pass nef_type="synaptic" that way.
+        "nef_type": "recurrent",
         "pid": 0,
         "base_seed": 0,
         "seed": 0,
@@ -1090,6 +1099,7 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
     from models.NEF import _extract_responses
 
     pe_variances = []
+    pe_means = []
     split_half_rs = []
     responses = []
     for seed in range(args.n_seeds):
@@ -1101,6 +1111,7 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
 
         m = (t_arr >= 3 * t_step + t_iti_ + 0.4) & (t_arr < 3 * t_step + t_iti_ + 0.6)
         pe_variances.append(float(np.var(pe_trace[m])))
+        pe_means.append(float(np.mean(pe_trace[m])))
 
         non_weight_idx = np.where(result["encoders"][:, 0] <= NEURAL_ENCODER_THRESHOLD)[0]
         counts = _bin_counts(result["error_neurons"][m], dt, args.splithalf_bin_ms)
@@ -1125,6 +1136,8 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
         "n_neurons_counting": n_neurons_counting,
         "pe_variance_mean": float(np.mean(pe_variances)),
         "pe_variance_per_seed": pe_variances,
+        "pe_mean_mean": float(np.mean(pe_means)),
+        "pe_mean_per_seed": pe_means,
         "split_half_r_mean": float(np.mean(split_half_valid)) if split_half_valid else float("nan"),
         "split_half_r_sd": float(np.std(split_half_valid)) if split_half_valid else float("nan"),
         "split_half_r_per_seed": split_half_rs,
@@ -1156,7 +1169,12 @@ def run_n_neurons_snr(args) -> None:
          though with a shallower slope -- response variability reflects
          DRIFT accumulated/amplified from this same noise source across
          every prior observation, while this measures the noise source
-         itself at one instant.
+         itself at one instant. Also saves pe_mean_mean (the SAME
+         window's own mean abs(pe_product), per seed then averaged) --
+         added to support a coefficient-of-variation-style RELATIVE
+         noise metric (std/mean) at figure-generation time, since
+         pe_variance_mean's raw scale (~1e-4) needed an ad hoc x1e4
+         figure-side multiplier to read on an axis (see chat).
 
       2. Split-half spike-population reliability -- a purely-neural,
          decoder-free complement: bin the window's raw error-population
@@ -1243,9 +1261,11 @@ def run_n_neurons_snr(args) -> None:
         result = _n_neurons_snr_worker(args, args.cluster_center, args.oddball_deviation,
                                        n_neurons, n_neurons_counting)
         pd.to_pickle(result, out_path)
+        pe_cv = (result["pe_variance_mean"] ** 0.5) / result["pe_mean_mean"] * 100
         print(f"Saved center={args.cluster_center} deviation={args.oddball_deviation} "
               f"n_neurons={n_neurons} n_neurons_counting={n_neurons_counting}: "
               f"pe_variance={result['pe_variance_mean']:.6f} "
+              f"pe_mean={result['pe_mean_mean']:.6f} pe_cv%={pe_cv:.2f} "
               f"split_half_r={result['split_half_r_mean']:.4f} -> {out_path}")
 
     elif args.mode == "submit":
@@ -1284,7 +1304,8 @@ def run_n_neurons_snr(args) -> None:
         grid = pd.DataFrame([
             {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
              "n_neurons": r["n_neurons"], "n_neurons_counting": r["n_neurons_counting"],
-             "pe_variance_mean": r["pe_variance_mean"], "split_half_r_mean": r["split_half_r_mean"],
+             "pe_variance_mean": r["pe_variance_mean"], "pe_mean_mean": r["pe_mean_mean"],
+             "split_half_r_mean": r["split_half_r_mean"],
              "split_half_r_sd": r["split_half_r_sd"], "response_variance": r["response_variance"]}
             for r in results
         ]).sort_values(["cluster_center", "oddball_deviation", "n_neurons"]).reset_index(drop=True)

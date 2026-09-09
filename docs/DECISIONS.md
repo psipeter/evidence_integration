@@ -621,3 +621,73 @@ current qualitative-baseline-consistency check; revisit once
 `archive/HISTORY_*.md` entry (NEF_synaptic was reimplemented, not
 retired).
 
+---
+
+## `neural_main`'s row 1/row 2 dependent variables converted to relative (%) metrics; row 3's PE noise CV designed, pending cluster collection
+
+**Decision:** Row 1's "PE decrease" (`max_pe - end_pe`, oddball window)
+and row 2's "Activity decay"/"ΔR decay" (`first - last`, `early - late`)
+are now expressed as percentages of their own starting value --
+`(max-end)/max`, `(first-last)/first`, `(early-late)/early` -- relabeled
+"PE decay (%)", "Activity decay (%)", "ΔR decay (%)" throughout
+`neural_main` (`scripts/make_paper_figures.py`:
+`_plot_oddball_param_effect`, `_plot_oddball_dv_scatter`,
+`_param_scan_decay_metrics`, `_plot_neural_main_decay_vs_param`,
+`_plot_param_scan_dv_scatter`). Row 3's "PE noise" (`pe_variance_mean`,
+`n_neurons` sweep) gets an analogous coefficient-of-variation metric,
+`pe_cv_pct = sqrt(pe_variance_mean) / pe_mean_mean * 100` --
+`_n_neurons_snr_worker` (`scripts/neural_experiments.py`) now also saves
+`pe_mean_mean` (mean `|pe_product|` in the same window), but the figure
+itself isn't repointed at it yet -- the existing 50-cell grid predates
+this field and needs a full resubmit/recollect first (see chat for the
+exact commands).
+
+**Why row 1:** a critic's objection, not a numerical audit -- a bigger
+peak PE has more room to fall before settling near zero regardless of
+whether the network is genuinely "resolving" it faster, so the absolute
+decrease is confounded with `max_pe` itself, which is exactly what `α₀`
+is being swept to test. Verified on real data (`alpha_0` sweep,
+`soltani_numbers`, 90 grid cells): `max_pe` and the correction both stay
+well-behaved (ratio always in [0,1], no cell with `end_pe > max_pe`),
+and the relative version shows proportionally tighter SEMs at every
+`alpha_0` value than the absolute one.
+
+**Why row 2 too, despite a different mechanism:** checked directly (155
+real pids, `lambda_` sweep) whether the SAME confound applies here --
+it doesn't, in either direction expected. Activity decay's own
+denominator (`act_first`) is uncorrelated with `lambda_` (r=-0.11,
+n.s.); ΔR decay's own denominator (`resp_early`) is mildly
+*anti*-correlated (r=-0.35), the opposite direction from a confound (a
+smaller starting value if anything works against a bigger absolute
+decrease, not for it). So neither absolute metric was actually biased.
+Converted anyway for interpretability (a bounded [0,1] "fraction
+resolved" reads more directly than a raw activity/response-magnitude
+difference) and so all three rows share one consistent percentage
+framing. Both relative versions came out with meaningfully *tighter*
+correlations to `lambda_` than their absolute counterparts (activity:
+r=0.86→0.89; ΔR: r=0.61→0.92) -- a real clarity gain, not just a
+relabeling.
+
+**Why row 3's CV over the alternative (normalize by the smallest-
+`n_neurons` condition instead):** that alternative needs no new
+simulation output at all (pure recompute from the existing
+`pe_variance_mean` grid) and was seriously considered -- it produces a
+clean, monotonic 100%→14% curve on the existing data. Went with CV
+instead because it's relative to the signal itself (the actual textbook
+SNR framing implied by this row's own name), not to an arbitrary
+reference condition inside the current sweep's own range -- the
+baseline-relative version's absolute numbers would silently shift if
+the sweep's own smallest `n_neurons` value ever changed. Confirmed
+locally before committing to a real cluster resubmit (`nef-debug-runner`,
+`n_neurons` ∈ {50, 250}, `n_seeds=3`, no files written): `pe_cv_pct`
+computes without a near-zero-denominator blowup (32.7% → 13.9%), and
+decreases with `n_neurons` matching every other metric in this row.
+
+**What did NOT change:** row 1's oddball design, row 2's `param_scan`
+design, and row 3's `n_neurons_snr` window/worker structure are all
+unchanged -- only how the same underlying quantities get combined into
+a displayed number.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (metric refinement, nothing retired).
+

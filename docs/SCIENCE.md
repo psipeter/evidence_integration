@@ -195,6 +195,21 @@ noise process, this would rest on an unvalidated Gaussian-noise assumption
 about human behavior, and it doesn't just flatten the curve, it reverses
 its apparent direction (see `docs/DECISIONS.md` for the actual numbers).
 
+**Also settled this session (new, separate thread): `neural_main`'s row
+1/row 2 dependent variables converted to relative (%) framing.** Row 1's
+"PE decrease" and row 2's "Activity decay"/"ΔR decay" were absolute
+differences, confounded (row 1) or just less interpretable (row 2) than
+a percentage of each quantity's own starting value — see
+`docs/DECISIONS.md` for the full reasoning and the correlation numbers
+that motivated it. Now "PE decay (%)", "Activity decay (%)", "ΔR decay
+(%)" throughout. Row 3's "PE noise" gets an analogous
+coefficient-of-variation treatment (`pe_cv_pct`) — designed and verified
+locally (well-scaled, decreases with `n_neurons` as expected), but NOT
+yet wired into the figure: `_n_neurons_snr_worker` now saves the
+`pe_mean_mean` the ratio needs, but the existing 50-cell grid predates
+that field and needs a full resubmit/recollect before `neural_main`'s
+row 3 can actually switch over.
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships). Model
 fitting against real `task_backend` (soltani) data — the human-only pilot

@@ -3737,12 +3737,26 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
 
 def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_numbers"):
     """Panel: sweep_param (x) vs max |decoded PE| (peak error response
-    within the oddball observation's own window) AND its absolute
-    decrease by the end of that SAME window (max minus the window's own
-    end value -- how much learning/value-updating has shrunk the error
-    WITHIN the oddball observation, not across the whole trial), twin
-    y-axes -- mean +- SEM AGGREGATED across every (cluster_center,
-    oddball_deviation) cell in the grid for that sweep_param value.
+    within the oddball observation's own window) AND its RELATIVE decay
+    by the end of that SAME window ((max - end) / max, as a percentage --
+    what FRACTION of the peak error has been resolved by
+    learning/value-updating WITHIN the oddball observation, not across
+    the whole trial), twin y-axes -- mean +- SEM AGGREGATED across every
+    (cluster_center, oddball_deviation) cell in the grid for that
+    sweep_param value.
+
+    Relative rather than absolute decay (see chat): the raw absolute
+    decrease is confounded with max_pe itself -- a bigger peak has more
+    room to fall, so "decreases more" in absolute terms even without any
+    real difference in how completely the error resolves. The ratio is
+    computed PER GRID CELL first, then aggregated (mean/SEM across
+    cells), matching decrease's own prior aggregation order -- NOT a
+    ratio of the aggregated means, which would need separate error
+    propagation and lose the per-cell distribution that SEM describes.
+    Verified directly on real data (alpha_0 sweep, soltani_numbers): the
+    ratio stays within [0, 1] for every cell (no case where end_pe >
+    max_pe), and shows a cleaner, proportionally-tighter-SEM monotonic
+    trend with alpha_0 than the absolute metric did.
 
     AGGREGATION JUSTIFICATION (revised after real data, not the original
     a-priori assumption -- see chat): centers are NOT actually
@@ -3766,11 +3780,12 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     d = pd.read_pickle(path)
-    grid = d["grid"]
-    agg = (grid.groupby(sweep_param)[["max_pe", "decrease"]]
+    grid = d["grid"].copy()
+    grid["relative_decrease"] = grid["decrease"] / grid["max_pe"] * 100
+    agg = (grid.groupby(sweep_param)[["max_pe", "relative_decrease"]]
           .agg(["mean", "sem"]).reset_index())
     agg.columns = [sweep_param, "max_pe_mean", "max_pe_sem",
-                  "decrease_mean", "decrease_sem"]
+                  "relative_decrease_mean", "relative_decrease_sem"]
     agg = agg.sort_values(sweep_param)
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
@@ -3786,8 +3801,8 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
         ax.set_xlim(left=0)
 
     ax2 = ax.twinx()
-    ax2.errorbar(agg[sweep_param], agg["decrease_mean"], yerr=agg["decrease_sem"],
-                fmt="o-", color=c2, lw=1.8, ms=5, capsize=3, label="PE decrease")
+    ax2.errorbar(agg[sweep_param], agg["relative_decrease_mean"], yerr=agg["relative_decrease_sem"],
+                fmt="o-", color=c2, lw=1.8, ms=5, capsize=3, label="PE decay (%)")
     # No text label on ax2 itself -- shared/linked with col 3's own
     # y-axis (see make_neural_main), which already carries this label.
     sns.despine(ax=ax2, top=True)
@@ -3807,18 +3822,20 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
 
 
 def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Row 1, col 3: max |decoded PE| (x) vs its own decrease by the
-    oddball window's end (y), one point per (cluster_center,
-    oddball_deviation, sweep_param) grid cell -- the SAME full grid
-    _plot_oddball_param_effect aggregates into twin-axis means vs
-    sweep_param, here shown instead as a direct scatter of panel 2's own
-    two dependent variables against each other. Matches the ORIGINAL
-    neural_giant figure's own DV-vs-DV convention exactly
-    (_plot_neural_sigma_vs_pe_variability / _plot_neural_resp_vs_act_decay:
-    single flat color, small low-alpha points, sns.regplot fit line with
-    CI band, pearsonr r + significance stars in the legend) rather than
-    color-coding by sweep_param -- this directly visualizes the row's own
-    claim (higher alpha_0 -> both higher max_pe AND higher decrease) as a
+    """Row 1, col 3: max |decoded PE| (x) vs its own relative decay by
+    the oddball window's end (y, (max-end)/max as a percentage -- see
+    _plot_oddball_param_effect's own docstring for why relative rather
+    than absolute), one point per (cluster_center, oddball_deviation,
+    sweep_param) grid cell -- the SAME full grid _plot_oddball_param_effect
+    aggregates into twin-axis means vs sweep_param, here shown instead as
+    a direct scatter of panel 2's own two dependent variables against
+    each other. Matches the ORIGINAL neural_giant figure's own DV-vs-DV
+    convention exactly (_plot_neural_sigma_vs_pe_variability /
+    _plot_neural_resp_vs_act_decay: single flat color, small low-alpha
+    points, sns.regplot fit line with CI band, pearsonr r + significance
+    stars in the legend) rather than color-coding by sweep_param -- this
+    directly visualizes the row's own claim (higher alpha_0 -> both
+    higher max_pe AND a higher fraction of it resolved by decay) as a
     single positive correlation across the whole grid.
     """
     path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
@@ -3827,16 +3844,17 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     d = pd.read_pickle(path)
-    grid = d["grid"]
+    grid = d["grid"].copy()
+    grid["relative_decrease"] = grid["decrease"] / grid["max_pe"] * 100
 
     color = get_palette(6)[0]
-    r, p = pearsonr(grid["max_pe"], grid["decrease"])
-    ax.scatter(grid["max_pe"], grid["decrease"], color=color, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=grid, x="max_pe", y="decrease", ax=ax, color=color, ci=95,
+    r, p = pearsonr(grid["max_pe"], grid["relative_decrease"])
+    ax.scatter(grid["max_pe"], grid["relative_decrease"], color=color, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="max_pe", y="relative_decrease", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
     ax.set_xlabel("PE maximum")
-    ax.set_ylabel("PE decrease")
+    ax.set_ylabel("PE decay (%)")
     ax.set_xlim(left=0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
@@ -4001,6 +4019,26 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
     into the observation) for activity, the SAME conventions the
     synthetic/oddball pipelines already use elsewhere in this file.
 
+    Also returns act_rel = act_decay / act_first * 100 and
+    resp_rel = resp_decay / early * 100 -- each decay expressed as a
+    percentage of its own starting value (first observation's activity;
+    early-observations' response-change magnitude), mirroring row 1's PE
+    decay (%) treatment (see _plot_oddball_param_effect's own
+    docstring). Checked directly on real data (lambda_ sweep,
+    soltani_numbers, 155 real pids): act_first is essentially
+    uncorrelated with lambda_ (r=-0.11, n.s.) and early IS mildly
+    anti-correlated with lambda_ (r=-0.35) -- the OPPOSITE direction from
+    a confound (a bigger denominator inflating the absolute decrease),
+    so unlike PE decay neither conversion here is fixing a mechanical
+    bias; the absolute versions were already fair comparisons across
+    lambda_ values. Converting anyway for interpretability (a bounded
+    [0,1] "fraction resolved" reads more directly than a raw difference)
+    and for consistency with row 1's now-relative panel; both ratios are
+    well-behaved throughout (no non-positive denominators, ratio stays in
+    [0,1] for every point) and if anything show TIGHTER correlations with
+    lambda_ than their absolute counterparts (act: r=0.89 vs 0.86;
+    resp: r=0.92 vs 0.61).
+
     Output column is named EXACTLY `sweep_param` (not a generic
     "sweep_value") so this drops directly into _plot_neural_dual_vs_param,
     the SAME shared helper the original neural_giant's own row-3 panels
@@ -4051,7 +4089,9 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
         # Activity: pool across ALL of this pid's trials per observation,
         # THEN take first-minus-last on that pooled curve.
         act_by_obs = act_df.groupby("observation")["activity"].mean()
-        act_decay = float(act_by_obs[obs_sorted[0]]) - float(act_by_obs[obs_sorted[-1]])
+        act_first = float(act_by_obs[obs_sorted[0]])
+        act_decay = act_first - float(act_by_obs[obs_sorted[-1]])
+        act_rel = act_decay / act_first * 100
 
         # Response: per-trial delta (first observation's own delta
         # convention is |response|, matching this file's other decay
@@ -4062,19 +4102,21 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
         first_obs = obs_sorted[0]
         resp_df.loc[resp_df["observation"] == first_obs, "delta"] = (
             resp_df.loc[resp_df["observation"] == first_obs, "response"].abs())
-        early = resp_df[resp_df["observation"].isin(obs_sorted[:2])]["delta"].mean()
-        late = resp_df[resp_df["observation"].isin(obs_sorted[-2:])]["delta"].mean()
-        resp_decay = float(early) - float(late)
+        early = float(resp_df[resp_df["observation"].isin(obs_sorted[:2])]["delta"].mean())
+        late = float(resp_df[resp_df["observation"].isin(obs_sorted[-2:])]["delta"].mean())
+        resp_decay = early - late
+        resp_rel = resp_decay / early * 100
 
         rows.append({sweep_param: sweep_value, "pid": pid,
-                    "resp_decay": resp_decay, "act_decay": act_decay})
+                    "resp_decay": resp_decay, "act_decay": act_decay,
+                    "act_rel": act_rel, "resp_rel": resp_rel})
 
     return pd.DataFrame(rows)
 
 
 def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_numbers"):
-    """Row 2/3, col 2: decay(deltaR) AND decay(deltaA) vs sweep_param,
-    twin axes, one point per (sweep_value, seed) -- reuses
+    """Row 2/3, col 2: activity decay (%) AND deltaR decay (%) vs
+    sweep_param, twin axes, one point per (sweep_value, seed) -- reuses
     _plot_neural_dual_vs_param DIRECTLY, the SAME helper the ORIGINAL
     neural_giant's own row-3 panels use, so the visual convention is
     identical. Seeds play the role virtual pids played in that figure's
@@ -4082,6 +4124,11 @@ def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_
     separate large-N synthetic campaign -- this figure's own design scans
     explicit parameter values instead of random draws, so seeds are the
     only source of independent replication available per value.
+
+    BOTH axes are relative (act_rel, resp_rel -- each decay AS A
+    PERCENTAGE OF its own starting value), not the raw act_decay/
+    resp_decay differences -- see _param_scan_decay_metrics's own
+    docstring for why.
     """
     df = _param_scan_decay_metrics(sweep_param, task)
     if df is None or len(df) < 3:
@@ -4090,13 +4137,13 @@ def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_
         return
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     param_label = label_sym.get(sweep_param, sweep_param)
-    # act_decay on the left axis, resp_decay on the right/twin axis --
-    # resp_decay is the quantity col 3's own y-axis shows too, so keeping
+    # act_rel on the left axis, resp_rel on the right/twin axis --
+    # resp_rel is the quantity col 3's own y-axis shows too, so keeping
     # it on the twin axis here lets that axis be shared/linked with col
     # 3's y-axis (see make_neural_main's own row-wiring).
     return _plot_neural_dual_vs_param(
         ax, df, sweep_param, param_label,
-        "act_decay", "resp_decay", "Activity decay", "\u0394R decay",
+        "act_rel", "resp_rel", "Activity decay (%)", "\u0394R decay (%)",
         include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
 
 
@@ -4194,17 +4241,21 @@ def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers"):
 
 
 def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Row 2, col 3: NEF's own |Delta response| decay (y) vs weight-tuned
-    activity decay (x), one point per (sweep_param value, real pid) --
-    the SAME per-pid decay metrics _plot_neural_main_decay_vs_param
-    twin-axis plots vs sweep_param, here shown instead as a direct
-    scatter of THAT panel's own two dependent variables against each
-    other. This is the row-2 analogue of row 1's _plot_oddball_dv_scatter
-    and of the ORIGINAL neural_giant's own DV-vs-DV panels (panel 5:
-    sigma_R vs sigma_PE; panel 9: DeltaR-decay vs DeltaA-decay) --
-    matching that exact convention (single flat color, small low-alpha
-    points, sns.regplot fit line with CI band, pearsonr r + significance
-    stars in the legend) rather than color-coding by sweep_param.
+    """Row 2, col 3: NEF's own |Delta response| decay % (y) vs activity
+    decay % (x), one point per (sweep_param value, real pid) -- the SAME
+    per-pid decay metrics _plot_neural_main_decay_vs_param twin-axis
+    plots vs sweep_param, here shown instead as a direct scatter of THAT
+    panel's own two dependent variables against each other. This is the
+    row-2 analogue of row 1's _plot_oddball_dv_scatter and of the
+    ORIGINAL neural_giant's own DV-vs-DV panels (panel 5: sigma_R vs
+    sigma_PE; panel 9: DeltaR-decay vs DeltaA-decay) -- matching that
+    exact convention (single flat color, small low-alpha points,
+    sns.regplot fit line with CI band, pearsonr r + significance stars
+    in the legend) rather than color-coding by sweep_param.
+
+    BOTH axes are relative (act_rel, resp_rel), not the raw act_decay/
+    resp_decay differences -- see _param_scan_decay_metrics's own
+    docstring for why.
     """
     df = _param_scan_decay_metrics(sweep_param, task)
     if df is None or len(df) < 3:
@@ -4212,13 +4263,18 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     color = get_palette(6)[0]
-    r, p = pearsonr(df["act_decay"], df["resp_decay"])
-    ax.scatter(df["act_decay"], df["resp_decay"], color=color, s=8, alpha=0.35, zorder=2)
-    sns.regplot(data=df, x="act_decay", y="resp_decay", ax=ax, color=color, ci=95,
+    r, p = pearsonr(df["act_rel"], df["resp_rel"])
+    ax.scatter(df["act_rel"], df["resp_rel"], color=color, s=8, alpha=0.35, zorder=2)
+    sns.regplot(data=df, x="act_rel", y="resp_rel", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("Activity decay")
-    ax.set_ylabel("ΔR decay")
+    # fontsize=13 (below axes.labelsize=17) -- the added " (%)" pushed this
+    # specific label past the figure's own right edge in the 3x3 layout
+    # (verified via xaxis.label.get_window_extent -- clipped ~20px at the
+    # default size, clean with margin at 13); every other label in this
+    # figure is short enough to stay at the shared default.
+    ax.set_xlabel("Activity decay (%)", fontsize=13)
+    ax.set_ylabel("ΔR decay (%)")
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
@@ -4235,12 +4291,16 @@ def make_neural_main() -> Path:
         production default):
         Col 1: |decoded PE| vs time, one representative center, BOTH
           deviation signs, 3 representative alpha_0 values.
-        Col 2: alpha_0 (x) vs max |decoded PE| AND absolute decrease by
-          the end of the oddball's own window, twin axes, mean +- SEM
-          aggregated across the whole grid -- the neural prediction this
-          row tests: higher alpha_0 produces a bigger initial response
-          AND more dramatic attenuation from learning/value-updating.
-        Col 3: max |decoded PE| (x) vs decrease (y) plotted directly
+        Col 2: alpha_0 (x) vs max |decoded PE| AND PE decay (%) -- the
+          RELATIVE decrease by the end of the oddball's own window,
+          (max-end)/max -- twin axes, mean +- SEM aggregated across the
+          whole grid -- the neural prediction this row tests: higher
+          alpha_0 produces a bigger initial response AND resolves a
+          bigger FRACTION of it from learning/value-updating (relative,
+          not absolute, decay -- see _plot_oddball_param_effect's own
+          docstring for why: absolute decrease is confounded with max_pe
+          itself).
+        Col 3: max |decoded PE| (x) vs PE decay % (y) plotted directly
           against each other, one point per full grid cell -- the same
           two DVs col 2 twin-axis plots vs alpha_0, here as a direct
           scatter, matching the ORIGINAL neural_giant's own DV-vs-DV
@@ -4261,17 +4321,23 @@ def make_neural_main() -> Path:
           value, and folded hierarchically (trial -> pid) since each
           replicate is now a real multi-trial participant, not a single
           arbitrary seed.
-        Col 2: decay(deltaR) AND decay(deltaA) vs lambda_, twin axes, one
-          point per (lambda_, real pid) -- direct reuse of
+        Col 2: deltaR decay (%) AND activity decay (%) vs lambda_, twin
+          axes, one point per (lambda_, real pid) -- direct reuse of
           _plot_neural_dual_vs_param (the SAME helper the ORIGINAL
           neural_giant's own row-3 panels use), with real pids playing
           the "many independent draws" role that `synthetic`'s virtual
           pids played in that figure, since this figure's own design
           scans explicit parameter values rather than random draws.
-        Col 3: decay(deltaA) (x) vs decay(deltaR) (y) plotted directly
-          against each other, one point per (lambda_, real pid) -- the
-          row-2 analogue of row 1's own col-3 panel, and of the ORIGINAL
-          neural_giant's own panel 9 (DeltaR-decay vs DeltaA-decay).
+          BOTH are RELATIVE ((first/early - last/late)/(first/early), as
+          a percentage) -- see _param_scan_decay_metrics's own docstring;
+          unlike row 1's PE decay neither is correcting a confound (each
+          denominator doesn't vary with lambda_ the way max_pe varies
+          with alpha_0), it's for interpretability/consistency with row 1.
+        Col 3: activity decay % (x) vs deltaR decay % (y) plotted
+          directly against each other, one point per (lambda_, real pid)
+          -- the row-2 analogue of row 1's own col-3 panel, and of the
+          ORIGINAL neural_giant's own panel 9 (DeltaR-decay vs
+          DeltaA-decay).
       Row 3 (n_neurons): NOT YET BUILT -- same param_scan structure, own
         fresh scan, once row 2 is confirmed.
 
@@ -4298,7 +4364,7 @@ def make_neural_main() -> Path:
                              constrained_layout=True)
 
     # Each row's col-2 twin/right axis and col-3's own y-axis plot the
-    # SAME quantity (PE decrease; ΔR Decay; σ (oddball)) -- sharing them
+    # SAME quantity (PE decay %; ΔR decay %; σ (oddball)) -- sharing them
     # (Axes.sharey, matplotlib >=3.3) keeps their tick locations/range in
     # sync so that shared quantity reads as literally the same axis
     # across both panels, not just visually similar.
