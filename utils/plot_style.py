@@ -132,6 +132,44 @@ def get_palette(n: int = 10) -> list:
     return sns.color_palette("colorblind", n)
 
 
+def _nice_number(x: float, round_result: bool) -> float:
+    """One "nice" number (1/2/5/10 x a power of ten) near `x` -- classic
+    Heckbert axis-tick algorithm. `round_result=True` rounds to the
+    nearest nice number (for a tick step); `False` rounds UP (for a data
+    span, so the resulting step from that span doesn't undershoot it)."""
+    if x <= 0:
+        return 1.0
+    exp = np.floor(np.log10(x))
+    f = x / 10**exp
+    if round_result:
+        nf = 1 if f < 1.5 else 2 if f < 3 else 5 if f < 7 else 10
+    else:
+        nf = 1 if f <= 1 else 2 if f <= 2 else 5 if f <= 5 else 10
+    return nf * 10**exp
+
+
+def nice_ticks(data_min: float, data_max: float, n: int = 5) -> list:
+    """Project-wide axis tick convention (see .claude/agents/figure-viewer.md):
+    round-number ticks that pad slightly beyond [data_min, data_max] at
+    both ends, with intermediate ticks evenly dividing that span. `n` is
+    the target tick count; the actual count can differ by one once the
+    padded range is snapped to round numbers. n=5 empirically holds up
+    better than n=4 once data doesn't start near zero (n=4 tends to snap
+    the low end all the way down to 0, over-padding)."""
+    if data_max <= data_min:
+        return [data_min]
+    span = _nice_number(data_max - data_min, round_result=False)
+    step = _nice_number(span / max(n - 1, 1), round_result=True)
+    lo = np.floor(data_min / step) * step
+    hi = np.ceil(data_max / step) * step
+    if lo >= data_min:
+        lo -= step
+    if hi <= data_max:
+        hi += step
+    n_ticks = int(round((hi - lo) / step)) + 1
+    return [round(lo + i * step, 10) for i in range(n_ticks)]
+
+
 def pvalue_to_stars(p: float) -> str:
     if p <= 1e-4:
         return "****"

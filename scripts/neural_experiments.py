@@ -1396,12 +1396,33 @@ def run_oddball(args) -> None:
             print(f"No oddball_{args.sweep_param}_{args.task}_c*_d*_v*.pkl files found in {OUT_DIR}")
             return
         results = [pd.read_pickle(f) for f in files]
-        grid = pd.DataFrame([
-            {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
-             args.sweep_param: r["sweep_value"], "max_pe": r["max_pe"], "end_pe": r["end_pe"],
-             "decrease": r["decrease"]}
-            for r in results
-        ]).sort_values(["cluster_center", "oddball_deviation", args.sweep_param]).reset_index(drop=True)
+        # A per-cell argmax time is noisy for a handful of cells (low-SNR
+        # traces where a small late fluctuation can outrank the true early
+        # peak, producing a spuriously tiny decay_duration and blowing up
+        # any downstream rate -- observed directly, e.g. 3 of 90 cells for
+        # the alpha_0 sweep). Fix: compute ONE robust "typical" peak time
+        # for the WHOLE grid (median of every cell's own argmax time --
+        # robust to that handful of outliers), then use THAT single fixed
+        # time as the benchmark everywhere a "maximum" is measured, for
+        # every cell -- not each cell's own local argmax. decay_duration is
+        # then a genuine constant (window end minus that one fixed time),
+        # so a downstream rate (decrease / decay_duration) never risks
+        # dividing by a near-zero, cell-specific duration.
+        peak_times = np.array([r["t"][np.argmax(r["pe"])] for r in results])
+        typical_peak_time = float(np.median(peak_times))
+        grid_rows = []
+        for r in results:
+            idx = int(np.argmin(np.abs(r["t"] - typical_peak_time)))
+            max_pe = float(r["pe"][idx])
+            end_pe = float(r["end_pe"])
+            grid_rows.append({
+                "cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
+                args.sweep_param: r["sweep_value"], "max_pe": max_pe, "end_pe": end_pe,
+                "decrease": max_pe - end_pe,
+                "decay_duration": float(r["t"][-1] - r["t"][idx]),
+            })
+        grid = pd.DataFrame(grid_rows).sort_values(
+            ["cluster_center", "oddball_deviation", args.sweep_param]).reset_index(drop=True)
         traces = {
             (r["cluster_center"], r["oddball_deviation"], r["sweep_value"]): {"t": r["t"], "pe": r["pe"]}
             for r in results
@@ -1414,6 +1435,7 @@ def run_oddball(args) -> None:
             "base_lambda_": args.base_lambda_,
             "base_n_neurons": args.base_n_neurons,
             "cluster_spread": args.cluster_spread,
+            "typical_peak_time": typical_peak_time,
         }
         out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}.pkl"
         pd.to_pickle(result_all, out_path)

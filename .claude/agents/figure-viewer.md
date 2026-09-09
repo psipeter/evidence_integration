@@ -38,6 +38,24 @@ instead of guessing.
    or the equivalent path) before finishing — including on an early
    exit or an inconclusive result. Never leave a rendered PNG behind.
 
+## Standing tick convention (check on every panel, even if not asked)
+
+This project's axis ticks should follow one convention throughout:
+- The **minimum** tick is a round number slightly BELOW the actual data's
+  lowest value (padding, not sitting exactly on the data edge).
+- The **maximum** tick is a round number slightly ABOVE the actual data's
+  highest value (same padding logic).
+- A small number of **intermediate** ticks evenly divide that min-max
+  range (e.g. 3-5 ticks total is typical).
+
+When reporting on any panel, note if its ticks look like matplotlib's
+raw autoscaled default instead (non-round numbers, ticks sitting exactly
+at the data's min/max with no padding, or unevenly spaced) — flag it as
+a candidate for this convention even if the calling thread didn't ask
+about ticks specifically, the same way you'd flag an entirely blank
+panel or a missing axis label. This is a standing project convention,
+not a one-off request.
+
 ## Boundaries
 
 - Never edit a figure script, even if the fix looks obvious — report
