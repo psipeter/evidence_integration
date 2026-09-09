@@ -3554,19 +3554,26 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
     pal = get_palette(max(6, len(pairs)))
     for i, (n_neurons, n_neurons_counting) in enumerate(pairs):
         seed_traces = traces[(n_neurons, n_neurons_counting)]
-        for j, seed_tr in enumerate(seed_traces):
-            label = f"n={n_neurons}, nc={n_neurons_counting}" if j == 0 else None
+        for seed_tr in seed_traces:
             ax.plot(seed_tr["t"], seed_tr["value"], color=pal[i], lw=0.8,
-                    alpha=0.5, zorder=i + 1, label=label)
+                    alpha=0.5, zorder=i + 1)
 
-    ax.plot(readout_t, ideal_v, color="black", marker="o", ms=4, lw=1.4,
-           zorder=10, label="target")
+    ax.plot(readout_t, ideal_v, color="black", marker="o", ms=4, lw=1.4, zorder=10)
 
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Decoded value")
+    ax.set_ylabel("Value (oddball)")
     ax.set_xlim(0, n_obs * t_step)
     ax.set_ylim(-1, 1)
-    ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
+    # Explicit legend handles at a heavier weight than the actual plotted
+    # lines (deliberately thin/low-alpha here, for the "spiky" data-
+    # density effect) -- matching the line weight every other panel's
+    # legend uses, rather than reusing this panel's own faint data-line
+    # style as the swatch.
+    handles = [Line2D([0], [0], color=pal[i], lw=1.8,
+                      label=f"n={n_neurons}, nc={n_neurons_counting}")
+              for i, (n_neurons, n_neurons_counting) in enumerate(pairs)]
+    handles.append(Line2D([0], [0], color="black", marker="o", ms=4, lw=1.8, label="target"))
+    ax.legend(handles=handles, fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -3605,10 +3612,9 @@ def _plot_neural_dual_vs_param(
     ax.scatter(df[param_col], df[y1_col], color=c1, s=8, alpha=0.35, zorder=2)
     sns.regplot(data=df, x=param_col, y=y1_col, ax=ax, color=c1, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"r={r1:.2f}{pvalue_to_stars(p1)}")
+               label=f"{y1_label}: r={r1:.2f}{pvalue_to_stars(p1)}")
     ax.set_xlabel(param_label)
-    ax.set_ylabel(y1_label, color=c1)
-    ax.tick_params(axis="y", labelcolor=c1)
+    ax.set_ylabel(y1_label)
     if include_x_zero:
         ax.set_xlim(left=0)
 
@@ -3616,11 +3622,22 @@ def _plot_neural_dual_vs_param(
     ax2.scatter(df[param_col], df[y2_col], color=c2, s=8, alpha=0.35, zorder=2)
     sns.regplot(data=df, x=param_col, y=y2_col, ax=ax2, color=c2, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
-               label=f"r={r2:.2f}{pvalue_to_stars(p2)}")
-    ax2.set_ylabel(y2_label, color=c2)
-    ax2.tick_params(axis="y", labelcolor=c2)
+               label=f"{y2_label}: r={r2:.2f}{pvalue_to_stars(p2)}")
+    # No text label on ax2 itself -- its y-axis is now shared/linked with
+    # col 3's own y-axis (make_neural_main's row-wiring, via Axes.sharey),
+    # which already carries this same label; repeating it here would just
+    # be the same text twice for what reads as one aligned axis. Explicit
+    # "" (not just omitting the call) -- sns.regplot's own y= column-name
+    # default would otherwise leak through as the label.
+    ax2.set_ylabel("")
     sns.despine(ax=ax2, top=True)
 
+    # twinx() stacks ax2 ABOVE ax by default, so a legend drawn on ax would
+    # render BEHIND ax2's own data (the classic twinx+legend z-order trap)
+    # -- raise ax above ax2 and make its patch transparent so ax2's own
+    # background still shows through.
+    ax.set_zorder(ax2.get_zorder() + 1)
+    ax.patch.set_visible(False)
     handles1, labels1 = ax.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
     ax.legend(handles1 + handles2, labels1 + labels2, fontsize=7,
@@ -3714,11 +3731,11 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
 
     ax.set_xlim(0, float(df["t"].max()))
     ax.set_xlabel("Time")
-    ax.set_ylabel("Decoded PE (oddball)")
+    ax.set_ylabel("PE (oddball)")
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_numbers"):
     """Panel: sweep_param (x) vs max |decoded PE| (peak error response
     within the oddball observation's own window) AND its absolute
     decrease by the end of that SAME window (max minus the window's own
@@ -3762,20 +3779,31 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
     pal = get_palette(6)
     c1, c2 = pal[0], pal[1]
     ax.errorbar(agg[sweep_param], agg["max_pe_mean"], yerr=agg["max_pe_sem"],
-               fmt="o-", color=c1, lw=1.8, ms=5, capsize=3)
+               fmt="o-", color=c1, lw=1.8, ms=5, capsize=3, label="PE maximum")
     ax.set_xlabel(sym)
-    ax.set_ylabel("Max decoded PE", color=c1)
-    ax.tick_params(axis="y", labelcolor=c1)
+    ax.set_ylabel("PE maximum")
     if sweep_param in ("alpha_0", "lambda_"):
         ax.set_xlim(left=0)
 
     ax2 = ax.twinx()
     ax2.errorbar(agg[sweep_param], agg["decrease_mean"], yerr=agg["decrease_sem"],
-                fmt="o-", color=c2, lw=1.8, ms=5, capsize=3)
-    ax2.set_ylabel("PE decrease", color=c2)
-    ax2.tick_params(axis="y", labelcolor=c2)
+                fmt="o-", color=c2, lw=1.8, ms=5, capsize=3, label="PE decrease")
+    # No text label on ax2 itself -- shared/linked with col 3's own
+    # y-axis (see make_neural_main), which already carries this label.
     sns.despine(ax=ax2, top=True)
     sns.despine(ax=ax, top=True, right=True)
+
+    # twinx() stacks ax2 ABOVE ax by default, so a legend drawn on ax would
+    # render BEHIND ax2's own data (the classic twinx+legend z-order trap)
+    # -- raise ax above ax2 and make its patch transparent so ax2's own
+    # background still shows through.
+    ax.set_zorder(ax2.get_zorder() + 1)
+    ax.patch.set_visible(False)
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2, fontsize=7,
+             frameon=True, framealpha=0.9, loc="best")
+    return ax2
 
 
 def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
@@ -3807,7 +3835,7 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
     sns.regplot(data=grid, x="max_pe", y="decrease", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("Max decoded PE")
+    ax.set_xlabel("PE maximum")
     ax.set_ylabel("PE decrease")
     ax.set_xlim(left=0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
@@ -4044,7 +4072,7 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
     return pd.DataFrame(rows)
 
 
-def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_numbers"):
     """Row 2/3, col 2: decay(deltaR) AND decay(deltaA) vs sweep_param,
     twin axes, one point per (sweep_value, seed) -- reuses
     _plot_neural_dual_vs_param DIRECTLY, the SAME helper the ORIGINAL
@@ -4062,9 +4090,13 @@ def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_
         return
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     param_label = label_sym.get(sweep_param, sweep_param)
-    _plot_neural_dual_vs_param(
+    # act_decay on the left axis, resp_decay on the right/twin axis --
+    # resp_decay is the quantity col 3's own y-axis shows too, so keeping
+    # it on the twin axis here lets that axis be shared/linked with col
+    # 3's y-axis (see make_neural_main's own row-wiring).
+    return _plot_neural_dual_vs_param(
         ax, df, sweep_param, param_label,
-        "resp_decay", "act_decay", "decay (\u0394R)", "\u0394A",
+        "act_decay", "resp_decay", "Activity decay", "\u0394R decay",
         include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
 
 
@@ -4086,23 +4118,26 @@ def _plot_n_neurons_snr_dv_scatter(ax, task: str = "soltani_numbers") -> None:
     d = pd.read_pickle(path)
     grid = d["grid"].copy()
     grid["response_std"] = np.sqrt(grid["response_variance"])
+    # Scaled by 1e4 and baked into the label instead of matplotlib's own
+    # auto-placed sci-notation offset text, whose position landed
+    # inconsistently across this row's panels.
+    grid["pe_noise_scaled"] = grid["pe_variance_mean"] * 1e4
 
     color = get_palette(6)[0]
-    r, p = pearsonr(grid["pe_variance_mean"], grid["response_std"])
-    ax.scatter(grid["pe_variance_mean"], grid["response_std"], color=color, s=8,
+    r, p = pearsonr(grid["pe_noise_scaled"], grid["response_std"])
+    ax.scatter(grid["pe_noise_scaled"], grid["response_std"], color=color, s=8,
               alpha=0.35, zorder=2)
-    sns.regplot(data=grid, x="pe_variance_mean", y="response_std", ax=ax, color=color, ci=95,
+    sns.regplot(data=grid, x="pe_noise_scaled", y="response_std", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("decoded PE noise")
-    ax.set_ylabel("\u03c3R (oddball)")
-    ax.set_xlim(0, 5e-4)
-    ax.ticklabel_format(style="sci", axis="x", scilimits=(0, 0), useMathText=True)
+    ax.set_xlabel("PE noise")
+    ax.set_ylabel("\u03c3")
+    ax.set_xlim(0, 5.0)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers") -> None:
+def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers"):
     """Row 3, col 2: response variance (sigma_response**2) vs decoded PE
     noise, one on each axis, vs n_neurons -- direct reuse of
     _plot_neural_dual_vs_param (the SAME plain-linear-twin-axis helper
@@ -4141,12 +4176,21 @@ def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers") -> None:
     # np.var across seeds in _n_neurons_snr_worker); this sqrt is
     # plot-side only, not a change to the underlying collected data.
     grid["response_std"] = np.sqrt(grid["response_variance"])
+    # Scaled by 1e4 and baked into the label instead of matplotlib's own
+    # auto-placed sci-notation offset text (same fix as
+    # _plot_n_neurons_snr_dv_scatter's own pe_noise_scaled).
+    grid["pe_noise_scaled"] = grid["pe_variance_mean"] * 1e4
+    # pe_noise_scaled on the left axis, response_std ("\u03c3 (oddball)") on
+    # the right/twin axis -- response_std is the quantity col 3's own
+    # y-axis shows too, so keeping it on the twin axis here lets that
+    # axis be shared/linked with col 3's y-axis (see make_neural_main's
+    # own row-wiring).
     ax2 = _plot_neural_dual_vs_param(
-        ax, grid, "n_neurons", "neurons",
-        "response_std", "pe_variance_mean",
-        "\u03c3R (oddball)", "decoded PE noise")
+        ax, grid, "n_neurons", "Neurons",
+        "pe_noise_scaled", "response_std",
+        "PE noise", "\u03c3")
     ax.set_xticks([50, 150, 250])
-    ax2.ticklabel_format(style="sci", axis="y", scilimits=(0, 0), useMathText=True)
+    return ax2
 
 
 def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
@@ -4173,7 +4217,7 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
     sns.regplot(data=df, x="act_decay", y="resp_decay", ax=ax, color=color, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3},
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
-    ax.set_xlabel("ΔA (Hz)")
+    ax.set_xlabel("Activity decay")
     ax.set_ylabel("ΔR decay")
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper left")
     sns.despine(ax=ax, top=True, right=True)
@@ -4253,17 +4297,28 @@ def make_neural_main() -> Path:
     fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75),
                              constrained_layout=True)
 
+    # Each row's col-2 twin/right axis and col-3's own y-axis plot the
+    # SAME quantity (PE decrease; ΔR Decay; σ (oddball)) -- sharing them
+    # (Axes.sharey, matplotlib >=3.3) keeps their tick locations/range in
+    # sync so that shared quantity reads as literally the same axis
+    # across both panels, not just visually similar.
     _plot_oddball_pe_trace(axes[0, 0], "alpha_0")
-    _plot_oddball_param_effect(axes[0, 1], "alpha_0")
+    ax2_r1 = _plot_oddball_param_effect(axes[0, 1], "alpha_0")
     _plot_oddball_dv_scatter(axes[0, 2], "alpha_0")
+    if ax2_r1 is not None:
+        axes[0, 2].sharey(ax2_r1)
 
     _plot_neural_main_activity_vs_obs(axes[1, 0], "lambda_")
-    _plot_neural_main_decay_vs_param(axes[1, 1], "lambda_")
+    ax2_r2 = _plot_neural_main_decay_vs_param(axes[1, 1], "lambda_")
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
+    if ax2_r2 is not None:
+        axes[1, 2].sharey(ax2_r2)
 
     _plot_n_neurons_demo_trace(axes[2, 0])
-    _plot_n_neurons_snr_pair(axes[2, 1])
+    ax2_r3 = _plot_n_neurons_snr_pair(axes[2, 1])
     _plot_n_neurons_snr_dv_scatter(axes[2, 2])
+    if ax2_r3 is not None:
+        axes[2, 2].sharey(ax2_r3)
 
     out_path, _ = _save_fig(fig, "neural_main")
     plt.close(fig)
@@ -4381,15 +4436,52 @@ def _plot_synaptic_iti_dynamics_panel(ax, df: pd.DataFrame, task: str) -> None:
             estimator=None, linewidth=1.2, alpha=alpha_for_strength[strength],
             ax=ax, legend=False,
         )
-    handles = [Line2D([0], [0], color=c, lw=1.6, label=SYNAPTIC_LABELS.get(mt, mt))
-               for mt, c in SYNAPTIC_COLORS.items()]
-    handles += [Line2D([0], [0], color="0.3", lw=1.6, alpha=a, label=f"strength={s:g}")
-                for s, a in alpha_for_strength.items()]
+    # Model-identity (color) entries are NOT repeated here -- only the
+    # top-right panel's legend carries those; this legend is just the
+    # alpha/strength key, which is unique to this panel.
+    handles = [Line2D([0], [0], color="0.3", lw=1.6, alpha=a, label=f"strength={s:g}")
+               for s, a in alpha_for_strength.items()]
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Decoded value")
     ax.margins(x=0)
     sns.despine(ax=ax)
     ax.legend(handles=handles, fontsize=7, frameon=True, framealpha=0.85)
+
+
+def _synaptic_model_fit_path(model: str) -> Path:
+    """Path to NEF/NEF_synaptic's own per-pid RMSE fit (vs human
+    responses) for soltani_numbers -- the only task make_synaptic_main
+    covers. NEF's own fit already lives in the canonical rmse/ run
+    folder (_model_fit_path's own convention); NEF_synaptic's doesn't --
+    it has no MODEL_PARAMS entry/Optuna fit of its own yet (see
+    docs/SCIENCE.md), so what exists is ad hoc fit output under its own
+    nef_synaptic/ run folder. A dedicated lookup here rather than
+    widening _model_fit_path's own hardcoded "rmse" folder for this one
+    not-yet-canonical case."""
+    if model == "NEF":
+        return _model_fit_path("numbers", "NEF")
+    return RUNS_DIR / "nef_synaptic" / f"{model}_soltani_numbers_performance.pkl"
+
+
+def _plot_synaptic_fit_boxplot_panel(ax, plot_df: pd.DataFrame, order: list) -> None:
+    """r2c1 of make_synaptic_main: per-pid RMSE-vs-human boxplot, NEF vs
+    NEF_synaptic. Uses SYNAPTIC_COLORS (not the global MODEL_COLORS,
+    which has no NEF_synaptic entry) and plain x-tick labels rather than
+    a separate legend -- this panel has no other legend to share model
+    identity with, unlike _draw_metric_boxplot's own multi-panel-plus-
+    shared-legend context."""
+    pal = {m: SYNAPTIC_COLORS[m] for m in order}
+    sns.boxplot(data=plot_df, x="model", y="rmse", order=order,
+                hue="model", palette=pal, legend=False, ax=ax)
+    ax.set_xlabel("")
+    ax.set_ylabel("RMSE (vs human)")
+    ax.set_xticks(range(len(order)))
+    # No explicit fontsize -- matches every other panel's tick label size
+    # (the rcParams default set by _apply_slide_style). Long labels
+    # ("working memory") wrap to a second line rather than shrinking the
+    # font, so tick size stays consistent across the whole figure.
+    ax.set_xticklabels([SYNAPTIC_LABELS.get(m, m).replace(" ", "\n") for m in order])
+    sns.despine(ax=ax, top=True, right=True)
 
 
 def _plot_synaptic_dose_response_panel(ax_rmse, ax_sigma, raw_df: pd.DataFrame) -> None:
@@ -4401,7 +4493,6 @@ def _plot_synaptic_dose_response_panel(ax_rmse, ax_sigma, raw_df: pd.DataFrame) 
     stats_df = stats_df[stats_df["strength"] <= SYNAPTIC_DOSE_RESPONSE_MAX_STRENGTH]
     model_types = sorted(raw_df["model_type"].unique())
 
-    handles = []
     for model_type in model_types:
         color = SYNAPTIC_COLORS.get(model_type, "gray")
         g = stats_df[stats_df["model_type"] == model_type]
@@ -4415,10 +4506,13 @@ def _plot_synaptic_dose_response_panel(ax_rmse, ax_sigma, raw_df: pd.DataFrame) 
             estimator="mean", errorbar="se",
             linewidth=1.6, ax=ax_sigma, legend=False,
         )
-        handles.append(Line2D([0], [0], color=color, lw=1.6,
-                               label=SYNAPTIC_LABELS.get(model_type, model_type)))
-    handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="-", label="RMSE"))
-    handles.append(Line2D([0], [0], color="black", lw=1.6, linestyle="--", label="Sigma"))
+    # Model-identity (color) entries are NOT repeated here -- only the
+    # top-right panel's legend carries those; this legend is just the
+    # RMSE/Sigma linestyle key, which is unique to this panel.
+    handles = [
+        Line2D([0], [0], color="black", lw=1.6, linestyle="-", label="RMSE"),
+        Line2D([0], [0], color="black", lw=1.6, linestyle="--", label="Sigma"),
+    ]
 
     ax_rmse.set_xlabel("Perturbation strength")
     ax_rmse.set_ylabel("Model RMSE")
@@ -4442,12 +4536,12 @@ def make_synaptic_main() -> Path:
       r1c3: recurrent vs synaptic mean +/- 95% CI decoded-value trace on a
         fixed pool sequence, NO perturbation -- the baseline consistency
         check.
-      r2c1: STUB -- per-pid RMSE boxplot (NEF vs NEF_synaptic) once
-        NEF_synaptic has its own fitted alpha_0/lambda_ (currently borrows
-        NEF's, see docs/SCIENCE.md's NEF_synaptic entry); swap in
-        _gather_metric_data + _draw_metric_boxplot once that fit exists --
-        both already generic over the model list, no new plotting code
-        needed then.
+      r2c1: per-pid RMSE-vs-human boxplot, NEF vs NEF_synaptic (see
+        _synaptic_model_fit_path -- NEF_synaptic's fit is ad hoc output
+        under data/runs/nef_synaptic/, not yet migrated to the canonical
+        rmse/ run folder since it still borrows NEF's fitted alpha_0/
+        lambda_ rather than having its own Optuna fit -- see
+        docs/SCIENCE.md's NEF_synaptic entry).
       r2c2: ITI-perturbation single-trial dynamics (color = model_type,
         alpha = strength).
       r2c3: ITI-perturbation dose-response, dual y-axis (RMSE left, sigma
@@ -4473,7 +4567,7 @@ def make_synaptic_main() -> Path:
     gs = fig.add_gridspec(2, 3)
     ax_schematic = fig.add_subplot(gs[0, 0:2])
     ax_rvs = fig.add_subplot(gs[0, 2])
-    ax_stub = fig.add_subplot(gs[1, 0])
+    ax_fit = fig.add_subplot(gs[1, 0])
     ax_dyn = fig.add_subplot(gs[1, 1])
     ax_dose = fig.add_subplot(gs[1, 2])
     task = "soltani_numbers"
@@ -4491,14 +4585,16 @@ def make_synaptic_main() -> Path:
     else:
         _synaptic_missing_panel(ax_rvs, rvs_path)
 
-    # r2c1 -- STUB: per-pid RMSE boxplot, pending NEF_synaptic's own fit.
-    ax_stub.text(
-        0.5, 0.5, "Model fit comparison\n(pending NEF_synaptic RMSE fit)",
-        ha="center", va="center", transform=ax_stub.transAxes,
-        color="0.5", style="italic", fontsize=8,
+    # r2c1 -- per-pid RMSE-vs-human boxplot, NEF vs NEF_synaptic.
+    gathered = _gather_metric_data(
+        "numbers", ["NEF", "NEF_synaptic"],
+        lambda _task_key, m: _synaptic_model_fit_path(m), _get_loss, "rmse",
     )
-    ax_stub.set_xticks([])
-    ax_stub.set_yticks([])
+    if gathered is not None:
+        fit_order, fit_df = gathered
+        _plot_synaptic_fit_boxplot_panel(ax_fit, fit_df, fit_order)
+    else:
+        _synaptic_missing_panel(ax_fit, _synaptic_model_fit_path("NEF_synaptic"))
 
     # r2c2 -- ITI-perturbation single-trial dynamics.
     dyn_path = NEURAL_EXPERIMENTS_OUT_DIR / f"iti_perturbation_dynamics_{task}.pkl"
