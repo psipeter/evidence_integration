@@ -1818,38 +1818,8 @@ def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_
             )
 
 
-def _parse_param_map(pairs: list | None, model_types: list, flag_name: str) -> dict:
-    """Parse --alpha_0/--lambda_'s per-model-type KEY=VALUE syntax, e.g.
-    ["NEF=0.999", "NEF_synaptic=0.880"] -> {"NEF": 0.999, "NEF_synaptic": 0.880}.
-    Replaced an earlier single-shared-float design (see docs/DECISIONS.md's
-    pid-33 entry) once NEF_synaptic got its own real Optuna fit and an
-    arbitrary shared value became a confound in its own right. Validates
-    every entry in `model_types` has a matching key -- raises SystemExit
-    (not a KeyError at simulate time) so a missing/misspelled model_type
-    fails immediately, matching this file's existing "required for --mode
-    X" convention."""
-    if pairs is None:
-        raise SystemExit(
-            f"{flag_name} required, as KEY=VALUE pairs, e.g. "
-            f"{flag_name} NEF=0.7 NEF_synaptic=0.7"
-        )
-    parsed = {}
-    for item in pairs:
-        if "=" not in item:
-            raise SystemExit(f"{flag_name} expects KEY=VALUE pairs (e.g. NEF=0.7), got {item!r}")
-        key, _, value = item.partition("=")
-        parsed[key] = float(value)
-    missing = [mt for mt in model_types if mt not in parsed]
-    if missing:
-        raise SystemExit(
-            f"{flag_name} is missing a value for model_type(s) {missing} "
-            f"(got keys {sorted(parsed)})"
-        )
-    return parsed
-
-
 def _iti_perturbation_session_worker(
-    task: str, session: int, alpha_0: dict, lambda_: dict,
+    task: str, session: int, alpha_0: float, lambda_: float,
     n_neurons: int, n_neurons_counting: int,
     model_types: list, strength: float, activity_map: dict,
     gate_error_feedback: bool = False, perturb_error: bool = False,
@@ -1866,18 +1836,21 @@ def _iti_perturbation_session_worker(
     single-sequence design's own per-observation growth curve is
     superseded by this pool-based dose-response design.
 
-    `alpha_0`/`lambda_` are dicts keyed by model_type (see
-    _parse_param_map) -- PER-MODEL-TYPE fitted params, not one shared
-    value. Chosen (see chat/docs/DECISIONS.md) as pid 33's own real
-    per-pid RMSE-fitted (alpha_0, lambda_) for each model_type -- the pid
-    where NEF and NEF_synaptic's independently-fitted RMSE/sigma (vs real
-    human data) are closest to each other, so the baseline (strength=0)
-    comparison isn't confounded by one model already fitting worse before
-    any perturbation is applied. Superseded an earlier shared-value
-    design (one arbitrary (alpha_0, lambda_) applied to both model_types)
-    once NEF_synaptic got its own real Optuna fit (data/runs/nef_synaptic/)
-    and that fit's per-pid values turned out to differ enough from NEF's
-    own to make an arbitrary shared value a confound in its own right.
+    Same (alpha_0, lambda_, n_neurons, n_neurons_counting) for EVERY
+    model_type and every session -- this experiment asks how nef_type and
+    perturbation strength affect accuracy/reliability at one fixed
+    computational setting, not how individually-fitted params compare.
+    A per-model-type fitted-params version (pid 33's own real per-pid
+    values) was tried and reverted -- see docs/DECISIONS.md -- both
+    because it's a bit incongruous to use one real pid's fitted params on
+    synthetic trials that pid never actually saw, and because it broke
+    with neural_main's own convention of artificial params throughout;
+    also, pid 33's fitted lambda_ turned out to decay far more slowly
+    than this shared value, which masked the ITI-perturbation effect
+    within this experiment's 4-observation window entirely (see
+    docs/DECISIONS.md for the mechanism). Finding a shared (alpha_0,
+    lambda_) with comparable baseline RMSE/sigma between model_types is
+    the current open question (see docs/DECISIONS.md/SCIENCE.md).
 
     Returns one row per (model_type, trial) with that trial's own qid and
     true_mean (mean of ITS OWN simulated prefix -- NOT the pool entry's
@@ -1901,10 +1874,8 @@ def _iti_perturbation_session_worker(
     rows = []
     for model_type in model_types:
         nef_type = "synaptic" if "synaptic" in model_type else "recurrent"
-        model_alpha_0 = alpha_0[model_type]
-        model_lambda_ = lambda_[model_type]
         base_params = _base_params(
-            task, model_alpha_0, n_neurons, model_lambda_,
+            task, alpha_0, n_neurons, lambda_,
             n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
             gate_error_feedback=gate_error_feedback,
         )
@@ -1926,7 +1897,7 @@ def _iti_perturbation_session_worker(
             # sweep).
             global_idx = (session - 1) * len(trials) + trial_idx
             akey = _toy_activity_key(global_idx % n_keys)
-            decoders = _decoders_for_seed(activity_map, akey, model_alpha_0, model_lambda_)
+            decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
             p = {**base_params, "seed": akey}
             net = build_network(obs_values, p, decoders)
             _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey, perturb_error=perturb_error)
@@ -2012,11 +1983,9 @@ def run_iti_perturbation(args) -> None:
         activity_map = load_activities(
             n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
         )
-        alpha_0_map = _parse_param_map(args.alpha_0, args.model_types, "--alpha_0")
-        lambda_map = _parse_param_map(args.lambda_, args.model_types, "--lambda_")
         t0 = time.time()
         df = _iti_perturbation_session_worker(
-            args.task, args.session, alpha_0_map, lambda_map,
+            args.task, args.session, args.alpha_0, args.lambda_,
             args.n_neurons, args.n_neurons_counting, args.model_types, args.strength, activity_map,
             gate_error_feedback=getattr(args, "gate_error_feedback", False),
             perturb_error=getattr(args, "perturb_error", False),
@@ -2026,11 +1995,8 @@ def run_iti_perturbation(args) -> None:
               f"{time.time() - t0:.0f}s -> {out_path}")
 
     elif args.mode == "submit":
-        # Validated here (fails fast on a typo'd/missing model_type) even
-        # though only the raw strings -- not this parsed dict -- get passed
-        # through to each per-cell job's own --mode run invocation below.
-        _parse_param_map(args.alpha_0, args.model_types, "--alpha_0")
-        _parse_param_map(args.lambda_, args.model_types, "--lambda_")
+        if args.alpha_0 is None or args.lambda_ is None:
+            raise SystemExit("--alpha_0/--lambda_ required for --mode submit")
         root = str(Path(__file__).resolve().parent.parent)
         n_jobs = args.n_sessions * len(args.strengths)
         print(f"Submitting {n_jobs} iti_perturbation jobs for task={args.task} "
@@ -2050,7 +2016,7 @@ def run_iti_perturbation(args) -> None:
                 cmd = (
                     f"venv/bin/python scripts/neural_experiments.py iti_perturbation "
                     f"--task {args.task} --mode run --session {session} --strength {strength} "
-                    f"--alpha_0 {' '.join(args.alpha_0)} --lambda_ {' '.join(args.lambda_)} "
+                    f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} "
                     f"--n_neurons {args.n_neurons} --n_neurons_counting {args.n_neurons_counting} "
                     f"--model_types {' '.join(args.model_types)}{extra_flags}"
                 )
@@ -2185,14 +2151,12 @@ def run_iti_perturbation_dynamics(args) -> None:
     )
     gate_error_feedback = getattr(args, "gate_error_feedback", False)
     perturb_error = getattr(args, "perturb_error", False)
-    alpha_0_map = _parse_param_map(args.alpha_0, args.model_types, "--alpha_0")
-    lambda_map = _parse_param_map(args.lambda_, args.model_types, "--lambda_")
     rows = []
     for model_type in args.model_types:
         for strength in args.strengths:
             result = _iti_perturbation_dynamics_worker(
                 args.task, model_type, strength, args.session, args.qid,
-                alpha_0_map[model_type], lambda_map[model_type],
+                args.alpha_0, args.lambda_,
                 args.n_neurons, args.n_neurons_counting, activity_map,
                 gate_error_feedback=gate_error_feedback, perturb_error=perturb_error,
             )
@@ -2432,13 +2396,13 @@ def main() -> None:
     p_iti.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0],
                        help="Full strength grid for --mode submit -- one job per (session, "
                             "strength) pair")
-    p_iti.add_argument("--alpha_0", type=str, nargs="+", default=None,
-                       help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.999 NEF_synaptic=0.880 "
-                            "(see _parse_param_map, docs/DECISIONS.md's pid-33 entry). Required "
-                            "for --mode run/submit; unused by --mode collect.")
-    p_iti.add_argument("--lambda_", type=str, nargs="+", default=None,
-                       help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.194 NEF_synaptic=0.226. "
-                            "Required for --mode run/submit; unused by --mode collect.")
+    p_iti.add_argument("--alpha_0", type=float, default=None,
+                       help="Shared across every model_type (see docs/DECISIONS.md for why a "
+                            "per-model-type version was tried and reverted). Required for --mode "
+                            "run/submit; unused by --mode collect.")
+    p_iti.add_argument("--lambda_", type=float, default=None,
+                       help="Shared across every model_type. Required for --mode run/submit; "
+                            "unused by --mode collect.")
     p_iti.add_argument("--n_neurons", type=int, default=500)
     p_iti.add_argument("--n_neurons_counting", type=int, default=2000)
     p_iti.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
@@ -2461,11 +2425,11 @@ def main() -> None:
                         help="Which pool session's trial to use for the single-trial visual")
     p_itid.add_argument("--qid", type=int, default=0,
                         help="Which of that session's 8 qids to use")
-    p_itid.add_argument("--alpha_0", type=str, nargs="+", required=True,
-                        help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.999 NEF_synaptic=0.880 "
-                             "(see _parse_param_map, docs/DECISIONS.md's pid-33 entry).")
-    p_itid.add_argument("--lambda_", type=str, nargs="+", required=True,
-                        help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.194 NEF_synaptic=0.226.")
+    p_itid.add_argument("--alpha_0", type=float, required=True,
+                        help="Shared across every model_type (see docs/DECISIONS.md for why a "
+                             "per-model-type version was tried and reverted).")
+    p_itid.add_argument("--lambda_", type=float, required=True,
+                        help="Shared across every model_type.")
     p_itid.add_argument("--n_neurons", type=int, default=500)
     p_itid.add_argument("--n_neurons_counting", type=int, default=2000)
     p_itid.add_argument("--strengths", type=float, nargs="+", default=[0.0, 1.0])

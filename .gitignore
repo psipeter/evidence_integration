@@ -114,3 +114,4 @@ scripts/test_sequences_subsampling.py
 # directly (scp/rsync, never git) so both places assign the same integer
 # pid to the same real person.
 data/pid_registry.json
+scripts/_tmp_baseline_calibration.py

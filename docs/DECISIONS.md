@@ -745,6 +745,8 @@ shown with the first-pass constants.
 
 ## ITI-perturbation experiment: per-model-type fitted params (pid 33), not one shared arbitrary value
 
+**Reverted** — see the following entry ("ITI-perturbation experiment: reverted to a shared param set") for why and what replaced it. Kept here rather than deleted, per this file's own convention of recording the reasoning even for a path not taken.
+
 **Decision:** `iti_perturbation`/`iti_perturbation_dynamics`'s `--alpha_0`/
 `--lambda_` changed from a single shared float applied to both `NEF` and
 `NEF_synaptic` to per-model-type `KEY=VALUE` pairs (`_parse_param_map`,
@@ -804,4 +806,58 @@ for this task; only `alpha_0`/`lambda_` come from the per-pid fit.
 
 **Full investigation:** this session's chat; no separate
 `archive/HISTORY_*.md` entry (methodology refinement, nothing retired).
+
+---
+
+## ITI-perturbation experiment: reverted to a shared param set (pid-specific params abandoned)
+
+**Decision:** reverted the pid-33 per-model-type params (previous entry)
+back to a single shared `(alpha_0, lambda_)` applied to both `NEF` and
+`NEF_synaptic` -- `_parse_param_map` and the `KEY=VALUE` CLI syntax
+removed from `iti_perturbation`/`iti_perturbation_dynamics` entirely
+(`scripts/neural_experiments.py`), `--alpha_0`/`--lambda_` back to plain
+shared floats. Not yet replaced with a new shared value -- finding one
+with comparable baseline RMSE/sigma between model_types is the current
+open task (see docs/SCIENCE.md's "Current thread").
+
+**Why reverted, beyond the masking effect already found:** two objections
+surfaced on reflection, independent of that mechanistic problem. (1)
+Pid 33's fitted params come from that ONE real participant's real trial
+sequence; applying them to SYNTHETIC pool trials that pid never actually
+saw mixes a real individual's fitted characteristics with stimuli that
+have nothing to do with them -- a conceptual mismatch, not just a
+statistical one. (2) `neural_main` (the project's other major NEF
+figure) uses artificial/arbitrary params throughout every row (oddball,
+param_scan) -- picking one pid's real fit for this one experiment broke
+with that established convention for no strong countervailing reason.
+
+**Why the masking effect (previous entry) also mattered on its own:**
+pid 33's fitted `lambda_` (0.194 NEF / 0.226 synaptic) decays far more
+slowly than the old shared `(0.7, 0.7)` -- at the 4th (only measured)
+observation, alpha(t) was ~0.76-0.64 under pid 33's params vs ~0.27 under
+the old shared value. Within this experiment's fixed 4-observation
+window, a high alpha(t) at every step means each new observation
+aggressively corrects whatever the ITI noise just did to `value`, before
+that noise ever reaches the readout -- collected pilot data (20 sessions,
+strengths [0, 0.25, 0.5], gate_error_feedback=True) confirmed NEF's own
+RMSE came out completely flat across strength (0.1231/0.1230/0.1241,
+all within one SEM), the exact vulnerability signal this experiment
+exists to detect. pids 32/43 (the other close-baseline-fit candidates)
+have similarly shallow `lambda_`, so this isn't pid-33-specific -- it may
+be that no close-real-fit pid in this pool has enough decay to show the
+effect in only 4 observations, independent of the two conceptual
+objections above.
+
+**Not yet done:** find a shared `(alpha_0, lambda_)` giving comparable
+baseline (strength=0) RMSE/sigma between `NEF` and `NEF_synaptic` --
+planned as a small local grid search (a handful of candidate values,
+evaluated on a session subsample, strength=0 only) rather than either the
+per-pid-fit approach above or the original single unvalidated guess of
+`(0.7, 0.7)`.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (methodology reversal, nothing retired from
+the codebase -- the per-model-params machinery was removed as dead code,
+not archived, since it's a small, easily-reconstructed CLI change, not a
+standalone feature).
 
