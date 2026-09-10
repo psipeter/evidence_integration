@@ -678,6 +678,7 @@ def _load_params(
     n_neurons_counting: int,
     datafile: str | None,
     model_type: str = MODEL_TYPE,
+    gate_error_feedback: bool = False,
 ) -> dict:
     """Build a full NEF params dict from explicit CLI values. No completed
     fit is ever read -- merge order is PARAM_DEFAULTS < dataset's fixed
@@ -701,6 +702,7 @@ def _load_params(
     merged["model_type"] = model_type
     merged["pid"] = int(pid)
     merged["nef_type"] = "synaptic" if "synaptic" in model_type else "recurrent"
+    merged["gate_error_feedback"] = bool(gate_error_feedback)
     return merged
 
 
@@ -936,10 +938,11 @@ def plot_dynamics(probe_data: dict, trial: int) -> None:
     )
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    gate_suffix = "_gated" if params.get("gate_error_feedback", False) else ""
     stem = (
         f"NEF_dynamics_{params['model_type']}_{params['dataset']}_{params['pid']}"
         f"_n{int(params['n_neurons'])}_nc{int(params['n_neurons_counting'])}"
-        f"_trial{trial}"
+        f"_trial{trial}{gate_suffix}"
     )
     fig.savefig(FIGURES_DIR / f"{stem}.pdf")
     print(f"Saved figures/{stem}.pdf")
@@ -960,10 +963,11 @@ def save_individual_panels(probe_data: dict, trial: int) -> None:
     n_obs = int(probe_data.get("n_obs_trial", round((t[-1] + float(params["dt"])) / t_step)))
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    gate_suffix = "_gated" if params.get("gate_error_feedback", False) else ""
     suffix = (
         f"{params['dataset']}_{params['pid']}"
         f"_n{int(params['n_neurons'])}_nc{int(params['n_neurons_counting'])}"
-        f"_trial{trial}"
+        f"_trial{trial}{gate_suffix}"
     )
     panel_specs = [
         ("node_input", lambda ax: _panel_node_input(
@@ -1027,13 +1031,20 @@ def main() -> None:
                          "NEF_synaptic comparison once per pes_learning_rate value "
                          "given here (overriding the fixed-dict default), printing a "
                          "compact RMSE table instead of a single comparison/plot")
+    p.add_argument("--gate_error_feedback", action="store_true", default=False,
+                    help="Use models/NEF.py's gated ITI-silencing mode (value->gate->"
+                         "error[1], inhibition moved onto gate.neurons) instead of the "
+                         "default direct error.neurons inhibition. Output filenames get "
+                         "a '_gated' suffix so on/off runs don't overwrite each other.")
     args = p.parse_args()
 
     params = _load_params(
         args.dataset, args.pid,
         args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting,
         args.datafile, args.model_type,
+        gate_error_feedback=args.gate_error_feedback,
     )
+    gate_suffix = "_gated" if args.gate_error_feedback else ""
 
     n_neurons = int(params["n_neurons"])
     n_neurons_counting = int(params["n_neurons_counting"])
@@ -1060,7 +1071,7 @@ def main() -> None:
     print_report(params, sampled, result, label=f"{args.model_type} vs RL_lambda")
     out_stem = (
         f"{args.model_type.lower()}_vs_rl_lambda_{args.dataset}_{args.pid}"
-        f"_n{n_neurons}_nc{n_neurons_counting}"
+        f"_n{n_neurons}_nc{n_neurons_counting}{gate_suffix}"
     )
     plot_comparison(
         params, result, out_stem,
@@ -1078,7 +1089,7 @@ def main() -> None:
             )
             syn_out_stem = (
                 f"nef_recurrent_vs_synaptic_{args.dataset}_{args.pid}"
-                f"_n{n_neurons}_nc{n_neurons_counting}"
+                f"_n{n_neurons}_nc{n_neurons_counting}{gate_suffix}"
             )
             plot_comparison(
                 params, syn_result, syn_out_stem,

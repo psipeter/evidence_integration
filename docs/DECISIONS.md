@@ -691,3 +691,53 @@ a displayed number.
 **Full investigation:** this session's chat; no separate
 `archive/HISTORY_*.md` entry (metric refinement, nothing retired).
 
+---
+
+## ITI silencing: gated `value→gate→error` population, not a weaker direct inhibition
+
+**Decision:** added `gate_error_feedback` (`models.NEF.build_network`,
+default `False`) as an alternative to the existing ITI-silencing
+mechanism, rather than changing the default's own inhibition weight.
+Default unchanged: `node_input[1]` inhibits `error.neurons` directly
+(`-10.0`, `synapse=tau_error`), blocking all of `error`'s activity during
+the ITI. New mode: `value→gate→error[dim 1]` replaces the direct
+`value→error[dim 1]` connection, and the inhibition targets `gate.neurons`
+instead — `error` is never silenced, so its dim-1 input during the ITI is
+`obs(~0) - gate(~0)` (small, noise-driven) rather than exactly zero.
+
+**Why a separate population, not just turning down `error`'s own
+inhibition weight:** weakening the direct inhibition would still zero out
+BOTH of error's dimensions together (the counting-weight signal in dim 0
+along with the value-tracking signal in dim 1) at whatever partial
+strength was chosen, with no way to let dim-1 alone leak. Routing
+value→error through its own population isolates exactly the one pathway
+(`value`'s ITI contribution) that should leak a little, without touching
+`error`'s response to the counting subnetwork.
+
+**Why `tau_ff/2` on each of the two new hops, not `tau_ff` on both:**
+first pass used `tau_ff` on both `value→gate` and `gate→error[1]`
+(mirroring the single synapse the direct connection used), which visibly
+doubled the pathway's lag relative to every other `tau_ff`-synapse
+connection feeding `error` (e.g. `counting.memory→error[0]`) — manual
+inspection of dynamics plots (`scripts/check_NEF_pipeline.py
+--gate_error_feedback --plot_trials`) showed `error` transiently spiking
+toward the raw input before `value`'s feedback (delayed by the extra hop)
+caught up. Halving each hop's synapse keeps total lag comparable to the
+single-hop paths instead of compounding it.
+
+**Why `-3.0`/`synapse=0` on `gate`'s inhibition, not `-10.0`/`tau_error`
+(the default path's own values):** with the default path's inhibition
+weight/synapse copied onto `gate` unchanged, `gate`'s neurons were still
+recovering from the filtered inhibition ramp-down when the ITI ended,
+lagging the sharp ITI→observation transition. Weakening the weight and
+removing the synapse (instant, unfiltered) lets `gate` recover
+immediately when inhibition cuts off. Manually verified at carrabin's
+production network size (`n_neurons=500`, `n_neurons_counting=500`, real
+fitted `alpha_0`/`lambda_` from the `nef_synaptic` RMSE fit): `value`
+traces now track closely between `gate_error_feedback` on and off,
+resolving the divergence a smaller test network (`n_neurons=50`) had
+shown with the first-pass constants.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (new mechanism, nothing retired).
+

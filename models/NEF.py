@@ -9,12 +9,22 @@ Architecture (per trial):
     counting subnetwork (LMU or integrator, pretrained decoders)
     counting → error[dim 0]   (alpha(n) via W_weight decoder)
     node_input[0] → error[dim 1]   (observation o(t))
-    node_input[1] → error.neurons  (ITI inhibition)
     value → error[dim 1]      (transform=-1, subtracts v)
+    node_input[1] → ITI inhibition, target depends on ``gate_error_feedback``:
+        False (default): node_input[1] → error.neurons directly, blocking
+            ALL of error's activity during the ITI.
+        True: value → gate → error[dim 1] (transform=-1) replaces the direct
+            value → error[dim 1] connection, and node_input[1] → gate.neurons
+            instead of error.neurons -- error itself is never silenced, so
+            during the ITI its dim-1 input is obs(~0) - gate(~0) (small,
+            noise-driven) rather than fully blocked. Lets noise (e.g. from
+            ITI perturbation on value's neurons) leak a little into
+            downstream learning/feedback instead of being fully gated out.
 
 ``nef_type`` (from ``model_type``): ``recurrent`` uses multiplicative
 error→value and a recurrent self-connection on ``value``; ``synaptic`` uses a
-``background`` population and PES learning onto ``value``.
+``background`` population and PES learning onto ``value``. ``gate_error_feedback``
+applies identically to both.
 
 Usage:
     from models.NEF import run
@@ -72,6 +82,7 @@ PARAM_DEFAULTS: dict = {
     "alpha_0": 1,
     "T_error": 0.5,
     "tau_error": 0.1,
+    "gate_error_feedback": False,
 }
 
 
@@ -210,14 +221,6 @@ def build_network(
             )
 
         nengo.Connection(net.node_input[0], net.error[1], synapse=None, seed=seed)
-        w_inh = -10.0 * np.ones((net.error.n_neurons, 1))
-        nengo.Connection(
-            net.node_input[1],
-            net.error.neurons,
-            transform=w_inh,
-            synapse=float(params["tau_error"]),
-            seed=seed,
-        )
 
         net.value = nengo.Ensemble(
             n_neurons=int(params["n_neurons"]),
@@ -227,13 +230,64 @@ def build_network(
             label="value",
         )
 
-        nengo.Connection(
-            net.value,
-            net.error[1],
-            transform=-1,
-            synapse=float(params["tau_ff"]),
-            seed=seed,
-        )
+        # ITI silencing of the value->error feedback. Default: inhibit
+        # error's own neurons directly (node_input[1]->error.neurons), which
+        # blocks ALL of error's activity during the ITI -- including any
+        # noise-driven learning, e.g. NEF_synaptic's PES rule is completely
+        # immune to ITI perturbation noise on `value` as a result. When
+        # `gate_error_feedback` is set, an intermediate `gate` population
+        # carries value->error instead, and the inhibition targets gate's
+        # neurons rather than error's: gated to ~0, error[1] sees obs(~0) -
+        # gate(~0) instead of obs(0) - value(t), so error keeps firing on
+        # its own residual/noise-driven activity through the ITI -- allowed
+        # to nudge learning a little (rather than being fully blocked),
+        # while staying centered near zero rather than tracking -value(t).
+        if params.get("gate_error_feedback", False):
+            net.gate = nengo.Ensemble(
+                n_neurons=int(params["n_neurons"]),
+                dimensions=1,
+                radius=float(params["radius_v"]),
+                seed=seed,
+                label="gate",
+            )
+            nengo.Connection(
+                net.value, net.gate,
+                synapse=float(params["tau_ff"]) / 2.0,
+                seed=seed,
+            )
+            nengo.Connection(
+                net.gate, net.error[1],
+                transform=-1,
+                synapse=float(params["tau_ff"]) / 2.0,
+                seed=seed,
+            )
+            # Weaker (-3 vs error.neurons' -10) and unfiltered (synapse=0) so
+            # gate's neurons recover quickly once inhibition sharply turns
+            # off, rather than lagging behind the ITI->observation transition.
+            w_inh = -3.0 * np.ones((net.gate.n_neurons, 1))
+            nengo.Connection(
+                net.node_input[1],
+                net.gate.neurons,
+                transform=w_inh,
+                synapse=0,
+                seed=seed,
+            )
+        else:
+            nengo.Connection(
+                net.value,
+                net.error[1],
+                transform=-1,
+                synapse=float(params["tau_ff"]),
+                seed=seed,
+            )
+            w_inh = -10.0 * np.ones((net.error.n_neurons, 1))
+            nengo.Connection(
+                net.node_input[1],
+                net.error.neurons,
+                transform=w_inh,
+                synapse=float(params["tau_error"]),
+                seed=seed,
+            )
 
         if params["nef_type"] == "recurrent":
             nengo.Connection(
@@ -292,6 +346,12 @@ def build_network(
             sample_every=float(params["dt"]),
         )
         net.probe_error_neurons = nengo.Probe(net.error.neurons, synapse=None)
+        if hasattr(net, "gate"):
+            net.probe_gate = nengo.Probe(
+                net.gate,
+                synapse=float(params["tau_probe"]),
+                sample_every=float(params["dt"]),
+            )
         net.probe_obs = nengo.Probe(
             net.node_input[0],
             synapse=None,
@@ -360,6 +420,8 @@ def _simulate_trial(
     probe_data["error_neurons"] = error_neuron_data[readout_indices]
     if return_probes and hasattr(net, "probe_iti_noise"):
         probe_data["iti_noise"] = sim.data[net.probe_iti_noise].squeeze()
+    if return_probes and hasattr(net, "probe_gate"):
+        probe_data["gate"] = sim.data[net.probe_gate].squeeze()
     return responses, probe_data
 
 
@@ -547,6 +609,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--t_iti", type=float, default=PARAM_DEFAULTS["t_iti"])
     p.add_argument("--seed", type=int, default=PARAM_DEFAULTS["seed"])
     p.add_argument("--alpha_0", type=float, default=PARAM_DEFAULTS["alpha_0"])
+    p.add_argument(
+        "--gate_error_feedback", action="store_true",
+        default=PARAM_DEFAULTS["gate_error_feedback"],
+    )
     p.add_argument("--save_probes", action="store_true", default=False)
     return p.parse_args()
 

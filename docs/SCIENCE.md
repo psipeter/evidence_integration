@@ -210,14 +210,54 @@ yet wired into the figure: `_n_neurons_snr_worker` now saves the
 that field and needs a full resubmit/recollect before `neural_main`'s
 row 3 can actually switch over.
 
+**Also settled this session: `gate_error_feedback`, an alternative
+ITI-silencing mechanism in `models.NEF.build_network` (default off).**
+The ITI-perturbation experiment (`scripts/neural_experiments.py`'s
+`iti_perturbation`) found NEF_synaptic essentially immune to ITI noise
+injected on `value`'s neurons, unlike NEF (recurrent) — largely an
+artifact of how the ITI silences the value→error feedback: by default,
+`node_input[1]` inhibits `error.neurons` directly, blocking ALL of
+error's activity (including any noise-driven learning) during the ITI.
+`gate_error_feedback=True` instead routes `value→error[dim 1]` through an
+intermediate `gate` population and moves the inhibition onto `gate`'s
+neurons instead of `error`'s — `error` itself is never silenced, so
+during the ITI its dim-1 input is `obs(~0) - gate(~0)` (small,
+noise-driven) rather than fully blocked, letting injected noise leak a
+little into downstream learning/feedback instead of being fully gated
+out. Applies identically to `nef_type="recurrent"` (there the leak feeds
+`value`'s dynamics directly and continuously, not just a learning rule,
+so baseline drift is expected to rise somewhat even without injected
+noise) and `"synaptic"`.
+
+Tuned via local dynamics inspection (`scripts/check_NEF_pipeline.py
+--gate_error_feedback`, `--plot_trials`): the first pass (`tau_ff` on
+both new hops, `-10.0`/`tau_error`-filtered inhibition on `gate`, mirroring
+the default path's own inhibition exactly) produced a startup transient —
+`error` briefly spiked toward the raw input before `value`'s feedback
+through the extra hop caught up — and value traces diverged more than
+"fairly similar" between gate on/off on some trials even with zero
+injected perturbation noise (per-trial correlation as low as 0.59, max
+abs diff up to 0.92 on a radius-1.0 ensemble at `n_neurons=50`), likely
+compounded by that small network size. Fixed by halving the synapse on
+each of the two new hops (`tau_ff/2` each, so total lag is comparable to
+the single-`tau_ff`-hop paths already feeding `error`, not double), and
+weakening/defiltering `gate`'s inhibition (`-3.0`, `synapse=0` instead of
+`-10.0`, `synapse=tau_error`) so `gate`'s neurons recover quickly right
+when the ITI ends rather than lagging on a filtered rebound. Re-checked
+at carrabin's production size (`n_neurons=500`, `n_neurons_counting=500`)
+via manual inspection: value traces now track closely between gate
+on/off.
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships). Model
 fitting against real `task_backend` (soltani) data — the human-only pilot
 figures exist, but NEF/math-model fits to that data haven't been run yet.
-The synaptic-vs-working-memory implementation comparison is now underway
-(see above) — NEF_synaptic reimplemented and baseline-checked; an
-independent Optuna fit is the remaining prerequisite before the actual
-comparison experiment.
+The synaptic-vs-working-memory implementation comparison is underway (see
+above) — NEF_synaptic reimplemented and baseline-checked, with an initial
+Optuna RMSE fit now collected (`data/runs/nef_synaptic/`, 100 trials/pid,
+all 4 datasets, not yet promoted to the canonical `rmse` folder pending
+review) and `gate_error_feedback` built for the ITI-perturbation
+comparison's next iteration.
 
 ---
 
@@ -252,6 +292,15 @@ entry).
 NEF fits under RMSE only now — the NLL/multi-seed-ensemble branch was
 retired (too expensive to run at scale; see docs/DECISIONS.md and
 "Current thread" above).
+
+`gate_error_feedback` (params flag, default `False`) swaps how the ITI
+silences the value→error feedback: off, `node_input[1]` inhibits
+`error.neurons` directly (blocks all of error's activity during the ITI);
+on, an intermediate `gate` population carries value→error instead, and
+the inhibition targets `gate.neurons` — `error` keeps firing on small
+residual/noise-driven activity through the ITI rather than being fully
+silenced. Applies identically to both `nef_type` branches. See "Current
+thread" and docs/DECISIONS.md for why and the tuning.
 
 ---
 
