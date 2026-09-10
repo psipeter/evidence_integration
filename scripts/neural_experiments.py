@@ -1766,8 +1766,9 @@ def _iti_perturbation_gate(t_iti: float, t_step: float, t_obs: float):
     return _gate
 
 
-def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_seed: int) -> None:
-    """Inject one gated WhiteSignal into .neurons of `value` ONLY (both
+def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_seed: int,
+                          perturb_error: bool = False) -> None:
+    """Inject one gated WhiteSignal into .neurons of `value` (both
     nef_types), synapse=None so WhiteSignal's own `high` cutoff is the only
     frequency control. Originally also targeted error/background/
     counting.memory; dropped -- memory is a leakless integrator and gets
@@ -1775,7 +1776,17 @@ def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_
     readout collapsed from ~15 to ~2.9 at strength=1.0, since nothing decays
     it back), and error/background were cut afterward to isolate value's own
     persistent-recurrence-vs-learned-readout distinction cleanly (see chat
-    for the full diagnostic). No-op when strength == 0.0 (baseline)."""
+    for the full diagnostic). No-op when strength == 0.0 (baseline).
+
+    `perturb_error=True` (default False, exploratory -- see chat) ALSO
+    connects the SAME gated noise signal (identical waveform, not an
+    independent draw) onto `error.neurons` at the same strength -- a direct
+    test of whether perturbing error's own spiking activity (which, under
+    `gate_error_feedback`, is no longer fully silenced during the ITI) has
+    a bigger/different effect than perturbing `value` alone, since error's
+    output feeds the learning rule (synaptic) or `value` directly
+    (recurrent) rather than only reaching `value`'s own dynamics indirectly
+    through the small residual gate signal."""
     import nengo
 
     if strength == 0.0:
@@ -1800,13 +1811,48 @@ def _add_iti_neuron_noise(net, params: dict, n_obs: int, strength: float, noise_
             gated_node, net.value.neurons,
             transform=strength * np.ones((net.value.n_neurons, 1)), synapse=None,
         )
+        if perturb_error:
+            nengo.Connection(
+                gated_node, net.error.neurons,
+                transform=strength * np.ones((net.error.n_neurons, 1)), synapse=None,
+            )
+
+
+def _parse_param_map(pairs: list | None, model_types: list, flag_name: str) -> dict:
+    """Parse --alpha_0/--lambda_'s per-model-type KEY=VALUE syntax, e.g.
+    ["NEF=0.999", "NEF_synaptic=0.880"] -> {"NEF": 0.999, "NEF_synaptic": 0.880}.
+    Replaced an earlier single-shared-float design (see docs/DECISIONS.md's
+    pid-33 entry) once NEF_synaptic got its own real Optuna fit and an
+    arbitrary shared value became a confound in its own right. Validates
+    every entry in `model_types` has a matching key -- raises SystemExit
+    (not a KeyError at simulate time) so a missing/misspelled model_type
+    fails immediately, matching this file's existing "required for --mode
+    X" convention."""
+    if pairs is None:
+        raise SystemExit(
+            f"{flag_name} required, as KEY=VALUE pairs, e.g. "
+            f"{flag_name} NEF=0.7 NEF_synaptic=0.7"
+        )
+    parsed = {}
+    for item in pairs:
+        if "=" not in item:
+            raise SystemExit(f"{flag_name} expects KEY=VALUE pairs (e.g. NEF=0.7), got {item!r}")
+        key, _, value = item.partition("=")
+        parsed[key] = float(value)
+    missing = [mt for mt in model_types if mt not in parsed]
+    if missing:
+        raise SystemExit(
+            f"{flag_name} is missing a value for model_type(s) {missing} "
+            f"(got keys {sorted(parsed)})"
+        )
+    return parsed
 
 
 def _iti_perturbation_session_worker(
-    task: str, session: int, alpha_0: float, lambda_: float,
+    task: str, session: int, alpha_0: dict, lambda_: dict,
     n_neurons: int, n_neurons_counting: int,
     model_types: list, strength: float, activity_map: dict,
-    gate_error_feedback: bool = False,
+    gate_error_feedback: bool = False, perturb_error: bool = False,
 ) -> pd.DataFrame:
     """Simulate ONE synthetic session's full 32 trials -- 8 qids x 4
     repeats, matching a real participant's own session exactly (see
@@ -1820,11 +1866,18 @@ def _iti_perturbation_session_worker(
     single-sequence design's own per-observation growth curve is
     superseded by this pool-based dose-response design.
 
-    Same (alpha_0, lambda_, n_neurons, n_neurons_counting) for EVERY
-    model_type and every session -- this experiment asks how nef_type and
-    perturbation strength affect accuracy/reliability at one fixed
-    computational setting, not how individually-fitted params compare
-    (NEF_synaptic has no fit of its own yet -- see docs/SCIENCE.md).
+    `alpha_0`/`lambda_` are dicts keyed by model_type (see
+    _parse_param_map) -- PER-MODEL-TYPE fitted params, not one shared
+    value. Chosen (see chat/docs/DECISIONS.md) as pid 33's own real
+    per-pid RMSE-fitted (alpha_0, lambda_) for each model_type -- the pid
+    where NEF and NEF_synaptic's independently-fitted RMSE/sigma (vs real
+    human data) are closest to each other, so the baseline (strength=0)
+    comparison isn't confounded by one model already fitting worse before
+    any perturbation is applied. Superseded an earlier shared-value
+    design (one arbitrary (alpha_0, lambda_) applied to both model_types)
+    once NEF_synaptic got its own real Optuna fit (data/runs/nef_synaptic/)
+    and that fit's per-pid values turned out to differ enough from NEF's
+    own to make an arbitrary shared value a confound in its own right.
 
     Returns one row per (model_type, trial) with that trial's own qid and
     true_mean (mean of ITS OWN simulated prefix -- NOT the pool entry's
@@ -1848,8 +1901,10 @@ def _iti_perturbation_session_worker(
     rows = []
     for model_type in model_types:
         nef_type = "synaptic" if "synaptic" in model_type else "recurrent"
+        model_alpha_0 = alpha_0[model_type]
+        model_lambda_ = lambda_[model_type]
         base_params = _base_params(
-            task, alpha_0, n_neurons, lambda_,
+            task, model_alpha_0, n_neurons, model_lambda_,
             n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
             gate_error_feedback=gate_error_feedback,
         )
@@ -1871,10 +1926,10 @@ def _iti_perturbation_session_worker(
             # sweep).
             global_idx = (session - 1) * len(trials) + trial_idx
             akey = _toy_activity_key(global_idx % n_keys)
-            decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
+            decoders = _decoders_for_seed(activity_map, akey, model_alpha_0, model_lambda_)
             p = {**base_params, "seed": akey}
             net = build_network(obs_values, p, decoders)
-            _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey)
+            _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey, perturb_error=perturb_error)
             with nengo.Simulator(
                 net, dt=float(p["dt"]), seed=int(akey), progress_bar=False
             ) as sim:
@@ -1924,13 +1979,18 @@ def run_iti_perturbation(args) -> None:
     never-plot-here / save-raw-compute-in-figures convention.
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    # "iti_perturbation_gated_pool_..." (not "..._pool_..._gated") so the
-    # default (non-gated) glob at --mode collect below can never
-    # accidentally swallow gated per-cell files too -- matches oddball's
-    # own oddball_gated_ prefix convention and the same reasoning (a
-    # trailing suffix right before ".pkl" would be caught by a glob's own
-    # trailing wildcard).
-    iti_prefix = "iti_perturbation_gated" if getattr(args, "gate_error_feedback", False) else "iti_perturbation"
+    # "iti_perturbation_gated_errpert_pool_..." (never a suffix right
+    # before ".pkl") so the default (non-gated/non-errpert) glob at --mode
+    # collect below can never accidentally swallow a more-specific variant
+    # too -- matches oddball's own oddball_gated_ prefix convention and the
+    # same reasoning (a trailing suffix right before ".pkl" would be caught
+    # by a glob's own trailing wildcard). Composable: any combination of
+    # the two flags gets its own distinct, non-colliding prefix.
+    iti_prefix = "iti_perturbation"
+    if getattr(args, "gate_error_feedback", False):
+        iti_prefix += "_gated"
+    if getattr(args, "perturb_error", False):
+        iti_prefix += "_errpert"
 
     if args.mode == "run":
         if args.session is None:
@@ -1952,24 +2012,31 @@ def run_iti_perturbation(args) -> None:
         activity_map = load_activities(
             n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
         )
+        alpha_0_map = _parse_param_map(args.alpha_0, args.model_types, "--alpha_0")
+        lambda_map = _parse_param_map(args.lambda_, args.model_types, "--lambda_")
         t0 = time.time()
         df = _iti_perturbation_session_worker(
-            args.task, args.session, args.alpha_0, args.lambda_,
+            args.task, args.session, alpha_0_map, lambda_map,
             args.n_neurons, args.n_neurons_counting, args.model_types, args.strength, activity_map,
             gate_error_feedback=getattr(args, "gate_error_feedback", False),
+            perturb_error=getattr(args, "perturb_error", False),
         )
         df.to_pickle(out_path)
         print(f"session={args.session} strength={args.strength}: {len(df)} rows in "
               f"{time.time() - t0:.0f}s -> {out_path}")
 
     elif args.mode == "submit":
-        if args.alpha_0 is None or args.lambda_ is None:
-            raise SystemExit("--alpha_0/--lambda_ required for --mode submit")
+        # Validated here (fails fast on a typo'd/missing model_type) even
+        # though only the raw strings -- not this parsed dict -- get passed
+        # through to each per-cell job's own --mode run invocation below.
+        _parse_param_map(args.alpha_0, args.model_types, "--alpha_0")
+        _parse_param_map(args.lambda_, args.model_types, "--lambda_")
         root = str(Path(__file__).resolve().parent.parent)
         n_jobs = args.n_sessions * len(args.strengths)
         print(f"Submitting {n_jobs} iti_perturbation jobs for task={args.task} "
               f"({args.n_sessions} sessions x {len(args.strengths)} strengths)")
-        gate_flag = " --gate_error_feedback" if getattr(args, "gate_error_feedback", False) else ""
+        extra_flags = " --gate_error_feedback" if getattr(args, "gate_error_feedback", False) else ""
+        extra_flags += " --perturb_error" if getattr(args, "perturb_error", False) else ""
         for session in range(1, args.n_sessions + 1):
             for strength in args.strengths:
                 tag = _oddball_value_tag(strength)
@@ -1983,9 +2050,9 @@ def run_iti_perturbation(args) -> None:
                 cmd = (
                     f"venv/bin/python scripts/neural_experiments.py iti_perturbation "
                     f"--task {args.task} --mode run --session {session} --strength {strength} "
-                    f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} "
+                    f"--alpha_0 {' '.join(args.alpha_0)} --lambda_ {' '.join(args.lambda_)} "
                     f"--n_neurons {args.n_neurons} --n_neurons_counting {args.n_neurons_counting} "
-                    f"--model_types {' '.join(args.model_types)}{gate_flag}"
+                    f"--model_types {' '.join(args.model_types)}{extra_flags}"
                 )
                 script = make_job_script(root, [cmd], time_limit="0:30:0", mem="16G")
                 script_path = (
@@ -2050,6 +2117,7 @@ def _iti_perturbation_dynamics_worker(
     task: str, model_type: str, strength: float, session: int, qid: int,
     alpha_0: float, lambda_: float, n_neurons: int, n_neurons_counting: int,
     activity_map: dict, repeat: int = 0, gate_error_feedback: bool = False,
+    perturb_error: bool = False,
 ) -> dict:
     """Full per-timestep decoded `value` trace for ONE (model_type,
     strength) on ONE specific (session, qid)'s trial, at repeat-seed
@@ -2088,7 +2156,7 @@ def _iti_perturbation_dynamics_worker(
     decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
     p = {**base_params, "seed": akey}
     net = build_network(obs_values, p, decoders)
-    _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey)
+    _add_iti_neuron_noise(net, p, n_obs, strength, noise_seed=akey, perturb_error=perturb_error)
     with nengo.Simulator(net, dt=float(p["dt"]), seed=int(akey), progress_bar=False) as sim:
         sim.run(n_obs * (float(p["t_obs"]) + float(p["t_iti"])))
     t_arr = np.arange(len(sim.data[net.probe_value])) * float(p["dt"])
@@ -2116,13 +2184,17 @@ def run_iti_perturbation_dynamics(args) -> None:
         n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
     )
     gate_error_feedback = getattr(args, "gate_error_feedback", False)
+    perturb_error = getattr(args, "perturb_error", False)
+    alpha_0_map = _parse_param_map(args.alpha_0, args.model_types, "--alpha_0")
+    lambda_map = _parse_param_map(args.lambda_, args.model_types, "--lambda_")
     rows = []
     for model_type in args.model_types:
         for strength in args.strengths:
             result = _iti_perturbation_dynamics_worker(
                 args.task, model_type, strength, args.session, args.qid,
-                args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting, activity_map,
-                gate_error_feedback=gate_error_feedback,
+                alpha_0_map[model_type], lambda_map[model_type],
+                args.n_neurons, args.n_neurons_counting, activity_map,
+                gate_error_feedback=gate_error_feedback, perturb_error=perturb_error,
             )
             for t, v in zip(result["t"], result["value"]):
                 rows.append({
@@ -2132,7 +2204,11 @@ def run_iti_perturbation_dynamics(args) -> None:
             print(f"{model_type} strength={strength}: simulated ({len(result['t'])} timesteps)")
 
     df = pd.DataFrame(rows)
-    prefix = "iti_perturbation_gated" if gate_error_feedback else "iti_perturbation"
+    prefix = "iti_perturbation"
+    if gate_error_feedback:
+        prefix += "_gated"
+    if perturb_error:
+        prefix += "_errpert"
     out_path = OUT_DIR / f"{prefix}_dynamics_{args.task}.pkl"
     df.to_pickle(out_path)
     print(f"Saved {len(df):,} rows -> {out_path}")
@@ -2356,10 +2432,13 @@ def main() -> None:
     p_iti.add_argument("--strengths", type=float, nargs="+", default=[0.0, 0.5, 1.0],
                        help="Full strength grid for --mode submit -- one job per (session, "
                             "strength) pair")
-    p_iti.add_argument("--alpha_0", type=float, default=None,
-                       help="Required for --mode run/submit; unused by --mode collect")
-    p_iti.add_argument("--lambda_", type=float, default=None,
-                       help="Required for --mode run/submit; unused by --mode collect")
+    p_iti.add_argument("--alpha_0", type=str, nargs="+", default=None,
+                       help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.999 NEF_synaptic=0.880 "
+                            "(see _parse_param_map, docs/DECISIONS.md's pid-33 entry). Required "
+                            "for --mode run/submit; unused by --mode collect.")
+    p_iti.add_argument("--lambda_", type=str, nargs="+", default=None,
+                       help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.194 NEF_synaptic=0.226. "
+                            "Required for --mode run/submit; unused by --mode collect.")
     p_iti.add_argument("--n_neurons", type=int, default=500)
     p_iti.add_argument("--n_neurons_counting", type=int, default=2000)
     p_iti.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
@@ -2368,6 +2447,11 @@ def main() -> None:
                             "docs/DECISIONS.md) for every model_type. Output filenames get an "
                             "'iti_perturbation_gated_' prefix so gated/default runs never collide "
                             "or get mixed together at --mode collect.")
+    p_iti.add_argument("--perturb_error", action="store_true", default=False,
+                       help="Exploratory (see chat): ALSO inject the same gated ITI noise onto "
+                            "error.neurons, not just value.neurons. Composes with "
+                            "--gate_error_feedback in the output filename prefix "
+                            "('_errpert', e.g. 'iti_perturbation_gated_errpert_').")
     p_iti.add_argument("--dry_run", action="store_true")
     p_iti.set_defaults(func=run_iti_perturbation)
 
@@ -2377,8 +2461,11 @@ def main() -> None:
                         help="Which pool session's trial to use for the single-trial visual")
     p_itid.add_argument("--qid", type=int, default=0,
                         help="Which of that session's 8 qids to use")
-    p_itid.add_argument("--alpha_0", type=float, required=True)
-    p_itid.add_argument("--lambda_", type=float, required=True)
+    p_itid.add_argument("--alpha_0", type=str, nargs="+", required=True,
+                        help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.999 NEF_synaptic=0.880 "
+                             "(see _parse_param_map, docs/DECISIONS.md's pid-33 entry).")
+    p_itid.add_argument("--lambda_", type=str, nargs="+", required=True,
+                        help="Per-model-type KEY=VALUE pairs, e.g. NEF=0.194 NEF_synaptic=0.226.")
     p_itid.add_argument("--n_neurons", type=int, default=500)
     p_itid.add_argument("--n_neurons_counting", type=int, default=2000)
     p_itid.add_argument("--strengths", type=float, nargs="+", default=[0.0, 1.0])
@@ -2386,6 +2473,10 @@ def main() -> None:
     p_itid.add_argument("--gate_error_feedback", action="store_true", default=False,
                         help="Use models.NEF's gated ITI-silencing mode for every model_type. "
                              "Output gets an 'iti_perturbation_gated_dynamics_' filename.")
+    p_itid.add_argument("--perturb_error", action="store_true", default=False,
+                        help="Exploratory (see chat): ALSO inject the same gated ITI noise onto "
+                             "error.neurons, not just value.neurons. Composes with "
+                             "--gate_error_feedback in the output filename prefix.")
     p_itid.set_defaults(func=run_iti_perturbation_dynamics)
 
     p_rvs = sub.add_parser("recurrent_vs_synaptic_dynamics")

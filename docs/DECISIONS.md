@@ -741,3 +741,67 @@ shown with the first-pass constants.
 **Full investigation:** this session's chat; no separate
 `archive/HISTORY_*.md` entry (new mechanism, nothing retired).
 
+---
+
+## ITI-perturbation experiment: per-model-type fitted params (pid 33), not one shared arbitrary value
+
+**Decision:** `iti_perturbation`/`iti_perturbation_dynamics`'s `--alpha_0`/
+`--lambda_` changed from a single shared float applied to both `NEF` and
+`NEF_synaptic` to per-model-type `KEY=VALUE` pairs (`_parse_param_map`,
+`scripts/neural_experiments.py`), e.g. `--alpha_0 NEF=0.999
+NEF_synaptic=0.880 --lambda_ NEF=0.194 NEF_synaptic=0.226` -- pid 33's own
+real per-pid RMSE-fitted values from each model's independent Optuna fit
+(`data/runs/rmse/NEF_soltani_numbers_params.pkl`,
+`data/runs/nef_synaptic/NEF_synaptic_soltani_numbers_params.pkl`). Clean
+break, not a backwards-compatible option -- the old single-float form no
+longer works for these two subcommands (`recurrent_vs_synaptic_dynamics`
+is untouched, since its panel is no longer read by `synaptic_main`).
+
+**Why per-model params, not a shared value at all:** the experiment
+originally used one arbitrary shared `(alpha_0=0.7, lambda_=0.7)` for
+both model_types deliberately, to isolate `nef_type` as the only
+difference between them (see this file's own NEF_synaptic `pes_learning_
+rate` entry and `neural_experiments.py`'s own docstrings). That worked
+as a placeholder while `NEF_synaptic` had no fit of its own. Once it got
+one (`data/runs/nef_synaptic/`), the baseline (strength=0,
+`gate_error_feedback=True`) comparison showed NEF_synaptic's RMSE ~45%
+higher than NEF's at the shared `(0.7, 0.7)` setting (0.060 vs 0.080) --
+i.e. the arbitrary shared value was ITSELF a confound (it happens to sit
+closer to NEF's own fitted optimum than NEF_synaptic's), not a neutral
+control. A shared-parameter grid search to re-balance the two models was
+considered and abandoned in favor of this approach (see chat) once each
+model's own real fitted values turned out to differ enough that forcing
+one shared number was fighting the data rather than isolating anything.
+
+**Why pid 33 specifically:** searched all 46 common pids for where NEF
+and NEF_synaptic's independently-fitted RMSE (`performance.pkl`) AND
+sigma (qid-grouped response std on each model's own `responses.pkl`, via
+`_qid_response_std` -- the same convention the human-data figures use)
+are simultaneously closest to each other, entirely from already-existing
+fit data (no new simulation needed for this search). Top candidates:
+
+| pid | NEF rmse/sigma | Synaptic rmse/sigma | rmse gap | sigma gap | λ (NEF / synaptic) |
+|---|---|---|---|---|---|
+| 43 | 0.167 / 0.012 | 0.169 / 0.017 | 0.0018 | 0.0054 | 0.011 / 0.014 |
+| 32 | 0.092 / 0.012 | 0.096 / 0.018 | 0.0039 | 0.0057 | 0.263 / 0.227 |
+| 33 | 0.080 / 0.012 | 0.078 / 0.019 | 0.0020 | 0.0075 | 0.194 / 0.226 |
+
+pid 43 has the single smallest rmse/sigma gap, but its fitted `lambda_`
+is near-zero for both models (~0.01) -- a near-flat learning rate, not
+representative of the power-law-decay story this whole project is built
+around. pids 32/33 both show real, comparably-shaped decay (`alpha(t)`
+drops from ~1.0 at t=1 to ~0.5 at t=15 for both models, NEF consistently
+offset above synaptic rather than diverging in shape). Picked **33** over
+32: smallest rmse gap of the two (0.0020 vs 0.0039) and lowest absolute
+rmse for both models (best overall fit quality), trading a slightly
+larger sigma gap (0.0075 vs 0.0057) -- still far smaller than every
+candidate outside this top handful.
+
+**Not done:** no attempt to also match `n_neurons`/`n_neurons_counting`
+per model -- both stay at the shared architecture sizing
+(`n_neurons=500`, `n_neurons_counting=2000`) already used everywhere else
+for this task; only `alpha_0`/`lambda_` come from the per-pid fit.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (methodology refinement, nothing retired).
+

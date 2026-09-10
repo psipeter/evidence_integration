@@ -248,6 +248,23 @@ at carrabin's production size (`n_neurons=500`, `n_neurons_counting=500`)
 via manual inspection: value traces now track closely between gate
 on/off.
 
+**Also settled this session: `synaptic_main`'s ITI-perturbation experiments
+now use per-model-type fitted params (pid 33), not one shared arbitrary
+value.** At the original shared `(alpha_0=0.7, lambda_=0.7)`,
+NEF_synaptic's baseline (strength=0, `gate_error_feedback=True`) RMSE ran
+~45% higher than NEF's — the shared value was itself a confound, sitting
+closer to NEF's own fitted optimum than NEF_synaptic's, once NEF_synaptic
+got a real fit of its own to compare against. Replaced with pid 33's own
+independently-fitted `(alpha_0, lambda_)` per model_type (NEF: 0.999,
+0.194; NEF_synaptic: 0.880, 0.226) — the pid where the two models'
+real-data RMSE and sigma are closest to each other while both still show
+genuine power-law decay (unlike the single closest-RMSE-gap candidate,
+pid 43, whose fitted `lambda_≈0.01` is a near-flat learning rate). See
+docs/DECISIONS.md for the full candidate comparison.
+`iti_perturbation`/`iti_perturbation_dynamics`'s `--alpha_0`/`--lambda_`
+CLI now take per-model `KEY=VALUE` pairs instead of a single float — a
+clean break, not a backwards-compatible option.
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships). Model
 fitting against real `task_backend` (soltani) data — the human-only pilot
@@ -256,8 +273,10 @@ The synaptic-vs-working-memory implementation comparison is underway (see
 above) — NEF_synaptic reimplemented and baseline-checked, with an initial
 Optuna RMSE fit now collected (`data/runs/nef_synaptic/`, 100 trials/pid,
 all 4 datasets, not yet promoted to the canonical `rmse` folder pending
-review) and `gate_error_feedback` built for the ITI-perturbation
-comparison's next iteration.
+review). `synaptic_main`'s dynamics/dose-response data needs regenerating
+under the new per-model-params design (gated, pid 33) before the figure
+reflects it — the current on-disk data still reflects the old shared-value
+design (dose-response) or was clobbered by a debug test (dynamics).
 
 ---
 
