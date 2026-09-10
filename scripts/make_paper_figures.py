@@ -3744,18 +3744,22 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
     # simulation itself used), NOT t_obs + t_iti (2.0s) -- the trace is
     # already windowed to exclude its own preceding ITI (see docstring),
     # so t=0 is this observation's onset and t=t_obs is where it ends.
-    # Middle tick = typical_peak_time, the SAME single grid-wide benchmark
-    # time _plot_oddball_param_effect/_plot_oddball_dv_scatter read max_pe
-    # AT (see neural_experiments.py's collect step) -- so this raw trace
-    # visually marks exactly where those panels' "PE maximum" is measured
-    # from, not an arbitrary midpoint.
+    # Plain evenly-spaced ticks (not a typical_peak_time marker tick) --
+    # with the gated ITI-silencing data (models.NEF's gate_error_feedback,
+    # see docs/DECISIONS.md) the upswing is immediate and the maximum
+    # follows shortly after, so a dedicated peak-time tick no longer
+    # tells the reader anything a uniform grid doesn't already show.
     from fitting.model_params import _NEF_FIXED
     end_time = float(_NEF_FIXED["t_obs"])
-    typical_peak_time = float(d.get("typical_peak_time", end_time / 2))
     ax.set_xlim(0, end_time)
-    ax.set_xticks([0, typical_peak_time, end_time])
+    ax.set_xticks([0.0, 0.5, 1.0, 1.5])
     ax.set_xlabel("Time")
     ax.set_ylabel("PE (oddball)")
+    # PE maximum is now ~0.1 (gated data) -- fixed round-number ticks
+    # shared across row 1 (see _plot_oddball_param_effect/_plot_oddball_
+    # dv_scatter's own matching PE-maximum axis).
+    ax.set_ylim(0, 0.1)
+    ax.set_yticks([0.0, 0.05, 0.1])
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -3838,10 +3842,11 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
         "PE maximum", "PE decay (%max/s)",
         include_x_zero=sweep_param in ("alpha_0", "lambda_"),
     )
-    # PE maximum ticks: project-wide round-number-padded convention (see
-    # .claude/agents/figure-viewer.md) -- matches _plot_oddball_dv_scatter's
-    # own x-axis, the SAME quantity, read from the same underlying grid.
-    max_pe_ticks = nice_ticks(grid["max_pe"].min(), grid["max_pe"].max(), n=3)
+    # PE maximum ticks: fixed at [0.0, 0.05, 0.1] (gated-data PE maximum is
+    # ~0.1, see docs/DECISIONS.md), not the auto nice_ticks range -- matches
+    # _plot_oddball_dv_scatter's own x-axis, the SAME quantity, read from
+    # the same underlying grid.
+    max_pe_ticks = [0.0, 0.05, 0.1]
     ax.set_ylim(max_pe_ticks[0], max_pe_ticks[-1])
     ax.set_yticks(max_pe_ticks)
     return ax2
@@ -3884,10 +3889,11 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
                label=f"r={r:.2f}{pvalue_to_stars(p)}")
     ax.set_xlabel("PE maximum")
     ax.set_ylabel("PE decay (%max/s)")
-    # Project-wide round-number-padded tick convention (see
-    # .claude/agents/figure-viewer.md) -- matches _plot_oddball_param_effect's
-    # own left axis, the SAME quantity, read from the same underlying grid.
-    max_pe_ticks = nice_ticks(grid["max_pe"].min(), grid["max_pe"].max(), n=3)
+    # Fixed at [0.0, 0.05, 0.1] (gated-data PE maximum is ~0.1, see
+    # docs/DECISIONS.md), not the auto nice_ticks range -- matches
+    # _plot_oddball_param_effect's own left axis, the SAME quantity, read
+    # from the same underlying grid.
+    max_pe_ticks = [0.0, 0.05, 0.1]
     ax.set_xlim(max_pe_ticks[0], max_pe_ticks[-1])
     ax.set_xticks(max_pe_ticks)
     # Fit/pearsonr above still use every point (including the handful of
@@ -4039,9 +4045,9 @@ def _plot_neural_main_activity_vs_obs(ax, sweep_param: str, task: str = "soltani
                 hue_order=hue_order, palette=color_map, ax=ax, lw=1.8)
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right", title=None)
 
-    n_obs_max = int(df["observation"].max())
     ax.set_xlabel("Observation")
-    ax.set_xlim(0, n_obs_max)
+    ax.set_xlim(0, 15)
+    ax.set_xticks([0, 5, 10, 15])
     ax.set_ylabel("Error neuron activity (Hz)")
     ax.legend(fontsize=8, frameon=True, framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)

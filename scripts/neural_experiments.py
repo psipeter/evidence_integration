@@ -1806,6 +1806,7 @@ def _iti_perturbation_session_worker(
     task: str, session: int, alpha_0: float, lambda_: float,
     n_neurons: int, n_neurons_counting: int,
     model_types: list, strength: float, activity_map: dict,
+    gate_error_feedback: bool = False,
 ) -> pd.DataFrame:
     """Simulate ONE synthetic session's full 32 trials -- 8 qids x 4
     repeats, matching a real participant's own session exactly (see
@@ -1850,6 +1851,7 @@ def _iti_perturbation_session_worker(
         base_params = _base_params(
             task, alpha_0, n_neurons, lambda_,
             n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
+            gate_error_feedback=gate_error_feedback,
         )
         for trial_idx, trial_data in enumerate(trials):
             raw_prefix = np.array(trial_data["values"][:prefix_length], dtype=float)
@@ -1922,6 +1924,13 @@ def run_iti_perturbation(args) -> None:
     never-plot-here / save-raw-compute-in-figures convention.
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # "iti_perturbation_gated_pool_..." (not "..._pool_..._gated") so the
+    # default (non-gated) glob at --mode collect below can never
+    # accidentally swallow gated per-cell files too -- matches oddball's
+    # own oddball_gated_ prefix convention and the same reasoning (a
+    # trailing suffix right before ".pkl" would be caught by a glob's own
+    # trailing wildcard).
+    iti_prefix = "iti_perturbation_gated" if getattr(args, "gate_error_feedback", False) else "iti_perturbation"
 
     if args.mode == "run":
         if args.session is None:
@@ -1932,7 +1941,7 @@ def run_iti_perturbation(args) -> None:
             raise SystemExit("--alpha_0/--lambda_ required for --mode run")
         tag = _oddball_value_tag(args.strength)
         out_path = (
-            OUT_DIR / f"iti_perturbation_pool_{args.task}_session{args.session}_strength{tag}.pkl"
+            OUT_DIR / f"{iti_prefix}_pool_{args.task}_session{args.session}_strength{tag}.pkl"
         )
         if out_path.exists():
             print(f"Already exists: session={args.session} strength={args.strength} "
@@ -1947,6 +1956,7 @@ def run_iti_perturbation(args) -> None:
         df = _iti_perturbation_session_worker(
             args.task, args.session, args.alpha_0, args.lambda_,
             args.n_neurons, args.n_neurons_counting, args.model_types, args.strength, activity_map,
+            gate_error_feedback=getattr(args, "gate_error_feedback", False),
         )
         df.to_pickle(out_path)
         print(f"session={args.session} strength={args.strength}: {len(df)} rows in "
@@ -1959,12 +1969,13 @@ def run_iti_perturbation(args) -> None:
         n_jobs = args.n_sessions * len(args.strengths)
         print(f"Submitting {n_jobs} iti_perturbation jobs for task={args.task} "
               f"({args.n_sessions} sessions x {len(args.strengths)} strengths)")
+        gate_flag = " --gate_error_feedback" if getattr(args, "gate_error_feedback", False) else ""
         for session in range(1, args.n_sessions + 1):
             for strength in args.strengths:
                 tag = _oddball_value_tag(strength)
                 out_path = (
                     OUT_DIR
-                    / f"iti_perturbation_pool_{args.task}_session{session}_strength{tag}.pkl"
+                    / f"{iti_prefix}_pool_{args.task}_session{session}_strength{tag}.pkl"
                 )
                 if out_path.exists():
                     print(f"  session={session} strength={strength}: already exists -- skipping")
@@ -1974,23 +1985,23 @@ def run_iti_perturbation(args) -> None:
                     f"--task {args.task} --mode run --session {session} --strength {strength} "
                     f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} "
                     f"--n_neurons {args.n_neurons} --n_neurons_counting {args.n_neurons_counting} "
-                    f"--model_types {' '.join(args.model_types)}"
+                    f"--model_types {' '.join(args.model_types)}{gate_flag}"
                 )
                 script = make_job_script(root, [cmd], time_limit="0:30:0", mem="16G")
                 script_path = (
-                    OUT_DIR / f"_job_iti_perturbation_{args.task}_session{session}_strength{tag}.sh"
+                    OUT_DIR / f"_job_{iti_prefix}_{args.task}_session{session}_strength{tag}.sh"
                 )
                 script_path.write_text(script)
                 submit_script(script_path, dry_run=args.dry_run)
 
     elif args.mode == "collect":
-        files = sorted(OUT_DIR.glob(f"iti_perturbation_pool_{args.task}_session*_strength*.pkl"))
+        files = sorted(OUT_DIR.glob(f"{iti_prefix}_pool_{args.task}_session*_strength*.pkl"))
         if not files:
-            print(f"No iti_perturbation_pool_{args.task}_session*_strength*.pkl files found "
+            print(f"No {iti_prefix}_pool_{args.task}_session*_strength*.pkl files found "
                   f"in {OUT_DIR}")
             return
         df = pd.concat([pd.read_pickle(f) for f in files], ignore_index=True)
-        out_path = OUT_DIR / f"iti_perturbation_{args.task}_raw.pkl"
+        out_path = OUT_DIR / f"{iti_prefix}_{args.task}_raw.pkl"
         df.to_pickle(out_path)
         n_sessions = df["session"].nunique()
         n_strengths = df["strength"].nunique()
@@ -2038,7 +2049,7 @@ def _session_level_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
 def _iti_perturbation_dynamics_worker(
     task: str, model_type: str, strength: float, session: int, qid: int,
     alpha_0: float, lambda_: float, n_neurons: int, n_neurons_counting: int,
-    activity_map: dict, repeat: int = 0,
+    activity_map: dict, repeat: int = 0, gate_error_feedback: bool = False,
 ) -> dict:
     """Full per-timestep decoded `value` trace for ONE (model_type,
     strength) on ONE specific (session, qid)'s trial, at repeat-seed
@@ -2071,6 +2082,7 @@ def _iti_perturbation_dynamics_worker(
     base_params = _base_params(
         task, alpha_0, n_neurons, lambda_,
         n_neurons_counting=n_neurons_counting, model_type=model_type, nef_type=nef_type,
+        gate_error_feedback=gate_error_feedback,
     )
     akey = _toy_activity_key(repeat)
     decoders = _decoders_for_seed(activity_map, akey, alpha_0, lambda_)
@@ -2103,12 +2115,14 @@ def run_iti_perturbation_dynamics(args) -> None:
     activity_map = load_activities(
         n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
     )
+    gate_error_feedback = getattr(args, "gate_error_feedback", False)
     rows = []
     for model_type in args.model_types:
         for strength in args.strengths:
             result = _iti_perturbation_dynamics_worker(
                 args.task, model_type, strength, args.session, args.qid,
                 args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting, activity_map,
+                gate_error_feedback=gate_error_feedback,
             )
             for t, v in zip(result["t"], result["value"]):
                 rows.append({
@@ -2118,7 +2132,8 @@ def run_iti_perturbation_dynamics(args) -> None:
             print(f"{model_type} strength={strength}: simulated ({len(result['t'])} timesteps)")
 
     df = pd.DataFrame(rows)
-    out_path = OUT_DIR / f"iti_perturbation_dynamics_{args.task}.pkl"
+    prefix = "iti_perturbation_gated" if gate_error_feedback else "iti_perturbation"
+    out_path = OUT_DIR / f"{prefix}_dynamics_{args.task}.pkl"
     df.to_pickle(out_path)
     print(f"Saved {len(df):,} rows -> {out_path}")
 
@@ -2155,13 +2170,14 @@ def run_recurrent_vs_synaptic_dynamics(args) -> None:
     activity_map = load_activities(
         n_neurons=args.n_neurons, n_neurons_counting=args.n_neurons_counting, dataset=args.task,
     )
+    gate_error_feedback = getattr(args, "gate_error_feedback", False)
     rows = []
     for model_type in args.model_types:
         for seed in range(args.n_seeds):
             result = _iti_perturbation_dynamics_worker(
                 args.task, model_type, 0.0, args.session, args.qid,
                 args.alpha_0, args.lambda_, args.n_neurons, args.n_neurons_counting,
-                activity_map, repeat=seed,
+                activity_map, repeat=seed, gate_error_feedback=gate_error_feedback,
             )
             for t, v in zip(result["t"], result["value"]):
                 rows.append({
@@ -2171,7 +2187,8 @@ def run_recurrent_vs_synaptic_dynamics(args) -> None:
         print(f"{model_type}: {args.n_seeds} seeds simulated", flush=True)
 
     df = pd.DataFrame(rows)
-    out_path = OUT_DIR / f"recurrent_vs_synaptic_dynamics_{args.task}.pkl"
+    suffix = "_gated" if gate_error_feedback else ""
+    out_path = OUT_DIR / f"recurrent_vs_synaptic_dynamics{suffix}_{args.task}.pkl"
     df.to_pickle(out_path)
     print(f"Saved {len(df):,} rows -> {out_path}")
 
@@ -2346,6 +2363,11 @@ def main() -> None:
     p_iti.add_argument("--n_neurons", type=int, default=500)
     p_iti.add_argument("--n_neurons_counting", type=int, default=2000)
     p_iti.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
+    p_iti.add_argument("--gate_error_feedback", action="store_true", default=False,
+                       help="Use models.NEF's gated ITI-silencing mode (see models/NEF.py, "
+                            "docs/DECISIONS.md) for every model_type. Output filenames get an "
+                            "'iti_perturbation_gated_' prefix so gated/default runs never collide "
+                            "or get mixed together at --mode collect.")
     p_iti.add_argument("--dry_run", action="store_true")
     p_iti.set_defaults(func=run_iti_perturbation)
 
@@ -2361,6 +2383,9 @@ def main() -> None:
     p_itid.add_argument("--n_neurons_counting", type=int, default=2000)
     p_itid.add_argument("--strengths", type=float, nargs="+", default=[0.0, 1.0])
     p_itid.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
+    p_itid.add_argument("--gate_error_feedback", action="store_true", default=False,
+                        help="Use models.NEF's gated ITI-silencing mode for every model_type. "
+                             "Output gets an 'iti_perturbation_gated_dynamics_' filename.")
     p_itid.set_defaults(func=run_iti_perturbation_dynamics)
 
     p_rvs = sub.add_parser("recurrent_vs_synaptic_dynamics")
@@ -2376,6 +2401,9 @@ def main() -> None:
     p_rvs.add_argument("--n_neurons", type=int, default=500)
     p_rvs.add_argument("--n_neurons_counting", type=int, default=2000)
     p_rvs.add_argument("--model_types", type=str, nargs="+", default=["NEF", "NEF_synaptic"])
+    p_rvs.add_argument("--gate_error_feedback", action="store_true", default=False,
+                       help="Use models.NEF's gated ITI-silencing mode for every model_type. "
+                            "Output gets a 'recurrent_vs_synaptic_dynamics_gated_' filename.")
     p_rvs.set_defaults(func=run_recurrent_vs_synaptic_dynamics)
 
     args = parser.parse_args()
