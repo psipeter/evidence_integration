@@ -1003,7 +1003,8 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
     obs_values = obs_values_raw / 50.0 - 1.0 if args.task == "soltani_numbers" else obs_values_raw
 
     base_kwargs = dict(alpha_0=args.base_alpha_0, n_neurons=args.base_n_neurons,
-                       lambda_=args.base_lambda_)
+                       lambda_=args.base_lambda_,
+                       gate_error_feedback=getattr(args, "gate_error_feedback", False))
     base_kwargs[args.sweep_param] = sweep_value
     params = _base_params(args.task, **base_kwargs)
 
@@ -1343,6 +1344,11 @@ def run_oddball(args) -> None:
     simulations run serially within that one job.
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # "oddball_gated_" (not "oddball_..._gated") so the default (non-gated)
+    # glob at --mode collect below can never accidentally swallow gated
+    # per-cell files too -- a suffix right before ".pkl" would, since "v*"
+    # in that glob matches any trailing characters including "_gated".
+    oddball_prefix = "oddball_gated" if getattr(args, "gate_error_feedback", False) else "oddball"
 
     def _tag3(c, d, v):
         return f"c{_oddball_value_tag(c)}_d{_oddball_value_tag(d)}_v{_oddball_value_tag(v)}"
@@ -1352,7 +1358,7 @@ def run_oddball(args) -> None:
             raise SystemExit("--cluster_center, --oddball_deviation, and --sweep_value "
                              "all required for --mode run")
         tag = _tag3(args.cluster_center, args.oddball_deviation, args.sweep_value)
-        out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}_{tag}.pkl"
+        out_path = OUT_DIR / f"{oddball_prefix}_{args.sweep_param}_{args.task}_{tag}.pkl"
         if out_path.exists():
             print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
             return
@@ -1373,27 +1379,28 @@ def run_oddball(args) -> None:
               f"for task={args.task}")
         for c, d, v in combos:
             tag = _tag3(c, d, v)
-            out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}_{tag}.pkl"
+            out_path = OUT_DIR / f"{oddball_prefix}_{args.sweep_param}_{args.task}_{tag}.pkl"
             if out_path.exists():
                 print(f"  center={c} deviation={d} {args.sweep_param}={v}: already exists -- skipping")
                 continue
+            gate_flag = " --gate_error_feedback" if getattr(args, "gate_error_feedback", False) else ""
             cmd = (
                 f"venv/bin/python scripts/neural_experiments.py oddball "
                 f"--task {args.task} --mode run --sweep_param {args.sweep_param} "
                 f"--sweep_value {v} --cluster_center {c} --oddball_deviation {d} "
                 f"--cluster_spread {args.cluster_spread} "
                 f"--base_alpha_0 {args.base_alpha_0} --base_lambda_ {args.base_lambda_} "
-                f"--base_n_neurons {args.base_n_neurons} --n_seeds {args.n_seeds}"
+                f"--base_n_neurons {args.base_n_neurons} --n_seeds {args.n_seeds}{gate_flag}"
             )
             script = make_job_script(root, [cmd], time_limit="1:0:0", mem="16G")
-            script_path = OUT_DIR / f"_job_oddball_{args.sweep_param}_{args.task}_{tag}.sh"
+            script_path = OUT_DIR / f"_job_{oddball_prefix}_{args.sweep_param}_{args.task}_{tag}.sh"
             script_path.write_text(script)
             submit_script(script_path, dry_run=args.dry_run)
 
     elif args.mode == "collect":
-        files = sorted(OUT_DIR.glob(f"oddball_{args.sweep_param}_{args.task}_c*_d*_v*.pkl"))
+        files = sorted(OUT_DIR.glob(f"{oddball_prefix}_{args.sweep_param}_{args.task}_c*_d*_v*.pkl"))
         if not files:
-            print(f"No oddball_{args.sweep_param}_{args.task}_c*_d*_v*.pkl files found in {OUT_DIR}")
+            print(f"No {oddball_prefix}_{args.sweep_param}_{args.task}_c*_d*_v*.pkl files found in {OUT_DIR}")
             return
         results = [pd.read_pickle(f) for f in files]
         # A per-cell argmax time is noisy for a handful of cells (low-SNR
@@ -1437,7 +1444,7 @@ def run_oddball(args) -> None:
             "cluster_spread": args.cluster_spread,
             "typical_peak_time": typical_peak_time,
         }
-        out_path = OUT_DIR / f"oddball_{args.sweep_param}_{args.task}.pkl"
+        out_path = OUT_DIR / f"{oddball_prefix}_{args.sweep_param}_{args.task}.pkl"
         pd.to_pickle(result_all, out_path)
         print(f"Collected {len(files)} cell(s) -> {out_path}")
         print(grid)
@@ -2287,6 +2294,12 @@ def main() -> None:
     p_odd.add_argument("--base_lambda_", type=float, required=True)
     p_odd.add_argument("--base_n_neurons", type=int, required=True)
     p_odd.add_argument("--n_seeds", type=int, default=20)
+    p_odd.add_argument("--gate_error_feedback", action="store_true", default=False,
+                       help="Use models.NEF's gated ITI-silencing mode (value->gate->"
+                            "error[1], see models/NEF.py) instead of the default direct "
+                            "error.neurons inhibition. Output filenames get an 'oddball_gated_' "
+                            "prefix (vs. 'oddball_') so gated/default runs never collide or "
+                            "get mixed together at --mode collect.")
     p_odd.add_argument("--dry_run", action="store_true")
     p_odd.set_defaults(func=run_oddball)
 
