@@ -115,3 +115,15 @@ scripts/test_sequences_subsampling.py
 # pid to the same real person.
 data/pid_registry.json
 scripts/_tmp_baseline_calibration.py
+
+# LaTeX build byproducts (paper/ source is tracked, compiled/aux output is not)
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.pdf
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/supplement.aux
