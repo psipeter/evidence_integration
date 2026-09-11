@@ -60,6 +60,11 @@ figures/*
 paper/figures/*
 !paper/figures/tasks_overview.pdf
 !paper/figures/models_overview_paper.pdf
+!paper/figures/model_performance.pdf
+!paper/figures/lambda_main.pdf
+!paper/figures/sigma_main.pdf
+!paper/figures/neural_main.pdf
+!paper/figures/synaptic_main.pdf
 
 presentations/figures/*
 !presentations/figures/temporal_performance.svg
