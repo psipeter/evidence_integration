@@ -44,6 +44,42 @@ def apply_style() -> None:
     )
 
 
+def apply_paper_style() -> None:
+    """scripts/make_figures.py's paper-mode style -- a print figure read up
+    close on a printed/PDF page, not a projector. Thin wrapper around
+    apply_style() (same publication defaults every other script in this
+    project already uses) so paper-mode figures share ONE style source
+    with everything else, rather than a second, drifting copy of the
+    same rcParams dict."""
+    apply_style()
+
+
+def apply_presentation_style() -> None:
+    """scripts/make_figures.py's presentation-mode style -- bigger than
+    apply_paper_style()'s publication defaults (font.size 9), since this
+    renders as ONE full-slide panel viewed on a projector, not a
+    multi-panel PDF read up close. Moved here (was make_figures.py's own
+    private _apply_slide_style) so it's a shared, public counterpart to
+    apply_paper_style() rather than living only inside one script."""
+    sns.set_theme(style="ticks")
+    plt.rcParams.update({
+        "figure.dpi": 150,
+        "savefig.dpi": 200,
+        "font.family": "sans-serif",
+        "font.size": 15,
+        "axes.labelsize": 17,
+        "axes.titlesize": 18,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "legend.fontsize": 14,
+        "axes.linewidth": 1.2,
+        "xtick.major.width": 1.2,
+        "ytick.major.width": 1.2,
+        "lines.linewidth": 2.5,
+        "savefig.transparent": False,
+    })
+
+
 # -- shared figure constants ---------------------------------------------------
 
 FIGURE_SIZE = (14, 7)
@@ -188,7 +224,7 @@ def draw_sig_line(ax, x1, x2, y, stars, color="black", linewidth=0.9, fontsize=7
     `color` defaults to "black" -- every existing caller passes positionally
     through `stars` only, so this default preserves their exact prior output.
     Added so a caller can color the bar/stars to match a specific reference
-    model (e.g. scripts/make_paper_figures.py's make_model_performance,
+    model (e.g. scripts/make_figures.py's make_model_performance,
     which draws its bars in RL_lambda's own established color rather than
     black, since the comparison is specifically FROM that model).
     """

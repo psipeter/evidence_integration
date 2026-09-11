@@ -77,7 +77,7 @@ analysis -- see `docs/DECISIONS.md` for the comparison and why.
 
 ## Current thread
 
-**Active:** `neural_main` (`scripts/make_paper_figures.py`'s
+**Active:** `neural_main` (`scripts/make_figures.py`'s
 `make_neural_main()`) — the sole, authoritative figure for the causal
 impact of neural parameters (α₀, λ, n_neurons) on behaviour and activity.
 Isolates each parameter's own contribution one row at a time, rather than

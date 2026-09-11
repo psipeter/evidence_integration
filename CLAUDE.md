@@ -25,10 +25,14 @@ fully before making changes.
   cluster-side file/job state directly — give the person commands to run
   themselves on `discovery-01` and take their terminal output as ground
   truth.
-- **Figures save PDF only** — never PNG/SVG, never upload images to chat
+- **Figures save PDF only** — never PNG, never upload images to chat
   unless a genuine visual judgment call is needed (see "Figure
   iteration" below). Don't upload Playwright screenshots either — use
-  DOM/computed-style assertions instead.
+  DOM/computed-style assertions instead. One deliberate exception:
+  `scripts/make_figures.py` saves PDF **and** SVG for both its output
+  modes (paper and presentation — see "Figure modes" below), a
+  standing house convention for that script specifically, not a
+  license to add SVG output elsewhere.
 - **NEF simulation runtime varies from minutes to hours.** For a real
   fit or the actual scientific simulation, never run one directly —
   write the script, then give the person the exact command so they can
@@ -184,6 +188,59 @@ conventions.
 
 ---
 
+## Figure modes
+
+`scripts/make_figures.py` generates BOTH the paper's figures and the
+companion presentation's, from the same `make_*` functions — always pass
+`--mode paper` or `--mode presentation`; there is no default, since the
+two produce visibly different output (wrong mode picked silently would go
+unnoticed):
+
+```
+venv/bin/python scripts/make_figures.py model_performance --mode paper
+venv/bin/python scripts/make_figures.py model_performance --mode presentation
+```
+
+| | `--mode paper` | `--mode presentation` |
+|---|---|---|
+| Width | 6.5in (`paper/main.tex`'s real `\textwidth`) | 10.6in (established Quarto deck width) |
+| Style | `apply_paper_style()` (`utils/plot_style.py`) | `apply_presentation_style()` (`utils/plot_style.py`) |
+| Saves to | `paper/figures/` | `presentations/figures/` |
+| Format | PDF + SVG (both modes) | PDF + SVG (both modes) |
+
+Height is **not** derived from width by a fixed formula — every figure's
+own height gets hand-tuned per mode as it's checked in its actual
+paper/presentation context (`MODE_CONFIG`'s own starting values in
+`scripts/make_figures.py` are just that, a starting point, not a target).
+This is ongoing, incremental work — most figures have so far only ever
+been checked at what is now `--mode presentation`'s own size; treat an
+unretuned figure's `--mode paper` output as unverified until it's actually
+been looked at.
+
+The old shared top-level `figures/` directory is being phased out as
+each figure's paper/presentation-mode output is confirmed — it still
+holds every figure's last-generated output from before this split, and
+`figures/schematics/` remains the real, current home for hand-drawn
+schematic SOURCE assets (read by, not written by, `make_figures.py`).
+
+`presentations/make_figures.py` (SVG-only, its own bespoke reveal.js-
+fragment slide figures) has been **retired** — archived to
+`archive/scripts/make_figures.py` (git history preserved via `git mv`;
+see `archive/HISTORY_modeling_2026.md`'s "presentations/make_figures.py
+retired" entry for the full narrative and restore instructions). Only 2
+of its 13 figures (`temporal_performance`, `model_performance`) have
+actually been ported to `scripts/make_figures.py --mode presentation`
+so far — the other 11 (`response_change`, `lambda_human`,
+`lambda_sanity_human`, `lambda_model_correlation`, `variability_human`,
+`variability_models`, `sigma_sanity_human`, `sigma_model_correlation`,
+`model_performance_nll`, `variance_autocorr_human`,
+`variance_autocorr_models`) still need porting — remaining work, not yet
+scheduled. `presentations/presentation.qmd` still references the old
+script's SVG output for those 11 and will render broken until each is
+ported and the deck rebuilt.
+
+---
+
 ## Repository structure
 
 ```
@@ -212,10 +269,12 @@ evidence_integration/
     participant_filters.py  — exclusion criteria (see task_backend/CLAUDE.md)
     colors_quasi_qids.py    — empirically-derived repeat structure for colors
   scripts/
-    make_paper_figures.py     — sole figure generator (composite/presentation
+    make_figures.py           — sole figure generator (composite/presentation
                                 figures, incl. neural_main); supersedes the
                                 retired per-dataset figure_*.py scripts
-                                (archived, see "What NOT to do")
+                                (archived, see "What NOT to do"). Renamed
+                                from make_paper_figures.py once presentation
+                                output was generalized in — see "Figure modes"
     build_model_inputs.py, pull_soltani_data.py
     inspect_participant.py, inspect_participant_temporal.py
     plot_sequences.py         — see .claude/skills/task-backend-sequences/SKILL.md
@@ -229,11 +288,24 @@ evidence_integration/
   docs/
     SCIENCE.md          — scientific goals, current thread, results, NEF architecture
     DECISIONS.md        — non-diff-shaped methodology/platform decisions
+  paper/                — the AAAS Science-family submission (main.tex,
+                          bibliography.bib); paper/figures/ is
+                          make_figures.py's own --mode paper output
+  presentations/        — Quarto/reveal.js slide deck (presentation.qmd)
+                          plus presentations/figures/, scripts/make_figures.py's
+                          own --mode presentation output. Its OLD, separate
+                          make_figures.py script is retired (archived to
+                          archive/scripts/make_figures.py); only 2 of its 13
+                          figures have been ported to scripts/make_figures.py
+                          so far, so presentation.qmd currently has 11 broken
+                          figure references pending that porting work (see
+                          "Figure modes")
   venv/
 ```
 
 All new scripts go in `scripts/`. Never create scripts at the project
-root. Figures save PDF only.
+root. Figures save PDF only (see "Figure modes" for `scripts/make_figures.py`'s
+own PDF+SVG exception).
 
 ---
 
@@ -347,7 +419,7 @@ platform evaluations, methodology choices made before any code existed.
   scripts, the legacy combined `figure_carrabin.py`/`figure_yoo.py`, or
   `extras_carrabin.py`/`extras_yoo.py` (the older N1-N8 neural-data-generation
   taxonomy) without an explicit plan — all superseded by
-  `scripts/make_paper_figures.py`'s consolidated `make_*` functions and
+  `scripts/make_figures.py`'s consolidated `make_*` functions and
   `neural_main`; see `docs/DECISIONS.md`. Code is archived under
   `archive/scripts/` (restorable), not deleted.
 - Do not resurrect the `task/` (JATOS/MindProbe) online-task pipeline

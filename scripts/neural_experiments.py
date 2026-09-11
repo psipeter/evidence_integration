@@ -91,7 +91,7 @@ predate this docstring's last update; see --help for the full set):
                  sigma/rmse aggregation (a two-stage, qid-aware hierarchy
                  mirroring how human data is aggregated elsewhere in this
                  project, see `_session_level_stats` below) and plotting
-                 both live in make_paper_figures.py's make_synaptic_main.
+                 both live in make_figures.py's make_synaptic_main.
                  See run_iti_perturbation's own docstring for the full design
                  and why error/background/counting.memory were tried and
                  dropped as perturbation targets.
@@ -1452,7 +1452,7 @@ def run_oddball(args) -> None:
 
 # ── param_scan (neural_main rows 2/3 -- lambda_/n_neurons vs activity+decay) ──
 
-NEURAL_ENCODER_THRESHOLD = 0.5  # matches figure_yoo_neural.py's/make_paper_figures.py's
+NEURAL_ENCODER_THRESHOLD = 0.5  # matches figure_yoo_neural.py's/make_figures.py's
                                 # own ENCODER_THRESHOLD -- same weight-tuned-neuron
                                 # convention as the original neural_giant figure.
 
@@ -1944,7 +1944,7 @@ def run_iti_perturbation(args) -> None:
     --mode collect: concatenates every cell's raw file into ONE long-form
     dataframe (iti_perturbation_{task}_raw.pkl) -- NO stats computed here.
     sigma/rmse need a two-stage, qid-aware aggregation (mirroring
-    scripts/make_paper_figures.py's own _qid_response_std and
+    scripts/make_figures.py's own _qid_response_std and
     utils/aggregate.py's hier_mean_sem convention for human data -- see
     chat) that belongs in the figure script, matching this module's own
     never-plot-here / save-raw-compute-in-figures convention.
@@ -2045,11 +2045,11 @@ def run_iti_perturbation(args) -> None:
 def _session_level_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
     """Two-stage, qid-aware per-session sigma + flat per-session RMSE, over
     `run_iti_perturbation`'s own collected raw output -- mirrors
-    scripts/make_paper_figures.py's own _qid_response_std (sigma: std of
+    scripts/make_figures.py's own _qid_response_std (sigma: std of
     response across a qid's repeats, averaged across that session's 8
     qids) and utils/aggregate.py's hier_mean_sem convention (RMSE:
     per-session RMSE first, mean +/- SEM across sessions at plot time, not
-    a pooled/bootstrapped statistic). Read directly by make_paper_figures.py's
+    a pooled/bootstrapped statistic). Read directly by make_figures.py's
     make_synaptic_main, so plotting and this aggregation never drift apart.
 
     Sigma needs the qid-stratified stage (repeats of the SAME stimulus
@@ -2140,7 +2140,7 @@ def run_iti_perturbation_dynamics(args) -> None:
     aggregated accuracy/reliability analysis, for manually inspecting what
     the perturbation is actually doing rather than only its aggregate
     statistical effect. Saved as ONE long-form dataframe (model_type,
-    strength, t, value); plotted separately via make_paper_figures.py's
+    strength, t, value); plotted separately via make_figures.py's
     make_synaptic_main (r2c2).
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -2189,7 +2189,7 @@ def run_recurrent_vs_synaptic_dynamics(args) -> None:
     consistency check (see docs/SCIENCE.md's "Current thread"), now using
     the same pool-based sequence selection this module's iti_perturbation
     experiments already established, plus seaborn's own mean+CI machinery
-    at plot time (make_paper_figures.py's make_synaptic_main, r1c3) instead
+    at plot time (make_figures.py's make_synaptic_main, r1c3) instead
     of eyeballing single traces.
 
     Default --session/--qid (102, 2) were picked by ONE random draw, not

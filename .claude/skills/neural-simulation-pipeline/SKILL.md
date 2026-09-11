@@ -67,8 +67,11 @@ its current status. Data source: `scripts/neural_experiments.py`'s
 experiments, run on `soltani_numbers`. Build the figure with:
 
 ```bash
-python scripts/make_paper_figures.py neural_main
+python scripts/make_figures.py neural_main --mode paper
 ```
+
+(`--mode presentation` for the companion-presentation-sized version — see
+CLAUDE.md's "Figure modes"; `--mode` is required, no default.)
 
 The older per-task carrabin/yoo neural panel data (PE dynamics, probe sims,
 n_neurons scan, λ=0 ablation, error ensemble activities) and the N1-N8

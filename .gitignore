@@ -37,6 +37,48 @@ data/runs/
 figures/*
 !figures/*.py
 
+# =============================================================================
+# paper/ and presentations/ generated figures
+# =============================================================================
+# Only track what the document actually embeds, in the ONE format each
+# consumes (paper/main.tex wants PDF; presentation.qmd wants SVG, for
+# Quarto/reveal.js) -- scripts/make_figures.py's own local convention is
+# to always write PDF+SVG together for both --mode paper/presentation,
+# so plenty of untracked files accumulate here that were never meant to
+# be committed. Add a new `!path` line below whenever a new figure gets
+# embedded in main.tex/presentation.qmd; remove one when a figure is
+# dropped from the document. A figure under active hand-editing (e.g.
+# Inkscape touch-ups) can add its OTHER format here too as a deliberate
+# exception -- note why in the commit that adds it.
+#
+# TODO (deferred, kept as plain SVG for now): these presentation SVGs
+# get large -- matplotlib exports every scatter point/CI-band vertex as
+# its own full-precision XML path. Fix later: rasterize just the dense
+# data layers (ax.scatter(..., rasterized=True), regplot's CI-band
+# collection) while keeping text/axes/legends true vector -- smaller
+# files, still-crisp labels, no format change needed.
+paper/figures/*
+!paper/figures/tasks_overview.pdf
+!paper/figures/models_overview_paper.pdf
+
+presentations/figures/*
+!presentations/figures/temporal_performance.svg
+!presentations/figures/model_performance.svg
+!presentations/figures/response_change_human.svg
+!presentations/figures/response_change_full.svg
+!presentations/figures/lambda_human.svg
+!presentations/figures/lambda_sanity_human.svg
+!presentations/figures/lambda_model_correlation.svg
+!presentations/figures/variability_human.svg
+!presentations/figures/sigma_sanity_human.svg
+!presentations/figures/sigma_model_correlation.svg
+!presentations/figures/variance_autocorr_human.svg
+!presentations/figures/variance_autocorr_models.svg
+!presentations/figures/model_performance_nll.svg
+!presentations/figures/PE_dynamics.svg
+!presentations/figures/PE_drives_sigma.svg
+!presentations/figures/lambda_drives_discounting.svg
+
 # Archive figures (generated; code and docs in archive/ remain tracked)
 archive/**/*.png
 archive/**/*.pdf
@@ -128,3 +170,8 @@ paper/*.fdb_latexmk
 paper/*.synctex.gz
 paper/*.bcf
 paper/*.run.xml
+
+# Quarto extensions -- reinstalled locally as needed (`quarto add ...`),
+# not tracked; got committed by accident (both at the repo root and under
+# presentations/) when first installed.
+_extensions/
