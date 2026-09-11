@@ -269,20 +269,34 @@ both worth avoiding independent of the masking effect.
 shared `--alpha_0`/`--lambda_` float; `_parse_param_map`/the `KEY=VALUE`
 CLI syntax removed as dead code.
 
+**`synaptic_main` is now essentially complete.** The shared-value search
+the previous paragraph left open: a 25-candidate local grid
+(`alpha_0 ∈ {0.5,...,0.9}` × `lambda_ ∈ {0.3,...,0.7}`, cluster-dispatched
+one job per (candidate, session) cell, 10-session subsample per
+candidate, strength=0, `gate_error_feedback=True`) found `(alpha_0=0.5,
+lambda_=0.7)` with by far the smallest RMSE/sigma gap between model_types
+(0.0051/0.00074, next-best candidate nearly 2x worse on RMSE gap) while
+still showing real decay within the experiment's 4-observation window
+(`alpha(t)` 0.5→0.19, comparable to the original `(0.7,0.7)`'s own
+0.7→0.27 — ruling out the pid-33 masking problem by construction, not
+just by luck). All three `synaptic_main` panels regenerated under this
+setting: the dynamics panel now also uses a trial with genuine sign
+fluctuation (session 164, qid 5: prefix rescales to
+`[0.38, 0.66, 0.54, -0.24]`, true_mean +0.335) rather than the earlier
+monotonic-convergence trial, and a 100-session dose-response run (up from
+the 10-20-session pilots used for calibration) confirms the intended
+trend holds at this setting. The RMSE-boxplot panel (r1c3) also had its
+outlier dots hidden and y-limits pulled to the whisker extent
+(`(0.05, 0.25)`) for a tighter layout. `synaptic_main` added to the
+figure panel inventory below.
+
 **Not yet started:** the "Future extensions" below (ablation/statistical
-validation of `neural_main`'s parameter-vs-outcome relationships). Model
-fitting against real `task_backend` (soltani) data — the human-only pilot
-figures exist, but NEF/math-model fits to that data haven't been run yet.
-The synaptic-vs-working-memory implementation comparison is underway (see
-above) — NEF_synaptic reimplemented and baseline-checked, with an initial
-Optuna RMSE fit now collected (`data/runs/nef_synaptic/`, 100 trials/pid,
-all 4 datasets, not yet promoted to the canonical `rmse` folder pending
-review). Finding a new shared `(alpha_0, lambda_)` with comparable
-baseline RMSE/sigma between model_types (a small local grid search, not
-yet run) is the remaining prerequisite before `synaptic_main`'s
-dynamics/dose-response panels can be regenerated for real — the current
-on-disk data for both is stale (old shared-value dose-response data, and
-dynamics data clobbered by an unrelated debug test).
+validation of `neural_main`'s parameter-vs-outcome relationships) and
+model fitting against real `task_backend` (soltani) data for the other 3
+models — the human-only pilot figures exist, but NEF/math-model fits to
+that data haven't been run yet. `NEF_synaptic`'s own Optuna RMSE fit
+(`data/runs/nef_synaptic/`, 100 trials/pid, all 4 datasets) is still not
+promoted to the canonical `rmse` folder pending review.
 
 ---
 
@@ -501,6 +515,7 @@ testable with future spike-resolved recordings.
 | `sigma_overview` | 3.1 composite | 2×4 |
 | `sigma_main` | 3.1 + 3.2 + 3.3 composite | 3×3 |
 | `neural_main` | 4. Neural predictions | 3×3 |
+| `synaptic_main` | Synaptic vs. working-memory | 2×3 |
 
 ---
 
@@ -515,16 +530,12 @@ testable with future spike-resolved recordings.
   controlling for the other parameters, and, where feasible, a mechanistic
   ablation (forcing a parameter to null and showing the correlation
   collapses) — direct causal validation of the current rows.
-- **Synaptic vs. working-memory implementation comparison** (in
-  progress) — `neural_main`'s row 5. NEF_synaptic reimplemented and
-  baseline-checked against NEF (recurrent) this session (see "Current
-  thread" above): qualitatively consistent integration direction, same
-  order-of-magnitude RL_lambda agreement, but smoother/lagged dynamics, as
-  expected. Remaining before the actual ITI-manipulation experiment: (1)
-  NEF_synaptic needs its own Optuna RMSE fit (own alpha_0/lambda_, not NEF
-  (recurrent)'s borrowed values) — requires a `MODEL_PARAMS` entry and
-  fixing `fitting/fit.py`'s `model_type == "NEF"` exact-match dispatch
-  (should be `.startswith("NEF")`, matching `fitting/submit.py`'s own
-  convention); (2) `archive/scripts/iti_perturbation.py`'s gated ITI-noise
-  injection (already built, currently archived) would need reviving to
-  actually run the manipulation.
+- **Synaptic vs. working-memory implementation comparison** — DONE, as
+  its own standalone figure (`synaptic_main`, not a `neural_main` row as
+  originally planned here — see "Current thread" above for the full
+  account). Remaining loose end: `NEF_synaptic`'s Optuna RMSE fit is
+  still ad hoc output under `data/runs/nef_synaptic/`, not yet promoted
+  to the canonical `rmse/` folder or given a real `MODEL_PARAMS` entry of
+  its own (the RMSE-boxplot panel reads it via `_synaptic_model_fit_path`
+  regardless, so this doesn't block the figure — just its long-term
+  pipeline hygiene).

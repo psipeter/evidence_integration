@@ -4630,7 +4630,7 @@ def _plot_synaptic_fit_boxplot_panel(ax, plot_df: pd.DataFrame, order: list) -> 
     shared-legend context."""
     pal = {m: SYNAPTIC_COLORS[m] for m in order}
     sns.boxplot(data=plot_df, x="model", y="rmse", order=order,
-                hue="model", palette=pal, legend=False, ax=ax)
+                hue="model", palette=pal, legend=False, showfliers=False, ax=ax)
     ax.set_xlabel("")
     ax.set_ylabel("RMSE (vs human)")
     ax.set_xticks(range(len(order)))
@@ -4639,6 +4639,10 @@ def _plot_synaptic_fit_boxplot_panel(ax, plot_df: pd.DataFrame, order: list) -> 
     # ("working memory") wrap to a second line rather than shrinking the
     # font, so tick size stays consistent across the whole figure.
     ax.set_xticklabels([SYNAPTIC_LABELS.get(m, m).replace(" ", "\n") for m in order])
+    # Outlier dots hidden (showfliers=False) and ylim pulled in to the
+    # whisker extent -- outliers were compressing the boxes into a thin
+    # band near the bottom with a lot of dead whitespace above.
+    ax.set_ylim(0.05, 0.25)
     sns.despine(ax=ax, top=True, right=True)
 
 

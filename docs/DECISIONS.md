@@ -848,12 +848,24 @@ be that no close-real-fit pid in this pool has enough decay to show the
 effect in only 4 observations, independent of the two conceptual
 objections above.
 
-**Not yet done:** find a shared `(alpha_0, lambda_)` giving comparable
-baseline (strength=0) RMSE/sigma between `NEF` and `NEF_synaptic` --
-planned as a small local grid search (a handful of candidate values,
-evaluated on a session subsample, strength=0 only) rather than either the
-per-pid-fit approach above or the original single unvalidated guess of
-`(0.7, 0.7)`.
+**Resolved:** ran the planned local grid search (`scripts/_tmp_baseline_
+calibration.py`, deleted after use -- cluster-dispatched, one job per
+(candidate, session) cell, 25 candidates x 10 sessions, strength=0,
+`gate_error_feedback=True`). `alpha_0 ∈ {0.5,0.6,0.7,0.8,0.9}` x
+`lambda_ ∈ {0.3,0.4,0.5,0.6,0.7}`, biased toward `lambda_` values closer
+to the original `0.7` than pid 33's `~0.2` specifically to avoid
+repeating the masking problem above. Winner: `(alpha_0=0.5,
+lambda_=0.7)` -- RMSE gap 0.0051, sigma gap 0.00074, both far smaller
+than the next-best candidate (RMSE gap 0.0098) and every other point in
+the grid. This candidate sits at a grid corner (`alpha_0` at the grid's
+min, `lambda_` at its max), which was flagged and considered before
+accepting it -- decided the gap was already small enough in absolute
+terms not to warrant a boundary-extension pass. Its own `alpha(t)` decays
+0.5→0.19 across the 4-observation window (comparable to the original
+`(0.7,0.7)`'s 0.7→0.27), so it does not reintroduce the pid-33 masking
+effect. A 100-session dose-response run at this setting confirms the
+intended trend holds. Now the active shared value for
+`iti_perturbation`/`iti_perturbation_dynamics`.
 
 **Full investigation:** this session's chat; no separate
 `archive/HISTORY_*.md` entry (methodology reversal, nothing retired from
