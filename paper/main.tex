@@ -1,60 +1,68 @@
-\documentclass[9pt,twocolumn,twoside]{pnas-new}
-% Use the lineno option to display guide line numbers if required.
-\usepackage{printlen}
-\usepackage{orcidlink}
-\usepackage{hyperref}
-\usepackage{xr-hyper}
-\externaldocument[supp-]{supplement}
-\templatetype{pnasresearcharticle} % Choose template
-% {pnasresearcharticle} = Template for a two-column research article
-% {pnasmathematics} %= Template for a one-column mathematics article
-% {pnasinvited} %= Template for a PNAS invited submission
+% main.tex
+% Based on AAAS's science_template.tex (v1.1, April 2026) for Science-family journals.
+% Single file: main text, then supplement, per that template's structure (not two files).
+
+%%%%%%%%%%%%%%%% START OF PREAMBLE %%%%%%%%%%%%%%%
+
+\documentclass[12pt]{article}
+
+\usepackage{newtxtext,newtxmath}
+\usepackage{graphicx}
+\usepackage[letterpaper,margin=1in]{geometry}
+\linespread{1.5}
+\frenchspacing
+
+\renewenvironment{abstract}
+	{\quotation}
+	{\endquotation}
+
+\date{}
+
+\renewcommand\refname{References and Notes}
+
+\makeatletter
+\renewcommand{\fnum@figure}{\textbf{Figure \thefigure}}
+\renewcommand{\fnum@table}{\textbf{Table \thetable}}
+\makeatother
+
+\usepackage{scicite}
+\usepackage{url}
+
+% Per template instructions: do not add further \usepackage{} commands --
+% AAAS's conversion software expects a minimal, standard preamble.
+
+%%%%%%%%%%%%%%%% TITLE AND AUTHORS %%%%%%%%%%%%%%%%
+
+\def\scititle{
+	Placeholder title for spacing test
+}
+\title{\bfseries \boldmath \scititle}
+
+\author{
+	Peter Duggins$^{1\ast}$,
+	Alireza Soltani$^{1}$\and
+	\small$^{1}$Department of Psychological and Brain Sciences, Dartmouth College, Hanover, NH 03755\and
+	\small$^\ast$Corresponding author. Email: peter.duggins@dartmouth.edu
+}
+
+%%%%%%%%%%%%%%%%% END OF PREAMBLE %%%%%%%%%%%%%%%%
 
 \begin{document}
 
-\title{Placeholder title for spacing test}
+\maketitle
 
-% Use letters for affiliations, numbers to show equal authorship (if applicable) and to indicate the corresponding author
-\author[a,1]{Peter Duggins \orcidlink{https://orcid.org/0000-0002-8948-0586}}
-\author[a,1]{Alireza Soltani \orcidlink{https://orcid.org/0000-0003-4386-8486}}
-
-\affil[a]{Department of Psychological and Brain Sciences, Dartmouth College, Hanover, NH 03755}
-
-% Please give the surname of the lead author for the running footer
-\leadauthor{Duggins}
-
-% Please add a significance statement to explain the relevance of your work
-\significancestatement{Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.}
-
-% Please include corresponding author, author contribution and author declaration information
-\authorcontributions{Author One and Author Two designed the study; Author One performed the analysis; Author One and Author Two wrote the paper.}
-\authordeclaration{The authors declare no conflict of interest.}
-% \equalauthors{\textsuperscript{ 1}A.O.(Author One) contributed equally to this work with A.T. (Author Two) (remove if not applicable).}
-\correspondingauthor{\textsuperscript{1}To whom correspondence should be addressed. E-mail: peter.duggins@dartmouth.edu. Simulation and analysis code is available on \href{https://github.com/psipeter/evidence_integration}{GitHub}.}
-
-% At least three keywords are required at submission. Please provide three to five keywords, separated by the pipe symbol.
-\keywords{keyword one $|$ keyword two $|$ keyword three}
-
-\begin{abstract}
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus, ut interdum tellus elit sed risus. Maecenas eget condimentum velit, sit amet feugiat lectus. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos.
+\begin{abstract} \bfseries \boldmath
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 \end{abstract}
 
-\dates{This manuscript was compiled on \today}
-% \doi{\url{www.pnas.org/cgi/doi/10.1073/pnas.XXXXXXXXXX}}
-
-\maketitle
-\thispagestyle{firststyle}
-\ifthenelse{\boolean{shortarticle}}{\ifthenelse{\boolean{singlecolumn}}{\abscontentformatted}{\abscontent}}{}
-
-% \firstpage note removed -- recompute once body text/layout is final:
-% \firstpage[<last paragraph's last line #>]{<paragraph # starting page 2>}
-
-% \section{Introduction}\label{introduction}
+\noindent
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua \cite{kalm2018visual}. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{moreno2011bayesian, doll2011dopaminergic}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
 Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo \cite{dayan2005theoretical}. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
 
-\section*{Materials and Methods}\label{methods}
+% TODO once real Methods content exists: Science-family convention keeps full Materials
+% and Methods in the supplement, with a main-text pointer via a dedicated reference-list
+% entry, e.g. "\cite{methods}" -- see the Materials and Methods subsection below.
 
 \subsection*{Subsection A}
 Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur.
@@ -62,30 +70,95 @@ Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, ad
 \subsection*{Subsection B}
 Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur. At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.
 
-\section*{Results}\label{results}
-
-\subsection*{Subsection A}
+\subsection*{Subsection C}
 Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est omnis dolor repellendus.
 
-\subsection*{Subsection B}
+\subsection*{Subsection D}
 Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat.
 
-% \begin{figure}
-%     \centering
-%     \includegraphics[width=1.0\columnwidth]{figures/figureX.pdf}
-%     \caption{[TODO: caption]}
-%     \label{fig.figureX}
-% \end{figure}
-
-\section*{Discussion}\label{discussion}
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
 
-\acknow{The authors thank placeholder collaborators for helpful comments on this test document.}
 
-\showacknow{} % Display the acknowledgments section
+%%%%%%%%%%%%%%%% MAIN TEXT FIGURES %%%%%%%%%%%%%%%
+% Per template: figures/tables go at the end of the main text, not inline.
 
-% Bibliography
-\section*{References}
+\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+	\centering
+	\includegraphics[width=1.0\textwidth]{figures/tasks_overview.pdf}
+	\caption{\textbf{Four placeholder tasks are used to test figure inclusion, panel lettering, and caption style ahead of the real design.} Each panel represents one task in the (not-yet-designed) task battery. (\textbf{A--D}) Each panel is a placeholder for one task schematic; panel letters are baked into the figure itself, in the upper-left corner, matching this project's existing convention. Some placeholder tasks are drawn to test wider panels (A,B), whereas others test narrower ones (C,D). \textit{This caption is a structural placeholder -- real content, and the real figure, are pending.}}
+	\label{fig:tasks_overview}
+\end{figure}
+
+
+%%%%%%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%
+
+\clearpage
+
 \bibliography{bibliography}
+\bibliographystyle{sciencemag}
+
+
+%%%%%%%%%%%%%%%% ACKNOWLEDGEMENTS %%%%%%%%%%%%%%%
+
+\section*{Acknowledgments}
+\paragraph*{Funding:}
+TODO: list grants/fellowships that funded the research, with initials indicating which author(s) were supported by each.
+\paragraph*{Author contributions:}
+Author One and Author Two designed the study; Author One performed the analysis; Author One and Author Two wrote the paper.
+\paragraph*{Competing interests:}
+There are no competing interests to declare.
+\paragraph*{Data, code and materials availability:}
+Simulation and analysis code is available on GitHub: \url{https://github.com/psipeter/evidence_integration}.
+
+%%%%%%%%%%%%%%%% SUPPLEMENT LIST %%%%%%%%%%%%%%%
+
+\subsection*{Supplementary materials}
+Materials and Methods\\
+Supplementary Text
+
+%%%%%%%%%%%%%%%% END OF MAIN TEXT %%%%%%%%%%%%%%%
+
+\newpage
+
+%%%%%%%%%%%%%%%% START OF SUPPLEMENT %%%%%%%%%%%%%%%
+
+\renewcommand{\thefigure}{S\arabic{figure}}
+\renewcommand{\thetable}{S\arabic{table}}
+\renewcommand{\theequation}{S\arabic{equation}}
+\renewcommand{\thepage}{S\arabic{page}}
+\setcounter{figure}{0}
+\setcounter{table}{0}
+\setcounter{equation}{0}
+\setcounter{page}{1}
+
+\begin{center}
+\section*{Supplementary Materials for\\ \scititle}
+
+Peter Duggins$^\ast$,
+Alireza Soltani\\
+\small$^\ast$Corresponding author. Email: peter.duggins@dartmouth.edu
+\end{center}
+
+\subsubsection*{This PDF file includes:}
+Materials and Methods\\
+Supplementary Text
+
+\newpage
+
+%%%%%%%%%%%%%%%% MATERIALS AND METHODS %%%%%%%%%%%%%%%
+
+\subsection*{Materials and Methods}
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua \cite{vassiliadis2024non}. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+
+%%%%%%%%%%%%%%%% SUPPLEMENTARY TEXT %%%%%%%%%%%%%%%
+
+\subsection*{Supplementary Text}
+
+\subsubsection*{Example supplement heading}
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{trevismd_statannotations}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+
+Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
 
 \end{document}
+% End of main.tex

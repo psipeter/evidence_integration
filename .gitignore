@@ -126,4 +126,5 @@ paper/*.blg
 paper/*.fls
 paper/*.fdb_latexmk
 paper/*.synctex.gz
-paper/supplement.aux
+paper/*.bcf
+paper/*.run.xml
