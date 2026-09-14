@@ -61,7 +61,13 @@ paper/figures/*
 !paper/figures/tasks_overview.pdf
 !paper/figures/models_overview_paper.pdf
 !paper/figures/model_performance.pdf
-!paper/figures/lambda_main.pdf
+# lambda_main_edited, not the plain script-generated lambda_main -- hand
+# touch-ups on top of the script's own output (main.tex now embeds the
+# edited PDF); .svg tracked too since it's the actual hand-edited source
+# for the next round of manual touch-ups, per this file's own
+# active-hand-editing exception (see the block comment above).
+!paper/figures/lambda_main_edited.pdf
+!paper/figures/lambda_main_edited.svg
 !paper/figures/sigma_main.pdf
 !paper/figures/neural_main.pdf
 !paper/figures/synaptic_main.pdf

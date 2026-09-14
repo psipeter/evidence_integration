@@ -1592,10 +1592,29 @@ def make_lambda_main() -> Path:
     Every panel reuses the exact same helper functions the giant (and its
     own four source figures) already called -- no panel-drawing logic
     duplicated here, only the layout (now 2x3, task-restricted) differs.
+
+    Legend: a single large horizontal legend (Human + 5 models), matching
+    make_model_performance's own shared-legend convention, placed in its
+    OWN thin GridSpec row BETWEEN the two panel rows -- not squeezed into
+    a panel corner (row 1 col 3's own upper-right, small/vertical, the
+    previous convention here) and not fig.legend's own "outside lower
+    center" (below the WHOLE figure, model_performance's own placement,
+    which doesn't read as "between the rows" for a 2-row figure like this
+    one). A 3-row GridSpec (content, thin legend band, content) with a
+    dedicated axis for the legend band (axis("off"), just the legend
+    drawn on it) achieves this directly.
     """
     _apply_mode_style()
-    fig, axes = plt.subplots(2, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
-                             constrained_layout=True)
+    # -1.0in off the height -- too much vertical whitespace at the
+    # original size, per instruction; a flat inch off (not another
+    # multiplier) so it's easy to nudge further by the same increment.
+    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
+                     constrained_layout=True)
+    gs = fig.add_gridspec(3, 3, height_ratios=[1, 0.12, 1])
+    axes_row0 = [fig.add_subplot(gs[0, i]) for i in range(3)]
+    axes_row1 = [fig.add_subplot(gs[2, i]) for i in range(3)]
+    ax_legend = fig.add_subplot(gs[1, :])
+    ax_legend.axis("off")
 
     task_panels_no_balls = [(tk, title, models) for tk, title, models in TASK_PANELS
                             if tk != "balls"]
@@ -1610,30 +1629,30 @@ def make_lambda_main() -> Path:
         obs_max_by_task[task_key] = max(obs_vals)
     for i, (task_key, title, models_list) in enumerate(task_panels_no_balls):
         human_delta, models, _ = data[task_key]
-        ax = axes[0, i]
+        ax = axes_row0[i]
         ylabel = "Median \u0394R" if i == 0 else ""
         _draw_response_change_panel(ax, human_delta, models, include_models=True,
                                     ylabel=ylabel, obs_max=obs_max_by_task[task_key])
         ax.set_title(title, color=TASK_COLORS[task_key])
         ax.tick_params(axis="y", labelleft=(i == 0))
-    axes[0, 0].set_ylim(bottom=0)
+    axes_row0[0].set_ylim(bottom=0)
     legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
     legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=2, label=MODEL_LABEL.get(m, m))
                        for m in ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]]
-    axes[0, 2].legend(handles=legend_handles, fontsize=7, loc="upper right",
-                      frameon=True, framealpha=0.9, ncol=1)
+    ax_legend.legend(handles=legend_handles, loc="center", ncol=6,
+                     frameon=True, framealpha=0.9)
 
     # Row 2 -- make_lambda_overview's own KDE panels, unchanged, no titles
     # (row 1 above already names each task).
     for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
-        ax = axes[1, i]
+        ax = axes_row1[i]
         human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
         lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
         _plot_lambda_distribution(ax, lam, task_key)
         ax.set_ylabel("Density" if i == 0 else "")
         ax.tick_params(axis="y", labelleft=(i == 0))
 
-    label_panels(axes)
+    label_panels(axes_row0 + axes_row1)
     out_path, _ = _save_fig(fig, "lambda_main")
     plt.close(fig)
     return out_path
@@ -2585,8 +2604,13 @@ def make_sigma_main() -> Path:
     3x3 kept, matching row 3's existing layout.
     """
     _apply_mode_style()
-    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75),
-                             constrained_layout=True)
+    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
+                     constrained_layout=True)
+    gs = fig.add_gridspec(4, 3, height_ratios=[1, 1, 1, 0.12])
+    axes = np.array([[fig.add_subplot(gs[row, col]) for col in range(3)]
+                     for row in range(3)])
+    ax_legend = fig.add_subplot(gs[3, :])
+    ax_legend.axis("off")
 
     # Row 1 -- variability KDE panels, unchanged (minus the schematic
     # column), real titles.
@@ -2638,11 +2662,12 @@ def make_sigma_main() -> Path:
     for m in NLL_RESP_NOISE_MODELS:
         legend_handles.append(Line2D([0], [0], color=MODEL_COLORS[m], lw=2.2,
                                      label=MODEL_LABEL.get(m, m)))
-    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=2.2, label="NEF"))
-    axes[2, 2].legend(handles=legend_handles, fontsize=7, loc="upper right",
-                      frameon=True, framealpha=0.9, ncol=1)
+    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=2.2,
+                                 label=MODEL_LABEL.get("NEF", "NEF")))
+    ax_legend.legend(handles=legend_handles, loc="center", ncol=len(legend_handles),
+                     frameon=True, framealpha=0.9)
 
-    label_panels(axes)
+    label_panels(list(axes.flat), y=1.18)
     out_path, _ = _save_fig(fig, "sigma_main")
     plt.close(fig)
     return out_path
@@ -3328,7 +3353,6 @@ def _draw_variance_autocorr_panel(ax_ac, task_key: str, title: str, human_res,
     models = models if models is not None else NLL_RESP_NOISE_MODELS
     model_colors = model_colors or MODEL_COLORS
     ax_ac.set_title(title, color=TASK_COLORS[task_key])
-    ax_ac.axhline(0, color="0.7", lw=0.8, ls="--", zorder=1)
     if isinstance(human_res, str):
         msg = ("Insufficient data\n(no qid repeats for this task)"
               if human_res == "no_repeats" else "Insufficient data")
@@ -3437,7 +3461,6 @@ def _draw_variance_growth_panel(ax, task_key: str, title: str, human_stats,
     in practice at this project's response-noise scale.
     """
     ax.set_title(title, color=TASK_COLORS[task_key])
-    ax.axhline(1, color="0.7", lw=0.8, ls="--", zorder=1)
 
     def _normalized(stats):
         if stats is None or not len(stats):
