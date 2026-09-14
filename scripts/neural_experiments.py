@@ -361,6 +361,58 @@ def _simulate_full(params: dict, obs_values: np.ndarray, decoders: dict,
     }
 
 
+def _simulate_dynamics_demo(params: dict, obs_values: np.ndarray, decoders: dict,
+                            seed: int = 0) -> dict:
+    """Like _simulate_full, but ALSO probes net.value.neurons and
+    net.counting.memory.neurons (raw, for their own spike rasters) and
+    reads out net.probe_counting_weight/net.probe_counting_count (already
+    probed inside build_network, just never read out by _simulate_full).
+    _simulate_full only ever needed net.error.neurons (raster_demo/sweep/
+    oddball's own single raster) -- this is for make_figures.py's
+    models_overview demo panel (Panel C: input/count/error/value spike
+    rasters + decoded traces for one toy trial), the only current caller
+    that needs value's and count's spikes too. Probes are added to `net`
+    POST-BUILD via a plain `with net:` block (a normal nengo pattern --
+    matches archive/scripts/dynamics_NEF.py's own now-retired approach),
+    not by modifying build_network itself, since no other caller needs
+    these.
+
+    `decoders` is REQUIRED, same convention as _simulate_full -- never
+    falls back to a live _pretrain() training run.
+    """
+    import nengo
+    from models.NEF import build_network
+
+    p = {**params, "seed": int(seed)}
+    net = build_network(obs_values, p, decoders)
+    with net:
+        p_value_neurons = nengo.Probe(net.value.neurons, synapse=None)
+        p_count_neurons = nengo.Probe(net.counting.memory.neurons, synapse=None)
+
+    dt = float(p["dt"])
+    n_obs = len(obs_values)
+    t_total = n_obs * (float(p["t_obs"]) + float(p["t_iti"]))
+
+    with nengo.Simulator(net, dt=dt, seed=int(seed), progress_bar=False) as sim:
+        sim.run(t_total)
+
+    t_arr = np.arange(len(sim.data[net.probe_value])) * dt
+    error_dec = sim.data[net.probe_error]          # (T, 2): [:,0]=weight/alpha(t), [:,1]=raw PE
+    return {
+        "t": t_arr,
+        "obs": sim.data[net.probe_obs].squeeze(),
+        "value": sim.data[net.probe_value].squeeze(),
+        "weight": error_dec[:, 0],
+        "pe_raw": error_dec[:, 1],
+        "pe_product": error_dec[:, 0] * error_dec[:, 1],
+        "counting_weight": sim.data[net.probe_counting_weight].squeeze(),
+        "counting_count": sim.data[net.probe_counting_count].squeeze(),
+        "error_neurons": sim.data[net.probe_error_neurons],
+        "value_neurons": sim.data[p_value_neurons],
+        "count_neurons": sim.data[p_count_neurons],
+    }
+
+
 # ── raster_demo (Act 1.1) ────────────────────────────────────────────────────
 
 def run_raster_demo(args) -> None:

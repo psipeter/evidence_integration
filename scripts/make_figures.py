@@ -62,6 +62,11 @@ from scripts.neural_experiments import (
     ITI_PERTURBATION_PREFIX_LENGTH,
     OUT_DIR as NEURAL_EXPERIMENTS_OUT_DIR,
     _session_level_stats,
+    _base_params,
+    _require_activities,
+    _toy_activity_key,
+    _decoders_for_seed,
+    _simulate_dynamics_demo,
 )
 # FIGURES_DIR (the old shared top-level figures/) is NOT used for output
 # any more (see MODE_CONFIG below) -- kept only for the hand-drawn
@@ -74,6 +79,7 @@ from utils.plot_style import (
     draw_sig_line, pvalue_to_stars, get_palette, nice_ticks,
     apply_paper_style, apply_presentation_style, label_panels,
 )
+from utils.plot_spikes import cm_gray_r_a, plot_spikes, preprocess_spikes
 
 # paper/main.tex's actual \textwidth (letterpaper, 1in margins each side,
 # single-column) -- NOT the paper's raw page width (8.5in).
@@ -327,8 +333,16 @@ MODEL_COLORS = {
 # make_model_performance's own 5-entry legend) and MODEL_DISPLAY (defined
 # further down, for the abbreviated multi-source legends elsewhere in this
 # file -- LI/PR/etc) both use it.
+#
+# "NEF" -> "SNN" for reader-facing text ONLY (paper/figures, per instruction
+# -- "SNN" reads clearly to a general Science Advances audience without
+# first knowing what the Neural Engineering Framework is; the specific
+# NEF methodology is introduced properly in Materials and Methods instead).
+# The internal model_type string "NEF" is UNCHANGED everywhere else --
+# dict keys, filenames (data/runs/rmse/NEF_*.pkl, etc.), MODEL_COLORS --
+# this is a display-label override only, not a rename.
 _RL_LAMBDA_PRETTY = r"RL-$\lambda$"
-MODEL_LABEL = {"RL_lambda": _RL_LAMBDA_PRETTY}
+MODEL_LABEL = {"RL_lambda": _RL_LAMBDA_PRETTY, "NEF": "SNN"}
 
 # (task_key, panel title, model list) -- ALL FOUR tasks now get the SAME
 # 5-model roster (Mean/LeakyIntegrator/PrimacyRecency/RL_lambda/NEF), unlike
@@ -1209,7 +1223,7 @@ MODEL_DISPLAY = {
     "Mean": "Mean",
     "LeakyIntegrator": "LI",
     "PrimacyRecency": "PR",
-    "NEF": "NEF",
+    "NEF": "SNN",
     "RL_lambda": _RL_LAMBDA_PRETTY,
 }
 
@@ -4901,6 +4915,255 @@ def make_synaptic_main() -> Path:
     return out_path
 
 
+# Neurons actually DISPLAYED per spike raster in make_models_overview_demo
+# -- the simulation itself always runs at full production size (500/2000);
+# only the raster's own display subsamples down to this many, per
+# instruction, so individual spikes stay visually distinct rather than
+# blurring into utils/plot_spikes.py's own block-averaged merge.
+DYNAMICS_DEMO_N_DISPLAY = 100
+
+# Shared time axis ticks for every column of make_models_overview_demo --
+# the trial is exactly 4 observations x 2.0s (t_obs+t_iti) = 8s, so this
+# divides it evenly at each observation boundary, per instruction.
+DYNAMICS_DEMO_XTICKS = [0, 2, 4, 6, 8]
+
+
+def _dynamics_demo_iti_shading(ax, n_obs: int, t_iti: float, t_step: float) -> None:
+    for i in range(n_obs):
+        start = i * t_step
+        ax.axvspan(start, start + t_iti, alpha=0.08, color="gray",
+                  linewidth=0, zorder=0)
+
+
+def _dynamics_demo_round_extent(y_lo: float, y_hi: float) -> tuple:
+    """Round (y_lo, y_hi) outward to a clean step matching the data's own
+    magnitude, and return exactly 3 values: (padded min, center, padded
+    max) -- round numbers, per instruction. Deliberately NOT
+    utils/plot_style.py's own nice_ticks(): that targets a roughly-n tick
+    count via a coarser 1/2/5/10 step search (built for a normal
+    multi-tick axis), which over-pads badly for a tight fixed-3-tick
+    request like this one (e.g. a [0,1] range would round out to
+    [-1,0,1,2]) -- this uses a finer 0.25/0.5/1x step search instead, and
+    ALWAYS returns exactly 3 points.
+    """
+    span = max(y_hi - y_lo, 1e-9)
+    magnitude = 10 ** np.floor(np.log10(span))
+    frac = span / magnitude
+    step = 0.25 * magnitude if frac <= 2 else 0.5 * magnitude if frac <= 5 else magnitude
+    lo = np.floor(y_lo / step) * step
+    hi = np.ceil(y_hi / step) * step
+    if lo >= y_lo:
+        lo -= step
+    if hi <= y_hi:
+        hi += step
+    lo, hi = round(float(lo), 10), round(float(hi), 10)
+    return lo, round((lo + hi) / 2, 10), hi
+
+
+def _dynamics_demo_raster_column(ax, t, spikes, lines: list, title: str, *,
+                                 legend: bool = False) -> None:
+    """One column of make_models_overview_demo: an optional grayscale
+    spike raster (behind) plus one or more decoded overlay line(s) (in
+    front), on the SAME axes -- matches the now-retired
+    archive/scripts/dynamics_NEF.py's own per-column convention exactly
+    (raster + line overlaid, not stacked in separate rows). `spikes` is
+    None for the input column -- node_input is a plain nengo.Node now,
+    not an Ensemble, so there's no spike raster for it any more (unlike
+    dynamics_NEF.py's own retired auxiliary "input" Ensemble hack, added
+    there for exactly this purpose and not reused here). `lines` is a
+    list of (values, color, label, linestyle) tuples.
+
+    `spikes` carries the FULL production-size population (e.g. 500 or
+    2000 neurons) -- the simulation itself is NOT shrunk for display.
+    preprocess_spikes (utils/plot_spikes.py) is handed the FULL array
+    directly, with sample_size=DYNAMICS_DEMO_N_DISPLAY -- its own
+    sample_by_variance step then picks exactly that many of the
+    HIGHEST-VARIANCE (most dynamically-modulated) neurons out of the
+    full population, cluster() reorders them by similarity, and merge()
+    is a no-op (already <= its own num=DYNAMICS_DEMO_N_DISPLAY target).
+    Each displayed row is therefore one real, informative neuron's own
+    raw spike train, not a blurred composite AND not an arbitrary random
+    subset -- an earlier version pre-selected a random subset before
+    calling preprocess_spikes, which meant its own variance-based
+    selection only ever saw that random subset and couldn't do its job.
+    """
+    all_vals = np.concatenate([np.asarray(v, dtype=float) for v, *_ in lines])
+    y_lo, y_mid, y_hi = _dynamics_demo_round_extent(
+        float(np.min(all_vals)), float(np.max(all_vals)))
+
+    if spikes is not None:
+        n_display = min(DYNAMICS_DEMO_N_DISPLAY, spikes.shape[1])
+        # sample_size=n_display (not preprocess_spikes' own default 200) --
+        # its sample_by_variance step then picks the n_display HIGHEST-
+        # variance (most dynamically-modulated) neurons directly out of
+        # the FULL population, not a pre-filtered random subset. An
+        # earlier version pre-selected a random n_display subset before
+        # calling this, which meant sample_by_variance/cluster only ever
+        # saw that arbitrary subset and couldn't surface the actually
+        # interesting neurons -- exactly why the raster looked flat.
+        # merge() still ends up a no-op (n_display neurons in, num=
+        # n_display out), so rows stay individual, unblurred spike trains.
+        t_pp, sp_pp = preprocess_spikes(t, spikes, num=n_display, sample_size=n_display)
+        plot_spikes(t_pp, sp_pp, ax=ax, cmap=cm_gray_r_a, zorder=1,
+                   extent=(float(t_pp[0]), float(t_pp[-1]), y_lo, y_hi),
+                   contrast_scale=0.6, interpolation="none")
+
+    for values, color, label, linestyle in lines:
+        ax.plot(t, values, color=color, lw=1.6, linestyle=linestyle,
+               label=label, zorder=3)
+
+    ax.set_ylim(y_lo, y_hi)
+    ax.set_yticks([y_lo, y_mid, y_hi])
+    ax.set_xlim(float(t[0]), float(t[-1]))
+    ax.set_xticks(DYNAMICS_DEMO_XTICKS)
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    sns.despine(ax=ax, top=True, right=True)
+    if legend:
+        ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper left")
+
+
+def make_models_overview_demo() -> Path:
+    """Panel C of the hand-composited "models_overview" figure (paper's
+    Fig. 2, paper/main.tex) -- Panels A/B are hand-drawn in Inkscape
+    (figures/schematics/models_overview_paper.svg); this function
+    produces ONLY this panel, as its own standalone plot, for manual
+    import into that Inkscape file. It does NOT touch the .svg itself.
+
+    One toy 4-observation trial (soltani_numbers, arbitrary illustrative
+    observation values -- this is a qualitative dynamics demo, not a
+    data-fit claim), alpha_0=lambda_=0.7 (this project's RMSE-production
+    default), n_neurons=500 / n_neurons_counting=2000 -- the ACTUAL
+    production network size (matches MODEL_PARAMS[soltani_numbers]
+    ['NEF']['fixed']), not shrunk for this figure. Only each raster's own
+    DISPLAY subsamples down to DYNAMICS_DEMO_N_DISPLAY neurons (see
+    _dynamics_demo_raster_column's own docstring) -- an earlier version
+    shrunk the simulation itself (n_neurons=50/n_neurons_counting=200)
+    for a "spikier" look, but per instruction that traded away fidelity
+    to the paper's real architecture; subsampling only at display time
+    keeps the simulated dynamics (decoded lines, learning) faithful to
+    the full population while still avoiding utils/plot_spikes.py's own
+    preprocess_spikes/merge blurring hundreds of neurons into one row.
+    gate_error_feedback=True (an override on top of MODEL_PARAMS' own
+    default False), per instruction, so error keeps SOME (noise-driven)
+    activity through the ITI instead of being fully silenced -- see
+    models/NEF.py's build_network's own docstring for the mechanism.
+    Decoders come from the SAME precomputed-
+    activity convention every other toy-trial experiment in
+    neural_experiments.py already uses (_require_activities/
+    _toy_activity_key/_decoders_for_seed) -- never a live _pretrain() run.
+
+    Four columns, one per network signal:
+      input: node_input's own decoded/raw observation trace, LINE ONLY --
+        no spike raster, since node_input is a plain nengo.Node now, not
+        an Ensemble (unlike the retired dynamics_NEF.py, which built an
+        extra auxiliary "input" Ensemble just to get a raster for this
+        signal -- not reused here). get_palette()[1] (#de8f05) -- checked
+        directly against the hand-drawn schematic's own "input" text
+        color, not guessed.
+      count: net.counting.memory's own spikes, plus its two decoded
+        readouts -- weight alpha(n) (get_palette()[3], #d55e00 -- the
+        schematic's own "count" text color, given to alpha(n) here) and
+        count n (get_palette()[4], pink -- swapped from an earlier
+        version, per instruction). Each normalized to its own natural
+        range (alpha(n) by its max magnitude, count by n_obs); BOTH
+        solid now, not solid/dashed -- a dashed line doesn't render as
+        visibly distinct from solid at this temporal resolution (8s
+        trial, thin line), per instruction, so color is now the only
+        cue distinguishing the two.
+      error: net.error's own spikes, plus ONE decoded line -- the
+        EFFECTIVE signal the network's own recurrent connection actually
+        computes (error[:,0]*error[:,1], i.e. weight*rawPE), not either
+        raw dimension alone (get_palette()[2], #029e73 -- matches the
+        schematic).
+      value: net.value's own spikes, plus its decoded trace -- NO
+        readout-marker dots this time (unlike e.g.
+        _plot_n_neurons_demo_trace's own convention elsewhere in this
+        file), just the continuous line, plus a thin dashed zero
+        reference (get_palette()[0], #0173b2 -- matches the schematic).
+    input/count/error/value colors all match
+    figures/schematics/models_overview_paper.svg's own hand-drawn text
+    colors exactly (verified directly in that SVG's source, not assumed),
+    so Panel C reads as visually continuous with Panels A/B once
+    composited. No bold
+    panel-lettering/sub-labels on the four columns -- this whole plot IS
+    one panel of that larger composite, so it shouldn't carry its own
+    internal A/B/C/D-style labels; plain column headers only.
+    """
+    _apply_mode_style()
+    task = "soltani_numbers"
+    obs_raw = np.array([30.0, 65.0, 45.0, 80.0])
+    obs_values = obs_raw / 50.0 - 1.0
+    # n_neurons=500 -- the actual production size (matches
+    # MODEL_PARAMS[soltani_numbers]['NEF']['fixed']'s own
+    # n_neurons_counting=2000 activity file) -- the SIMULATION itself is
+    # NOT shrunk; only each raster's own DISPLAY subsamples down to
+    # DYNAMICS_DEMO_N_DISPLAY neurons (see _dynamics_demo_raster_column's
+    # own docstring), per instruction, so the network dynamics (decoded
+    # lines, learning) stay faithful to the paper's real architecture
+    # while the raster itself still shows visually distinct spikes.
+    alpha_0, lambda_, n_neurons = 0.7, 0.7, 500
+    # gate_error_feedback=True -- per instruction, so error keeps SOME
+    # (noise-driven) activity through the ITI instead of being fully
+    # silenced (see models/NEF.py's build_network's own docstring for the
+    # mechanism).
+    params = _base_params(task, alpha_0, n_neurons, lambda_, gate_error_feedback=True)
+    activity_map = _require_activities(task, n_neurons, params["n_neurons_counting"])
+    key = _toy_activity_key(0)
+    decoders = _decoders_for_seed(activity_map, key, alpha_0, lambda_)
+    probe_data = _simulate_dynamics_demo(params, obs_values, decoders, seed=key)
+
+    t = probe_data["t"]
+    n_obs = len(obs_values)
+    t_step = float(params["t_obs"]) + float(params["t_iti"])
+
+    # value/error/input match figures/schematics/models_overview_paper.svg's
+    # own hand-drawn text colors exactly (checked directly in the SVG
+    # source, not guessed): value=pal[0] (#0173b2), error=pal[2]
+    # (#029e73), input=pal[1] (#de8f05). count's own two decoded overlay
+    # lines have no single hand-drawn precedent (the schematic renders
+    # both "count" and alpha(n) in the SAME #d55e00) -- pal[3] (#d55e00,
+    # count's own schematic color) now goes to alpha(n), and pal[4]
+    # (pink) to n -- swapped from an earlier version, per instruction.
+    pal = get_palette(5)
+    color_value, color_input, color_error, color_alpha, color_count = (
+        pal[0], pal[1], pal[2], pal[3], pal[4])
+
+    fig, axes = plt.subplots(1, 4, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 0.55),
+                             constrained_layout=True)
+    for ax in axes:
+        _dynamics_demo_iti_shading(ax, n_obs, float(params["t_iti"]), t_step)
+
+    _dynamics_demo_raster_column(
+        axes[0], t, None,
+        [(probe_data["obs"], color_input, "input", "-")],
+        "input",
+    )
+    w_max = float(np.max(np.abs(probe_data["counting_weight"]))) or 1.0
+    c_max = float(max(n_obs, 1))
+    _dynamics_demo_raster_column(
+        axes[1], t, probe_data["count_neurons"],
+        [(probe_data["counting_weight"] / w_max, color_alpha, "α(n)", "-"),
+         (probe_data["counting_count"] / c_max, color_count, "n", "-")],
+        "count", legend=True,
+    )
+    _dynamics_demo_raster_column(
+        axes[2], t, probe_data["error_neurons"],
+        [(probe_data["pe_product"], color_error, "error", "-")],
+        "error",
+    )
+    _dynamics_demo_raster_column(
+        axes[3], t, probe_data["value_neurons"],
+        [(probe_data["value"], color_value, "value", "-")],
+        "value",
+    )
+    axes[3].axhline(0, color="0.7", linewidth=0.6, linestyle="--", zorder=2)
+
+    out_path, _ = _save_fig(fig, "models_overview_demo")
+    plt.close(fig)
+    return out_path
+
+
 FIGURES = {
     "temporal_performance": make_temporal_performance,
     "model_performance": make_model_performance,
@@ -4921,6 +5184,7 @@ FIGURES = {
     "neural_main": make_neural_main,
     "sigma_model_correlation": make_sigma_model_correlation,
     "synaptic_main": make_synaptic_main,
+    "models_overview_demo": make_models_overview_demo,
 }
 
 

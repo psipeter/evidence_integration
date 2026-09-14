@@ -33,8 +33,15 @@
 
 %%%%%%%%%%%%%%%% TITLE AND AUTHORS %%%%%%%%%%%%%%%%
 
+% Science Advances limits (Information for Authors, science.org/content/page/
+% science-advances-information-authors): title <=135 characters. A "short
+% title" (<=50 characters, for the running head) is also required, but is a
+% submission-portal metadata field, not manuscript text -- no template macro
+% for it, so just a reminder here rather than a fabricated LaTeX command.
+% TODO: short title, <=50 characters, for the submission form.
 \def\scititle{
-	Placeholder title for spacing test
+	Evidence integration with prediction error:
+	theory, behavioral experiments, and spiking neural network models
 }
 \title{\bfseries \boldmath \scititle}
 
@@ -42,7 +49,7 @@
 	Peter Duggins$^{1\ast}$,
 	Alireza Soltani$^{1}$\and
 	\small$^{1}$Department of Psychological and Brain Sciences, Dartmouth College, Hanover, NH 03755\and
-	\small$^\ast$Corresponding author. Email: peter.duggins@dartmouth.edu
+	\small$^\ast$Corresponding author. Email: psipeter@gmail.com
 }
 
 %%%%%%%%%%%%%%%%% END OF PREAMBLE %%%%%%%%%%%%%%%%
@@ -51,55 +58,98 @@
 
 \maketitle
 
+% Science Advances: abstract <=150 words, single paragraph, no citations
+% (science.org/content/page/science-advances-information-authors).
 \begin{abstract} \bfseries \boldmath
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 \end{abstract}
 
-\noindent
+% Science Advances requires a named, numbered section structure in the main
+% text -- Title, Short title, Authors/Affiliations, Abstract, Introduction,
+% Results, Discussion, Materials and Methods, References, Acknowledgments
+% (science.org/content/page/science-advances-information-authors) -- unlike
+% Science (flagship), which uses one undivided "Main Text" block and keeps
+% Materials and Methods in the supplement. Do NOT move Methods back to the
+% supplement without checking that page again first.
+
+\section*{Introduction}
+
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua \cite{kalm2018visual}. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{moreno2011bayesian, doll2011dopaminergic}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
 Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo \cite{dayan2005theoretical}. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
 
-% TODO once real Methods content exists: Science-family convention keeps full Materials
-% and Methods in the supplement, with a main-text pointer via a dedicated reference-list
-% entry, e.g. "\cite{methods}" -- see the Materials and Methods subsection below.
+\section*{Results}
 
-\subsection*{Subsection A}
-Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur.
+\subsection*{Task battery and modeling framework}
+Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur (Fig.~\ref{fig:tasks_overview}, Fig.~\ref{fig:models_overview}).
 
-\subsection*{Subsection B}
-Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur. At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.
+\subsection*{Model comparison across tasks}
+Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur. At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident (Fig.~\ref{fig:model_performance}).
 
-\subsection*{Subsection C}
-Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est omnis dolor repellendus.
+\subsection*{Individual differences in the learning-rate parameter}
+Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est omnis dolor repellendus (Fig.~\ref{fig:lambda_main}).
 
-\subsection*{Subsection D}
-Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat.
+\subsection*{Individual differences in response noise}
+Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat (Fig.~\ref{fig:sigma_main}).
+
+\subsection*{Neural network predictions}
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur (Fig.~\ref{fig:neural_main}).
+
+\subsection*{Synaptic versus recurrent implementations}
+Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus, ut interdum tellus elit sed risus. Maecenas eget condimentum velit, sit amet feugiat lectus (Fig.~\ref{fig:synaptic_main}).
+
+\section*{Discussion}
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+
+% Science Advances explicitly requires a limitations paragraph in Discussion
+% (science.org/content/page/science-advances-information-authors) -- keep
+% this as its own clearly-marked paragraph, not folded into general discussion.
+\paragraph*{Limitations.}
+Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
+
+\section*{Materials and Methods}
+
+\subsection*{Cognitive tasks}
+Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.
+
+\subsection*{Computational models}
+Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur.
+
+\subsection*{General framework for information integration based on prediction error}
+Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga \cite{vassiliadis2024non}. Et harum quidem rerum facilis est et expedita distinctio.
+
+\subsection*{Neural network model}
+Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.
+
+\subsection*{Response noise and parameter fitting}
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
 
 
 %%%%%%%%%%%%%%%% MAIN TEXT FIGURES %%%%%%%%%%%%%%%
 % Per template: figures/tables go at the end of the main text, not inline.
+% Science Advances: <=10 figures and tables COMBINED in the main text; each
+% caption <=200 words (science.org/content/page/science-advances-information-authors).
+% Currently 7 figures, 0 tables -- room for up to 3 more before hitting the cap.
 
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/tasks_overview.pdf}
-	\caption{\textbf{Placeholder caption for this figure.} Panel letters (\textbf{A--D}) are baked into the figure itself for future cross-referencing. \textit{Real descriptive content and interpretation are pending.}}
+	\caption{\textbf{Evidence integration in four sequential estimation tasks.} In each task, participants view a sequence of inputs and report a real-valued estimate after each observation. Tasks differ in input type, sequence length, and repetition structure. (\textbf{A}) The \textit{Value Integration Task} \cite{yoo2025people} presents pairs of snack items and asks participants to report the mean value difference between the accumulated snacks on the left vs right. Each trial includes 30 observations, and snack sequences are never repeated. (\textbf{B}) The \textit{Proportion Inference Task} \cite{prat2024imprecise} presents rings of two colors drawn randomly from a box and asks participants to report the hidden proportion of one color. Each trial includes 5 observations, leading to frequent repetition of color sub-sequences. (\textbf{C, D}) The \textit{Binary} and \textit{Continuous Integration Tasks} (both new) present binary (continuous) draws from a hidden distribution and ask participants to report a running estimate of the proportion (mean) of the sequence so far. Each trial includes 15 observations, and the first few are drawn from a small pool of fixed sub-sequences, producing partial repetition across trials.}
 	\label{fig:tasks_overview}
 \end{figure}
 
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/models_overview_paper.pdf}
-	\caption{\textbf{Placeholder caption for this figure.} This figure has no lettered sub-panels. \textit{Real descriptive content and interpretation are pending.}}
+	\caption{\textbf{A dynamic learning-rate model and its spiking neural network implementation.} (\textbf{A}) An error-driven update rule integrates each observation $I_n$ into a running estimate $V_n$ with a learning rate that decays as a power law of the observation count $n$. The discounting exponent $\lambda$ sets the resulting integration strategy (see Supplementary Text): $\lambda=1$ recovers the unweighted running mean, $\lambda<1$ slows the decay and over-weights recent observations (recency), and $\lambda>1$ steepens it and over-weights early observations (primacy). (\textbf{B}) A spiking neural network implements the same computation using three functionally- and anatomically-distinct neural populations. Each observation $I_n$ feeds directly into \textit{error} and into \textit{count}, which recurrently tracks the observation number and decodes the discounting weight that modulates \textit{error}. \textit{Error} computes the discounted prediction error between the observation and the current value estimate, and drives \textit{value}, which maintains a working memory of $V_n$ through recurrent excitation and feeds it back to \textit{error} for the next comparison. (\textbf{C}) Spiking activity (rasters) and decoded traces from one example trial (four observations, shaded inter-trial intervals). \textit{Count} decodes $\alpha(n)$ and $n$; \textit{error} tracks the discounted prediction error, rising at each observation and decaying between them; and \textit{value} integrates and holds its estimate.}
 	\label{fig:models_overview}
 \end{figure}
 
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/model_performance.pdf}
-	\caption{\textbf{Placeholder caption for this figure.} Panel letters (\textbf{A--D}) are baked into the figure itself for future cross-referencing. \textit{Real descriptive content and interpretation are pending.}}
+	\caption{\textbf{RL-$\lambda$ outperforms classic integration models on most tasks while the SNN implementation remains competitive despite spiking noise.} Each model was fit separately to every participant via cross-validated RMSE between predicted and human responses; boxplots show the resulting per-participant distribution (one point per participant). Mean, LeakyIntegrator, and PrimacyRecency are widely used baselines for evidence-integration behavior: Mean is the optimal unweighted running average \cite{degroot1974reaching}; LeakyIntegrator applies the same update rule as RL-$\lambda$ but with a constant, rather than power-law-decaying, learning rate \cite{usher2001time, glaze2015normative}; PrimacyRecency up-weighs earlier and more recent observations via two free decay parameters \cite{pooley2011understanding, galdo2022quest}. RL-$\lambda$ has significantly lower RMSE than all three baselines on the Value Integration (\textbf{A}) and Proportion Inference (\textbf{B}) tasks (stars: paired Wilcoxon vs.\ RL-$\lambda$), and than Mean and LeakyIntegrator on Binary (\textbf{C}) and Continuous (\textbf{D}) Integration; PrimacyRecency ties RL-$\lambda$ on Binary Integration and significantly outperforms it on Continuous Integration. SNN, which reproduces RL-$\lambda$'s computation within a biologically plausible network, necessarily has higher RMSE than RL-$\lambda$ due to spike noise and real-time dynamics, but remains comparable to the classic baselines. Model comparisons were consistent when validated using a second fit metric, negative log-likelihood (see Supplementary Text).}
 	\label{fig:model_performance}
 \end{figure}
 
@@ -133,6 +183,10 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor i
 
 
 %%%%%%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%
+% Science Advances: <=80 references for a Research Article, ONE combined
+% numbered list covering both main text and Supplementary Materials -- no
+% separate reference list in the supplement
+% (science.org/content/page/science-advances-information-authors).
 
 \clearpage
 
@@ -153,9 +207,10 @@ There are no competing interests to declare.
 Simulation and analysis code is available on GitHub: \url{https://github.com/psipeter/evidence_integration}.
 
 %%%%%%%%%%%%%%%% SUPPLEMENT LIST %%%%%%%%%%%%%%%
+% Supplement is Supplementary Text only for now; add Figs./Tables lines here
+% if/when any supplementary figures or tables are added.
 
 \subsection*{Supplementary materials}
-Materials and Methods\\
 Supplementary Text
 
 %%%%%%%%%%%%%%%% END OF MAIN TEXT %%%%%%%%%%%%%%%
@@ -178,27 +233,26 @@ Supplementary Text
 
 Peter Duggins$^\ast$,
 Alireza Soltani\\
-\small$^\ast$Corresponding author. Email: peter.duggins@dartmouth.edu
+\small$^\ast$Corresponding author. Email: psipeter@gmail.com
 \end{center}
 
 \subsubsection*{This PDF file includes:}
-Materials and Methods\\
 Supplementary Text
 
 \newpage
 
-%%%%%%%%%%%%%%%% MATERIALS AND METHODS %%%%%%%%%%%%%%%
-
-\subsection*{Materials and Methods}
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua \cite{vassiliadis2024non}. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
-
 %%%%%%%%%%%%%%%% SUPPLEMENTARY TEXT %%%%%%%%%%%%%%%
+% Supplementary Text may only support/elaborate on claims
+% already made in the main text, not introduce new ones
+% (science.org/content/page/science-advances-information-authors).
 
 \subsection*{Supplementary Text}
 
+\subsubsection*{Model comparison via negative log-likelihood}
+STUB: replicate Fig.~\ref{fig:model_performance}'s RMSE-based model comparison using negative log-likelihood (data/runs/nll/, \texttt{\_resp\_noise} model variants) as a second fit metric, across all four tasks. State that the ranking is consistent with the RMSE-based comparison (RL-$\lambda$ beats Mean/LeakyIntegrator/PrimacyRecency on Value Integration and Proportion Inference; ties PrimacyRecency on Binary Integration; loses to PrimacyRecency on Continuous Integration).
+
 \subsubsection*{Example supplement heading}
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{trevismd_statannotations}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{vassiliadis2024non, trevismd_statannotations}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
 Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
 

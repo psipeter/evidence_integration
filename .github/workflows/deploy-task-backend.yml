@@ -12,11 +12,12 @@ name: Deploy task_backend to GitHub Pages
 #   - Settings -> Secrets and variables -> Actions -> two repo secrets:
 #       VITE_SUPABASE_URL
 #       VITE_SUPABASE_PUBLISHABLE_KEY
-#     (see task_backend/TODO.md's "Hosting" section for the actual values
-#     and the rationale for why these are safe to build into the client
-#     bundle despite living in "Secrets" -- they're publishable values,
-#     just stored there because that's the conventional place for
-#     anything env-specific, not because they're sensitive.)
+#     (see .claude/skills/task-backend-schema/SKILL.md's "Hosting /
+#     deployment" section for the actual values and the rationale for why
+#     these are safe to build into the client bundle despite living in
+#     "Secrets" -- they're publishable values, just stored there because
+#     that's the conventional place for anything env-specific, not because
+#     they're sensitive.)
 on:
   push:
     branches: [main]
