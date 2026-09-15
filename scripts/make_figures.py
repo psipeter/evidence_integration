@@ -3668,7 +3668,7 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
 def _plot_neural_dual_vs_param(
     ax, df: pd.DataFrame, param_col: str, param_label: str,
     y1_col: str, y2_col: str, y1_label: str, y2_label: str,
-    include_x_zero: bool = False,
+    include_x_zero: bool = False, legend_labels: tuple | None = None,
 ):
     """Generic panel: two dependent measures (y1_col, y2_col), twin y-axes,
     both plotted against ONE parameter (param_col: alpha_0, lambda_, or
@@ -3691,15 +3691,19 @@ def _plot_neural_dual_vs_param(
     where 0 is a meaningful reference point) -- left False for n_neurons,
     where the real data starts at 500 and forcing the axis down to 0 would
     waste half the panel on empty space.
+
+    legend_labels, when given, is a (y1_short, y2_short) pair of short
+    axis-name shorthands (e.g. "PE max"/"PE decay") drawn as a small
+    in-panel legend next to two color swatches matching each series' own
+    line color -- REPLACES the previous colored-axis convention (axes and
+    ticks are plain black now, per instruction), since with black axes on
+    both sides y1 vs y2 would otherwise be indistinguishable.
     """
     pal = get_palette(6)
     c1, c2 = pal[0], pal[1]
     r1, p1 = pearsonr(df[param_col], df[y1_col])
     r2, p2 = pearsonr(df[param_col], df[y2_col])
-    # No legend on this panel (per instruction) -- y1 vs y2 are
-    # distinguished by axis color instead (left axis/spine/ticks = c1,
-    # right = c2, matching each series' own line/scatter color). The r/p
-    # values still need to be reportable when the real caption gets
+    # r/p values still need to be reportable when the real caption gets
     # written, so print them here rather than only encoding them visually.
     y1_legend = re.sub(r"\s*\([^)]*\)\s*$", "", y1_label)
     y2_legend = re.sub(r"\s*\([^)]*\)\s*$", "", y2_label)
@@ -3710,9 +3714,7 @@ def _plot_neural_dual_vs_param(
     sns.regplot(data=df, x=param_col, y=y1_col, ax=ax, color=c1, ci=95,
                scatter=False, line_kws={"lw": 2.2, "zorder": 3})
     ax.set_xlabel(param_label)
-    ax.set_ylabel(y1_label, color=c1)
-    ax.tick_params(axis="y", colors=c1)
-    ax.spines["left"].set_color(c1)
+    ax.set_ylabel(y1_label)
     if include_x_zero:
         ax.set_xlim(left=0)
 
@@ -3727,12 +3729,19 @@ def _plot_neural_dual_vs_param(
     # "" (not just omitting the call) -- sns.regplot's own y= column-name
     # default would otherwise leak through as the label.
     ax2.set_ylabel("")
-    ax2.tick_params(axis="y", colors=c2)
-    ax2.spines["right"].set_color(c2)
     # right=False (unlike the ax despine below) -- ax2's right spine IS
     # its own y-axis frame (twinx() puts its ticks/spine on the right),
     # so it stays, per instruction; only its redundant top spine goes.
     sns.despine(ax=ax2, top=True, right=False)
+
+    if legend_labels is not None:
+        y1_short, y2_short = legend_labels
+        legend_handles = [
+            Line2D([0], [0], color=c1, lw=2.2, label=y1_short),
+            Line2D([0], [0], color=c2, lw=2.2, label=y2_short),
+        ]
+        ax.legend(handles=legend_handles, fontsize=6, frameon=True,
+                 framealpha=0.9, loc="upper right", handlelength=1.5)
 
     # twinx() stacks ax2 ABOVE ax by default -- raise ax above ax2 and make
     # its patch transparent so ax2's own background doesn't occlude ax's
@@ -3743,8 +3752,8 @@ def _plot_neural_dual_vs_param(
     return ax2
 
 
-def _oddball_primary_context(grid: pd.DataFrame) -> tuple[float, float]:
-    """Pick one representative (cluster_center, oddball_deviation) for
+def _outlier_primary_context(grid: pd.DataFrame) -> tuple[float, float]:
+    """Pick one representative (cluster_center, outlier_deviation) for
     panels that need a single context rather than the full grid.
 
     Center: 50 (the task's own raw-scale midpoint) if present in the grid
@@ -3759,26 +3768,27 @@ def _oddball_primary_context(grid: pd.DataFrame) -> tuple[float, float]:
     back to whatever deviation exists if none are positive).
     """
     centers = sorted(grid["cluster_center"].unique())
-    deviations = sorted(grid["oddball_deviation"].unique())
+    deviations = sorted(grid["outlier_deviation"].unique())
     center = 50.0 if 50.0 in centers else centers[len(centers) // 2]
     positive = [d for d in deviations if d > 0]
     deviation = min(positive) if positive else deviations[-1]
     return center, deviation
 
 
-def _oddball_base_value(d: dict, sweep_param: str) -> float:
+def _outlier_base_value(d: dict, sweep_param: str) -> float:
     return {"alpha_0": d["base_alpha_0"], "lambda_": d["base_lambda_"],
            "n_neurons": d["base_n_neurons"]}[sweep_param]
 
 
-def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Panel: |decoded PE| vs time WITHIN THE ODDBALL (4TH) OBSERVATION
-    ONLY -- the trace neural_experiments.py's _oddball_worker now returns
-    is already windowed to that single observation (t=0 at that
-    observation's own onset, excluding its preceding ITI), so this panel
-    shows the model's response to the surprise itself rather than the
-    whole 4-observation trial. ONE representative cluster_center
-    (_oddball_primary_context's own pick, currently 50), up to 3
+def _plot_outlier_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Panel: |decoded PE| vs time from ONE FULL ITI BEFORE the outlier
+    (4TH) OBSERVATION's own cue onset through the end of its own stimulus
+    window -- the trace neural_experiments.py's _outlier_worker now
+    returns already spans this range (t=0 still at the observation's own
+    cue onset, t<0 into its preceding ITI), so this panel shows the flat
+    pre-cue baseline alongside the model's response to the surprise
+    itself, per instruction. ONE representative cluster_center
+    (_outlier_primary_context's own pick, currently 50), up to 3
     representative values of sweep_param (low/mid/high of whatever was
     actually run, per instruction) -- BOTH deviation signs present in the
     grid are folded into ONE long-format frame per sweep_param value and
@@ -3788,15 +3798,15 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
     per instruction, simpler than manually distinguishing sign. No
     title -- the legend already identifies every line.
     """
-    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
     if not path.exists():
-        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+        ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     d = pd.read_pickle(path)
     grid, traces = d["grid"], d["traces"]
-    center, _ = _oddball_primary_context(grid)
-    deviations = sorted(grid["oddball_deviation"].unique())
+    center, _ = _outlier_primary_context(grid)
+    deviations = sorted(grid["outlier_deviation"].unique())
 
     values = sorted(grid[sweep_param].unique())
     picks = [values[0], values[len(values) // 2], values[-1]] if len(values) >= 3 else values
@@ -3809,7 +3819,7 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
                 continue
             rows.append(pd.DataFrame({"t": tr["t"], "pe": tr["pe"], "sweep_value": val}))
     if not rows:
-        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+        ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     df = pd.concat(rows, ignore_index=True)
@@ -3826,37 +3836,38 @@ def _plot_oddball_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
     ax.legend(handles, [f"{float(l):g}" for l in labels], title=sym,
               fontsize=5, title_fontsize=5, frameon=True, framealpha=0.9, loc="upper right")
 
-    # end_time = t_obs (1.5s) -- the oddball observation's own real
-    # duration (fitting/model_params.py's _NEF_FIXED, the same value the
-    # simulation itself used), NOT t_obs + t_iti (2.0s) -- the trace is
-    # already windowed to exclude its own preceding ITI (see docstring),
-    # so t=0 is this observation's onset and t=t_obs is where it ends.
-    # Plain evenly-spaced ticks (not a typical_peak_time marker tick) --
-    # with the gated ITI-silencing data (models.NEF's gate_error_feedback,
-    # see docs/DECISIONS.md) the upswing is immediate and the maximum
-    # follows shortly after, so a dedicated peak-time tick no longer
-    # tells the reader anything a uniform grid doesn't already show.
+    # start_time = -t_iti (-0.5s), end_time = t_obs (1.5s) -- one full ITI
+    # before cue onset through the end of the outlier's own stimulus
+    # window (fitting/model_params.py's _NEF_FIXED, the same values the
+    # simulation itself used); t=0 stays this observation's own cue onset
+    # (see _outlier_worker's own docstring). Plain evenly-spaced ticks
+    # (not a typical_peak_time marker tick) -- with the gated ITI-
+    # silencing data (models.NEF's gate_error_feedback, see
+    # docs/DECISIONS.md) the upswing is immediate and the maximum follows
+    # shortly after, so a dedicated peak-time tick no longer tells the
+    # reader anything a uniform grid doesn't already show.
     from fitting.model_params import _NEF_FIXED
+    start_time = -float(_NEF_FIXED["t_iti"])
     end_time = float(_NEF_FIXED["t_obs"])
-    ax.set_xlim(0, end_time)
-    ax.set_xticks([0.0, 0.5, 1.0, 1.5])
+    ax.set_xlim(start_time, end_time)
+    ax.set_xticks([start_time, 0.0, 0.5, 1.0, end_time])
     ax.set_xlabel("Time")
-    ax.set_ylabel("PE (oddball)")
+    ax.set_ylabel("PE (outlier)")
     # PE maximum is now ~0.1 (gated data) -- fixed round-number ticks
-    # shared across row 1 (see _plot_oddball_param_effect/_plot_oddball_
+    # shared across row 1 (see _plot_outlier_param_effect/_plot_outlier_
     # dv_scatter's own matching PE-maximum axis).
     ax.set_ylim(0, 0.1)
     ax.set_yticks([0.0, 0.05, 0.1])
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_numbers"):
+def _plot_outlier_param_effect(ax, sweep_param: str, task: str = "soltani_numbers"):
     """Panel: sweep_param (x) vs max |decoded PE| (error response AT a
     single grid-wide "typical peak time" benchmark -- see below, NOT each
     cell's own local argmax) AND its RELATIVE decay RATE by the end of
     that SAME window ((max - end) / max / decay_duration, as %max/second),
     twin y-axes -- ONE POINT PER GRID CELL (cluster_center x
-    oddball_deviation x sweep_param), fit via _plot_neural_dual_vs_param
+    outlier_deviation x sweep_param), fit via _plot_neural_dual_vs_param
     (scatter + sns.regplot + its own CI band), matching rows 2/3's own
     col-2 panels exactly -- this row used to be the odd one out here
     (aggregate-then-errorbar instead of raw-scatter-then-regplot), which
@@ -3905,13 +3916,13 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
     max_pe amplifies it into a large-magnitude (occasionally negative)
     decay_rate for that one cell -- verified directly: 4 of 90
     alpha_0-sweep cells, all at alpha_0 in {0.2, 0.3}. Left as-is in the
-    raw scatter (matching _plot_oddball_dv_scatter's own choice) rather
+    raw scatter (matching _plot_outlier_dv_scatter's own choice) rather
     than filtered -- the regplot fit is robust to a handful of such
     points across ~90.
     """
-    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
     if not path.exists():
-        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+        ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return None
     d = pd.read_pickle(path)
@@ -3928,24 +3939,28 @@ def _plot_oddball_param_effect(ax, sweep_param: str, task: str = "soltani_number
         ax, grid, sweep_param, sym, "max_pe", "decay_rate",
         "PE maximum", "PE decay (%max/s)",
         include_x_zero=sweep_param in ("alpha_0", "lambda_"),
+        legend_labels=("PE max", "PE decay"),
     )
     # PE maximum ticks: fixed at [0.0, 0.05, 0.1] (gated-data PE maximum is
     # ~0.1, see docs/DECISIONS.md), not the auto nice_ticks range -- matches
-    # _plot_oddball_dv_scatter's own x-axis, the SAME quantity, read from
+    # _plot_outlier_dv_scatter's own x-axis, the SAME quantity, read from
     # the same underlying grid.
     max_pe_ticks = [0.0, 0.05, 0.1]
     ax.set_ylim(max_pe_ticks[0], max_pe_ticks[-1])
     ax.set_yticks(max_pe_ticks)
+    if sweep_param in ("alpha_0", "lambda_"):
+        ax.set_xlim(0, 1)
+        ax.set_xticks([0, 0.5, 1])
     return ax2
 
 
-def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+def _plot_outlier_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
     """Row 1, col 3: max |decoded PE| (x) vs its own relative decay RATE
-    by the oddball window's end (y, (max-end)/max/decay_duration as
-    %max/second -- see _plot_oddball_param_effect's own docstring for why
+    by the outlier window's end (y, (max-end)/max/decay_duration as
+    %max/second -- see _plot_outlier_param_effect's own docstring for why
     relative-rate rather than absolute decrease), one point per
-    (cluster_center, oddball_deviation, sweep_param) grid cell -- the SAME
-    full grid _plot_oddball_param_effect aggregates into twin-axis means
+    (cluster_center, outlier_deviation, sweep_param) grid cell -- the SAME
+    full grid _plot_outlier_param_effect aggregates into twin-axis means
     vs sweep_param, here shown instead as a direct scatter of panel 2's
     own two dependent variables against each other. Matches the ORIGINAL
     neural_giant figure's own DV-vs-DV convention exactly
@@ -3956,9 +3971,9 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
     claim (higher alpha_0 -> both higher max_pe AND a faster rate of
     decay) as a single positive correlation across the whole grid.
     """
-    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
     if not path.exists():
-        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+        ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     d = pd.read_pickle(path)
@@ -3968,14 +3983,13 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
                                   grid["relative_decrease"] / grid["decay_duration"], np.nan)
     grid = grid.dropna(subset=["decay_rate"])
 
-    # Palette green (not black -- too harsh, per instruction), and not
-    # blue/orange either: this panel's x/y axes are themselves colored to
-    # match column 2's left/right axes (make_neural_main's own wiring), and
-    # a blue- or orange-colored scatter here would read as belonging to one
-    # side instead of representing the joint relationship between both.
-    color = get_palette(6)[2]
+    # Palette's normal blue (pal[0]) -- reverted from an earlier green,
+    # back when this panel's axes were colored to match column 2's
+    # left/right axes; those axis colors are gone now (plain black, per
+    # instruction), so there's no longer a reason to avoid the default.
+    color = get_palette(6)[0]
     r, p = pearsonr(grid["max_pe"], grid["decay_rate"])
-    print(f"  [neural_main, oddball_{sweep_param}, PE maximum vs PE decay] "
+    print(f"  [neural_main, outlier_{sweep_param}, PE maximum vs PE decay] "
           f"r={r:.3f} ({pvalue_to_stars(p)})")
     ax.scatter(grid["max_pe"], grid["decay_rate"], color=color, s=8, alpha=0.35, zorder=2)
     sns.regplot(data=grid, x="max_pe", y="decay_rate", ax=ax, color=color, ci=95,
@@ -3984,46 +3998,46 @@ def _plot_oddball_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
     ax.set_ylabel("PE decay (%max/s)")
     # Fixed at [0.0, 0.05, 0.1] (gated-data PE maximum is ~0.1, see
     # docs/DECISIONS.md), not the auto nice_ticks range -- matches
-    # _plot_oddball_param_effect's own left axis, the SAME quantity, read
+    # _plot_outlier_param_effect's own left axis, the SAME quantity, read
     # from the same underlying grid.
     max_pe_ticks = [0.0, 0.05, 0.1]
     ax.set_xlim(max_pe_ticks[0], max_pe_ticks[-1])
     ax.set_xticks(max_pe_ticks)
     # Fit/pearsonr above still use every point (including the handful of
     # near-zero-max_pe cells with a noise-driven negative decay_rate --
-    # see _plot_oddball_param_effect's own docstring) -- this only crops
+    # see _plot_outlier_param_effect's own docstring) -- this only crops
     # the visible range, per instruction.
     ax.set_ylim(0, 50)
     sns.despine(ax=ax, top=True, right=True)
 
 
-def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
-    """Panel: |decoded PE| vs time WITHIN THE ODDBALL (4TH) OBSERVATION
-    ONLY (see _plot_oddball_pe_trace's own note -- the saved trace is
+def _plot_outlier_center_invariance(ax, sweep_param: str, task: str = "soltani_numbers") -> None:
+    """Panel: |decoded PE| vs time WITHIN THE OUTLIER (4TH) OBSERVATION
+    ONLY (see _plot_outlier_pe_trace's own note -- the saved trace is
     already windowed to this one observation), one line per
-    cluster_center, all at ONE representative oddball_deviation and
+    cluster_center, all at ONE representative outlier_deviation and
     sweep_param held at its own --base_* value (whichever sweep value is
     closest to it) -- a direct visual test of the person's own
     prediction that a fixed-magnitude surprise produces the same
     response regardless of where the cluster sits. If these collapse
-    onto each other, that confirms _plot_oddball_param_effect's own
+    onto each other, that confirms _plot_outlier_param_effect's own
     cross-center aggregation is legitimate; if they don't, that's a
     real, informative finding about where the model's behaviour depends
     on absolute position (e.g. saturation near the edges of the rescaled
     range), not just relative deviation -- and this panel should stay in
     the figure rather than be removed as trivial.
     """
-    path = NEURAL_EXP_DIR / f"oddball_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
     if not path.exists():
-        ax.text(0.5, 0.5, f"No oddball {sweep_param} data", ha="center", va="center",
+        ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
     d = pd.read_pickle(path)
     grid, traces = d["grid"], d["traces"]
     centers = sorted(grid["cluster_center"].unique())
-    _, deviation = _oddball_primary_context(grid)
+    _, deviation = _outlier_primary_context(grid)
 
-    base_val = _oddball_base_value(d, sweep_param)
+    base_val = _outlier_base_value(d, sweep_param)
     values = sorted(grid[sweep_param].unique())
     closest_val = min(values, key=lambda v: abs(v - base_val))
 
@@ -4041,7 +4055,7 @@ def _plot_oddball_center_invariance(ax, sweep_param: str, task: str = "soltani_n
 
     label_sym = {"alpha_0": "\u03b1\u2080", "lambda_": "\u03bb", "n_neurons": "n"}
     sym = label_sym.get(sweep_param, sweep_param)
-    ax.set_xlabel("Time since oddball onset (s)")
+    ax.set_xlabel("Time since outlier onset (s)")
     ax.set_ylabel("|Decoded PE|")
     ax.set_title(f"deviation={deviation:+g}, {sym}={closest_val:g}", fontsize=8)
     ax.legend(fontsize=7, frameon=True, framealpha=0.9, loc="upper right")
@@ -4061,14 +4075,14 @@ def _plot_neural_main_activity_vs_obs(ax, sweep_param: str, task: str = "soltani
     per-timestep samples within a trial aren't independent, so they must
     be collapsed before handing off -- then that per-pid frame is passed
     to sns.lineplot with hue=group, which computes mean + its own default
-    CI band ACROSS PIDS itself, matching _plot_oddball_pe_trace's own
+    CI band ACROSS PIDS itself, matching _plot_outlier_pe_trace's own
     established convention (hand seaborn a long-format frame at the
     correct unit-of-independence, let it aggregate) rather than manually
     computing mean/SEM + fill_between. N per group = the pid count shown
     in its own legend entry. Direct structural port of the ORIGINAL
     neural_giant's own panel 3 (_plot_neural_lambda_activity), reading
     neural_experiments.py's own `param_scan` experiment instead of
-    `sweep` (a genuinely different design from row 1's `oddball` -- every
+    `sweep` (a genuinely different design from row 1's `outlier` -- every
     replicate's own full 32-trial sequence, not an arbitrary constant-
     input toy trial and not a windowed surprise response). Weight-tuned-
     neuron reduction is ALREADY applied there, per trial (encoders
@@ -4140,6 +4154,8 @@ def _plot_neural_main_activity_vs_obs(ax, sweep_param: str, task: str = "soltani
     ax.set_xlim(0, 15)
     ax.set_xticks([0, 5, 10, 15])
     ax.set_ylabel("Error neuron activity (Hz)")
+    ax.set_ylim(60, 120)
+    ax.set_yticks([60, 90, 120])
     ax.legend(title=sym, fontsize=5, title_fontsize=5, frameon=True, framealpha=0.9,
              loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
@@ -4154,13 +4170,13 @@ def _param_scan_decay_metrics(sweep_param: str, task: str = "soltani_numbers") -
     responses' own small-window-average convention for response (|t -
     t_resp| < dt*3) and neural_experiments.py's own READOUT_OFFSET (0.5s
     into the observation) for activity, the SAME conventions the
-    synthetic/oddball pipelines already use elsewhere in this file.
+    synthetic/outlier pipelines already use elsewhere in this file.
 
     Also returns act_rel = act_decay / act_first * 100 and
     resp_rel = resp_decay / early * 100 -- each decay expressed as a
     percentage of its own starting value (first observation's activity;
     early-observations' response-change magnitude), mirroring row 1's PE
-    decay (%) treatment (see _plot_oddball_param_effect's own
+    decay (%) treatment (see _plot_outlier_param_effect's own
     docstring). Checked directly on real data (lambda_ sweep,
     soltani_numbers, 155 real pids): act_first is essentially
     uncorrelated with lambda_ (r=-0.11, n.s.) and early IS mildly
@@ -4281,16 +4297,20 @@ def _plot_neural_main_decay_vs_param(ax, sweep_param: str, task: str = "soltani_
     ax2 = _plot_neural_dual_vs_param(
         ax, df, sweep_param, param_label,
         "act_rel", "resp_rel", "Activity decay (%)", "\u0394R decay (%)",
-        include_x_zero=(sweep_param in ("alpha_0", "lambda_")))
+        include_x_zero=(sweep_param in ("alpha_0", "lambda_")),
+        legend_labels=("Activity", "\u0394R"))
     ax.set_ylim(10, 50)
     ax.set_yticks([10, 30, 50])
+    if sweep_param in ("alpha_0", "lambda_"):
+        ax.set_xlim(0, 1)
+        ax.set_xticks([0, 0.5, 1])
     return ax2
 
 
 def _plot_n_neurons_snr_dv_scatter(ax, task: str = "soltani_numbers") -> None:
-    """Row 3, col 3: decoded PE noise (CV%) (x) vs sigma (oddball response)
+    """Row 3, col 3: decoded PE noise (CV%) (x) vs sigma (outlier response)
     (y) plotted directly against each other, one point per (cluster_center,
-    oddball_deviation, n_neurons) cell -- the SAME two DVs col 2's
+    outlier_deviation, n_neurons) cell -- the SAME two DVs col 2's
     twin-axis panel plots vs n_neurons, here as a direct scatter, matching
     the ORIGINAL neural_giant's own DV-vs-DV panels (5, 9) and this
     figure's own row 1 col 3 / row 2 col 3 (flat color, small low-alpha
@@ -4314,10 +4334,8 @@ def _plot_n_neurons_snr_dv_scatter(ax, task: str = "soltani_numbers") -> None:
     # _plot_n_neurons_snr_pair's own docstring).
     grid["pe_cv_pct"] = (grid["pe_variance_mean"] ** 0.5) / grid["pe_mean_mean"] * 100
 
-    # Palette green -- see _plot_oddball_dv_scatter's own note (this panel's
-    # axes are colored to match column 2's left/right axes; a blue- or
-    # orange-colored scatter would misleadingly tie the data to just one).
-    color = get_palette(6)[2]
+    # Palette's normal blue -- see _plot_outlier_dv_scatter's own note.
+    color = get_palette(6)[0]
     r, p = pearsonr(grid["pe_cv_pct"], grid["response_std"])
     print(f"  [neural_main, n_neurons_snr, PE noise vs \u03c3] r={r:.3f} ({pvalue_to_stars(p)})")
     ax.scatter(grid["pe_cv_pct"], grid["response_std"], color=color, s=8,
@@ -4337,8 +4355,8 @@ def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers"):
     _plot_neural_dual_vs_param (the SAME plain-linear-twin-axis helper
     every other panel in this figure already uses), reading neural_
     experiments.py's own `n_neurons_snr` grid (one row per (cluster_
-    center, oddball_deviation, n_neurons) cell, aggregation across
-    cluster_center/oddball_deviation NOT pre-decided -- every cell
+    center, outlier_deviation, n_neurons) cell, aggregation across
+    cluster_center/outlier_deviation NOT pre-decided -- every cell
     contributes its own point to the regression directly).
 
     SUPERSEDES an earlier 3-line version (response variance + PE
@@ -4385,7 +4403,7 @@ def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers"):
     # plot-side only, not a change to the underlying collected data.
     grid["response_std"] = np.sqrt(grid["response_variance"])
     grid["pe_cv_pct"] = (grid["pe_variance_mean"] ** 0.5) / grid["pe_mean_mean"] * 100
-    # pe_cv_pct on the left axis, response_std ("\u03c3 (oddball)") on
+    # pe_cv_pct on the left axis, response_std ("\u03c3 (outlier)") on
     # the right/twin axis -- response_std is the quantity col 3's own
     # y-axis shows too, so keeping it on the twin axis here lets that
     # axis be shared/linked with col 3's y-axis (see make_neural_main's
@@ -4393,7 +4411,8 @@ def _plot_n_neurons_snr_pair(ax, task: str = "soltani_numbers"):
     ax2 = _plot_neural_dual_vs_param(
         ax, grid, "n_neurons", "Neurons",
         "pe_cv_pct", "response_std",
-        "PE noise (CV%)", "\u03c3")
+        "PE noise (CV%)", "\u03c3",
+        legend_labels=("PE Noise", "\u03c3"))
     ax.set_xticks([50, 150, 250])
     ax.set_ylim(10, 50)
     ax.set_yticks([10, 30, 50])
@@ -4406,7 +4425,7 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
     per-pid decay metrics _plot_neural_main_decay_vs_param twin-axis
     plots vs sweep_param, here shown instead as a direct scatter of THAT
     panel's own two dependent variables against each other. This is the
-    row-2 analogue of row 1's _plot_oddball_dv_scatter and of the
+    row-2 analogue of row 1's _plot_outlier_dv_scatter and of the
     ORIGINAL neural_giant's own DV-vs-DV panels (panel 5: sigma_R vs
     sigma_PE; panel 9: DeltaR-decay vs DeltaA-decay) -- matching that
     exact convention (single flat color, small low-alpha points,
@@ -4422,10 +4441,8 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
         ax.text(0.5, 0.5, f"No param_scan {sweep_param} decay data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
         return
-    # Palette green -- see _plot_oddball_dv_scatter's own note (this panel's
-    # axes are colored to match column 2's left/right axes; a blue- or
-    # orange-colored scatter would misleadingly tie the data to just one).
-    color = get_palette(6)[2]
+    # Palette's normal blue -- see _plot_outlier_dv_scatter's own note.
+    color = get_palette(6)[0]
     r, p = pearsonr(df["act_rel"], df["resp_rel"])
     print(f"  [neural_main, param_scan_{sweep_param}, activity decay vs ΔR decay] "
           f"r={r:.3f} ({pvalue_to_stars(p)})")
@@ -4452,7 +4469,7 @@ COLUMN_HEADERS = ["Model Dynamics", "Link to Behavior", "Predictions"]
 def make_neural_main() -> Path:
     """3x2 figure: a second neural-predictions figure, one row per
     parameter (alpha_0, lambda_, n_neurons), each investigated via its own
-    fresh grid of oddball simulations (3 observations clustered around a
+    fresh grid of outlier simulations (3 observations clustered around a
     center, then one surprising observation deviating from it, across
     several centers x deviations x parameter values) rather than the
     giant's own random-virtual-pid design.
@@ -4463,7 +4480,7 @@ def make_neural_main() -> Path:
           deviation signs, 3 representative alpha_0 values.
         Col 2: alpha_0 (x) vs max |decoded PE| AND PE decay RATE
           (%max/second) -- the RELATIVE decrease by the end of the
-          oddball's own window, (max-end)/max, divided by decay_duration
+          outlier's own window, (max-end)/max, divided by decay_duration
           (time from the trace's own peak to the window's end) -- twin
           axes, one point per grid cell with a regplot fit + CI band each
           (_plot_neural_dual_vs_param, matching rows 2/3's own col-2
@@ -4471,7 +4488,7 @@ def make_neural_main() -> Path:
           alpha_0 produces a bigger initial response AND resolves it
           FASTER from learning/value-updating (relative RATE, not
           absolute decrease or a duration-blind fraction -- see
-          _plot_oddball_param_effect's own docstring for why).
+          _plot_outlier_param_effect's own docstring for why).
         Col 3: max |decoded PE| (x) vs PE decay rate (%max/s) (y) plotted
           directly against each other, one point per full grid cell --
           the same two DVs col 2 twin-axis plots vs alpha_0, here as a
@@ -4479,7 +4496,7 @@ def make_neural_main() -> Path:
           DV-vs-DV panels (5, 9).
       Row 2 (lambda_ swept 0.1-1.0, alpha_0=0.7, n_neurons=500/nc=2000 --
         neural_experiments.py's own `param_scan` experiment, NOT
-        `oddball` -- a different design: every REAL soltani_numbers
+        `outlier` -- a different design: every REAL soltani_numbers
         pid's own full 32-trial sequence (CORRECTED this session -- an
         earlier version used a degenerate constant-input arbitrary toy
         trial, Act 1.2-style; see param_scan's own docstring for why that
@@ -4511,12 +4528,12 @@ def make_neural_main() -> Path:
           ORIGINAL neural_giant's own panel 9 (DeltaR-decay vs
           DeltaA-decay).
       Row 3 (n_neurons, alpha_0=0.7, lambda_=0.7 -- neural_experiments.py's
-        own `n_neurons_snr` experiment, NOT `param_scan` or `oddball`; see
+        own `n_neurons_snr` experiment, NOT `param_scan` or `outlier`; see
         that function's own docstring for the settled 3-DV design and
         the exploration that got there):
         Col 1: n_neurons demo trace (_plot_n_neurons_demo_trace).
-        Col 2: n_neurons (x) vs PE noise (CV%) AND sigma (oddball response),
-          twin axes, one point per (cluster_center, oddball_deviation,
+        Col 2: n_neurons (x) vs PE noise (CV%) AND sigma (outlier response),
+          twin axes, one point per (cluster_center, outlier_deviation,
           n_neurons) grid cell -- direct reuse of _plot_neural_dual_vs_param.
           PE noise (CV%) is a coefficient of variation (sqrt(pe_variance_mean)
           / pe_mean_mean * 100), not the raw pe_variance_mean -- see
@@ -4530,47 +4547,38 @@ def make_neural_main() -> Path:
     figure) was REMOVED per instruction -- it had already served its
     purpose: the analysis it was checking for (whether magnitude is
     center-independent) came back genuinely non-trivial (magnitude varies
-    non-monotonically with the oddball's own distance from the task's raw
-    midpoint -- see chat and _plot_oddball_param_effect's own docstring),
+    non-monotonically with the outlier's own distance from the task's raw
+    midpoint -- see chat and _plot_outlier_param_effect's own docstring),
     so keeping a dedicated panel around to re-confirm that on every render
     was no longer the point; the finding itself is now documented in
-    prose instead. _plot_oddball_center_invariance itself is left defined
+    prose instead. _plot_outlier_center_invariance itself is left defined
     (not deleted) in case a future row wants to re-run this check on its
     own grid, just no longer wired into this figure's layout.
 
-    Row 1 reads neural_experiments.py's own `oddball` experiment; row 2
+    Row 1 reads neural_experiments.py's own `outlier` experiment; row 2
     reads its `param_scan` experiment -- both cluster-bound (--mode
     run/submit/collect; a real timing check found even a modest
-    single-context oddball run exceeds a reasonable single local call,
+    single-context outlier run exceeds a reasonable single local call,
     and param_scan's own per-real-pid 32-trial jobs cost similarly).
     """
     _apply_mode_style()
-    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75),
+    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
                              constrained_layout=True)
 
     # Each row's col-2 twin/right axis and col-3's own y-axis plot the
-    # SAME quantity (PE decay rate, %max/s; ΔR decay %; σ (oddball)) --
-    # sharing them
-    # (Axes.sharey, matplotlib >=3.3) keeps their tick locations/range in
-    # sync so that shared quantity reads as literally the same axis
-    # across both panels, not just visually similar.
-    # Column 2's twin (right) axis and column 3's own axis plot the SAME
-    # quantity (shared via sharey below) -- color column 3's axis to match
-    # column 2's twin-axis color so that connection reads visually instead
-    # of column 3 looking like an unrelated plain-black axis. Deterministic
-    # (get_palette(6)[1] is always _plot_neural_dual_vs_param's own c2), so
-    # this doesn't need that function to hand its color back explicitly.
-    twin_color = get_palette(6)[1]
-    # Column 3's x-axis plots the SAME quantity as column 2's LEFT axis
-    # (c1) -- colored to match for the same reason/symmetry as twin_color
-    # above. Column 3's own scatter/regplot are colored black instead of
-    # either axis color (see each function's own note) so the data doesn't
-    # read as belonging to just one side.
-    left_color = get_palette(6)[0]
+    # SAME quantity (PE decay rate, %max/s; ΔR decay %; σ (outlier)) --
+    # sharing them (Axes.sharey, matplotlib >=3.3) keeps their tick
+    # locations/range in sync so that shared quantity reads as literally
+    # the same axis across both panels, not just visually similar. Axes/
+    # ticks are plain black throughout now (reverted from an earlier
+    # colored-axis convention, per instruction) -- col 2's own small
+    # in-panel legend (see _plot_neural_dual_vs_param's legend_labels) is
+    # what now distinguishes its two series, and col 3 no longer needs its
+    # own axis recolored to match.
 
-    _plot_oddball_pe_trace(axes[0, 0], "alpha_0")
-    ax2_r1 = _plot_oddball_param_effect(axes[0, 1], "alpha_0")
-    _plot_oddball_dv_scatter(axes[0, 2], "alpha_0")
+    _plot_outlier_pe_trace(axes[0, 0], "alpha_0")
+    ax2_r1 = _plot_outlier_param_effect(axes[0, 1], "alpha_0")
+    _plot_outlier_dv_scatter(axes[0, 2], "alpha_0")
     if ax2_r1 is not None:
         axes[0, 2].sharey(ax2_r1)
         # sharey() re-syncs col 3's just-set ylim to col 2 twin axis's own
@@ -4578,12 +4586,7 @@ def make_neural_main() -> Path:
         # AFTER linking so it actually reaches the rendered figure; shared
         # axes have linked limits, so this one call updates both.
         axes[0, 2].set_ylim(0, 50)
-        axes[0, 2].set_ylabel(axes[0, 2].get_ylabel(), color=twin_color)
-        axes[0, 2].tick_params(axis="y", colors=twin_color)
-        axes[0, 2].spines["left"].set_color(twin_color)
-        axes[0, 2].set_xlabel(axes[0, 2].get_xlabel(), color=left_color)
-        axes[0, 2].tick_params(axis="x", colors=left_color)
-        axes[0, 2].spines["bottom"].set_color(left_color)
+        axes[0, 2].set_yticks([0, 25, 50])
 
     # Column headers -- one per column, above row 1 only (each spans that
     # whole column's 3 rows conceptually: how the model behaves, how that
@@ -4599,36 +4602,21 @@ def make_neural_main() -> Path:
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
     if ax2_r2 is not None:
         axes[1, 2].sharey(ax2_r2)
-        # Project-wide round-number-padded tick convention (see
-        # .claude/agents/figure-viewer.md) -- reasserted AFTER sharey (same
-        # z-order-of-operations reason as row 1's own ylim reassert above).
-        resp_rel = _param_scan_decay_metrics("lambda_", "soltani_numbers")["resp_rel"]
-        resp_rel_ticks = nice_ticks(resp_rel.min(), resp_rel.max())
-        axes[1, 2].set_ylim(resp_rel_ticks[0], resp_rel_ticks[-1])
-        axes[1, 2].set_yticks(resp_rel_ticks)
-        axes[1, 2].set_ylabel(axes[1, 2].get_ylabel(), color=twin_color)
-        axes[1, 2].tick_params(axis="y", colors=twin_color)
-        axes[1, 2].spines["left"].set_color(twin_color)
-        axes[1, 2].set_xlabel(axes[1, 2].get_xlabel(), color=left_color)
-        axes[1, 2].tick_params(axis="x", colors=left_color)
-        axes[1, 2].spines["bottom"].set_color(left_color)
+        # Fixed ticks (per instruction), reasserted AFTER sharey (same
+        # z-order-of-operations reason as row 1's own ylim reassert above)
+        # -- propagates to E's own twin axis too, since sharey joins them.
+        axes[1, 2].set_ylim(20, 100)
+        axes[1, 2].set_yticks([20, 60, 100])
 
     _plot_n_neurons_demo_trace(axes[2, 0])
     ax2_r3 = _plot_n_neurons_snr_pair(axes[2, 1])
     _plot_n_neurons_snr_dv_scatter(axes[2, 2])
     if ax2_r3 is not None:
         axes[2, 2].sharey(ax2_r3)
-        snr_grid = pd.read_pickle(NEURAL_EXP_DIR / "n_neurons_snr_soltani_numbers.pkl")["grid"]
-        response_std = np.sqrt(snr_grid["response_variance"])
-        response_std_ticks = nice_ticks(response_std.min(), response_std.max())
-        axes[2, 2].set_ylim(response_std_ticks[0], response_std_ticks[-1])
-        axes[2, 2].set_yticks(response_std_ticks)
-        axes[2, 2].set_ylabel(axes[2, 2].get_ylabel(), color=twin_color)
-        axes[2, 2].tick_params(axis="y", colors=twin_color)
-        axes[2, 2].spines["left"].set_color(twin_color)
-        axes[2, 2].set_xlabel(axes[2, 2].get_xlabel(), color=left_color)
-        axes[2, 2].tick_params(axis="x", colors=left_color)
-        axes[2, 2].spines["bottom"].set_color(left_color)
+        # Fixed ticks (per instruction) -- propagates to H's own twin axis
+        # too, since sharey joins them.
+        axes[2, 2].set_ylim(0.0, 0.2)
+        axes[2, 2].set_yticks([0.0, 0.1, 0.2])
 
     # Nudged further left and up (was x=-0.1, y=1.1 default) -- at the
     # default position a letter can sit close enough to a panel's own top

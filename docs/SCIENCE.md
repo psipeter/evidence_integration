@@ -85,7 +85,7 @@ reading off a correlation across randomly-covarying parameters (its
 predecessor, `neural_giant`, did the latter — retired; see
 docs/DECISIONS.md).
 
-- **Row 1 (α₀) — `oddball` experiment.** Built, stable.
+- **Row 1 (α₀) — `outlier` experiment.** Built, stable.
 - **Row 2 (λ) — `param_scan` on real/synthetic trials.** Built, stable.
 - **Row 3 (n_neurons) — a different underlying experiment, settled after
   extensive exploration** (a convergence hypothesis tested and not
@@ -472,22 +472,22 @@ internal structure: observe the qualitative phenomenon, show it scales
 with the parameter, then predict an individual-difference signature
 testable with future spike-resolved recordings.
 
-- **Row 1 — oddball experiment (α₀).** A run of consistent inputs
-  followed by an oddball: the error population's decoded PE rises sharply
+- **Row 1 — outlier experiment (α₀).** A run of consistent inputs
+  followed by an outlier: the error population's decoded PE rises sharply
   then declines as the value estimate updates in real time. Magnitude and
   decline rate both depend on the synaptic learning rate α₀; individuals
-  with larger oddball PE responses are predicted to adapt fastest.
+  with larger outlier PE responses are predicted to adapt fastest.
 - **Row 2 — error activity decline across the block (λ).** Error-sensitive
   neurons' activity decays over the course of a block, producing
   progressively smaller (more conservative) value updates later on. Both
   the activity decay and the shrinking update size depend on the synaptic
   modulation λ; individuals with larger activity attenuation are predicted
   to show the most stable late-block behaviour.
-- **Row 3 — oddball SNR / response variability (n_neurons).** The decoded
+- **Row 3 — outlier SNR / response variability (n_neurons).** The decoded
   value signal drifts over time, producing different responses to
   identical repeated sequences. Both response variability and
   within-trial error-population variability depend on the number of
-  simulated neurons; individuals with the most inconsistent post-oddball
+  simulated neurons; individuals with the most inconsistent post-outlier
   error-population readouts are predicted to show the most response
   variability.
 

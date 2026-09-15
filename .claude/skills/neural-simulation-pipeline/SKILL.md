@@ -63,7 +63,7 @@ scp data/counting_activities_n200_nc1000_yoo.pkl \
 
 See `docs/SCIENCE.md`'s "Current thread" for what `neural_main` is and
 its current status. Data source: `scripts/neural_experiments.py`'s
-`oddball` (row 1, α₀) and `param_scan` (rows 2-3, λ/n_neurons)
+`outlier` (row 1, α₀) and `param_scan` (rows 2-3, λ/n_neurons)
 experiments, run on `soltani_numbers`. Build the figure with:
 
 ```bash

@@ -16,9 +16,9 @@ own _require_activities()/_decoders_for_seed() wrap that pattern) and
 RAISE with the exact regenerate command if it's missing -- matching
 models.NEF's own _require_activity_map convention exactly. This was an
 EXPLICIT prior instruction that got silently reintroduced once already
-(_simulate_full, used by raster_demo/sweep/oddball, had a `decoders is
+(_simulate_full, used by raster_demo/sweep/outlier, had a `decoders is
 None -> _pretrain(...)` fallback baked in) and only surfaced because a
-person noticed an unexplained asymmetry in an oddball result and asked
+person noticed an unexplained asymmetry in an outlier result and asked
 whether the real activity file was actually being used. A silent
 _pretrain() fallback is NOT just slower (a full from-scratch Nengo
 training run per call, vs. an analytic decode from a cached Gram matrix)
@@ -31,7 +31,7 @@ _decoders_for_seed() (or the equivalent in models.NEF/counting_integrator)
 and let a missing file/key raise. Do not add a new _pretrain() fallback,
 here or anywhere else that touches NEF simulation.
 
-Experiments (partial list -- n_neurons_demo/n_neurons_snr/oddball/param_scan
+Experiments (partial list -- n_neurons_demo/n_neurons_snr/outlier/param_scan
 predate this docstring's last update; see --help for the full set):
 
   raster_demo  — ONE trial, arbitrary (alpha_0, n_neurons, lambda_), full
@@ -229,7 +229,7 @@ def _base_params(task: str, alpha_0: float, n_neurons: float, lambda_: float,
 def _require_activities(task: str, n_neurons: int, n_neurons_counting: int) -> dict:
     """Load precomputed counting-activity Gram matrices for (n_neurons,
     n_neurons_counting, task), or fail loudly with the exact regenerate
-    command. REQUIRED, not optional -- raster_demo/sweep/oddball (every
+    command. REQUIRED, not optional -- raster_demo/sweep/outlier (every
     caller of _simulate_full) must NEVER fall back to a live _pretrain()
     training run when the file is missing. This mirrors models.NEF's own
     _require_activity_map convention exactly, and exists because that
@@ -269,7 +269,7 @@ def _require_activities(task: str, n_neurons: int, n_neurons_counting: int) -> d
 
 def _toy_activity_key(seed: int) -> int:
     """Maps an arbitrary toy seed (0-indexed, as used by raster_demo/
-    sweep/oddball/param_scan's own --seed/range(n_seeds) loops, which have
+    sweep/outlier/param_scan's own --seed/range(n_seeds) loops, which have
     no real trial to key off of) to the activity file's own 1-indexed key
     space. THE SINGLE SOURCE OF TRUTH for this mapping -- every caller
     must use this SAME returned value for BOTH the activity-map lookup
@@ -368,7 +368,7 @@ def _simulate_dynamics_demo(params: dict, obs_values: np.ndarray, decoders: dict
     reads out net.probe_counting_weight/net.probe_counting_count (already
     probed inside build_network, just never read out by _simulate_full).
     _simulate_full only ever needed net.error.neurons (raster_demo/sweep/
-    oddball's own single raster) -- this is for make_figures.py's
+    outlier's own single raster) -- this is for make_figures.py's
     models_overview demo panel (Panel C: input/count/error/value spike
     rasters + decoded traces for one toy trial), the only current caller
     that needs value's and count's spikes too. Probes are added to `net`
@@ -467,7 +467,7 @@ def run_n_neurons_demo(args) -> None:
     ground, and the actual mean+CI aggregation happens in the figure
     script via sns.lineplot (matching this project's established
     convention of handing seaborn a long-format frame and letting it
-    aggregate, e.g. _plot_oddball_pe_trace), not here.
+    aggregate, e.g. _plot_outlier_pe_trace), not here.
 
     Each pair needs its OWN precomputed activity file (file identity is
     the exact (n_neurons, n_neurons_counting) pair, not just n_neurons --
@@ -1028,30 +1028,34 @@ def run_synthetic(args) -> None:
             print(f"Collected {len(files)} file(s), {n_pids} virtual pids -> {out_path}")
 
 
-# ── oddball (neural_main's per-parameter rows) ──────────────────────────────────────
+# ── outlier (neural_main's per-parameter rows) ──────────────────────────────────────
 
-def _oddball_value_tag(val: float) -> str:
+def _outlier_value_tag(val: float) -> str:
     """Filesystem-safe tag for one numeric value, e.g. 0.2 -> '0p2', -15 -> 'm15'."""
     return f"{val:g}".replace(".", "p").replace("-", "m")
 
 
-def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
+def _outlier_worker(args, cluster_center: float, outlier_deviation: float,
                     sweep_value: float) -> dict:
-    """One (cluster_center, oddball_deviation, sweep_value) cell of the
+    """One (cluster_center, outlier_deviation, sweep_value) cell of the
     grid: 3 observations clustered around cluster_center (+-
-    --cluster_spread), then one oddball observation at cluster_center +
-    oddball_deviation. Returns the per-timestep abs(decoded PE) trace
-    (mean over --n_seeds seeds), WINDOWED TO THE 4TH (ODDBALL)
-    OBSERVATION ONLY -- excludes its own preceding ITI, since PE during
-    that ITI still reflects the 3rd (clustered) observation's tail, not
-    the oddball's own response -- plus summary stats (max within that
-    window, end-of-window value, and their absolute difference) --
-    abs() throughout per instruction.
+    --cluster_spread), then one outlier observation at cluster_center +
+    outlier_deviation. Returns the per-timestep abs(decoded PE) trace
+    (mean over --n_seeds seeds), WINDOWED TO ONE FULL ITI BEFORE THE 4TH
+    (OUTLIER) OBSERVATION THROUGH THE END OF ITS OWN STIMULUS WINDOW --
+    per instruction, showing the preceding ITI (where PE should sit flat,
+    still reflecting the 3rd/clustered observation's settled tail) makes
+    the outlier's own sharp onset response visually legible against a
+    flat baseline, rather than starting the trace already mid-response.
+    t=0 stays the outlier's own cue onset (unchanged downstream meaning --
+    see max_pe/end_pe below) -- the window just extends to negative t
+    -- plus summary stats (max within that window, end-of-window value,
+    and their absolute difference) -- abs() throughout per instruction.
     """
     cluster_vals = [cluster_center - args.cluster_spread, cluster_center,
                     cluster_center + args.cluster_spread]
-    oddball_val = cluster_center + oddball_deviation
-    obs_values_raw = np.array(cluster_vals + [oddball_val], dtype=float)
+    outlier_val = cluster_center + outlier_deviation
+    obs_values_raw = np.array(cluster_vals + [outlier_val], dtype=float)
     obs_values = obs_values_raw / 50.0 - 1.0 if args.task == "soltani_numbers" else obs_values_raw
 
     base_kwargs = dict(alpha_0=args.base_alpha_0, n_neurons=args.base_n_neurons,
@@ -1072,17 +1076,21 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
         t = result["t"]
     pe_mean = np.mean(pe_traces, axis=0)
 
-    # Window to the 4th (oddball) observation's own stimulus window only:
-    # [3*t_step + t_iti, 4*t_step] -- i.e. from the end of its own ITI
-    # (excluding it) to the end of the trial. n_obs is always exactly 4
-    # for this experiment (3 clustered + 1 oddball).
+    # Window: [3*t_step, 4*t_step] -- one full ITI before the outlier's own
+    # cue onset (3*t_step + t_iti) through the end of the trial. n_obs is
+    # always exactly 4 for this experiment (3 clustered + 1 outlier).
+    # t_window is shifted so t=0 is still the outlier's own CUE ONSET (not
+    # the ITI start) -- keeps max_pe/end_pe/decay_duration's downstream
+    # meaning unchanged (a benchmark time near cue onset, not near ITI
+    # start), while the returned array/plot now extends to negative t.
     t_obs_ = float(params["t_obs"])
     t_iti_ = float(params["t_iti"])
     t_step = t_obs_ + t_iti_
-    window_start = 3 * t_step + t_iti_
+    cue_onset = 3 * t_step + t_iti_
+    window_start = 3 * t_step
     window_end = 4 * t_step
     mask = (t >= window_start) & (t <= window_end)
-    t_window = t[mask] - window_start
+    t_window = t[mask] - cue_onset
     pe_window = pe_mean[mask]
 
     max_pe = float(np.max(pe_window))
@@ -1091,7 +1099,7 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
 
     return {
         "cluster_center": cluster_center,
-        "oddball_deviation": oddball_deviation,
+        "outlier_deviation": outlier_deviation,
         "sweep_value": sweep_value,
         "t": t_window,
         "pe": pe_window,
@@ -1103,19 +1111,19 @@ def _oddball_worker(args, cluster_center: float, oddball_deviation: float,
     }
 
 
-def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
+def _n_neurons_snr_worker(args, cluster_center: float, outlier_deviation: float,
                           n_neurons: int, n_neurons_counting: int) -> dict:
-    """One (cluster_center, oddball_deviation, n_neurons_pair) cell: the
+    """One (cluster_center, outlier_deviation, n_neurons_pair) cell: the
     two settled SNR DVs (decoded PE within-seed variance, split-half
     spike-population reliability on non-weight-tuned neurons), both
-    restricted to the SAME 400-600ms window within the oddball's own
+    restricted to the SAME 400-600ms window within the outlier's own
     presentation, averaged across --n_seeds. See run_n_neurons_snr's own
     docstring for the full definitions.
     """
     cluster_vals = [cluster_center - args.cluster_spread, cluster_center,
                     cluster_center + args.cluster_spread]
-    oddball_val = cluster_center + oddball_deviation
-    obs_values_raw = np.array(cluster_vals + [oddball_val], dtype=float)
+    outlier_val = cluster_center + outlier_deviation
+    obs_values_raw = np.array(cluster_vals + [outlier_val], dtype=float)
     obs_values = obs_values_raw / 50.0 - 1.0 if args.task == "soltani_numbers" else obs_values_raw
 
     def _bin_counts(spikes: np.ndarray, dt: float, bin_ms: float) -> np.ndarray:
@@ -1175,8 +1183,8 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
         # _extract_responses directly (the SAME function every other
         # response-readout in this project calls) rather than
         # reimplementing its window-averaging formula here. Returns one
-        # value per observation; the oddball is always the LAST
-        # (index n_obs-1) in this trial's own 3-clustered-then-1-oddball
+        # value per observation; the outlier is always the LAST
+        # (index n_obs-1) in this trial's own 3-clustered-then-1-outlier
         # structure.
         all_responses = _extract_responses(t_arr, result["value"], n_obs, params)
         responses.append(float(all_responses[-1]))
@@ -1184,7 +1192,7 @@ def _n_neurons_snr_worker(args, cluster_center: float, oddball_deviation: float,
     split_half_valid = [r for r in split_half_rs if not np.isnan(r)]
     return {
         "cluster_center": cluster_center,
-        "oddball_deviation": oddball_deviation,
+        "outlier_deviation": outlier_deviation,
         "n_neurons": n_neurons,
         "n_neurons_counting": n_neurons_counting,
         "pe_variance_mean": float(np.mean(pe_variances)),
@@ -1208,9 +1216,9 @@ def run_n_neurons_snr(args) -> None:
     at): measures TWO SNR DVs for neural_main's row 3 (n_neurons),
     both restricted to the SAME 200ms window (t_iti+400ms to
     t_iti+600ms, the established ~0.5s peak-response latency) within
-    the oddball's own presentation, for the SAME oddball trial structure
-    `oddball` already uses, now over a FULL GRID of --cluster_centers x
-    --oddball_deviations (matching `oddball`'s own grid convention,
+    the outlier's own presentation, for the SAME outlier trial structure
+    `outlier` already uses, now over a FULL GRID of --cluster_centers x
+    --outlier_deviations (matching `outlier`'s own grid convention,
     since aggregation across this grid isn't decided yet -- every cell
     gets its own point, not pre-averaged) x --n_neurons_pairs:
 
@@ -1253,8 +1261,8 @@ def run_n_neurons_snr(args) -> None:
       3. Response variance (sigma_response**2) -- ADDED this session for
          the 3-DV panel (PE variance + split-half r share a log-scale
          axis, response variance gets its own linear axis). The response
-         value at "decision time" (the oddball -- always the LAST
-         observation in this trial's own 3-clustered-then-1-oddball
+         value at "decision time" (the outlier -- always the LAST
+         observation in this trial's own 3-clustered-then-1-outlier
          structure), extracted by calling models.NEF's own canonical
          `_extract_responses(t_arr, value, n_obs, params)` directly --
          NOT its window-averaging formula reimplemented here -- the SAME
@@ -1281,15 +1289,15 @@ def run_n_neurons_snr(args) -> None:
     project's normal convention (raw traces saved only when a script
     needs to support genuinely open-ended downstream analysis).
 
-    Values are on the RAW 0-100 numbers-task scale, matching `oddball`'s
+    Values are on the RAW 0-100 numbers-task scale, matching `outlier`'s
     own convention -- keep --cluster_centers comfortably away from 0 and
-    100 (and --oddball_deviations small enough not to push the oddball
-    itself close to those edges), same saturation concern `oddball`'s
+    100 (and --outlier_deviations small enough not to push the outlier
+    itself close to those edges), same saturation concern `outlier`'s
     own docstring flags.
 
-    Has the SAME --mode run/submit/collect lifecycle `oddball` uses --
-    one job per (cluster_center, oddball_deviation, n_neurons_pair) cell,
-    matching `oddball`'s own per-cell granularity exactly (a real timing
+    Has the SAME --mode run/submit/collect lifecycle `outlier` uses --
+    one job per (cluster_center, outlier_deviation, n_neurons_pair) cell,
+    matching `outlier`'s own per-cell granularity exactly (a real timing
     check on that experiment found even a modest single-context run
     exceeds a reasonable single local call, and this grid multiplies
     that the same way: n_centers x n_deviations x n_pairs).
@@ -1297,25 +1305,25 @@ def run_n_neurons_snr(args) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     def _tag3(c, d, pair_str):
-        return f"c{_oddball_value_tag(c)}_d{_oddball_value_tag(d)}_p{pair_str.replace(':', '-')}"
+        return f"c{_outlier_value_tag(c)}_d{_outlier_value_tag(d)}_p{pair_str.replace(':', '-')}"
 
     if args.mode == "run":
-        if args.cluster_center is None or args.oddball_deviation is None \
+        if args.cluster_center is None or args.outlier_deviation is None \
                 or args.n_neurons_pair is None:
-            raise SystemExit("--cluster_center, --oddball_deviation, and --n_neurons_pair "
+            raise SystemExit("--cluster_center, --outlier_deviation, and --n_neurons_pair "
                              "all required for --mode run")
         n_str, nc_str = args.n_neurons_pair.split(":")
         n_neurons, n_neurons_counting = int(n_str), int(nc_str)
-        tag = _tag3(args.cluster_center, args.oddball_deviation, args.n_neurons_pair)
+        tag = _tag3(args.cluster_center, args.outlier_deviation, args.n_neurons_pair)
         out_path = OUT_DIR / f"n_neurons_snr_{args.task}_{tag}.pkl"
         if out_path.exists():
             print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
             return
-        result = _n_neurons_snr_worker(args, args.cluster_center, args.oddball_deviation,
+        result = _n_neurons_snr_worker(args, args.cluster_center, args.outlier_deviation,
                                        n_neurons, n_neurons_counting)
         pd.to_pickle(result, out_path)
         pe_cv = (result["pe_variance_mean"] ** 0.5) / result["pe_mean_mean"] * 100
-        print(f"Saved center={args.cluster_center} deviation={args.oddball_deviation} "
+        print(f"Saved center={args.cluster_center} deviation={args.outlier_deviation} "
               f"n_neurons={n_neurons} n_neurons_counting={n_neurons_counting}: "
               f"pe_variance={result['pe_variance_mean']:.6f} "
               f"pe_mean={result['pe_mean_mean']:.6f} pe_cv%={pe_cv:.2f} "
@@ -1324,9 +1332,9 @@ def run_n_neurons_snr(args) -> None:
     elif args.mode == "submit":
         root = str(Path(__file__).resolve().parent.parent)
         combos = [(c, d, p) for c in args.cluster_centers
-                 for d in args.oddball_deviations for p in args.n_neurons_pairs]
+                 for d in args.outlier_deviations for p in args.n_neurons_pairs]
         print(f"Submitting {len(combos)} n_neurons_snr jobs "
-              f"({len(args.cluster_centers)} centers x {len(args.oddball_deviations)} "
+              f"({len(args.cluster_centers)} centers x {len(args.outlier_deviations)} "
               f"deviations x {len(args.n_neurons_pairs)} n_neurons pairs) for task={args.task}")
         for c, d, p in combos:
             tag = _tag3(c, d, p)
@@ -1337,7 +1345,7 @@ def run_n_neurons_snr(args) -> None:
             cmd = (
                 f"venv/bin/python scripts/neural_experiments.py n_neurons_snr "
                 f"--task {args.task} --mode run --n_neurons_pair {p} "
-                f"--cluster_center {c} --oddball_deviation {d} "
+                f"--cluster_center {c} --outlier_deviation {d} "
                 f"--cluster_spread {args.cluster_spread} "
                 f"--alpha_0 {args.alpha_0} --lambda_ {args.lambda_} --n_seeds {args.n_seeds} "
                 f"--splithalf_bin_ms {args.splithalf_bin_ms} "
@@ -1355,23 +1363,23 @@ def run_n_neurons_snr(args) -> None:
             return
         results = [pd.read_pickle(f) for f in files]
         grid = pd.DataFrame([
-            {"cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
+            {"cluster_center": r["cluster_center"], "outlier_deviation": r["outlier_deviation"],
              "n_neurons": r["n_neurons"], "n_neurons_counting": r["n_neurons_counting"],
              "pe_variance_mean": r["pe_variance_mean"], "pe_mean_mean": r["pe_mean_mean"],
              "split_half_r_mean": r["split_half_r_mean"],
              "split_half_r_sd": r["split_half_r_sd"], "response_variance": r["response_variance"]}
             for r in results
-        ]).sort_values(["cluster_center", "oddball_deviation", "n_neurons"]).reset_index(drop=True)
+        ]).sort_values(["cluster_center", "outlier_deviation", "n_neurons"]).reset_index(drop=True)
         out_path = OUT_DIR / f"n_neurons_snr_{args.task}.pkl"
         pd.to_pickle({"grid": grid, "results": results, "task": args.task}, out_path)
         print(f"Collected {len(files)} cell(s) -> {out_path}")
         print(grid)
 
 
-def run_oddball(args) -> None:
+def run_outlier(args) -> None:
     """Toy demo: 3 observations clustered around a center, then one
-    "oddball" observation deviating from it -- across a full grid of
-    (--cluster_centers x --oddball_deviations x --sweep_values), the other
+    "outlier" observation deviating from it -- across a full grid of
+    (--cluster_centers x --outlier_deviations x --sweep_values), the other
     two of {alpha_0, lambda_, n_neurons} held fixed at --base_alpha_0/
     --base_lambda_/--base_n_neurons. Averaged over --n_seeds seeds per
     cell. Tests directly whether the response to a fixed-magnitude
@@ -1382,8 +1390,8 @@ def run_oddball(args) -> None:
     exact same x/50-1 transform scripts/build_model_inputs.py applies to
     real human data before NEF ever sees it. Colors' own values are
     already +-1 and would NOT need this. Keep --cluster_centers
-    comfortably away from 0 and 100 (and --oddball_deviations small
-    enough not to push the oddball itself close to those edges either) --
+    comfortably away from 0 and 100 (and --outlier_deviations small
+    enough not to push the outlier itself close to those edges either) --
     values near the edges of the rescaled [-1,1] range risk exactly the
     saturation this grid is partly designed to detect as a confound, not
     a genuine center effect.
@@ -1392,31 +1400,31 @@ def run_oddball(args) -> None:
     a real timing check found even a modest single-context run exceeds a
     reasonable single local call, and the full grid multiplies that by
     n_centers x n_deviations. One job per (cluster_center,
-    oddball_deviation, sweep_value) triple; --n_seeds worth of
+    outlier_deviation, sweep_value) triple; --n_seeds worth of
     simulations run serially within that one job.
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    # "oddball_gated_" (not "oddball_..._gated") so the default (non-gated)
+    # "outlier_gated_" (not "outlier_..._gated") so the default (non-gated)
     # glob at --mode collect below can never accidentally swallow gated
     # per-cell files too -- a suffix right before ".pkl" would, since "v*"
     # in that glob matches any trailing characters including "_gated".
-    oddball_prefix = "oddball_gated" if getattr(args, "gate_error_feedback", False) else "oddball"
+    outlier_prefix = "outlier_gated" if getattr(args, "gate_error_feedback", False) else "outlier"
 
     def _tag3(c, d, v):
-        return f"c{_oddball_value_tag(c)}_d{_oddball_value_tag(d)}_v{_oddball_value_tag(v)}"
+        return f"c{_outlier_value_tag(c)}_d{_outlier_value_tag(d)}_v{_outlier_value_tag(v)}"
 
     if args.mode == "run":
-        if args.cluster_center is None or args.oddball_deviation is None or args.sweep_value is None:
-            raise SystemExit("--cluster_center, --oddball_deviation, and --sweep_value "
+        if args.cluster_center is None or args.outlier_deviation is None or args.sweep_value is None:
+            raise SystemExit("--cluster_center, --outlier_deviation, and --sweep_value "
                              "all required for --mode run")
-        tag = _tag3(args.cluster_center, args.oddball_deviation, args.sweep_value)
-        out_path = OUT_DIR / f"{oddball_prefix}_{args.sweep_param}_{args.task}_{tag}.pkl"
+        tag = _tag3(args.cluster_center, args.outlier_deviation, args.sweep_value)
+        out_path = OUT_DIR / f"{outlier_prefix}_{args.sweep_param}_{args.task}_{tag}.pkl"
         if out_path.exists():
             print(f"Already exists: {out_path.name} -- skipping (delete to rerun)")
             return
-        result = _oddball_worker(args, args.cluster_center, args.oddball_deviation, args.sweep_value)
+        result = _outlier_worker(args, args.cluster_center, args.outlier_deviation, args.sweep_value)
         pd.to_pickle(result, out_path)
-        print(f"Saved center={args.cluster_center} deviation={args.oddball_deviation} "
+        print(f"Saved center={args.cluster_center} deviation={args.outlier_deviation} "
               f"{args.sweep_param}={args.sweep_value}: max_pe={result['max_pe']:.4f} "
               f"end_pe={result['end_pe']:.4f} decrease={result['decrease']:.4f} "
               f"-> {out_path}")
@@ -1424,50 +1432,63 @@ def run_oddball(args) -> None:
     elif args.mode == "submit":
         root = str(Path(__file__).resolve().parent.parent)
         combos = [(c, d, v) for c in args.cluster_centers
-                 for d in args.oddball_deviations for v in args.sweep_values]
-        print(f"Submitting {len(combos)} oddball jobs "
-              f"({len(args.cluster_centers)} centers x {len(args.oddball_deviations)} "
+                 for d in args.outlier_deviations for v in args.sweep_values]
+        print(f"Submitting {len(combos)} outlier jobs "
+              f"({len(args.cluster_centers)} centers x {len(args.outlier_deviations)} "
               f"deviations x {len(args.sweep_values)} {args.sweep_param} values) "
               f"for task={args.task}")
         for c, d, v in combos:
             tag = _tag3(c, d, v)
-            out_path = OUT_DIR / f"{oddball_prefix}_{args.sweep_param}_{args.task}_{tag}.pkl"
+            out_path = OUT_DIR / f"{outlier_prefix}_{args.sweep_param}_{args.task}_{tag}.pkl"
             if out_path.exists():
                 print(f"  center={c} deviation={d} {args.sweep_param}={v}: already exists -- skipping")
                 continue
             gate_flag = " --gate_error_feedback" if getattr(args, "gate_error_feedback", False) else ""
             cmd = (
-                f"venv/bin/python scripts/neural_experiments.py oddball "
+                f"venv/bin/python scripts/neural_experiments.py outlier "
                 f"--task {args.task} --mode run --sweep_param {args.sweep_param} "
-                f"--sweep_value {v} --cluster_center {c} --oddball_deviation {d} "
+                f"--sweep_value {v} --cluster_center {c} --outlier_deviation {d} "
                 f"--cluster_spread {args.cluster_spread} "
                 f"--base_alpha_0 {args.base_alpha_0} --base_lambda_ {args.base_lambda_} "
                 f"--base_n_neurons {args.base_n_neurons} --n_seeds {args.n_seeds}{gate_flag}"
             )
             script = make_job_script(root, [cmd], time_limit="1:0:0", mem="16G")
-            script_path = OUT_DIR / f"_job_{oddball_prefix}_{args.sweep_param}_{args.task}_{tag}.sh"
+            script_path = OUT_DIR / f"_job_{outlier_prefix}_{args.sweep_param}_{args.task}_{tag}.sh"
             script_path.write_text(script)
             submit_script(script_path, dry_run=args.dry_run)
 
     elif args.mode == "collect":
-        files = sorted(OUT_DIR.glob(f"{oddball_prefix}_{args.sweep_param}_{args.task}_c*_d*_v*.pkl"))
+        files = sorted(OUT_DIR.glob(f"{outlier_prefix}_{args.sweep_param}_{args.task}_c*_d*_v*.pkl"))
         if not files:
-            print(f"No {oddball_prefix}_{args.sweep_param}_{args.task}_c*_d*_v*.pkl files found in {OUT_DIR}")
+            print(f"No {outlier_prefix}_{args.sweep_param}_{args.task}_c*_d*_v*.pkl files found in {OUT_DIR}")
             return
         results = [pd.read_pickle(f) for f in files]
         # A per-cell argmax time is noisy for a handful of cells (low-SNR
-        # traces where a small late fluctuation can outrank the true early
-        # peak, producing a spuriously tiny decay_duration and blowing up
-        # any downstream rate -- observed directly, e.g. 3 of 90 cells for
-        # the alpha_0 sweep). Fix: compute ONE robust "typical" peak time
-        # for the WHOLE grid (median of every cell's own argmax time --
-        # robust to that handful of outliers), then use THAT single fixed
-        # time as the benchmark everywhere a "maximum" is measured, for
-        # every cell -- not each cell's own local argmax. decay_duration is
-        # then a genuine constant (window end minus that one fixed time),
-        # so a downstream rate (decrease / decay_duration) never risks
-        # dividing by a near-zero, cell-specific duration.
-        peak_times = np.array([r["t"][np.argmax(r["pe"])] for r in results])
+        # traces where a small fluctuation can outrank the true peak,
+        # producing a spuriously tiny decay_duration and blowing up any
+        # downstream rate -- observed directly, e.g. 3 of 90 cells for the
+        # alpha_0 sweep). Fix: compute ONE robust "typical" peak time for
+        # the WHOLE grid (median of every cell's own argmax time -- robust
+        # to that handful of outliers), then use THAT single fixed time as
+        # the benchmark everywhere a "maximum" is measured, for every cell
+        # -- not each cell's own local argmax. decay_duration is then a
+        # genuine constant (window end minus that one fixed time), so a
+        # downstream rate (decrease / decay_duration) never risks dividing
+        # by a near-zero, cell-specific duration.
+        #
+        # argmax is restricted to t >= 0 (the outlier's own cue period) --
+        # the per-cell trace now also carries one full preceding ITI
+        # (t < 0, added so make_neural_main's own PE-trace panel can show
+        # the flat pre-cue baseline), and that segment's near-zero noise
+        # has no business competing for "the peak" against the real
+        # response; letting it into the argmax search would reintroduce
+        # exactly the noise-sensitivity this median fix was built to
+        # guard against, now via a NEW failure mode (a low-SNR cell's
+        # pre-cue blip outranking its own real, but small, cue response)
+        # instead of the original late-fluctuation one.
+        peak_times = np.array([
+            r["t"][r["t"] >= 0][np.argmax(r["pe"][r["t"] >= 0])] for r in results
+        ])
         typical_peak_time = float(np.median(peak_times))
         grid_rows = []
         for r in results:
@@ -1475,15 +1496,15 @@ def run_oddball(args) -> None:
             max_pe = float(r["pe"][idx])
             end_pe = float(r["end_pe"])
             grid_rows.append({
-                "cluster_center": r["cluster_center"], "oddball_deviation": r["oddball_deviation"],
+                "cluster_center": r["cluster_center"], "outlier_deviation": r["outlier_deviation"],
                 args.sweep_param: r["sweep_value"], "max_pe": max_pe, "end_pe": end_pe,
                 "decrease": max_pe - end_pe,
                 "decay_duration": float(r["t"][-1] - r["t"][idx]),
             })
         grid = pd.DataFrame(grid_rows).sort_values(
-            ["cluster_center", "oddball_deviation", args.sweep_param]).reset_index(drop=True)
+            ["cluster_center", "outlier_deviation", args.sweep_param]).reset_index(drop=True)
         traces = {
-            (r["cluster_center"], r["oddball_deviation"], r["sweep_value"]): {"t": r["t"], "pe": r["pe"]}
+            (r["cluster_center"], r["outlier_deviation"], r["sweep_value"]): {"t": r["t"], "pe": r["pe"]}
             for r in results
         }
         result_all = {
@@ -1496,7 +1517,7 @@ def run_oddball(args) -> None:
             "cluster_spread": args.cluster_spread,
             "typical_peak_time": typical_peak_time,
         }
-        out_path = OUT_DIR / f"{oddball_prefix}_{args.sweep_param}_{args.task}.pkl"
+        out_path = OUT_DIR / f"{outlier_prefix}_{args.sweep_param}_{args.task}.pkl"
         pd.to_pickle(result_all, out_path)
         print(f"Collected {len(files)} cell(s) -> {out_path}")
         print(grid)
@@ -1737,7 +1758,7 @@ def run_param_scan(args) -> None:
                                  "(unless --sweep_value is given explicitly)")
             sweep_value = _draw_sweep_value(args.sweep_param, args.trial_source, args.pid,
                                             args.sweep_low, args.sweep_high)
-        tag = _oddball_value_tag(sweep_value)
+        tag = _outlier_value_tag(sweep_value)
         out_path = OUT_DIR / (f"param_scan_{args.sweep_param}_{args.task}_"
                               f"{args.trial_source}_v{tag}_pid{args.pid}.pkl")
         if out_path.exists():
@@ -1984,7 +2005,7 @@ def run_iti_perturbation(args) -> None:
     Job granularity is (session, strength) -- NOT one job per session
     covering every strength -- specifically so widening the strength grid
     doesn't cost more wall-clock per job, only more (still-fast, ~10 min)
-    jobs running in parallel. Mirrors how `oddball`/`n_neurons_snr` already
+    jobs running in parallel. Mirrors how `outlier`/`n_neurons_snr` already
     split their own grids into one job per cell.
 
     --mode run: one (session, strength) cell's worth of work (every
@@ -2005,7 +2026,7 @@ def run_iti_perturbation(args) -> None:
     # "iti_perturbation_gated_errpert_pool_..." (never a suffix right
     # before ".pkl") so the default (non-gated/non-errpert) glob at --mode
     # collect below can never accidentally swallow a more-specific variant
-    # too -- matches oddball's own oddball_gated_ prefix convention and the
+    # too -- matches outlier's own outlier_gated_ prefix convention and the
     # same reasoning (a trailing suffix right before ".pkl" would be caught
     # by a glob's own trailing wildcard). Composable: any combination of
     # the two flags gets its own distinct, non-colliding prefix.
@@ -2022,7 +2043,7 @@ def run_iti_perturbation(args) -> None:
             raise SystemExit("--strength required for --mode run")
         if args.alpha_0 is None or args.lambda_ is None:
             raise SystemExit("--alpha_0/--lambda_ required for --mode run")
-        tag = _oddball_value_tag(args.strength)
+        tag = _outlier_value_tag(args.strength)
         out_path = (
             OUT_DIR / f"{iti_prefix}_pool_{args.task}_session{args.session}_strength{tag}.pkl"
         )
@@ -2057,7 +2078,7 @@ def run_iti_perturbation(args) -> None:
         extra_flags += " --perturb_error" if getattr(args, "perturb_error", False) else ""
         for session in range(1, args.n_sessions + 1):
             for strength in args.strengths:
-                tag = _oddball_value_tag(strength)
+                tag = _outlier_value_tag(strength)
                 out_path = (
                     OUT_DIR
                     / f"{iti_prefix}_pool_{args.task}_session{session}_strength{tag}.pkl"
@@ -2330,9 +2351,9 @@ def main() -> None:
     p_conv.add_argument("--cluster_centers", type=float, nargs="+", default=None,
                        help="Full grid of centers for --mode submit, e.g. 20 35 50 65 80")
     p_conv.add_argument("--cluster_spread", type=float, required=True)
-    p_conv.add_argument("--oddball_deviation", type=float, default=None,
+    p_conv.add_argument("--outlier_deviation", type=float, default=None,
                        help="Single deviation for --mode run.")
-    p_conv.add_argument("--oddball_deviations", type=float, nargs="+", default=None,
+    p_conv.add_argument("--outlier_deviations", type=float, nargs="+", default=None,
                        help="Full grid of deviations for --mode submit, e.g. -10 10")
     p_conv.add_argument("--alpha_0", type=float, default=0.7)
     p_conv.add_argument("--lambda_", type=float, default=0.7)
@@ -2379,38 +2400,38 @@ def main() -> None:
     p_synth.add_argument("--dry_run", action="store_true")
     p_synth.set_defaults(func=run_synthetic)
 
-    p_odd = sub.add_parser("oddball")
-    p_odd.add_argument("--task", required=True)
-    p_odd.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
-    p_odd.add_argument("--sweep_param", required=True, choices=["alpha_0", "lambda_", "n_neurons"])
-    p_odd.add_argument("--sweep_value", type=float, default=None,
+    p_out = sub.add_parser("outlier")
+    p_out.add_argument("--task", required=True)
+    p_out.add_argument("--mode", required=True, choices=["run", "submit", "collect"])
+    p_out.add_argument("--sweep_param", required=True, choices=["alpha_0", "lambda_", "n_neurons"])
+    p_out.add_argument("--sweep_value", type=float, default=None,
                        help="Single value for --mode run (one cluster job per grid cell).")
-    p_odd.add_argument("--sweep_values", type=float, nargs="+", default=None,
+    p_out.add_argument("--sweep_values", type=float, nargs="+", default=None,
                        help="Full list of values for --mode submit.")
-    p_odd.add_argument("--cluster_center", type=float, default=None,
+    p_out.add_argument("--cluster_center", type=float, default=None,
                        help="Single center for --mode run (one cluster job per grid cell).")
-    p_odd.add_argument("--cluster_centers", type=float, nargs="+", default=None,
+    p_out.add_argument("--cluster_centers", type=float, nargs="+", default=None,
                        help="Raw (0-100 scale) cluster centers to test, e.g. 20 40 60 80. "
-                            "Keep comfortably away from 0/100 -- see run_oddball's own docstring.")
-    p_odd.add_argument("--cluster_spread", type=float, required=True,
+                            "Keep comfortably away from 0/100 -- see run_outlier's own docstring.")
+    p_out.add_argument("--cluster_spread", type=float, required=True,
                        help="+- offset for the 3 clustered observations around each center, "
                             "e.g. 1 gives (center-1, center, center+1).")
-    p_odd.add_argument("--oddball_deviation", type=float, default=None,
+    p_out.add_argument("--outlier_deviation", type=float, default=None,
                        help="Single deviation for --mode run (one cluster job per grid cell).")
-    p_odd.add_argument("--oddball_deviations", type=float, nargs="+", default=None,
+    p_out.add_argument("--outlier_deviations", type=float, nargs="+", default=None,
                        help="Signed deviations from each center to test, e.g. -15 -10 10 15.")
-    p_odd.add_argument("--base_alpha_0", type=float, required=True)
-    p_odd.add_argument("--base_lambda_", type=float, required=True)
-    p_odd.add_argument("--base_n_neurons", type=int, required=True)
-    p_odd.add_argument("--n_seeds", type=int, default=20)
-    p_odd.add_argument("--gate_error_feedback", action="store_true", default=False,
+    p_out.add_argument("--base_alpha_0", type=float, required=True)
+    p_out.add_argument("--base_lambda_", type=float, required=True)
+    p_out.add_argument("--base_n_neurons", type=int, required=True)
+    p_out.add_argument("--n_seeds", type=int, default=20)
+    p_out.add_argument("--gate_error_feedback", action="store_true", default=False,
                        help="Use models.NEF's gated ITI-silencing mode (value->gate->"
                             "error[1], see models/NEF.py) instead of the default direct "
-                            "error.neurons inhibition. Output filenames get an 'oddball_gated_' "
-                            "prefix (vs. 'oddball_') so gated/default runs never collide or "
+                            "error.neurons inhibition. Output filenames get an 'outlier_gated_' "
+                            "prefix (vs. 'outlier_') so gated/default runs never collide or "
                             "get mixed together at --mode collect.")
-    p_odd.add_argument("--dry_run", action="store_true")
-    p_odd.set_defaults(func=run_oddball)
+    p_out.add_argument("--dry_run", action="store_true")
+    p_out.set_defaults(func=run_outlier)
 
     p_scan = sub.add_parser("param_scan")
     p_scan.add_argument("--task", required=True)
