@@ -76,6 +76,12 @@ paper/figures/*
 !paper/figures/neural_main_edited.pdf
 !paper/figures/neural_main_edited.svg
 !paper/figures/synaptic_main.pdf
+# synaptic_main_edited, same hand-touch-up convention as lambda_main_edited/
+# neural_main_edited above -- main.tex now embeds the edited PDF; .svg
+# tracked too as the actual hand-edited source for the next round of
+# touch-ups.
+!paper/figures/synaptic_main_edited.pdf
+!paper/figures/synaptic_main_edited.svg
 
 presentations/figures/*
 !presentations/figures/temporal_performance.svg
