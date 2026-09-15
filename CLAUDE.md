@@ -29,10 +29,12 @@ fully before making changes.
   unless a genuine visual judgment call is needed (see "Figure
   iteration" below). Don't upload Playwright screenshots either — use
   DOM/computed-style assertions instead. One deliberate exception:
-  `scripts/make_figures.py` saves PDF **and** SVG for both its output
-  modes (paper and presentation — see "Figure modes" below), a
-  standing house convention for that script specifically, not a
-  license to add SVG output elsewhere.
+  `scripts/make_figures.py`'s `--mode paper` saves PDF **and** SVG (main.tex
+  embeds the PDF; the SVG is tracked too as a hand-touch-up source, e.g.
+  `lambda_main_edited.svg`); `--mode presentation` saves **SVG only** —
+  Quarto/reveal.js never embeds the PDF twin, so it's not generated there
+  (see "Figure modes" below). A standing house convention for this script
+  specifically, not a license to add PNG/PDF+SVG output elsewhere.
 - **NEF simulation runtime varies from minutes to hours.** For a real
   fit or the actual scientific simulation, never run one directly —
   write the script, then give the person the exact command so they can
@@ -216,7 +218,7 @@ venv/bin/python scripts/make_figures.py model_performance --mode presentation
 | Width | 6.5in (`paper/main.tex`'s real `\textwidth`) | 10.6in (established Quarto deck width) |
 | Style | `apply_paper_style()` (`utils/plot_style.py`) | `apply_presentation_style()` (`utils/plot_style.py`) |
 | Saves to | `paper/figures/` | `presentations/figures/` |
-| Format | PDF + SVG (both modes) | PDF + SVG (both modes) |
+| Format | PDF + SVG | SVG only |
 
 Height is **not** derived from width by a fixed formula — every figure's
 own height gets hand-tuned per mode as it's checked in its actual
@@ -315,7 +317,7 @@ evidence_integration/
 
 All new scripts go in `scripts/`. Never create scripts at the project
 root. Figures save PDF only (see "Figure modes" for `scripts/make_figures.py`'s
-own PDF+SVG exception).
+own paper-mode PDF+SVG / presentation-mode SVG-only exception).
 
 ---
 

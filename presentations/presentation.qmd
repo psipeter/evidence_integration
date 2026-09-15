@@ -5,7 +5,7 @@ author: "Peter Duggins"
 format: 
   revealjs:
     theme: [default, custom.scss]
-    logo: images/logo.svg
+    logo: figures/logo.svg
     incremental: true 
     highlight-style: github
     slide-number: true
@@ -24,13 +24,13 @@ bibliography: "references.bib"
 
 ::: {.column width="50%"}
 ::: {.image-card}
-![](images/brain_model_behavior.svg){style="height: 480px; width: auto;"}
+![](figures/cognitive_science_loop.svg){style="height: 480px; width: auto;"}
 :::
 :::
 
 ::: {.column width="50%"}
 ::: {.image-card}
-![](images/cognitive_science_loop.svg){style="height: 480px; width: auto;"}
+![](figures/brain_model_behavior.svg){style="height: 480px; width: auto;"}
 :::
 :::
 
@@ -39,138 +39,77 @@ bibliography: "references.bib"
 ## Evidence Integration
 
 ::: {.image-card}
-![](images/evidence_integration_examples.jpg){width="85%"}
+![](figures/evidence_integration_examples.jpg){width="100%"}
 :::
 
-## Behavioral Experiments (old)
+## Behavioral Experiments
 
 ::: {.image-card}
-![](images/old_tasks.svg){width="90%"}
-:::
-
-## Behavioral Experiments (new)
-
-::: {.image-card}
-![](images/new_tasks.svg){width="90%"}
+![](figures/tasks_overview_presentation.svg){width="100%"}
 :::
 
 ## People Learn as they Gather Data
 
 ::: {.image-card}
-![](figures/temporal_performance.svg){width="90%"}
+![](figures/temporal_performance.svg){width="100%"}
 :::
 
-## Theories and Models
+## Cognitive Heuristics
 
 ::: {.image-card}
-![](images/complexity_1.svg){#theories-img width="90%"}
+![](figures/complexity_1.svg){#theories-img width="100%"}
 :::
 
-[]{.fragment fragment-index="1" data-swap-target="theories-img" data-swap-src="images/complexity_2.svg" data-swap-prev="images/complexity_1.svg"}
-[]{.fragment fragment-index="2" data-swap-target="theories-img" data-swap-src="images/complexity_3.svg" data-swap-prev="images/complexity_2.svg"}
-[]{.fragment fragment-index="3" data-swap-target="theories-img" data-swap-src="images/complexity_4.svg" data-swap-prev="images/complexity_3.svg"}
-[]{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="images/complexity_5.svg" data-swap-prev="images/complexity_4.svg"}
+[]{.fragment fragment-index="1" data-swap-target="theories-img" data-swap-src="figures/complexity_2.svg" data-swap-prev="figures/complexity_1.svg"}
+[]{.fragment fragment-index="2" data-swap-target="theories-img" data-swap-src="figures/complexity_3.svg" data-swap-prev="figures/complexity_2.svg"}
+[]{.fragment fragment-index="3" data-swap-target="theories-img" data-swap-src="figures/complexity_4.svg" data-swap-prev="figures/complexity_3.svg"}
+[]{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="figures/complexity_5.svg" data-swap-prev="figures/complexity_4.svg"}
 
 
-## Weighted Prediction Error
-
-HYP: People update beliefs using *prediction error*
-
-::: {.fragment}
-$$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I_n)$$
-:::
-
-::: {.fragment}
-::: {.image-card}
-![](images/wpe.svg){style="height: 200px; width: auto;"}
-:::
-:::
-
-## Spiking Neural Network Model
+## Theory and Model
 
 ::: {.image-card}
-![](images/snn.svg){width="90%"}
+![](figures/models_overview_presentation_1.svg){#models-overview-img width="100%"}
 :::
 
-## Neural Dynamics
+[]{.fragment fragment-index="1" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_2.svg" data-swap-prev="figures/models_overview_presentation_1.svg"}
+[]{.fragment fragment-index="2" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_3.svg" data-swap-prev="figures/models_overview_presentation_2.svg"}
+
+## Model Captures Behavior
 
 ::: {.image-card}
-![](images/spikes.svg){width="90%"}
-:::
-
-## Model Captures Behavior (rmse)
-
-::: {.image-card}
-![](figures/model_performance.svg){width="90%"}
+![](figures/model_performance.svg){width="100%"}
 :::
 
 
 ## Smaller Updates Over Time ($\lambda$)
 
 ::: {.image-card}
-![](figures/response_change_human.svg){#response-change-img width="90%"}
+![](figures/lambda_response_change.svg){width="100%"}
 :::
-
-[]{.fragment fragment-index="1" data-swap-target="response-change-img" data-swap-src="figures/response_change_full.svg" data-swap-prev="figures/response_change_human.svg"}
 
 ## Individual Differences in $\lambda$
 
 ::: {.image-card}
-![](figures/lambda_human.svg){width="90%"}
-:::
-
-## $\lambda$ Consistent Over Trials/Tasks
-
-::: {.image-card}
-![](figures/lambda_sanity_human.svg){width="90%"}
-:::
-
-## Models Capture $\lambda$ Differences
-
-::: {.image-card}
-![](figures/lambda_model_correlation.svg){width="90%"}
+![](figures/lambda_distributions.svg){width="100%"}
 :::
 
 ## People have Noisy Responses ($\sigma$)
 
 ::: {.image-card}
-![](figures/variability_human.svg){width="90%"}
+![](figures/sigma_distributions.svg){width="100%"}
 :::
 
-## $\sigma$ Consistent Over Trials/Tasks
+## Response Noise Autocorrelation
 
 ::: {.image-card}
-![](figures/sigma_sanity_human.svg){width="90%"}
-:::
-
-## Models Capture $\sigma$ Differences
-
-::: {.image-card}
-![](figures/sigma_model_correlation.svg){width="90%"}
-:::
-
-## Noise is Autocorrelated
-
-::: {.image-card}
-![](figures/variance_autocorr_human.svg){width="90%"}
-:::
-
-## Noise is Autocorrelated
-
-::: {.image-card}
-![](figures/variance_autocorr_models.svg){width="90%"}
-:::
-
-## Model Captures Behavior (nll)
-
-::: {.image-card}
-![](figures/model_performance_nll.svg){width="90%"}
+![](figures/sigma_growth_autocorr.svg){width="100%"}
 :::
 
 ## Prediction Error & Neural Activity
 
 ::: {.image-card}
-![](figures/PE_dynamics.svg){width="50%"}
+![](figures/PE_dynamics.svg){width="100%"}
 :::
 
 ## PE variance drives $\sigma$
@@ -212,17 +151,17 @@ $$V_n = V_{n-1} + \textcolor{#d62728}{\frac{\alpha_0}{n^{\lambda}}} (V_{n-1} - I
 ::::
 
 ::: {.image-card style="margin: 1em auto 0 auto;"}
-![](images/snn.svg){style="height: 200px; width: auto; display: block; margin: 0 auto;"}
+![](figures/snn.svg){style="height: 200px; width: auto; display: block; margin: 0 auto;"}
 :::
 
 
 ## Acknowledgments {.smaller}
 
 ::: {style="display: flex; justify-content: space-evenly; width: 100%; min-width: 100%; box-sizing: border-box;"}
-![Alireza Soltani](images/alireza.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
-![Peter Duggins](images/peter.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
-![Dartmouth logo](images/logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
-![NSF logo](images/nsf_logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Alireza Soltani](figures/alireza.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Peter Duggins](figures/peter.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Dartmouth logo](figures/logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![NSF logo](figures/nsf_logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
 :::
 
 
@@ -241,5 +180,35 @@ Prat-Carrabin, Arthur, and Michael Woodford. 2024. “Imprecise Probabilistic In
 Snacks Task / Data
 
 ::: {style="font-size: 0.6em;"}
-Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Display Consistent Recency and Primacy Effects in Behavior and Neural Activity Across Perceptual and Value-Based Judgments.” Cognitive, Affective, & Behavioral Neuroscience 25. 
+Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Display Consistent Recency and Primacy Effects in Behavior and Neural Activity Across Perceptual and Value-Based Judgments.” Cognitive, Affective, & Behavioral Neuroscience 25.
+:::
+
+## Individual Differences in $\lambda$
+
+::: {.image-card}
+![](figures/lambda_human.svg){width="100%"}
+:::
+
+## $\lambda$ Consistent Over Trials/Tasks
+
+::: {.image-card}
+![](figures/lambda_sanity_human.svg){width="100%"}
+:::
+
+## Models Capture $\lambda$ Differences
+
+::: {.image-card}
+![](figures/lambda_model_correlation.svg){width="100%"}
+:::
+
+## $\sigma$ Consistent Over Trials/Tasks
+
+::: {.image-card}
+![](figures/sigma_sanity_human.svg){width="100%"}
+:::
+
+## Models Capture $\sigma$ Differences
+
+::: {.image-card}
+![](figures/sigma_model_correlation.svg){width="100%"}
 :::

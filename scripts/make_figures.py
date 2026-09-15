@@ -127,6 +127,19 @@ def _apply_mode_style() -> None:
     MODE_CONFIG[_MODE]["apply_style"]()
 
 
+def _label_panels(axes, labels=None, **kwargs) -> None:
+    """Bold panel letters (A/B/C...) via utils.plot_style.label_panels --
+    paper mode only. Presentation slides drop them (per instruction): a
+    live talk doesn't narrate "panel A" the way a print caption does, and
+    the letters are just clutter at slide scale/viewing distance. Every
+    make_* figure below should call THIS wrapper, not label_panels
+    directly, so every current AND future presentation-mode figure gets
+    this for free without needing its own mode check."""
+    if _MODE == "presentation":
+        return
+    label_panels(axes, labels=labels, **kwargs)
+
+
 # Reassigned once in main() from MODE_CONFIG[_MODE] -- every figure
 # function below reads FIGURE_SIZE[0]/FIGURE_SIZE[1] as a plain module
 # global (unchanged from before mode support existed), so this one
@@ -162,13 +175,19 @@ DATASET_FOR_TASK = {"numbers": "soltani_numbers", "colors": "soltani_colors"}
 
 
 def _save_fig(fig, stem: str) -> tuple[Path, Path]:
-    """Save `fig` as BOTH {stem}.pdf and {stem}.svg under the ACTIVE MODE's
-    own figures directory (MODE_CONFIG[_MODE]["figures_dir"] -- paper/figures/
-    or presentations/figures/, never the old top-level figures/, which is
-    being phased out). Both formats, both modes, per instruction (PDF for
-    LaTeX/print; SVG for manual touch-ups or Quarto embedding). One shared
-    helper so every figure function saves both formats/the right directory
-    identically rather than each hand-rolling its own fig.savefig() calls.
+    """Save `fig` under the ACTIVE MODE's own figures directory
+    (MODE_CONFIG[_MODE]["figures_dir"] -- paper/figures/ or
+    presentations/figures/, never the old top-level figures/, which is
+    being phased out). Paper mode saves BOTH {stem}.pdf and {stem}.svg
+    (main.tex embeds the PDF; the SVG is tracked too as a hand-touch-up
+    source, matching this project's lambda_main_edited/neural_main_edited
+    convention). Presentation mode saves SVG ONLY, per instruction --
+    Quarto/reveal.js never embeds the PDF twin, so generating it was pure
+    waste. Returns (primary, secondary), where `primary` is whichever
+    format the ACTIVE mode actually embeds -- every make_* caller does
+    `out_path, _ = _save_fig(...)` and returns `out_path` as its own
+    result, so this keeps that meaning "the file that's actually used"
+    regardless of mode, rather than hardcoding "the PDF".
     """
     if _MODE is None:
         raise RuntimeError("_save_fig() called before main() set --mode")
@@ -192,12 +211,14 @@ def _save_fig(fig, stem: str) -> tuple[Path, Path]:
               f"stay consistent with every other {_MODE}-mode figure. Otherwise fix figsize.")
     figures_dir = MODE_CONFIG[_MODE]["figures_dir"]
     figures_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = figures_dir / f"{stem}.pdf"
     svg_path = figures_dir / f"{stem}.svg"
-    fig.savefig(pdf_path)
     fig.savefig(svg_path)
-    print(f"Saved {pdf_path}")
     print(f"Saved {svg_path}")
+    if _MODE == "presentation":
+        return svg_path, svg_path
+    pdf_path = figures_dir / f"{stem}.pdf"
+    fig.savefig(pdf_path)
+    print(f"Saved {pdf_path}")
     return pdf_path, svg_path
 
 
@@ -746,7 +767,7 @@ def make_model_performance() -> Path:
 
     _print_best_fit_counts(panel_data, value_col="rmse", metric_label="RMSE")
 
-    label_panels(axes)
+    _label_panels(axes)
     out_path, _ = _save_fig(fig, "model_performance")
     plt.close(fig)
     return out_path
@@ -1589,7 +1610,84 @@ def make_lambda_model_correlation() -> Path:
     return out_path
 
 
-def make_lambda_main() -> Path:
+def _lambda_main_task_panels():
+    """(task_panels_no_balls, obs_max_by_task) shared by both the paper-mode
+    combined layout and the presentation-mode split layout below -- avoids
+    loading/recomputing response-change data twice."""
+    task_panels_no_balls = [(tk, title, models) for tk, title, models in TASK_PANELS
+                            if tk != "balls"]
+    data = _load_response_change_data()
+    obs_max_by_task = {}
+    for task_key in data:
+        human_delta, models, _ = data[task_key]
+        obs_vals = [human_delta["observation"].max()] + [
+            df["observation"].max() for df in models.values() if len(df)]
+        obs_max_by_task[task_key] = max(obs_vals)
+    return task_panels_no_balls, data, obs_max_by_task
+
+
+def _make_lambda_main_split() -> list[Path]:
+    """Presentation-mode-only: make_lambda_main's row 1 (response-change
+    decay) and row 2 (fitted-lambda KDEs) as TWO separate 1-row, 3-column
+    figures/slides instead of one 2-row composite -- per instruction, so
+    each gets its own full-width slide ("Smaller Updates Over Time" /
+    "Individual Differences in Lambda") rather than being squeezed
+    together. Paper mode is untouched (still the single combined
+    make_lambda_main below) -- this split is presentation-only.
+
+    Both figures reuse the exact same panel-drawing helpers as the combined
+    layout -- no panel-drawing logic duplicated, only the layout differs.
+    """
+    task_panels_no_balls, data, obs_max_by_task = _lambda_main_task_panels()
+
+    # Figure 1 -- response-change panels, own full-width slide. Legend via
+    # fig.legend("outside lower center"), matching make_response_change's
+    # own convention for a standalone 1-row figure (the dedicated
+    # ax_legend GridSpec row was needed only to sit BETWEEN two panel
+    # rows in the combined layout; a lone row doesn't need that).
+    fig1, axes1 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    for i, (task_key, title, models_list) in enumerate(task_panels_no_balls):
+        human_delta, models, _ = data[task_key]
+        ax = axes1[i]
+        ylabel = "Median ΔR" if i == 0 else ""
+        _draw_response_change_panel(ax, human_delta, models, include_models=True,
+                                    ylabel=ylabel, obs_max=obs_max_by_task[task_key])
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.tick_params(axis="y", labelleft=(i == 0))
+    axes1[0].set_ylim(bottom=0)
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
+    legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=2, label=MODEL_LABEL.get(m, m))
+                       for m in ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]]
+    # h_pad=0.25 (make_response_change's own convention for this same
+    # "outside lower center" legend placement) -- pushes the legend further
+    # below the panels/x-axis labels instead of sitting right against them.
+    fig1.get_layout_engine().set(h_pad=0.25)
+    fig1.legend(handles=legend_handles, loc="outside lower center", ncol=6,
+               frameon=True, framealpha=0.9)
+    path1, _ = _save_fig(fig1, "lambda_response_change")
+    plt.close(fig1)
+
+    # Figure 2 -- fitted-lambda KDE panels, own full-width slide. Task-colored
+    # titles added (per instruction) -- unlike the combined layout, where
+    # row 1's titles above already named each task, this is now a standalone
+    # slide with nothing else naming the columns. No legend (human-only,
+    # same as this row in the combined layout).
+    fig2, axes2 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    for i, (task_key, title) in enumerate(LAMBDA_TASK_PANELS):
+        ax = axes2[i]
+        human_delta = _load_lambda_delta(task_key, _human_data_path(task_key))
+        lam = _fit_lambda_series(human_delta, LAMBDA_N_OFFSET[task_key])
+        _plot_lambda_distribution(ax, lam, task_key)
+        ax.set_title(title, color=TASK_COLORS[task_key])
+        ax.set_ylabel("Density" if i == 0 else "")
+        ax.tick_params(axis="y", labelleft=(i == 0))
+    path2, _ = _save_fig(fig2, "lambda_distributions")
+    plt.close(fig2)
+
+    return [path1, path2]
+
+
+def make_lambda_main() -> Path | list[Path]:
     """2-row, 3-column figure -- rows 1-2, cols 2-4 of the now-archived
     make_lambda_giant (see archive/scripts/archive_lambda_giant.py),
     dropping column 1 (the balls-task response-change panel, now its own
@@ -1600,6 +1698,11 @@ def make_lambda_main() -> Path:
       Row 2: make_lambda_overview's own fitted-lambda KDE panels for the
         same three tasks (no titles -- row 1 above already names each
         task).
+
+    PRESENTATION MODE ONLY: split into two separate 1-row figures/files
+    (see _make_lambda_main_split) instead of this one 2-row composite --
+    each gets its own slide, per instruction. Paper mode keeps the
+    combined layout below unchanged.
 
     Row 2 col 1's own panel (the "lambda definition" demo, previously
     row 2 col 1 of the giant) is NOT here -- it's now its own standalone
@@ -1623,28 +1726,24 @@ def make_lambda_main() -> Path:
     drawn on it) achieves this directly.
     """
     _apply_mode_style()
-    # -1.0in off the height -- too much vertical whitespace at the
-    # original size, per instruction; a flat inch off (not another
-    # multiplier) so it's easy to nudge further by the same increment.
-    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
-                     constrained_layout=True)
+    if _MODE == "presentation":
+        return _make_lambda_main_split()
+    # Paper-mode-only from here -- this 2-row layout needs a taller aspect
+    # ratio than every other (1-row) figure's flat FIGURE_SIZE[1] -- -1.0in
+    # off double-height (too much vertical whitespace at the original size,
+    # per instruction; a flat inch off, not another multiplier, so it's easy
+    # to nudge further by the same increment).
+    height = FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0
+    fig = plt.figure(figsize=(FIGURE_SIZE[0], height), constrained_layout=True)
     gs = fig.add_gridspec(3, 3, height_ratios=[1, 0.12, 1])
     axes_row0 = [fig.add_subplot(gs[0, i]) for i in range(3)]
     axes_row1 = [fig.add_subplot(gs[2, i]) for i in range(3)]
     ax_legend = fig.add_subplot(gs[1, :])
     ax_legend.axis("off")
 
-    task_panels_no_balls = [(tk, title, models) for tk, title, models in TASK_PANELS
-                            if tk != "balls"]
+    task_panels_no_balls, data, obs_max_by_task = _lambda_main_task_panels()
 
     # Row 1 -- make_response_change's own panels, unchanged, minus balls.
-    data = _load_response_change_data()
-    obs_max_by_task = {}
-    for task_key in data:
-        human_delta, models, _ = data[task_key]
-        obs_vals = [human_delta["observation"].max()] + [
-            df["observation"].max() for df in models.values() if len(df)]
-        obs_max_by_task[task_key] = max(obs_vals)
     for i, (task_key, title, models_list) in enumerate(task_panels_no_balls):
         human_delta, models, _ = data[task_key]
         ax = axes_row0[i]
@@ -1670,7 +1769,7 @@ def make_lambda_main() -> Path:
         ax.set_ylabel("Density" if i == 0 else "")
         ax.tick_params(axis="y", labelleft=(i == 0))
 
-    label_panels(axes_row0 + axes_row1)
+    _label_panels(axes_row0 + axes_row1)
     out_path, _ = _save_fig(fig, "lambda_main")
     plt.close(fig)
     return out_path
@@ -2590,7 +2689,83 @@ def _plot_sigma_model_corr_panel(ax, task_key: str, title: str,
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_sigma_main() -> Path:
+def _make_sigma_main_split() -> list[Path]:
+    """Presentation-mode-only: make_sigma_main's 3 rows as TWO separate
+    figures/slides instead of one 3-row composite, per instruction:
+      Figure 1 -- row 1 alone (variability KDE histograms), own slide.
+      Figure 2 -- rows 2+3 together (variance growth + autocorrelation),
+        own slide -- these two stay paired (not split further) since they
+        share one legend/model roster and read as one "state-persistent
+        noise" argument.
+    Figure 2's panels get task-colored titles on BOTH rows (passed straight
+    into _draw_variance_growth_panel/_draw_variance_autocorr_panel, which
+    already set them internally when given a non-empty title) -- the
+    combined layout could clear these because row 1's titles, two rows up,
+    named each column; without that row above it here, both rows need
+    their own. Paper mode is untouched (still the single combined
+    make_sigma_main below) -- this split is presentation-only.
+    """
+    # Figure 1 -- variability KDE panels, own full-width slide.
+    fig1, axes1 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    for i, (ax, (task_key, title)) in enumerate(zip(axes1, VARIABILITY_TASK_PANELS)):
+        _plot_variability_panel(ax, task_key, title, include_models=False,
+                                show_ylabel=(i == 0))
+        ax.set_ylabel("Density" if i == 0 else "")
+    path1, _ = _save_fig(fig1, "sigma_distributions")
+    plt.close(fig1)
+
+    # Figure 2 -- variance growth (row 1 here) + autocorrelation (row 2),
+    # own full-width slide. Same mode-aware 2-row height as make_lambda_main.
+    height = 5.5
+    fig2 = plt.figure(figsize=(FIGURE_SIZE[0], height), constrained_layout=True)
+    gs = fig2.add_gridspec(3, 3, height_ratios=[1, 1, 0.12])
+    axes_growth = [fig2.add_subplot(gs[0, i]) for i in range(3)]
+    axes_autocorr = [fig2.add_subplot(gs[1, i]) for i in range(3)]
+    ax_legend = fig2.add_subplot(gs[2, :])
+    ax_legend.axis("off")
+
+    growth_data = _load_variance_growth_data(models=NLL_RESP_NOISE_MODELS,
+                                             responses_path_fn=_nll_resp_noise_responses_path)
+    for i, (ax, (task_key, title)) in enumerate(zip(axes_growth, RESID_TASK_PANELS)):
+        human_stats, model_stats, nef_stats = growth_data[task_key]
+        _draw_variance_growth_panel(ax, task_key, title, human_stats, model_stats, nef_stats,
+                                    show_ylabel=(i == 0))
+        ax.set_ylabel(r"$\sigma$ (normalized)" if i == 0 else "")
+
+    autocorr_data = _load_variance_autocorr_data(models=NLL_RESP_NOISE_MODELS,
+                                                 responses_path_fn=_nll_resp_noise_responses_path,
+                                                 include_nef=True)
+    for i, (ax, (task_key, title)) in enumerate(zip(axes_autocorr, RESID_TASK_PANELS)):
+        human_res, model_results, lags = autocorr_data[task_key]
+        # Title cleared here -- row 1 immediately above already names each
+        # column; repeating it on both rows was redundant, per instruction.
+        _draw_variance_autocorr_panel(ax, task_key, "", human_res, model_results, lags,
+                                      include_models=True, show_ylabel=(i == 0),
+                                      models=NLL_RESP_NOISE_MODELS + ["NEF"],
+                                      model_colors=MODEL_COLORS)
+        ax.set_xlabel("Observation lag")
+        ax.set_ylabel(r"$\rho_\varepsilon$ (autocorr)" if i == 0 else "")
+
+    legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2.2, label="Human")]
+    for m in NLL_RESP_NOISE_MODELS:
+        legend_handles.append(Line2D([0], [0], color=MODEL_COLORS[m], lw=2.2,
+                                     label=MODEL_LABEL.get(m, m)))
+    legend_handles.append(Line2D([0], [0], color=MODEL_COLORS["NEF"], lw=2.2,
+                                 label=MODEL_LABEL.get("NEF", "NEF")))
+    # Between the two extremes: fully-default fontsize (14) squeezed the
+    # panels above/below it, same as make_lambda_main's own dedicated-axis
+    # legend originally did; the fully-shrunk fontsize=10 treatment (still
+    # used elsewhere) read too small once sized up here. fontsize=12 with
+    # default spacing splits the difference.
+    ax_legend.legend(handles=legend_handles, loc="center", ncol=len(legend_handles),
+                     frameon=True, framealpha=0.9, fontsize=12)
+
+    path2, _ = _save_fig(fig2, "sigma_growth_autocorr")
+    plt.close(fig2)
+    return [path1, path2]
+
+
+def make_sigma_main() -> Path | list[Path]:
     """3-row, 3-column figure -- the now-archived make_sigma_giant (see
     archive/scripts/archive_sigma_giant.py) with column 1 (the two
     schematic panels -- "sigma definition"/"rho definition" -- plus the
@@ -2620,10 +2795,18 @@ def make_sigma_main() -> Path:
         rows up, and now with row 2's own legend immediately above it).
 
     3x3 kept, matching row 3's existing layout.
+
+    PRESENTATION MODE ONLY: split into two separate figures/slides (see
+    _make_sigma_main_split) instead of this one 3-row composite -- row 1
+    alone, rows 2+3 together -- per instruction. Paper mode keeps the
+    combined layout below unchanged.
     """
     _apply_mode_style()
-    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
-                     constrained_layout=True)
+    if _MODE == "presentation":
+        return _make_sigma_main_split()
+    # Paper-mode-only from here.
+    height = FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0
+    fig = plt.figure(figsize=(FIGURE_SIZE[0], height), constrained_layout=True)
     gs = fig.add_gridspec(4, 3, height_ratios=[1, 1, 1, 0.12])
     axes = np.array([[fig.add_subplot(gs[row, col]) for col in range(3)]
                      for row in range(3)])
@@ -2685,7 +2868,7 @@ def make_sigma_main() -> Path:
     ax_legend.legend(handles=legend_handles, loc="center", ncol=len(legend_handles),
                      frameon=True, framealpha=0.9)
 
-    label_panels(list(axes.flat), y=1.18)
+    _label_panels(list(axes.flat), y=1.18)
     out_path, _ = _save_fig(fig, "sigma_main")
     plt.close(fig)
     return out_path
@@ -4650,7 +4833,7 @@ def make_neural_main() -> Path:
     # default position a letter can sit close enough to a panel's own top
     # tick marks/left y-axis to visually merge with them, occasionally
     # misreadable at a glance.
-    label_panels(axes, x=-0.15, y=1.25)
+    _label_panels(axes, x=-0.15, y=1.25)
     out_path, _ = _save_fig(fig, "neural_main")
     plt.close(fig)
     return out_path
@@ -4953,7 +5136,7 @@ def make_synaptic_main() -> Path:
     else:
         _synaptic_missing_panel(ax_dose, raw_path)
 
-    label_panels([ax_schematic, ax_fit, ax_dyn, ax_dose], y=1.15)
+    _label_panels([ax_schematic, ax_fit, ax_dyn, ax_dose], y=1.15)
     out_path, _ = _save_fig(fig, "synaptic_main")
     plt.close(fig)
     return out_path

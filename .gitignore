@@ -83,23 +83,15 @@ paper/figures/*
 !paper/figures/synaptic_main_edited.pdf
 !paper/figures/synaptic_main_edited.svg
 
-presentations/figures/*
-!presentations/figures/temporal_performance.svg
-!presentations/figures/model_performance.svg
-!presentations/figures/response_change_human.svg
-!presentations/figures/response_change_full.svg
-!presentations/figures/lambda_human.svg
-!presentations/figures/lambda_sanity_human.svg
-!presentations/figures/lambda_model_correlation.svg
-!presentations/figures/variability_human.svg
-!presentations/figures/sigma_sanity_human.svg
-!presentations/figures/sigma_model_correlation.svg
-!presentations/figures/variance_autocorr_human.svg
-!presentations/figures/variance_autocorr_models.svg
-!presentations/figures/model_performance_nll.svg
-!presentations/figures/PE_dynamics.svg
-!presentations/figures/PE_drives_sigma.svg
-!presentations/figures/lambda_drives_discounting.svg
+# presentations/figures/ holds BOTH scripts/make_figures.py's --mode
+# presentation output (PDF+SVG pairs, only the SVG consumed by
+# presentation.qmd/reveal.js) AND every hand-drawn schematic/photo asset
+# the deck embeds (consolidated here from the old presentations/images/,
+# to avoid two parallel image directories) -- unlike the PDF+SVG pairs,
+# those hand-drawn assets have no redundant unconsumed twin format, so a
+# per-file whitelist doesn't fit both cases. Ignore only the PDF twins
+# (never embedded by Quarto); everything else here is tracked by default.
+presentations/figures/*.pdf
 
 # Archive figures (generated; code and docs in archive/ remain tracked)
 archive/**/*.png
