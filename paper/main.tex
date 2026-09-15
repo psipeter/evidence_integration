@@ -107,6 +107,20 @@ Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saep
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur (Fig.~\ref{fig:neural_main}).
 
 \subsection*{Synaptic versus recurrent implementations}
+% TODO (Fig.~\ref{fig:synaptic_main}): state the real numbers verified
+% this session.
+% B (RMSE-vs-human fit, soltani_numbers, both borrow NEF's own fitted
+%   alpha_0/lambda_): NEF (WM) median RMSE=0.088, NEF_synaptic
+%   median=0.096 -- NEF_synaptic is consistently a bit worse (wins for
+%   only 2/46 pids, median gap +0.0067, paired Wilcoxon p<1e-9), but both
+%   are far better than the classic math baselines (Fig.~\ref{fig:model_performance}:
+%   0.16-0.31) -- "comparable, with a small consistent cost" is the
+%   accurate framing, not "equal."
+% D (dose-response, shared alpha_0=0.5/lambda_=0.7, the setting
+%   docs/SCIENCE.md documents as tuned to minimize the model_type gap at
+%   strength=0): as strength goes 0->0.5, NEF's RMSE grows 0.053->0.099
+%   (+87%) and sigma grows 0.027->0.036 (+31%); NEF_synaptic is flat on
+%   both (RMSE 0.0600->0.0600, sigma 0.0284->0.0284).
 Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus, ut interdum tellus elit sed risus. Maecenas eget condimentum velit, sit amet feugiat lectus (Fig.~\ref{fig:synaptic_main}).
 
 \section*{Discussion}
@@ -125,6 +139,12 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 %    task to check them against. Worth stating explicitly and tying to
 %    Goal 4's framing (docs/SCIENCE.md) of testable predictions for
 %    future joint neural/behavioral work.
+% 3. Fig.~\ref{fig:synaptic_main}'s WM-vs-synaptic perturbation dissociation
+%    is ALSO a novel prediction (same Goal-4 framing as above, not yet
+%    tested against real neural/behavioral perturbation data) -- worth
+%    grouping with point 2 rather than treating separately, since both
+%    figures make the same kind of claim (a testable dissociation, not a
+%    validated finding).
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
 
 % Science Advances explicitly requires a limitations paragraph in Discussion
@@ -145,6 +165,24 @@ Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil 
 Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga \cite{vassiliadis2024non}. Et harum quidem rerum facilis est et expedita distinctio.
 
 \subsection*{Neural network model}
+% TODO: describe NEF_synaptic's architecture (Fig.~\ref{fig:synaptic_main}A)
+% precisely -- same architecture as NEF (recurrent/WM) except the
+% value-dynamics block: a background population (fires from bias only)
+% connects to value via a PES-learned connection, driven by error's
+% product signal through the learning rule, instead of a direct
+% multiplicative connection plus a value self-recurrence.
+% pes_learning_rate=4e-4 (fixed, _NEF_FIXED). Branches on nef_type
+% (derived from model_type, "synaptic" in model_type) inside
+% models.NEF.build_network itself. See docs/SCIENCE.md's NEF_synaptic
+% entry for the full account (incl. why it borrows NEF's own fitted
+% alpha_0/lambda_ rather than having its own Optuna fit).
+% Also describe the ITI-perturbation experiment (Fig.~\ref{fig:synaptic_main}C-D):
+% neural_experiments.py's iti_perturbation/iti_perturbation_dynamics,
+% gate_error_feedback=True variant (docs/DECISIONS.md), shared
+% alpha_0=0.5/lambda_=0.7 (tuned via a 25-candidate grid to minimize the
+% model_type RMSE/sigma gap at strength=0 -- see docs/SCIENCE.md), noise
+% injected on value's neurons during the ITI across strengths
+% 0.0-0.5, soltani_numbers only.
 Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.
 
 \subsection*{Response noise and parameter fitting}
@@ -201,8 +239,8 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor i
 
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
-	\includegraphics[width=1.0\textwidth]{figures/synaptic_main.pdf}
-	\caption{\textbf{Placeholder caption for this figure.} Panel letters (\textbf{A--D}) are baked into the figure itself for future cross-referencing. \textit{Real descriptive content and interpretation are pending.}}
+	\includegraphics[width=1.0\textwidth]{figures/synaptic_main_edited.pdf}
+	\caption{\textbf{A biologically distinct synaptic-plasticity mechanism also fits behavior but predicts different responses to perturbation.} (\textbf{A}) An alternative SNN implements RL-$\lambda$ using synaptic plasticity (rather than working memory, WM) via a dopamine-like error-driven learning rule that stores the value estimate in the weights of plastic synapses. (\textbf{B}) On the Continuous Integration task, this synaptic model captures individual human behavior nearly as well as the WM model. (\textbf{C}) Both models' decoding accuracy drops during a simulated inter-trial-interval perturbation (e.g. a distractor task or transcranial stimulation), but only the WM model's disruption persists once the interval ends. (\textbf{D}) Across a range of perturbation strengths, the WM model's error (RMSE vs.\ running mean) and response variability ($\sigma$) both grow with strength, while the synaptic model is largely unaffected -- a concrete, testable prediction for distinguishing the two candidate mechanisms empirically. This asymmetry reflects each mechanism's dependence on ongoing activity: the WM model needs continuous recurrent feedback to hold its estimate, which is disrupted directly by the perturbation; whereas the synaptic model only changes its stored value in response to a sustained, non-zero-mean error signal, which unstructured noise does not produce.}
 	\label{fig:synaptic_main}
 \end{figure}
 

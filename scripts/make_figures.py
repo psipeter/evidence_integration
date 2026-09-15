@@ -4758,7 +4758,12 @@ def _plot_synaptic_iti_dynamics_panel(ax, df: pd.DataFrame, task: str) -> None:
     ax.set_ylabel("Decoded value")
     ax.margins(x=0)
     sns.despine(ax=ax)
-    ax.legend(handles=handles, title="Perturbation", fontsize=7, frameon=True, framealpha=0.85)
+    # title_fontsize explicitly matched to fontsize -- an unset title
+    # falls back to rcParams["axes.titlesize"] (10pt in paper mode), a
+    # visible mismatch against 7pt entries; every other titled legend in
+    # this file pairs the two explicitly for exactly this reason.
+    ax.legend(handles=handles, title="Perturbation", fontsize=7, title_fontsize=7,
+             frameon=True, framealpha=0.85)
 
 
 def _synaptic_model_fit_path(model: str) -> Path:
@@ -4832,8 +4837,8 @@ def _plot_synaptic_dose_response_panel(ax_rmse, ax_sigma, raw_df: pd.DataFrame) 
     ]
 
     ax_rmse.set_xlabel("Perturbation strength")
-    ax_rmse.set_ylabel("Model RMSE")
-    ax_sigma.set_ylabel(r"Model $\sigma_R$")
+    ax_rmse.set_ylabel("RMSE (vs running mean)")
+    ax_sigma.set_ylabel(r"$\sigma$")
     ax_rmse.set_xticks([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
     sns.despine(ax=ax_rmse, right=True)
     sns.despine(ax=ax_sigma, top=True, right=False, left=True, bottom=True)
@@ -4906,7 +4911,7 @@ def make_synaptic_main() -> Path:
     archive/HISTORY_modeling_2026.md for the full account.
     """
     _apply_mode_style()
-    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75),
+    fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75 - 1.5),
                      constrained_layout=True)
     gs = fig.add_gridspec(2, 3)
     ax_schematic = fig.add_subplot(gs[0, 0:2])
@@ -4916,11 +4921,11 @@ def make_synaptic_main() -> Path:
     task = "soltani_numbers"
     iti_prefix = "iti_perturbation_gated"
 
-    # r1c1-c2 -- schematic (merged).
+    # r1c1-c2 -- left blank (merged) -- per instruction, the schematic
+    # is inserted manually afterward instead of rasterized here, so its
+    # own aspect ratio is preserved rather than stretched to fit this
+    # panel's own axes box.
     ax_schematic.axis("off")
-    schematic = _rasterize_svg(SYNAPTIC_OVERVIEW_SCHEMATIC)
-    if schematic is not None:
-        ax_schematic.imshow(schematic, aspect="auto")
 
     # r1c3 -- per-pid RMSE-vs-human boxplot, NEF vs NEF_synaptic.
     gathered = _gather_metric_data(
@@ -4948,7 +4953,7 @@ def make_synaptic_main() -> Path:
     else:
         _synaptic_missing_panel(ax_dose, raw_path)
 
-    label_panels([ax_schematic, ax_fit, ax_dyn, ax_dose])
+    label_panels([ax_schematic, ax_fit, ax_dyn, ax_dose], y=1.15)
     out_path, _ = _save_fig(fig, "synaptic_main")
     plt.close(fig)
     return out_path
