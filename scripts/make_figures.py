@@ -172,6 +172,24 @@ def _save_fig(fig, stem: str) -> tuple[Path, Path]:
     """
     if _MODE is None:
         raise RuntimeError("_save_fig() called before main() set --mode")
+    # Catches a figure whose figsize width silently drifted from this
+    # mode's own standard width (e.g. a leftover conversion artifact from
+    # an earlier hardcoded-width version) -- exactly the bug that let
+    # neural_main render at 5.2in in paper mode while paper/main.tex still
+    # embedded it at the full 6.5in \textwidth, stretching everything
+    # ~25% beyond what apply_paper_style()'s font sizes were tuned for.
+    # A warning, not a hard error -- a genuinely narrower figure (e.g. one
+    # meant for a fractional \textwidth embed) is still a legitimate
+    # choice, just one worth a human's confirmation rather than a silent
+    # pass.
+    expected_width = MODE_CONFIG[_MODE]["width"]
+    actual_width = fig.get_figwidth()
+    if abs(actual_width - expected_width) > 0.05:
+        print(f"  WARNING: {stem}'s figsize width ({actual_width:.2f}in) does not match "
+              f"--mode {_MODE}'s standard width ({expected_width}in). If this is deliberate "
+              f"(e.g. a narrower figure embedded at a fractional \\textwidth), fine -- "
+              f"just confirm the embed width in main.tex/presentation.qmd matches so fonts "
+              f"stay consistent with every other {_MODE}-mode figure. Otherwise fix figsize.")
     figures_dir = MODE_CONFIG[_MODE]["figures_dir"]
     figures_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = figures_dir / f"{stem}.pdf"
@@ -3612,18 +3630,28 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
     n_obs = len(obs_values)
 
     # RL_lambda's own EXACT update rule (models.math_models.py's RL_lambda
-    # branch) -- the ideal target this demo's own NEF params should track,
-    # marked at each observation's own response-readout time. Starts at
-    # (t=0, v=0) -- RL_lambda's own starting expectation BEFORE any
-    # observation, matching that branch's own "expectation = 0.0" init.
+    # branch) -- the ideal target this demo's own NEF params should track.
+    # Starts at (t=0, v=0) -- RL_lambda's own starting expectation BEFORE
+    # any observation, matching that branch's own "expectation = 0.0" init.
+    # HELD FLAT through each observation's own preceding ITI (at the
+    # PREVIOUS expectation), then RAMPS to the new expectation across that
+    # observation's own cue window, reaching it exactly at the readout
+    # time (cue end) -- per instruction, so the target reads as tracking
+    # the SAME held-then-updates shape the "200" neurons line's own
+    # (much less noisy) dynamics actually have, instead of linearly
+    # interpolating straight through the ITI as if the value were already
+    # drifting toward the next observation before it even appears.
     readout_t, ideal_v = [0.0], [0.0]
     expectation = 0.0
     for i, value in enumerate(obs_values, start=1):
+        cue_start = t_iti + (i - 1) * t_step
+        readout_t.append(cue_start)
+        ideal_v.append(expectation)
         alpha = alpha_0 / (i ** lambda_)
         error = value - expectation
         expectation += alpha * error
         expectation = float(np.clip(expectation, -1, 1))
-        readout_t.append(t_iti + (i - 1) * t_step + t_obs)
+        readout_t.append(cue_start + t_obs)
         ideal_v.append(expectation)
 
     # Ascending n_neurons order -- smallest/noisiest plotted FIRST (bottom
@@ -3639,10 +3667,10 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
             ax.plot(seed_tr["t"], seed_tr["value"], color=pal[i], lw=0.8,
                     alpha=0.5, zorder=i + 1)
 
-    # pal[4] (palette pink) instead of green -- more contrast against the
-    # blue/orange n_neurons pairs (green read too close to one of them),
-    # per instruction. Line only, no markers -- per instruction.
-    ax.plot(readout_t, ideal_v, color=pal[4], lw=1.4, zorder=10)
+    # Black, thin -- reverted from palette pink (still not enough contrast/
+    # too easily read as another data series), per instruction. Line only,
+    # no markers -- per instruction.
+    ax.plot(readout_t, ideal_v, color="black", lw=0.8, zorder=10)
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Value")
@@ -3665,7 +3693,7 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
     # Separate, standalone legend for "target" -- kept apart from the
     # "Neurons" legend above rather than merged into one multi-row box,
     # per instruction.
-    target_handle = [Line2D([0], [0], color=pal[4], lw=1.8, label="target")]
+    target_handle = [Line2D([0], [0], color="black", lw=1.8, label="target")]
     ax.legend(handles=target_handle, fontsize=5, frameon=True, framealpha=0.9,
              loc="lower right")
     sns.despine(ax=ax, top=True, right=True)
@@ -4469,9 +4497,6 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
     sns.despine(ax=ax, top=True, right=True)
 
 
-COLUMN_HEADERS = ["Model Dynamics", "Link to Behavior", "Predictions"]
-
-
 def make_neural_main() -> Path:
     """3x2 figure: a second neural-predictions figure, one row per
     parameter (alpha_0, lambda_, n_neurons), each investigated via its own
@@ -4568,7 +4593,12 @@ def make_neural_main() -> Path:
     and param_scan's own per-real-pid 32-trial jobs cost similarly).
     """
     _apply_mode_style()
-    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0] * 0.8, FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
+    # Full FIGURE_SIZE[0] width (6.5in in paper mode) -- matches every other
+    # paper figure's standard width (see "Figure modes" in CLAUDE.md); this
+    # used to be scaled by 0.8 (5.2in) while paper/main.tex still embeds it
+    # at the full \textwidth, silently stretching everything (fonts, line
+    # widths) ~25% beyond what _apply_paper_style() actually tuned for.
+    fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
                              constrained_layout=True)
 
     # Each row's col-2 twin/right axis and col-3's own y-axis plot the
@@ -4594,15 +4624,6 @@ def make_neural_main() -> Path:
         axes[0, 2].set_ylim(0, 50)
         axes[0, 2].set_yticks([0, 25, 50])
 
-    # Column headers -- one per column, above row 1 only (each spans that
-    # whole column's 3 rows conceptually: how the model behaves, how that
-    # links to a behavioral-like metric, and the resulting prediction).
-    for ax, header in zip(axes[0], COLUMN_HEADERS):
-        # fontsize reduced from 13 and pad increased from 10 -- at the old
-        # size/pad this collided with label_panels' panel-letter position
-        # (axes-fraction y=1.1); smaller text plus more clearance fixes it.
-        ax.set_title(header, fontsize=10, fontweight="bold", pad=20)
-
     _plot_neural_main_activity_vs_obs(axes[1, 0], "lambda_")
     ax2_r2 = _plot_neural_main_decay_vs_param(axes[1, 1], "lambda_")
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
@@ -4624,11 +4645,12 @@ def make_neural_main() -> Path:
         axes[2, 2].set_ylim(0.0, 0.2)
         axes[2, 2].set_yticks([0.0, 0.1, 0.2])
 
-    # Nudged further left and up (was x=-0.1, y=1.1 default) -- at the
+    # Nudged further left and up (was x=-0.1, y=1.1 default; y raised again
+    # from 1.18 -- still overlapped the y-axis tick labels) -- at the
     # default position a letter can sit close enough to a panel's own top
     # tick marks/left y-axis to visually merge with them, occasionally
     # misreadable at a glance.
-    label_panels(axes, x=-0.15, y=1.18)
+    label_panels(axes, x=-0.15, y=1.25)
     out_path, _ = _save_fig(fig, "neural_main")
     plt.close(fig)
     return out_path
