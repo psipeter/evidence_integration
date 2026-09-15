@@ -3639,9 +3639,10 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
             ax.plot(seed_tr["t"], seed_tr["value"], color=pal[i], lw=0.8,
                     alpha=0.5, zorder=i + 1)
 
-    # pal[2] (palette green) instead of black -- softer against the blue/
-    # orange n_neurons pairs, per instruction.
-    ax.plot(readout_t, ideal_v, color=pal[2], marker="o", ms=4, lw=1.4, zorder=10)
+    # pal[4] (palette pink) instead of green -- more contrast against the
+    # blue/orange n_neurons pairs (green read too close to one of them),
+    # per instruction. Line only, no markers -- per instruction.
+    ax.plot(readout_t, ideal_v, color=pal[4], lw=1.4, zorder=10)
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Value")
@@ -3652,16 +3653,21 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
     # lines (deliberately thin/low-alpha here, for the "spiky" data-
     # density effect) -- matching the line weight every other panel's
     # legend uses, rather than reusing this panel's own faint data-line
-    # style as the swatch.
-    handles = [Line2D([0], [0], color=pal[i], lw=1.8,
-                      label=f"{n_neurons},{n_neurons_counting}")
-              for i, (n_neurons, n_neurons_counting) in enumerate(pairs)]
-    handles.append(Line2D([0], [0], color=pal[2], marker="o", ms=4, lw=1.8, label="target"))
-    # loc="best" (not a fixed corner) -- the target line/markers cross
-    # through most of the panel, so let matplotlib place the legend wherever
-    # it overlaps the least rather than risk it sitting on top of the line.
-    ax.legend(handles=handles, title="Neurons", fontsize=5, title_fontsize=5,
-             frameon=True, framealpha=0.9, loc="best")
+    # style as the swatch. Label is just n_neurons now (n_neurons_counting
+    # dropped, per instruction -- nc=4x n_neurons always, explained in the
+    # caption text instead of repeated in every legend entry).
+    neuron_handles = [Line2D([0], [0], color=pal[i], lw=1.8, label=f"{n_neurons}")
+                      for i, (n_neurons, n_neurons_counting) in enumerate(pairs)]
+    neuron_legend = ax.legend(handles=neuron_handles, title="Neurons", fontsize=5,
+                              title_fontsize=5, frameon=True, framealpha=0.9,
+                              loc="upper left")
+    ax.add_artist(neuron_legend)
+    # Separate, standalone legend for "target" -- kept apart from the
+    # "Neurons" legend above rather than merged into one multi-row box,
+    # per instruction.
+    target_handle = [Line2D([0], [0], color=pal[4], lw=1.8, label="target")]
+    ax.legend(handles=target_handle, fontsize=5, frameon=True, framealpha=0.9,
+             loc="lower right")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -3798,7 +3804,7 @@ def _plot_outlier_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
     per instruction, simpler than manually distinguishing sign. No
     title -- the legend already identifies every line.
     """
-    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_gated_{sweep_param}_{task}.pkl"
     if not path.exists():
         ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
@@ -3920,7 +3926,7 @@ def _plot_outlier_param_effect(ax, sweep_param: str, task: str = "soltani_number
     than filtered -- the regplot fit is robust to a handful of such
     points across ~90.
     """
-    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_gated_{sweep_param}_{task}.pkl"
     if not path.exists():
         ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
@@ -3971,7 +3977,7 @@ def _plot_outlier_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbers"
     claim (higher alpha_0 -> both higher max_pe AND a faster rate of
     decay) as a single positive correlation across the whole grid.
     """
-    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_gated_{sweep_param}_{task}.pkl"
     if not path.exists():
         ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
@@ -4027,7 +4033,7 @@ def _plot_outlier_center_invariance(ax, sweep_param: str, task: str = "soltani_n
     range), not just relative deviation -- and this panel should stay in
     the figure rather than be removed as trivial.
     """
-    path = NEURAL_EXP_DIR / f"outlier_{sweep_param}_{task}.pkl"
+    path = NEURAL_EXP_DIR / f"outlier_gated_{sweep_param}_{task}.pkl"
     if not path.exists():
         ax.text(0.5, 0.5, f"No outlier {sweep_param} data", ha="center", va="center",
                 transform=ax.transAxes, color="0.5", style="italic")
@@ -4153,7 +4159,7 @@ def _plot_neural_main_activity_vs_obs(ax, sweep_param: str, task: str = "soltani
     ax.set_xlabel("Observation")
     ax.set_xlim(0, 15)
     ax.set_xticks([0, 5, 10, 15])
-    ax.set_ylabel("Error neuron activity (Hz)")
+    ax.set_ylabel("Neural activity (Hz)")
     ax.set_ylim(60, 120)
     ax.set_yticks([60, 90, 120])
     ax.legend(title=sym, fontsize=5, title_fontsize=5, frameon=True, framealpha=0.9,

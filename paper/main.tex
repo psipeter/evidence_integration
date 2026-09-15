@@ -93,6 +93,17 @@ Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et d
 Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat (Fig.~\ref{fig:sigma_main}).
 
 \subsection*{Neural network predictions}
+% TODO (Fig.~\ref{fig:neural_main}): state the three covariation results
+% with their real numbers (verified this session, paired Pearson r,
+% stars): (A-C) peak decoded PE vs. PE decay rate, r=0.93****; (D-F)
+% weight-tuned error-neuron activity decay % vs. behavioral |delta
+% response| decay %, r=0.86****; (G-I) PE noise (coefficient of
+% variation, %) vs. sigma, r=0.68****. All three grids are SYNTHETIC
+% (155 virtual pids/replicates for D-F, an arbitrary center x deviation
+% x parameter grid for A-C/G-I) -- do NOT describe D-F as using real
+% participants (an earlier caption draft wrongly claimed this; checked
+% directly against neural_experiments.py's _param_scan_worker and the
+% actual collected filenames, which are trial_source=synthetic).
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur (Fig.~\ref{fig:neural_main}).
 
 \subsection*{Synaptic versus recurrent implementations}
@@ -100,6 +111,20 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 
 \section*{Discussion}
 
+% TODO (Fig.~\ref{fig:neural_main}), two points to devote real space to:
+% 1. Why alpha_0 controls BOTH peak PE magnitude and decay rate (A-C) is
+%    NOT a direct mathematical consequence of the RL_lambda equation
+%    (Fig.~\ref{fig:models_overview}A) -- it depends on the specific
+%    neural implementation (how alpha_0 scales gain in the error/value
+%    circuit) and is not guaranteed to hold for any spiking
+%    implementation of the same equation. Worth explaining mechanistically
+%    rather than leaving as an unexplained empirical correlation.
+% 2. All of Fig.~\ref{fig:neural_main}'s predictions (and the SI
+%    corroborating SNR measure below) are NOVEL predictions, not
+%    validated findings -- we have no real neural recordings from this
+%    task to check them against. Worth stating explicitly and tying to
+%    Goal 4's framing (docs/SCIENCE.md) of testable predictions for
+%    future joint neural/behavioral work.
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
 
 % Science Advances explicitly requires a limitations paragraph in Discussion
@@ -170,7 +195,7 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor i
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/neural_main.pdf}
-	\caption{\textbf{Placeholder caption for this figure.} Panel letters (\textbf{A--I}) are baked into the figure itself for future cross-referencing. \textit{Real descriptive content and interpretation are pending.}}
+	\caption{\textbf{SNN dynamics link neural activity to behavior, yielding concrete, testable predictions.} Columns show, left to right: network dynamics for representative parameter values; how neural and behavioral measures of those dynamics scale with a key model parameter; and how the two measures covary directly. (\textbf{A--C}) After a run of consistent observations, one outlier evokes a sharp rise in decoded prediction-error (PE) activity that decays before the next inter-trial interval; both the peak response and its decay rate scale with the learning rate $\alpha_0$. We predict that the peak PE response to a surprising observation will predict how quickly that response then decays. (\textbf{D--F}) Activity of error-sensitive neurons decays over a trial at a rate set by the discounting parameter $\lambda$. We predict that this neural decay rate will track an individual's own behavioral decay in response-change magnitude. (\textbf{G--I}) Spiking noise causes the decoded value estimate to drift across repeated presentations of an identical sequence, and this noise shrinks as more neurons are engaged. We predict that a neural measure of this trial-to-trial variability (such as coefficient of variation) will correlate with an individual's own behavioral response variance $\sigma$. All results are from simulations in the Continuous Integration Task.}
 	\label{fig:neural_main}
 \end{figure}
 
@@ -247,6 +272,21 @@ Supplementary Text
 % (science.org/content/page/science-advances-information-authors).
 
 \subsection*{Supplementary Text}
+
+\subsubsection*{A decoder-free corroboration of the neurons-vs-SNR result}
+STUB: add a new supplementary figure showing split-half reliability of
+the raw error-population spike counts (\texttt{split\_half\_r\_mean},
+already collected in the \texttt{n\_neurons\_snr} grid alongside the
+data Fig.~\ref{fig:neural_main}G--I plots, but not yet turned into its
+own figure -- see \texttt{scripts/make\_figures.py}'s
+\texttt{\_plot\_n\_neurons\_snr\_pair} docstring for the original TODO)
+vs.\ n\_neurons. Verified this session: split-half $r$ rises
+monotonically with n\_neurons (0.76, 0.85, 0.89, 0.91, 0.93 at
+n\_neurons=50, 100, 150, 200, 250) -- this is a fully decoder-free,
+purely-neural reliability measure (no decoded PE/value signal
+involved), so it corroborates Fig.~\ref{fig:neural_main}G--I's own
+PE-noise-vs-n\_neurons finding from a completely independent angle.
+Reference this figure from the main text once it exists.
 
 \subsubsection*{Model comparison via negative log-likelihood}
 STUB: replicate Fig.~\ref{fig:model_performance}'s RMSE-based model comparison using negative log-likelihood (data/runs/nll/, \texttt{\_resp\_noise} model variants) as a second fit metric, across all four tasks. State that the ranking is consistent with the RMSE-based comparison (RL-$\lambda$ beats Mean/LeakyIntegrator/PrimacyRecency on Value Integration and Proportion Inference; ties PrimacyRecency on Binary Integration; loses to PrimacyRecency on Continuous Integration).
