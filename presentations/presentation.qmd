@@ -1,6 +1,6 @@
 ---
-title: "How People Learn"
-subtitle: "from Streams of Information"
+title: "Evidence integration with prediction error"
+subtitle: "Theory, behavioral experiments, and spiking neural network models"
 author: "Peter Duggins"
 format: 
   revealjs:

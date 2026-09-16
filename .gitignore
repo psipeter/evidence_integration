@@ -58,7 +58,7 @@ figures/*
 # collection) while keeping text/axes/legends true vector -- smaller
 # files, still-crisp labels, no format change needed.
 paper/figures/*
-!paper/figures/tasks_overview.pdf
+!paper/figures/tasks_overview_paper.pdf
 !paper/figures/models_overview_paper.pdf
 !paper/figures/model_performance.pdf
 # lambda_main_edited retired -- the lambda-definition inset that used to
