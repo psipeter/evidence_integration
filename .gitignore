@@ -63,10 +63,16 @@ paper/figures/*
 !paper/figures/model_performance.pdf
 # lambda_main_edited retired -- the lambda-definition inset that used to
 # require hand-placing via Inkscape (see archive'd history/chat) now
-# renders NATIVELY inside make_lambda_main itself, so main.tex embeds the
-# plain script-generated PDF directly again, same convention as
-# model_performance.pdf/sigma_main.pdf above (no hand-edited .svg source
-# needed since there's no more manual touch-up step).
+# renders NATIVELY inside make_lambda_main itself. lambda_main.pdf/
+# sigma_main.pdf/model_performance.pdf above are still each a MANUALLY
+# produced file, though -- per instruction, scripts/make_figures.py no
+# longer attempts to place any figure's own bold panel labels (A/B/C...)
+# itself (repeated automated-placement attempts never got them positioned
+# above and to the left of all panel content); the person adds those by
+# hand in an SVG editor, using this script's freshly generated {stem}.svg
+# (paper/figures/, gitignored, regenerated at will) as the source, and
+# exports the result as this same {stem}.pdf. Applies to every current
+# and future paper-mode figure with panel labels, not just these three.
 !paper/figures/lambda_main.pdf
 !paper/figures/sigma_main.pdf
 !paper/figures/neural_main.pdf
@@ -82,6 +88,11 @@ paper/figures/*
 # touch-ups.
 !paper/figures/synaptic_main_edited.pdf
 !paper/figures/synaptic_main_edited.svg
+# First supplemental figure (Fig. S1) -- same manually-labeled-PDF
+# convention as the main-text figures above.
+!paper/figures/lambda_sigma_reliability.pdf
+# Second supplemental figure (Fig. S2) -- same convention.
+!paper/figures/model_performance_nll.pdf
 
 # presentations/figures/ holds BOTH scripts/make_figures.py's --mode
 # presentation output (PDF+SVG pairs, only the SVG consumed by

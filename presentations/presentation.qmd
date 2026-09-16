@@ -91,13 +91,13 @@ bibliography: "references.bib"
 ## Individual Differences in $\lambda$
 
 ::: {.image-card}
-![](figures/lambda_distributions_edited.svg){width="100%"}
+![](figures/lambda_distributions_e.svg){width="100%"}
 :::
 
 ## People have Noisy Responses ($\sigma$)
 
 ::: {.image-card}
-![](figures/sigma_distributions_edited.svg){width="100%"}
+![](figures/sigma_distributions_e.svg){width="100%"}
 :::
 
 ## Response Noise Autocorrelation
@@ -106,22 +106,34 @@ bibliography: "references.bib"
 ![](figures/sigma_growth_autocorr.svg){width="100%"}
 :::
 
-## Prediction Error & Neural Activity
+## $\alpha_0$ drives PE Dynamics
 
 ::: {.image-card}
-![](figures/PE_dynamics.svg){width="100%"}
+![](figures/neural_main_alpha0.svg){width="100%"}
 :::
 
 ## PE variance drives $\sigma$
 
 ::: {.image-card}
-![](figures/PE_drives_sigma.svg){width="100%"}
+![](figures/neural_main_n_neurons.svg){width="100%"}
 :::
 
 ## $\lambda$ drives discounting
 
 ::: {.image-card}
-![](figures/lambda_drives_discounting.svg){width="100%"}
+![](figures/neural_main_lambda.svg){width="100%"}
+:::
+
+## Synaptic implementation (PES)
+
+::: {.image-card}
+![](figures/synaptic_overview_presentation.svg){width="100%"}
+:::
+
+## Syn reistant to perturbation
+
+::: {.image-card}
+![](figures/synaptic_iti_perturbation.svg){width="100%"}
 :::
 
 ## Conclusions
@@ -151,7 +163,7 @@ bibliography: "references.bib"
 ::::
 
 ::: {.image-card style="margin: 1em auto 0 auto;"}
-![](figures/snn.svg){style="height: 200px; width: auto; display: block; margin: 0 auto;"}
+![](figures/models_overview_presentation_4.svg){style="height: 200px; width: auto; display: block; margin: 0 auto;"}
 :::
 
 
@@ -183,32 +195,20 @@ Snacks Task / Data
 Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Display Consistent Recency and Primacy Effects in Behavior and Neural Activity Across Perceptual and Value-Based Judgments.” Cognitive, Affective, & Behavioral Neuroscience 25.
 :::
 
-## Individual Differences in $\lambda$
-
-::: {.image-card}
-![](figures/lambda_human.svg){width="100%"}
-:::
-
 ## $\lambda$ Consistent Over Trials/Tasks
 
 ::: {.image-card}
-![](figures/lambda_sanity_human.svg){width="100%"}
-:::
-
-## Models Capture $\lambda$ Differences
-
-::: {.image-card}
-![](figures/lambda_model_correlation.svg){width="100%"}
+![](figures/lambda_reliability_crosstask.svg){width="100%"}
 :::
 
 ## $\sigma$ Consistent Over Trials/Tasks
 
 ::: {.image-card}
-![](figures/sigma_sanity_human.svg){width="100%"}
+![](figures/sigma_reliability_crosstask.svg){width="100%"}
 :::
 
-## Models Capture $\sigma$ Differences
+## Model performance (NLL)
 
 ::: {.image-card}
-![](figures/sigma_model_correlation.svg){width="100%"}
+![](figures/model_performance_nll.svg){width="100%"}
 :::

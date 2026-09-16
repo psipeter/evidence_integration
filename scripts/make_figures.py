@@ -77,7 +77,7 @@ from utils.paths import data_path, RUNS_DIR, PROJECT_ROOT, FIGURES_DIR
 from utils.aggregate import plot_error_aggregate, plot_delta_aggregate
 from utils.plot_style import (
     draw_sig_line, pvalue_to_stars, get_palette, nice_ticks,
-    apply_paper_style, apply_presentation_style, label_panels,
+    apply_paper_style, apply_presentation_style,
 )
 from utils.plot_spikes import cm_gray_r_a, plot_spikes, preprocess_spikes
 
@@ -127,19 +127,6 @@ def _apply_mode_style() -> None:
     MODE_CONFIG[_MODE]["apply_style"]()
 
 
-def _label_panels(axes, labels=None, **kwargs) -> None:
-    """Bold panel letters (A/B/C...) via utils.plot_style.label_panels --
-    paper mode only. Presentation slides drop them (per instruction): a
-    live talk doesn't narrate "panel A" the way a print caption does, and
-    the letters are just clutter at slide scale/viewing distance. Every
-    make_* figure below should call THIS wrapper, not label_panels
-    directly, so every current AND future presentation-mode figure gets
-    this for free without needing its own mode check."""
-    if _MODE == "presentation":
-        return
-    label_panels(axes, labels=labels, **kwargs)
-
-
 # Reassigned once in main() from MODE_CONFIG[_MODE] -- every figure
 # function below reads FIGURE_SIZE[0]/FIGURE_SIZE[1] as a plain module
 # global (unchanged from before mode support existed), so this one
@@ -178,16 +165,20 @@ def _save_fig(fig, stem: str) -> tuple[Path, Path]:
     """Save `fig` under the ACTIVE MODE's own figures directory
     (MODE_CONFIG[_MODE]["figures_dir"] -- paper/figures/ or
     presentations/figures/, never the old top-level figures/, which is
-    being phased out). Paper mode saves BOTH {stem}.pdf and {stem}.svg
-    (main.tex embeds the PDF; the SVG is tracked too as a hand-touch-up
-    source, matching this project's lambda_main_edited/neural_main_edited
-    convention). Presentation mode saves SVG ONLY, per instruction --
-    Quarto/reveal.js never embeds the PDF twin, so generating it was pure
-    waste. Returns (primary, secondary), where `primary` is whichever
-    format the ACTIVE mode actually embeds -- every make_* caller does
-    `out_path, _ = _save_fig(...)` and returns `out_path` as its own
-    result, so this keeps that meaning "the file that's actually used"
-    regardless of mode, rather than hardcoding "the PDF".
+    being phased out). SVG ONLY, in BOTH modes now.
+
+    Paper mode used to also save a plain {stem}.pdf here for main.tex to
+    embed directly. Per instruction, EVERY paper figure's bold panel
+    labels (A/B/C...) are now added BY HAND in an SVG editor instead --
+    repeated automated-placement attempts (across multiple sessions)
+    never got "above and to the left of all panel content" genuinely
+    right, so this script no longer tries. That makes main.tex's own
+    {stem}.pdf a MANUALLY produced file (this script's freshly generated
+    {stem}.svg, opened, labeled, and exported by the person) rather than
+    something this script writes itself -- an unlabeled {stem}.pdf
+    written here would just be a stale, unused duplicate. Returns
+    (svg_path, svg_path) in both modes -- kept as a 2-tuple so every
+    existing `out_path, _ = _save_fig(...)` call site needs no change.
     """
     if _MODE is None:
         raise RuntimeError("_save_fig() called before main() set --mode")
@@ -214,12 +205,7 @@ def _save_fig(fig, stem: str) -> tuple[Path, Path]:
     svg_path = figures_dir / f"{stem}.svg"
     fig.savefig(svg_path)
     print(f"Saved {svg_path}")
-    if _MODE == "presentation":
-        return svg_path, svg_path
-    pdf_path = figures_dir / f"{stem}.pdf"
-    fig.savefig(pdf_path)
-    print(f"Saved {pdf_path}")
-    return pdf_path, svg_path
+    return svg_path, svg_path
 
 
 def _load_human_true_gt(task: str) -> pd.DataFrame:
@@ -783,7 +769,6 @@ def make_model_performance() -> Path:
 
     _print_best_fit_counts(panel_data, value_col="rmse", metric_label="RMSE")
 
-    _label_panels(axes)
     out_path, _ = _save_fig(fig, "model_performance")
     plt.close(fig)
     return out_path
@@ -1021,9 +1006,8 @@ def make_response_change() -> Path:
     make_model_performance, including RL_lambda's pretty math-formatted
     display text (MODEL_LABEL) instead of the raw "RL_lambda" string.
 
-    Saved as response_change_decay.pdf (PDF only, per this project's usual
-    convention -- unlike make_model_performance, this one wasn't asked to
-    also save .svg).
+    Saved as response_change_decay.svg via _save_fig (see its own
+    docstring -- SVG only now, in both modes).
     """
     _apply_mode_style()
     data = _load_response_change_data()
@@ -1671,7 +1655,10 @@ def _make_lambda_main_split() -> list[Path]:
         ylabel = "Median ΔR" if i == 0 else ""
         _draw_response_change_panel(ax, human_delta, models, include_models=True,
                                     ylabel=ylabel, obs_max=obs_max_by_task[task_key])
-        ax.set_title(title, color=TASK_COLORS[task_key])
+        # linebreak stripped (per instruction) -- this row is now wide
+        # enough for the full one-line task name (matches LAMBDA_TASK_PANELS'
+        # own no-linebreak titles, e.g. sigma_main's row 1).
+        ax.set_title(title.replace("\n", " "), color=TASK_COLORS[task_key])
         ax.tick_params(axis="y", labelleft=(i == 0))
     axes1[0].set_ylim(bottom=0)
     legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
@@ -1769,7 +1756,10 @@ def make_lambda_main() -> Path | list[Path]:
         ylabel = "Median \u0394R" if i == 0 else ""
         _draw_response_change_panel(ax, human_delta, models, include_models=True,
                                     ylabel=ylabel, obs_max=obs_max_by_task[task_key])
-        ax.set_title(title, color=TASK_COLORS[task_key])
+        # linebreak stripped (per instruction) -- this row is now wide
+        # enough for the full one-line task name (matches LAMBDA_TASK_PANELS'
+        # own no-linebreak titles, e.g. sigma_main's row 1).
+        ax.set_title(title.replace("\n", " "), color=TASK_COLORS[task_key])
         ax.tick_params(axis="y", labelleft=(i == 0))
     axes_row0[0].set_ylim(bottom=0)
     legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
@@ -1803,7 +1793,6 @@ def make_lambda_main() -> Path | list[Path]:
             ax_inset = ax.inset_axes([0.58, 0.56, 0.40, 0.40])
             _plot_lambda_metric_demo(ax_inset, compact=True)
 
-    _label_panels(axes_row0 + axes_row1)
     out_path, _ = _save_fig(fig, "lambda_main")
     plt.close(fig)
     return out_path
@@ -2955,7 +2944,6 @@ def make_sigma_main() -> Path | list[Path]:
     ax_legend.legend(handles=legend_handles, loc="center", ncol=len(legend_handles),
                      frameon=True, framealpha=0.9)
 
-    _label_panels(list(axes.flat), y=1.18)
     out_path, _ = _save_fig(fig, "sigma_main")
     plt.close(fig)
     return out_path
@@ -2982,6 +2970,145 @@ def make_sigma_reliability() -> Path:
         _plot_sigma_splithalf_panel(ax, task_key, title, show_ylabel=(i == 0))
 
     out_path, _ = _save_fig(fig, "sigma_reliability")
+    plt.close(fig)
+    return out_path
+
+
+def _lambda_sigma_reliability_task_panels() -> tuple[list, list]:
+    """(lambda_pairs, sigma_pairs) -- colors/numbers only, in that order,
+    filtered out of LAMBDA_TASK_PANELS/VARIABILITY_TASK_PANELS rather than
+    hand-written here, so a task-title wording change to either constant
+    stays in sync automatically. Snacks (lambda) and balls (sigma) are
+    dropped -- neither has a cross-task partner to sit alongside in this
+    figure's own 3rd column (see _plot_lambda_crosstask_panel/
+    _plot_sigma_crosstask_panel's own docstrings for why that panel is
+    colors-vs-numbers only)."""
+    lambda_pairs = [(tk, title) for tk, title in LAMBDA_TASK_PANELS if tk in ("colors", "numbers")]
+    sigma_pairs = [(tk, title) for tk, title in VARIABILITY_TASK_PANELS if tk in ("colors", "numbers")]
+    return lambda_pairs, sigma_pairs
+
+
+def _draw_lambda_reliability_row(axes_row, lambda_pairs) -> None:
+    """Fills a length-3 axes row with colors/numbers splithalf reliability
+    (cols 1-2) plus the colors-vs-numbers crosstask panel (col 3) -- shared
+    by make_lambda_sigma_reliability's own row 1 and
+    _make_lambda_sigma_reliability_split's lambda slide, so both draw
+    IDENTICAL panels and differ only in surrounding layout.
+
+    Crosstask panel's title fontsize is reset to match the splithalf
+    panels' own default (axes.titlesize, 10pt in paper mode) -- unlike
+    make_lambda_sigma_crosstask's own standalone 1x2 figure (untouched,
+    still 14pt there), a bigger title reads as a mismatch once this panel
+    sits directly beside two 10pt-titled panels in the same row.
+
+    BOTH splithalf panels get show_ylabel=True (unlike
+    make_lambda_reliability's own 1x3 figure, where only col 1 of 3
+    same-scale task panels shows y-tick labels, the other two treated as
+    redundant) -- col 3 here is the UNRELATED crosstask panel, not a third
+    same-scale task, so col 2 no longer reads as "obviously identical to
+    col 1" the way it did sitting between two other same-scale panels;
+    hiding its labels there just looked like a missing-labels bug."""
+    for ax, (task_key, title) in zip(axes_row[:2], lambda_pairs):
+        _plot_lambda_splithalf_panel(ax, task_key, title, show_ylabel=True)
+    _plot_lambda_crosstask_panel(axes_row[2])
+    axes_row[2].title.set_fontsize(plt.rcParams["axes.titlesize"])
+
+
+def _draw_sigma_reliability_row(axes_row, sigma_pairs, *, show_titles: bool = True) -> None:
+    """Sigma analogue of _draw_lambda_reliability_row -- same structure,
+    same crosstask title-fontsize reset and show_ylabel=True on BOTH
+    splithalf panels (see that function's own docstring for why), for
+    response noise instead of fitted lambda. Doubly warranted here since
+    _plot_sigma_splithalf_panel's own y-axis label TEXT already differs
+    per task (SIGMA_SPLIT_LABELS), unlike lambda's identical "λ (even
+    trials)" wording across tasks -- col 2 hiding its label would have
+    dropped genuinely task-specific text, not just a repeated number.
+
+    show_titles=False (make_lambda_sigma_reliability's own row 2 only) --
+    row 1 above already names every column (task names + "Colors vs
+    Numbers"), matching make_lambda_main/make_sigma_main's own "row 2
+    titles cleared, row 1 already named each task" convention. Still
+    True by default for _make_lambda_sigma_reliability_split's own
+    standalone sigma slide, which has no row 1 above it to borrow titles
+    from."""
+    for ax, (task_key, title) in zip(axes_row[:2], sigma_pairs):
+        _plot_sigma_splithalf_panel(ax, task_key, title if show_titles else "", show_ylabel=True)
+    _plot_sigma_crosstask_panel(axes_row[2])
+    axes_row[2].title.set_fontsize(plt.rcParams["axes.titlesize"])
+    if not show_titles:
+        axes_row[2].set_title("")
+
+
+def _make_lambda_sigma_reliability_split() -> list[Path]:
+    """Presentation-mode-only: make_lambda_sigma_reliability's row 1
+    (lambda: colors/numbers splithalf + crosstask) and row 2 (sigma, same
+    structure) as TWO separate 1-row, 3-column figures/slides instead of
+    one 2-row composite -- each gets its own full-width slide, matching
+    make_lambda_main/make_sigma_main's own paper-vs-presentation split
+    convention. Paper mode keeps the combined 2x3 layout in
+    make_lambda_sigma_reliability below.
+
+    Both figures reuse the exact same row-drawing helpers as the combined
+    layout (_draw_lambda_reliability_row/_draw_sigma_reliability_row) --
+    no panel-drawing logic duplicated, only the layout differs.
+    """
+    lambda_pairs, sigma_pairs = _lambda_sigma_reliability_task_panels()
+
+    fig1, axes1 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    _draw_lambda_reliability_row(list(axes1), lambda_pairs)
+    path1, _ = _save_fig(fig1, "lambda_reliability_crosstask")
+    plt.close(fig1)
+
+    fig2, axes2 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    _draw_sigma_reliability_row(list(axes2), sigma_pairs)
+    path2, _ = _save_fig(fig2, "sigma_reliability_crosstask")
+    plt.close(fig2)
+
+    return [path1, path2]
+
+
+def make_lambda_sigma_reliability() -> Path | list[Path]:
+    """2-row, 3-column supplementary figure combining pieces of
+    make_lambda_reliability, make_sigma_reliability, and
+    make_lambda_sigma_crosstask into one grid (per instruction):
+      Row 1 (lambda): col 1 colors splithalf reliability, col 2 numbers
+        splithalf reliability, col 3 colors-vs-numbers crosstask
+        reliability.
+      Row 2 (sigma): same 3-column structure, for response noise instead
+        of fitted lambda. Titles cleared here (per instruction) -- row 1
+        above already names every column, same "row 2 titles redundant"
+        convention make_lambda_main/make_sigma_main already use. Kept
+        (not cleared) in the presentation-mode split's own standalone
+        sigma slide, which has no row 1 above it to borrow titles from.
+    Snacks (lambda)/balls (sigma) -- present in the standalone
+    make_lambda_reliability/make_sigma_reliability 1x3 figures -- are
+    dropped here, since neither has a crosstask partner for col 3 (see
+    _lambda_sigma_reliability_task_panels's own docstring).
+
+    PRESENTATION MODE ONLY: split into two separate 1-row figures/slides
+    (see _make_lambda_sigma_reliability_split) instead of this one 2-row
+    composite -- one per row -- per instruction, matching
+    make_lambda_main/make_sigma_main's own split convention. Paper mode
+    keeps the combined layout below unchanged.
+
+    No shared/dedicated legend row -- unlike make_lambda_main/
+    make_sigma_main, every panel here is human-only (a single regression
+    line), so each one's own small in-axes "r=..." legend (already drawn
+    by _plot_*_splithalf_panel/_plot_*_crosstask_panel) is sufficient; a
+    reserved legend band would have nothing extra to add.
+    """
+    _apply_mode_style()
+    if _MODE == "presentation":
+        return _make_lambda_sigma_reliability_split()
+
+    lambda_pairs, sigma_pairs = _lambda_sigma_reliability_task_panels()
+    fig, axes = plt.subplots(2, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.2),
+                             constrained_layout=True)
+
+    _draw_lambda_reliability_row(list(axes[0]), lambda_pairs)
+    _draw_sigma_reliability_row(list(axes[1]), sigma_pairs, show_titles=False)
+
+    out_path, _ = _save_fig(fig, "lambda_sigma_reliability")
     plt.close(fig)
     return out_path
 
@@ -3622,7 +3749,7 @@ def make_model_performance_nll() -> Path:
                     hue="model", palette=pal, legend=False, ax=ax)
         ax.set_title(title, color=TASK_COLORS[task_key])
         ax.set_xlabel("")
-        ax.set_ylabel("Model fit (NLL to\nhuman responses)" if i == 0 else "")
+        ax.set_ylabel("Model fit (NLL)" if i == 0 else "")
         ax.tick_params(axis="y", labelleft=(i == 0))
         ax.set_xticks([])
         sns.despine(ax=ax, top=True, right=True)
@@ -4420,15 +4547,20 @@ def _plot_n_neurons_demo_trace(ax, task: str = "soltani_numbers") -> None:
     # caption text instead of repeated in every legend entry).
     neuron_handles = [Line2D([0], [0], color=pal[i], lw=1.8, label=f"{n_neurons}")
                       for i, (n_neurons, n_neurons_counting) in enumerate(pairs)]
-    neuron_legend = ax.legend(handles=neuron_handles, title="Neurons", fontsize=5,
-                              title_fontsize=5, frameon=True, framealpha=0.9,
+    # fontsize=5/title_fontsize=5 was sized for this panel's own cramped
+    # 1-of-9 slot in the combined 3x3 paper figure -- presentation mode's
+    # own 1x3 split (_make_neural_main_split) gives this panel much more
+    # room, so a more normal size reads better there.
+    in_panel_fs = 9 if _MODE == "presentation" else 5
+    neuron_legend = ax.legend(handles=neuron_handles, title="Neurons", fontsize=in_panel_fs,
+                              title_fontsize=in_panel_fs, frameon=True, framealpha=0.9,
                               loc="upper left")
     ax.add_artist(neuron_legend)
     # Separate, standalone legend for "target" -- kept apart from the
     # "Neurons" legend above rather than merged into one multi-row box,
     # per instruction.
     target_handle = [Line2D([0], [0], color="black", lw=1.8, label="target")]
-    ax.legend(handles=target_handle, fontsize=5, frameon=True, framealpha=0.9,
+    ax.legend(handles=target_handle, fontsize=in_panel_fs, frameon=True, framealpha=0.9,
              loc="lower right")
     sns.despine(ax=ax, top=True, right=True)
 
@@ -4508,7 +4640,11 @@ def _plot_neural_dual_vs_param(
             Line2D([0], [0], color=c1, lw=2.2, label=y1_short),
             Line2D([0], [0], color=c2, lw=2.2, label=y2_short),
         ]
-        ax.legend(handles=legend_handles, fontsize=6, frameon=True,
+        # Sized for the combined 3x3 paper figure's own cramped panels --
+        # bigger in presentation mode's 1x3 split, same reasoning as
+        # _plot_n_neurons_demo_trace's own in-panel legends above.
+        dual_fs = 9 if _MODE == "presentation" else 6
+        ax.legend(handles=legend_handles, fontsize=dual_fs, frameon=True,
                  framealpha=0.9, loc="upper right", handlelength=1.5)
 
     # twinx() stacks ax2 ABOVE ax by default -- raise ax above ax2 and make
@@ -4601,8 +4737,12 @@ def _plot_outlier_pe_trace(ax, sweep_param: str, task: str = "soltani_numbers") 
                 palette=color_map, ax=ax, lw=1.8)
 
     handles, labels = ax.get_legend_handles_labels()
+    # Sized for the combined 3x3 paper figure's own cramped panels --
+    # bigger in presentation mode's 1x3 split.
+    trace_fs = 9 if _MODE == "presentation" else 5
     ax.legend(handles, [f"{float(l):g}" for l in labels], title=sym,
-              fontsize=5, title_fontsize=5, frameon=True, framealpha=0.9, loc="upper right")
+              fontsize=trace_fs, title_fontsize=trace_fs, frameon=True, framealpha=0.9,
+              loc="upper right")
 
     # start_time = -t_iti (-0.5s), end_time = t_obs (1.5s) -- one full ITI
     # before cue onset through the end of the outlier's own stimulus
@@ -4924,8 +5064,11 @@ def _plot_neural_main_activity_vs_obs(ax, sweep_param: str, task: str = "soltani
     ax.set_ylabel("Neural activity (Hz)")
     ax.set_ylim(60, 120)
     ax.set_yticks([60, 90, 120])
-    ax.legend(title=sym, fontsize=5, title_fontsize=5, frameon=True, framealpha=0.9,
-             loc="upper right")
+    # Sized for the combined 3x3 paper figure's own cramped panels --
+    # bigger in presentation mode's 1x3 split.
+    activity_fs = 9 if _MODE == "presentation" else 5
+    ax.legend(title=sym, fontsize=activity_fs, title_fontsize=activity_fs, frameon=True,
+             framealpha=0.9, loc="upper right")
     sns.despine(ax=ax, top=True, right=True)
 
 
@@ -5231,7 +5374,73 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
     sns.despine(ax=ax, top=True, right=True)
 
 
-def make_neural_main() -> Path:
+# Column identity for make_neural_main's 3x3 grid (per instruction) -- col 1
+# is each row's own raw trace/dynamics panel, col 2 links a swept parameter
+# to a behaviorally-relevant DV pair, col 3 plots that same DV pair directly
+# against each other as this row's own prediction.
+NEURAL_MAIN_COLUMN_TITLES = ["Model Dynamics", "Link to Behavior", "Predictions"]
+
+
+def _make_neural_main_split() -> list[Path]:
+    """Presentation-mode-only: make_neural_main's 3 rows (alpha_0/outlier,
+    lambda_/param_scan, n_neurons/n_neurons_snr) as THREE separate 1x3
+    figures/slides instead of one 3x3 composite -- per instruction, one
+    row per slide. NEURAL_MAIN_COLUMN_TITLES ("Model Dynamics"/"Link to
+    Behavior"/"Predictions") are dropped -- each row now gets its own
+    slide with its own descriptive title, so repeating the column headers
+    on every row would be redundant. Paper mode is untouched (still the
+    single combined make_neural_main below) -- this split is
+    presentation-only.
+
+    Each figure reuses the exact same panel-drawing helpers as the
+    combined layout, including the col-2/col-3 shared-y-axis tick fixups
+    -- no panel-drawing logic duplicated, only the layout differs.
+    """
+    paths = []
+
+    # Row 1 -- outlier experiment (alpha_0).
+    fig1, axes1 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    _plot_outlier_pe_trace(axes1[0], "alpha_0")
+    ax2_1 = _plot_outlier_param_effect(axes1[1], "alpha_0")
+    _plot_outlier_dv_scatter(axes1[2], "alpha_0")
+    if ax2_1 is not None:
+        axes1[2].sharey(ax2_1)
+        axes1[2].set_ylim(0, 50)
+        axes1[2].set_yticks([0, 25, 50])
+    path1, _ = _save_fig(fig1, "neural_main_alpha0")
+    plt.close(fig1)
+    paths.append(path1)
+
+    # Row 2 -- param_scan experiment (lambda_).
+    fig2, axes2 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    _plot_neural_main_activity_vs_obs(axes2[0], "lambda_")
+    ax2_2 = _plot_neural_main_decay_vs_param(axes2[1], "lambda_")
+    _plot_param_scan_dv_scatter(axes2[2], "lambda_")
+    if ax2_2 is not None:
+        axes2[2].sharey(ax2_2)
+        axes2[2].set_ylim(20, 100)
+        axes2[2].set_yticks([20, 60, 100])
+    path2, _ = _save_fig(fig2, "neural_main_lambda")
+    plt.close(fig2)
+    paths.append(path2)
+
+    # Row 3 -- n_neurons_snr experiment.
+    fig3, axes3 = plt.subplots(1, 3, figsize=FIGURE_SIZE, constrained_layout=True)
+    _plot_n_neurons_demo_trace(axes3[0])
+    ax2_3 = _plot_n_neurons_snr_pair(axes3[1])
+    _plot_n_neurons_snr_dv_scatter(axes3[2])
+    if ax2_3 is not None:
+        axes3[2].sharey(ax2_3)
+        axes3[2].set_ylim(0.0, 0.2)
+        axes3[2].set_yticks([0.0, 0.1, 0.2])
+    path3, _ = _save_fig(fig3, "neural_main_n_neurons")
+    plt.close(fig3)
+    paths.append(path3)
+
+    return paths
+
+
+def make_neural_main() -> Path | list[Path]:
     """3x2 figure: a second neural-predictions figure, one row per
     parameter (alpha_0, lambda_, n_neurons), each investigated via its own
     fresh grid of outlier simulations (3 observations clustered around a
@@ -5325,12 +5534,19 @@ def make_neural_main() -> Path:
     run/submit/collect; a real timing check found even a modest
     single-context outlier run exceeds a reasonable single local call,
     and param_scan's own per-real-pid 32-trial jobs cost similarly).
+
+    PRESENTATION MODE ONLY: split into three separate 1x3 figures/slides,
+    one per row (see _make_neural_main_split), column headers dropped.
+    Paper mode keeps the combined 3x3 layout below unchanged.
     """
     _apply_mode_style()
-    # Full FIGURE_SIZE[0] width (6.5in in paper mode) -- matches every other
-    # paper figure's standard width (see "Figure modes" in CLAUDE.md); this
-    # used to be scaled by 0.8 (5.2in) while paper/main.tex still embeds it
-    # at the full \textwidth, silently stretching everything (fonts, line
+    if _MODE == "presentation":
+        return _make_neural_main_split()
+    # Paper-mode-only from here. Full FIGURE_SIZE[0] width (6.5in) --
+    # matches every other paper figure's standard width (see "Figure
+    # modes" in CLAUDE.md); this used to be scaled by 0.8 (5.2in) while
+    # paper/main.tex still embeds it at the full \textwidth, silently
+    # stretching everything (fonts, line
     # widths) ~25% beyond what _apply_paper_style() actually tuned for.
     fig, axes = plt.subplots(3, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0),
                              constrained_layout=True)
@@ -5358,6 +5574,13 @@ def make_neural_main() -> Path:
         axes[0, 2].set_ylim(0, 50)
         axes[0, 2].set_yticks([0, 25, 50])
 
+    # Column headers (per instruction) -- row 1 only, since column
+    # identity holds for all 3 rows below it too; no panel in this figure
+    # has its own per-panel title to compete with (see _plot_outlier_dv_scatter
+    # etc.'s own docstrings -- none of the three call ax.set_title).
+    for ax, header in zip(axes[0], NEURAL_MAIN_COLUMN_TITLES):
+        ax.set_title(header, fontweight="bold")
+
     _plot_neural_main_activity_vs_obs(axes[1, 0], "lambda_")
     ax2_r2 = _plot_neural_main_decay_vs_param(axes[1, 1], "lambda_")
     _plot_param_scan_dv_scatter(axes[1, 2], "lambda_")
@@ -5379,12 +5602,6 @@ def make_neural_main() -> Path:
         axes[2, 2].set_ylim(0.0, 0.2)
         axes[2, 2].set_yticks([0.0, 0.1, 0.2])
 
-    # Nudged further left and up (was x=-0.1, y=1.1 default; y raised again
-    # from 1.18 -- still overlapped the y-axis tick labels) -- at the
-    # default position a letter can sit close enough to a panel's own top
-    # tick marks/left y-axis to visually merge with them, occasionally
-    # misreadable at a glance.
-    _label_panels(axes, x=-0.15, y=1.25)
     out_path, _ = _save_fig(fig, "neural_main")
     plt.close(fig)
     return out_path
@@ -5494,9 +5711,13 @@ def _plot_synaptic_iti_dynamics_panel(ax, df: pd.DataFrame, task: str) -> None:
     sns.despine(ax=ax)
     # title_fontsize explicitly matched to fontsize -- an unset title
     # falls back to rcParams["axes.titlesize"] (10pt in paper mode), a
-    # visible mismatch against 7pt entries; every other titled legend in
+    # visible mismatch against the entries; every other titled legend in
     # this file pairs the two explicitly for exactly this reason.
-    ax.legend(handles=handles, title="Perturbation", fontsize=7, title_fontsize=7,
+    # Sized for the combined 2x3 paper figure's own cramped panel --
+    # bigger in presentation mode's split-out synaptic_iti_perturbation.svg
+    # (per instruction, upsized further than neural_main's own 5/6->9 bump).
+    iti_fs = 12 if _MODE == "presentation" else 7
+    ax.legend(handles=handles, title="Perturbation", fontsize=iti_fs, title_fontsize=iti_fs,
              frameon=True, framealpha=0.85)
 
 
@@ -5577,10 +5798,67 @@ def _plot_synaptic_dose_response_panel(ax_rmse, ax_sigma, raw_df: pd.DataFrame) 
     sns.despine(ax=ax_rmse, right=True)
     sns.despine(ax=ax_sigma, top=True, right=False, left=True, bottom=True)
     ax_sigma.tick_params(axis="y", which="both", right=True, left=False)
-    ax_rmse.legend(handles=handles, frameon=True, framealpha=0.85, fontsize=7)
+    # Same presentation-mode upsizing as _plot_synaptic_iti_dynamics_panel's
+    # own legend above.
+    dose_fs = 12 if _MODE == "presentation" else 7
+    ax_rmse.legend(handles=handles, frameon=True, framealpha=0.85, fontsize=dose_fs)
 
 
-def make_synaptic_main() -> Path:
+def _make_synaptic_main_split() -> list[Path]:
+    """Presentation-mode-only: make_synaptic_main's 2 rows as TWO separate
+    figures/slides instead of one 2x3 composite, per instruction:
+      Figure 1 -- row 1: schematic panel (left blank for the same manual
+        Inkscape inset the combined layout uses -- SYNAPTIC_OVERVIEW_
+        SCHEMATIC, contrasting the recurrent vs PES-learned mechanisms)
+        + per-pid RMSE-vs-human boxplot (NEF vs NEF_synaptic).
+      Figure 2 -- row 2: ITI-perturbation single-trial dynamics +
+        dose-response (dual y-axis).
+    Paper mode is untouched (still the single combined make_synaptic_main
+    below) -- this split is presentation-only. Both figures reuse the
+    exact same panel-drawing helpers/data paths as the combined layout.
+    """
+    task = "soltani_numbers"
+    iti_prefix = "iti_perturbation_gated"
+
+    # Figure 1 -- schematic (blank, manual inset) + RMSE fit boxplot.
+    fig1, axes1 = plt.subplots(1, 2, figsize=FIGURE_SIZE, constrained_layout=True,
+                               gridspec_kw={"width_ratios": [2, 1]})
+    ax_schematic, ax_fit = axes1
+    ax_schematic.axis("off")
+    gathered = _gather_metric_data(
+        "numbers", ["NEF", "NEF_synaptic"],
+        lambda _task_key, m: _synaptic_model_fit_path(m), _get_loss, "rmse",
+    )
+    if gathered is not None:
+        fit_order, fit_df = gathered
+        _plot_synaptic_fit_boxplot_panel(ax_fit, fit_df, fit_order)
+    else:
+        _synaptic_missing_panel(ax_fit, _synaptic_model_fit_path("NEF_synaptic"))
+    path1, _ = _save_fig(fig1, "synaptic_overview")
+    plt.close(fig1)
+
+    # Figure 2 -- ITI-perturbation dynamics + dose-response.
+    fig2, axes2 = plt.subplots(1, 2, figsize=FIGURE_SIZE, constrained_layout=True,
+                               gridspec_kw={"width_ratios": [2, 1]})
+    ax_dyn, ax_dose = axes2
+    dyn_path = NEURAL_EXPERIMENTS_OUT_DIR / f"{iti_prefix}_dynamics_{task}.pkl"
+    if dyn_path.exists():
+        _plot_synaptic_iti_dynamics_panel(ax_dyn, pd.read_pickle(dyn_path), task)
+    else:
+        _synaptic_missing_panel(ax_dyn, dyn_path)
+    raw_path = NEURAL_EXPERIMENTS_OUT_DIR / f"{iti_prefix}_{task}_raw.pkl"
+    if raw_path.exists():
+        ax_sigma = ax_dose.twinx()
+        _plot_synaptic_dose_response_panel(ax_dose, ax_sigma, pd.read_pickle(raw_path))
+    else:
+        _synaptic_missing_panel(ax_dose, raw_path)
+    path2, _ = _save_fig(fig2, "synaptic_iti_perturbation")
+    plt.close(fig2)
+
+    return [path1, path2]
+
+
+def make_synaptic_main() -> Path | list[Path]:
     """2x3 figure introducing NEF_synaptic (the PES-learned "synaptic"
     value mechanism) alongside NEF ("recurrent") -- soltani_numbers only,
     the one task with an end-to-end NEF_synaptic pipeline so far.
@@ -5643,8 +5921,15 @@ def make_synaptic_main() -> Path:
     reproduced this same visual content as standalone half-column-width
     figures; both are now retired (superseded by this figure) -- see
     archive/HISTORY_modeling_2026.md for the full account.
+
+    PRESENTATION MODE ONLY: split into two separate figures/slides, one
+    per row (see _make_synaptic_main_split). Paper mode keeps the
+    combined 2x3 layout below unchanged.
     """
     _apply_mode_style()
+    if _MODE == "presentation":
+        return _make_synaptic_main_split()
+    # Paper-mode-only from here.
     fig = plt.figure(figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.9 * 0.75 - 1.5),
                      constrained_layout=True)
     gs = fig.add_gridspec(2, 3)
@@ -5687,7 +5972,6 @@ def make_synaptic_main() -> Path:
     else:
         _synaptic_missing_panel(ax_dose, raw_path)
 
-    _label_panels([ax_schematic, ax_fit, ax_dyn, ax_dose], y=1.15)
     out_path, _ = _save_fig(fig, "synaptic_main")
     plt.close(fig)
     return out_path
@@ -5956,6 +6240,7 @@ FIGURES = {
     "lambda_reliability": make_lambda_reliability,
     "lambda_humanvmodel": make_lambda_humanvmodel,
     "lambda_sigma_crosstask": make_lambda_sigma_crosstask,
+    "lambda_sigma_reliability": make_lambda_sigma_reliability,
     "sigma_overview": make_sigma_overview,
     "sigma_main": make_sigma_main,
     "sigma_reliability": make_sigma_reliability,
