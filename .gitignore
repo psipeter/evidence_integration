@@ -61,13 +61,13 @@ paper/figures/*
 !paper/figures/tasks_overview.pdf
 !paper/figures/models_overview_paper.pdf
 !paper/figures/model_performance.pdf
-# lambda_main_edited, not the plain script-generated lambda_main -- hand
-# touch-ups on top of the script's own output (main.tex now embeds the
-# edited PDF); .svg tracked too since it's the actual hand-edited source
-# for the next round of manual touch-ups, per this file's own
-# active-hand-editing exception (see the block comment above).
-!paper/figures/lambda_main_edited.pdf
-!paper/figures/lambda_main_edited.svg
+# lambda_main_edited retired -- the lambda-definition inset that used to
+# require hand-placing via Inkscape (see archive'd history/chat) now
+# renders NATIVELY inside make_lambda_main itself, so main.tex embeds the
+# plain script-generated PDF directly again, same convention as
+# model_performance.pdf/sigma_main.pdf above (no hand-edited .svg source
+# needed since there's no more manual touch-up step).
+!paper/figures/lambda_main.pdf
 !paper/figures/sigma_main.pdf
 !paper/figures/neural_main.pdf
 # neural_main_edited, same hand-touch-up convention as lambda_main_edited

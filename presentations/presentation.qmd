@@ -91,13 +91,13 @@ bibliography: "references.bib"
 ## Individual Differences in $\lambda$
 
 ::: {.image-card}
-![](figures/lambda_distributions.svg){width="100%"}
+![](figures/lambda_distributions_edited.svg){width="100%"}
 :::
 
 ## People have Noisy Responses ($\sigma$)
 
 ::: {.image-card}
-![](figures/sigma_distributions.svg){width="100%"}
+![](figures/sigma_distributions_edited.svg){width="100%"}
 :::
 
 ## Response Noise Autocorrelation

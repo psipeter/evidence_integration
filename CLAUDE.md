@@ -118,15 +118,28 @@ scientific framing (goals, current thread, results, NEF architecture).
 | NEF | Spiking NEF integrator (emergent power-law dynamics); RMSE-fit only | alpha_0, lambda_ |
 | `{Mean,LeakyIntegrator,PrimacyRecency,RL_lambda}_resp_noise` | base model + i.i.d. RESPONSE noise via `add_noise()`; all 4 datasets | base params + sigma_resp |
 
-**Reader-facing label:** the paper/figures call NEF "SNN" (Spiking Neural
-Network) — more legible to a general Science Advances audience than "NEF"
-(Neural Engineering Framework), which is introduced properly in Materials
-and Methods instead. This is a DISPLAY-LABEL override only
-(`scripts/make_figures.py`'s `MODEL_LABEL`/`MODEL_DISPLAY` dicts) — the
-internal model_type string, dict keys, and every filename
-(`data/runs/rmse/NEF_*.pkl`, etc.) stay `"NEF"` unchanged. Any figure with
-an already-generated legend predates this and still shows "NEF" until
-regenerated.
+**Reader-facing labels:** the paper/figures use shortened/relabeled
+display names for four models — internal model_type strings, dict keys,
+and every filename (`data/runs/rmse/NEF_*.pkl`, etc.) are UNCHANGED;
+these are DISPLAY-LABEL overrides only
+(`scripts/make_figures.py`'s `MODEL_LABEL`/`MODEL_DISPLAY` dicts, both now
+identical in content):
+- `NEF` → "SNN" (Spiking Neural Network) — more legible to a general
+  Science Advances audience than "NEF" (Neural Engineering Framework),
+  which is introduced properly in Materials and Methods instead.
+- `RL_lambda` → "DPE" (Discounted Prediction Error) — avoids the
+  "RL"/reward framing (these tasks have no reward) and avoids "adaptive
+  learning rate," which in the Behrens/Nassar/Yu-Dayan literature
+  specifically means a learning rate that responds to volatility/
+  surprise — a property this model's fixed power-law decay schedule
+  doesn't have. Spelled out in full at first use (Fig. 2's caption in
+  `paper/main.tex`), abbreviated "DPE" everywhere after.
+- `LeakyIntegrator` → "LI", `PrimacyRecency` → "PR" — consistent
+  abbreviated naming across every figure, both defined at first use
+  alongside DPE (Fig. 3's caption).
+
+Any figure with an already-generated legend predates one or more of
+these overrides and still shows the old name until regenerated.
 
 **Retired from active analysis** (code archived, restorable): see
 `docs/DECISIONS.md`. Doesn't affect the models in the table above or any

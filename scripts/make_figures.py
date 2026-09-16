@@ -170,7 +170,7 @@ TASK_LABELS = {
     "balls": "Proportion inference",
     "snacks": "Value integration",
 }
-TASK_ORDER = ["snacks", "balls", "colors", "numbers"]
+TASK_ORDER = ["balls", "colors", "numbers", "snacks"]
 DATASET_FOR_TASK = {"numbers": "soltani_numbers", "colors": "soltani_colors"}
 
 
@@ -368,20 +368,36 @@ MODEL_COLORS = {
 # key and as a component of every filename it touches) was never meant to
 # be read literally as legend text. Defined ONCE, here, so every legend
 # convention below renders it identically rather than drifting: MODEL_LABEL
-# (this dict -- full model names, just this one reformatted, e.g.
-# make_model_performance's own 5-entry legend) and MODEL_DISPLAY (defined
-# further down, for the abbreviated multi-source legends elsewhere in this
-# file -- LI/PR/etc) both use it.
+# (this dict, used e.g. by make_model_performance's own 5-entry legend)
+# and MODEL_DISPLAY (defined further down, for the abbreviated
+# multi-source legends elsewhere in this file) now use the SAME
+# abbreviated forms for every model -- no more full "LeakyIntegrator"/
+# "PrimacyRecency" in any figure legend, per instruction.
 #
 # "NEF" -> "SNN" for reader-facing text ONLY (paper/figures, per instruction
 # -- "SNN" reads clearly to a general Science Advances audience without
 # first knowing what the Neural Engineering Framework is; the specific
 # NEF methodology is introduced properly in Materials and Methods instead).
-# The internal model_type string "NEF" is UNCHANGED everywhere else --
-# dict keys, filenames (data/runs/rmse/NEF_*.pkl, etc.), MODEL_COLORS --
-# this is a display-label override only, not a rename.
-_RL_LAMBDA_PRETTY = r"RL-$\lambda$"
-MODEL_LABEL = {"RL_lambda": _RL_LAMBDA_PRETTY, "NEF": "SNN"}
+# "RL_lambda" -> "DPE" ("Discounted Prediction Error"), per instruction --
+# avoids "RL"/reward framing (these tasks have no reward) and the
+# "adaptive"/volatility-tracking connotation "adaptive learning rate" has
+# in the Behrens/Nassar/Yu-Dayan literature, which this model's FIXED
+# power-law decay schedule doesn't actually have. Spelled out in full at
+# first use (Fig.~2's caption in paper/main.tex), abbreviated everywhere
+# after, matching how "LI"/"PR" are introduced in Fig.~3's caption.
+# "LeakyIntegrator" -> "LI", "PrimacyRecency" -> "PR" for the SAME
+# reason -- consistent abbreviated model names across every figure.
+# The internal model_type strings (RL_lambda/NEF/LeakyIntegrator/
+# PrimacyRecency) are UNCHANGED everywhere else -- dict keys, filenames
+# (data/runs/rmse/NEF_*.pkl, etc.), MODEL_COLORS -- this is a
+# display-label override only, not a rename.
+_RL_LAMBDA_PRETTY = "DPE"
+MODEL_LABEL = {
+    "RL_lambda": _RL_LAMBDA_PRETTY,
+    "NEF": "SNN",
+    "LeakyIntegrator": "LI",
+    "PrimacyRecency": "PR",
+}
 
 # (task_key, panel title, model list) -- ALL FOUR tasks now get the SAME
 # 5-model roster (Mean/LeakyIntegrator/PrimacyRecency/RL_lambda/NEF), unlike
@@ -397,10 +413,10 @@ MODEL_LABEL = {"RL_lambda": _RL_LAMBDA_PRETTY, "NEF": "SNN"}
 # other three -- see fitting/model_params.py's own module docstring for why
 # carrabin differs).
 TASK_PANELS = [
-    ("snacks", "Value\nintegration", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]),
     ("balls", "Proportion\ninference", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]),
     ("colors", "Binary\nintegration", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]),
     ("numbers", "Continuous\nintegration", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]),
+    ("snacks", "Value\nintegration", ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]),
 ]
 
 
@@ -1060,9 +1076,9 @@ def _power_law(n, A, lam):
 # lambda for that task at all (no lambda panel exists there), so there is
 # nothing to reproduce.
 LAMBDA_TASK_PANELS = [
-    ("snacks", "Value integration"),
     ("colors", "Binary integration"),
     ("numbers", "Continuous integration"),
+    ("snacks", "Value integration"),
 ]
 
 # Minimum-observation threshold and n-offset for the lambda fit itself, PER
@@ -1254,10 +1270,13 @@ def _plot_lambda_distribution(ax, human_lam: pd.Series, task_key: str,
 # ── Sanity check: split-half reliability of lambda + cross-task comparison ──
 
 # Abbreviated legend labels for the sanity-check panels below, which pack up
-# to 5 sources into one legend per panel -- "Mean"/"NEF" stay full-length
-# (already short), LeakyIntegrator/PrimacyRecency/RL_lambda get shortened so
-# a 5-entry legend stays compact. "Human" is never in this dict (looked up
-# via .get(label, label), so it passes through unchanged).
+# to 5 sources into one legend per panel. Now identical in content to
+# MODEL_LABEL above (both dicts abbreviate every model the same way) --
+# kept as its own dict rather than merged, since call sites elsewhere in
+# this file already reference MODEL_DISPLAY by name; not worth a
+# find/replace across every one for a purely cosmetic consolidation.
+# "Human" is never in this dict (looked up via .get(label, label), so it
+# passes through unchanged).
 MODEL_DISPLAY = {
     "Mean": "Mean",
     "LeakyIntegrator": "LI",
@@ -1768,6 +1787,21 @@ def make_lambda_main() -> Path | list[Path]:
         _plot_lambda_distribution(ax, lam, task_key)
         ax.set_ylabel("Density" if i == 0 else "")
         ax.tick_params(axis="y", labelleft=(i == 0))
+        if task_key == "numbers":
+            # NATIVE inset (see _plot_lambda_metric_demo's own docstring)
+            # in this panel's own real whitespace -- the density curve
+            # peaks near x~0.25-0.3 and has decayed to near-zero by
+            # x~1.2, leaving the upper-right quadrant genuinely empty
+            # (verified directly by rendering this panel alone). Placed in
+            # the upper-rightmost portion specifically (per instruction) --
+            # bounds chosen from the ACTUAL kde curve height at this
+            # panel's own x-range (queried directly, not eyeballed).
+            # y0/x0 raised further (0.48/0.54 -> 0.56/0.58) after a visual
+            # check still showed the inset's own bottom-left corner
+            # crowding the curve/rug ticks beneath it -- more headroom than
+            # the raw curve-height number alone suggested.
+            ax_inset = ax.inset_axes([0.58, 0.56, 0.40, 0.40])
+            _plot_lambda_metric_demo(ax_inset, compact=True)
 
     _label_panels(axes_row0 + axes_row1)
     out_path, _ = _save_fig(fig, "lambda_main")
@@ -1775,31 +1809,28 @@ def make_lambda_main() -> Path | list[Path]:
     return out_path
 
 
-def make_lambda_metric() -> Path:
-    """Single-panel figure: the "lambda definition" demo -- fitting
+def _plot_lambda_metric_demo(ax, *, compact: bool = False) -> None:
+    """Core content of the "lambda definition" demo -- fitting
     A*n^(-lambda) to one representative human pid's own mean |delta
-    response| curve (numbers task) -- previously row 2 col 1 of the
-    now-archived make_lambda_giant (see archive/scripts/
-    archive_lambda_giant.py), unchanged, pulled out as its own standalone
-    figure so it can be composited into make_lambda_main as a hand-placed
-    Inkscape inset from this figure's saved SVG, per instruction.
+    response| curve (numbers task). Shared by make_lambda_metric (its own
+    standalone figure) and make_lambda_main (as a compact NATIVE inset in
+    panel E's own real whitespace, per instruction -- rendered in the SAME
+    matplotlib/rcParams context as the rest of that figure, unlike an
+    earlier considered approach of compositing this figure's separately-
+    saved SVG afterward, which would have risked a font/line-weight scale
+    mismatch against the panel hosting it).
 
-    Visual/fit details are IDENTICAL to the giant's own inlined version
-    (not the plainer _plot_lambda_demo helper make_lambda_human/
-    make_lambda_overview call): sns.regplot's binned mean+CI markers (one
-    bin per observation, via x_bins=sorted unique observation values)
-    rather than a bare scatter, and the shortened "delta R" ylabel.
+    Visual/fit details are IDENTICAL to the now-archived make_lambda_giant's
+    own inlined version (not the plainer _plot_lambda_demo helper
+    make_lambda_human/make_lambda_overview call): sns.regplot's binned
+    mean+CI markers (one bin per observation, via x_bins=sorted unique
+    observation values) rather than a bare scatter, and the shortened
+    "delta R" ylabel.
 
-    SQUARE figsize (side ~3.7in), NOT the shared 1-panel FIGURE_SIZE --
-    per instruction, sized to match one panel of make_lambda_main's own
-    2x3 grid (that grid is (FIGURE_SIZE[0], FIGURE_SIZE[1]*1.9*0.75) over
-    3 cols x 2 rows, so each panel is ~3.53in wide x ~3.88in tall; 3.7 is
-    the average of the two, close enough for an Inkscape inset that will
-    be manually rescaled onto that grid anyway).
+    `compact=True` (the inset case) shrinks marker size, fit-line weight,
+    and label/tick fontsize so the demo reads clearly at inset scale
+    without overwhelming the panel it sits inside.
     """
-    _apply_mode_style()
-    fig, ax = plt.subplots(figsize=(3.7, 3.7), constrained_layout=True)
-
     demo_task_key = "numbers"
     human_delta_demo = _load_lambda_delta(demo_task_key, _human_data_path(demo_task_key))
     lam_demo = _fit_lambda_series(human_delta_demo, LAMBDA_N_OFFSET[demo_task_key])
@@ -1814,31 +1845,80 @@ def make_lambda_metric() -> Path:
     A_fit, lam_fit = popt
 
     bin_centers = sorted(g["n"].unique())
-    sns.regplot(data=g, x="n", y="delta", x_bins=bin_centers, fit_reg=False,
-               color=HUMAN_COLOR, ax=ax)
+    scatter_kws = {"s": 6} if compact else None
+    # seaborn's own regplot (x_bins path) hardcodes each CI segment's
+    # linewidth as rcParams["lines.linewidth"] * 1.75 -- not exposed via
+    # scatter_kws/line_kws at all (verified directly against seaborn
+    # 0.13's _RegressionPlotter.scatterplot source; passing "elinewidth"
+    # through scatter_kws raises, since that path draws CI bars via a
+    # plain ax.plot, then separately calls ax.scatter for the markers,
+    # neither of which accepts that kwarg). Thinned for the inset (per
+    # instruction -- the default reads as way too heavy at inset scale)
+    # via a temporary rc override instead, computed so the SAME 1.75x
+    # multiplier lands at the target width.
+    ci_lw = (0.8 / 1.75) if compact else plt.rcParams["lines.linewidth"]
+    with plt.rc_context({"lines.linewidth": ci_lw}):
+        sns.regplot(data=g, x="n", y="delta", x_bins=bin_centers, fit_reg=False,
+                   color=HUMAN_COLOR, ax=ax, scatter_kws=scatter_kws)
     n_smooth = np.linspace(n.min(), n.max(), 200)
-    fit_line, = ax.plot(n_smooth, _power_law(n_smooth, A_fit, lam_fit),
-                        color=HUMAN_COLOR, lw=2.5, zorder=4)
+    # Highlighted with a palette color (not HUMAN_COLOR/gray, which reads
+    # as just another error bar) and a high zorder so it draws ON TOP of
+    # the error bars instead of being buried under them -- per instruction.
+    fit_color = get_palette(6)[0] if compact else HUMAN_COLOR
+    ax.plot(n_smooth, _power_law(n_smooth, A_fit, lam_fit),
+           color=fit_color, lw=1.4 if compact else 2.5, zorder=10)
 
-    ax.set_xlabel("Observation")
-    ax.set_ylabel("\u0394R")
-    ax.set_title("\u03bb definition", color="0.3")
-    ax.set_xlim(left=0)
-    ax.set_xticks(sorted(set([0.0] + list(ax.get_xticks()))))
-    ax.set_ylim(bottom=0)
+    ax.set_xlim(0, 15)
+    ax.set_xticks([0, 5, 10, 15])
+    # Fewer y-ticks (per instruction) -- nice_ticks pads BELOW data_min
+    # unconditionally (even when data_min is a hard floor, like 0 here --
+    # delta response can't be negative), so drop any tick it produced
+    # below 0 rather than accept a negative lower bound.
+    y_ticks = [t for t in nice_ticks(0, float(y.max()), n=3) if t >= -1e-9]
+    ax.set_ylim(y_ticks[0], y_ticks[-1])
+    ax.set_yticks(y_ticks)
+    if compact:
+        ax.set_xlabel("Observation", fontsize=6, labelpad=2)
+        ax.set_ylabel("ΔR", fontsize=6, labelpad=6)
+        ax.tick_params(labelsize=5, length=2, pad=1)
+        # fontsize small enough to fit the inset's own narrow width
+        # without overflowing it (per instruction) -- checked directly.
+        ax.set_title("λ: power-law fit to ΔR decay", fontsize=6, pad=5)
+    else:
+        # Title removed (added manually once composited as an Inkscape
+        # inset, per instruction) -- but xlabel/ylabel KEPT (per
+        # instruction), unlike an earlier version of this edit that also
+        # cleared those.
+        ax.set_xlabel("Observation")
+        ax.set_ylabel("ΔR")
     sns.despine(ax=ax, top=True, right=True)
+    # Legend removed (per instruction) -- the fit equation/participant/
+    # task identity it used to carry gets added manually once the
+    # standalone figure is composited as an Inkscape inset.
 
-    blank = Line2D([], [], linestyle="none")
-    leg = ax.legend(
-        [fit_line, blank, blank],
-        [r"$A n^{-\lambda}$, $\lambda=%.2f$" % lam_fit,
-         f"Participant #{demo_pid}",
-         TASK_LABELS[demo_task_key]],
-        loc="lower right", frameon=True, framealpha=0.9,
-        handlelength=1.2, fontsize=8,
-    )
-    leg.get_texts()[2].set_color(TASK_COLORS[demo_task_key])
 
+def make_lambda_metric() -> Path:
+    """Single-panel figure: the "lambda definition" demo (see
+    _plot_lambda_metric_demo) -- previously row 2 col 1 of the
+    now-archived make_lambda_giant (see archive/scripts/
+    archive_lambda_giant.py), pulled out as its own standalone figure so
+    it can ALSO be composited into make_lambda_main as a hand-placed
+    Inkscape inset from this figure's saved SVG -- an alternative to (not
+    a replacement for) that same demo now also rendering as a NATIVE inset
+    directly inside make_lambda_main itself (see that function's own
+    docstring) -- kept as its own figure regardless, in case a hand-
+    placed version is ever preferred over the native one.
+
+    SQUARE figsize (side ~3.7in), NOT the shared 1-panel FIGURE_SIZE --
+    per instruction, sized to match one panel of make_lambda_main's own
+    2x3 grid (that grid is (FIGURE_SIZE[0], FIGURE_SIZE[1]*1.9*0.75) over
+    3 cols x 2 rows, so each panel is ~3.53in wide x ~3.88in tall; 3.7 is
+    the average of the two, close enough for an Inkscape inset that will
+    be manually rescaled onto that grid anyway).
+    """
+    _apply_mode_style()
+    fig, ax = plt.subplots(figsize=(3.7, 3.7), constrained_layout=True)
+    _plot_lambda_metric_demo(ax)
     out_path, _ = _save_fig(fig, "lambda_metric")
     plt.close(fig)
     return out_path
@@ -2804,8 +2884,9 @@ def make_sigma_main() -> Path | list[Path]:
     _apply_mode_style()
     if _MODE == "presentation":
         return _make_sigma_main_split()
-    # Paper-mode-only from here.
-    height = FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0
+    # Paper-mode-only from here. +0.5in (per instruction) to give panel C
+    # a bit more room for the sigma-demo inset below.
+    height = FIGURE_SIZE[1] * 2.1 * 0.75 - 1.0 + 0.5
     fig = plt.figure(figsize=(FIGURE_SIZE[0], height), constrained_layout=True)
     gs = fig.add_gridspec(4, 3, height_ratios=[1, 1, 1, 0.12])
     axes = np.array([[fig.add_subplot(gs[row, col]) for col in range(3)]
@@ -2819,6 +2900,12 @@ def make_sigma_main() -> Path | list[Path]:
         _plot_variability_panel(ax, task_key, title, include_models=False,
                                 show_ylabel=(i == 0))
         ax.set_ylabel("Density" if i == 0 else "")
+        if task_key == "numbers":
+            # Experimental: NATIVE sigma-demo inset, trying the same
+            # approach make_lambda_main's own lambda-demo inset uses (see
+            # _plot_sigma_demo_inset's own docstring for how heavily it
+            # had to be consolidated to fit here).
+            _plot_sigma_demo_inset(ax)
 
     # Row 2 -- residual-variance growth, titles cleared (row 1 above
     # already names each task). See _load_variance_growth_data/
@@ -2941,6 +3028,470 @@ def make_sigma_model_correlation() -> Path:
     return out_path
 
 
+# -- Sigma-calculation demo (real soltani_numbers data, one pid) -----------
+
+# One real pid + 3 hand-picked (observation, qid) repeat groups -- chosen
+# by directly inspecting pid 1's own 32 qualifying groups (see chat):
+# different qid AND different observation index each time (to make clear
+# sigma pools across BOTH, not just one fixed slice), spanning a clean
+# low-to-high std range so the three fitted-Gaussian widths read as
+# visually distinct. n=4 repeats every time -- soltani_numbers' own
+# 32-trials/8-qids design gives EXACTLY 4 repeats per (observation, qid)
+# group for every pid, always (verified directly: zero variation across
+# all 46 pids) -- there is no real "different group sizes" variant to
+# draw on here, confirmed before settling on this design.
+SIGMA_DEMO_PID = 1
+SIGMA_DEMO_EXAMPLES = [(1, 5), (2, 4), (3, 2)]  # (observation, qid) pairs
+# RAW 0-100 scale, not the [-1,1] scale NEF/the models actually see -- per
+# instruction, the reader has no reason to already know about the x/50-1
+# rescale (scripts/build_model_inputs.py), so this demo is phrased in the
+# scale the real task/participant actually used.
+SIGMA_DEMO_XLIM = (0.0, 100.0)
+SIGMA_DEMO_MIN_TRIALS = 3  # matches _qid_response_std's own convention
+# Fixed visual peak height for every fitted-Gaussian bump, REGARDLESS of
+# its own std -- a raw norm.pdf peak is inversely proportional to std, so
+# without this normalization a tight (low-std) group's curve would tower
+# over a loose (high-std) one, visually implying the opposite of what the
+# width itself already shows. Each curve is normalized to its own peak
+# before scaling by this constant, so only WIDTH varies across panels.
+SIGMA_DEMO_BUMP_HEIGHT = 0.42
+
+
+def _sigma_demo_pid_groups(pid: int) -> pd.DataFrame:
+    """Every (observation, qid) repeat group for one real soltani_numbers
+    pid, restricted to the SAME prefix window (`observation < 4`) and
+    min-trials filter (`SIGMA_DEMO_MIN_TRIALS`) `_qid_response_std` itself
+    uses -- so this demo's own "sigma" number is directly comparable to
+    (not a simplified stand-in for) the real project-wide metric.
+
+    Also attaches each group's own real STIMULUS sequence (`value`,
+    observations 0..obs inclusive) -- `qid` is a TRIAL-level label (every
+    trial sharing one qid follows the same generative template), so every
+    trial in a group has an IDENTICAL value sequence through the prefix
+    window by construction; verified directly (pid 1, qid 5: all 4
+    trials read [65, 73, 73, 62] through observation 3, on the raw scale).
+    Reading just the first such trial is therefore exact, not an
+    approximation.
+
+    Both `responses` and `sequence` are converted to the RAW 0-100 scale
+    (`(value + 1) * 50`, the exact inverse of scripts/build_model_inputs.py's
+    own x/50-1) before `std` is computed -- a linear rescale, so this is
+    the SAME real spread the project-wide [-1,1] sigma reflects, just in
+    units the reader doesn't need the model-input transform to interpret.
+    """
+    df = pd.read_pickle(data_path("soltani_numbers.pkl"))
+    df = df[(df["pid"] == pid) & (df["observation"] < 4)].copy()
+    df["response"] = (df["response"] + 1.0) * 50.0
+    df["value"] = (df["value"] + 1.0) * 50.0
+
+    groups = (df.groupby(["observation", "qid"])["response"]
+              .apply(list).reset_index(name="responses"))
+    groups["n"] = groups["responses"].apply(len)
+    groups = groups[groups["n"] >= SIGMA_DEMO_MIN_TRIALS].copy()
+    groups["std"] = groups["responses"].apply(lambda r: float(np.std(r, ddof=1)))
+
+    def _sequence(row):
+        sub = df[(df["qid"] == row["qid"]) & (df["observation"] <= row["observation"])]
+        first_trial = sub["trial"].iloc[0]
+        return sub[sub["trial"] == first_trial].sort_values("observation")["value"].tolist()
+
+    groups["sequence"] = groups.apply(_sequence, axis=1)
+    return groups
+
+
+def _plot_sigma_demo_sequence_text(ax, sequence: list, *, fontsize: float = 7,
+                                    stacked: bool = True) -> None:
+    """Left-hand cell alongside one number-line row -- the real stimulus
+    sequence (observations 0..obs, `value` column) that produced that
+    row's repeated responses. STACKED vertically (one value per line) by
+    default, not comma-joined on one line -- per instruction, so this
+    column can stay narrow (less horizontal space) regardless of how many
+    observations a given example spans. `stacked=False` (the sigma_main
+    inset's own non-graphical table variant, per instruction) instead
+    joins them on one line, trading the narrower width for a much shorter
+    row -- appropriate there since that layout has horizontal room to
+    spare but very little vertical room."""
+    ax.axis("off")
+    if stacked:
+        seq_str = "\n".join(f"{v:.0f}" for v in sequence)  # raw scale -> whole numbers
+        # linespacing tightened + clip_on as a safety net for the inset
+        # case (fontsize<6, up to 3 stacked lines) -- verified directly
+        # that at the original 1.4 spacing, a 3-line block could overflow
+        # its own narrow axes box into whatever sits below it.
+        linespacing = 1.4 if fontsize >= 6 else 1.1
+        ax.text(1.0, 0.5, seq_str, ha="right", va="center", fontsize=fontsize,
+                linespacing=linespacing, clip_on=True, transform=ax.transAxes)
+    else:
+        # No space after the comma (per instruction) -- shorter string,
+        # less width needed.
+        seq_str = ",".join(f"{v:.0f}" for v in sequence)
+        # Right-anchored (not centered) -- a longer sequence (up to 4
+        # comma-joined values) grows LEFTWARD, away from the responses
+        # column immediately to its right, rather than bleeding into it
+        # from both sides (verified directly: centered text from a 3-4
+        # value sequence visibly collided with the responses column's own
+        # text on a first render).
+        ax.text(1.0, 0.5, seq_str, ha="right", va="center", fontsize=fontsize,
+                transform=ax.transAxes)
+
+
+def _plot_sigma_demo_responses_text(ax, responses: list, *, fontsize: float = 7) -> None:
+    """Non-graphical alternative (per instruction) to
+    _plot_sigma_demo_number_line's own plot -- the same real repeated
+    response values, single-line comma-joined, for a layout with too
+    little vertical room to fit a legible plot (sigma_main's own inset --
+    see _plot_sigma_demo_inset)."""
+    ax.axis("off")
+    # No space after the comma (per instruction) -- shorter string, less
+    # width needed.
+    resp_str = ",".join(f"{v:.0f}" for v in responses)
+    # Left-anchored (not centered) -- grows RIGHTWARD, away from the
+    # sequence column immediately to its left (see that function's own
+    # note for why centered text collided here).
+    ax.text(0.0, 0.5, resp_str, ha="left", va="center", fontsize=fontsize,
+            transform=ax.transAxes)
+
+
+def _plot_sigma_demo_sigma_label(ax, sigma: float, *, fontsize: float = 8) -> None:
+    """Narrow right-hand cell alongside one number-line row -- that
+    group's own std, per instruction (moved from centered-above-the-peak
+    inside the plot itself, to a dedicated column to its right). Plain
+    numeric value only, no "σ=" prefix -- the column's own title ($\\sigma_i$,
+    see make_sigma_demo) already carries that meaning."""
+    ax.axis("off")
+    ax.text(0.0, 0.5, f"{sigma:.1f}", ha="left", va="center",
+            fontsize=fontsize, transform=ax.transAxes)
+
+
+def _plot_sigma_demo_ellipsis(ax, *, fontsize: float = 14) -> None:
+    """Compact divider row between two number-line rows -- a vertical
+    ellipsis standing in for the other (observation, qid) groups that get
+    folded into the same average but aren't drawn individually (see
+    make_sigma_demo's own docstring for which two rows this sits between
+    and why).
+
+    Three stacked periods with a tight linespacing (per instruction),
+    not the single "⋮" glyph -- that character's own internal dot spacing
+    is fixed by the font and can't be tightened directly."""
+    ax.axis("off")
+    ax.text(0.5, 0.5, ".\n.\n.", ha="center", va="center", fontsize=fontsize,
+            linespacing=0.55, transform=ax.transAxes)
+
+
+# EXPERIMENTAL (per instruction: "let's have a branch for the abstract
+# version... then try it out") -- when True, the inset's table cells show
+# abstract PLACEHOLDER labels (a1/a2../r1..r4/std_a) instead of this pid's
+# own real numbers. Implemented as a toggle here rather than an actual git
+# branch, since everything today is still uncommitted (see chat) -- a real
+# branch wouldn't give a clean before/after comparison without a commit
+# first, which this project's own convention reserves for the person.
+# Flip back to False to restore the real-numbers version.
+SIGMA_DEMO_INSET_ABSTRACT = True
+
+
+def _plot_sigma_demo_inset(ax_host) -> None:
+    """Consolidated NATIVE inset version of the sigma-demo (see
+    make_sigma_demo) inside sigma_main's own numbers-task panel -- matches
+    the task this demo's real data actually comes from (SIGMA_DEMO_PID,
+    soltani_numbers), same principle as make_lambda_main's own lambda-demo
+    inset (rendered in the SAME matplotlib/rcParams context as the host
+    figure, not composited from a separately-saved SVG).
+
+    NON-GRAPHICAL alternative (per instruction) to an earlier version of
+    this inset that tried to fit an actual number-line+gaussian plot per
+    example -- that read as too cramped even after heavy consolidation.
+    This version keeps the standalone figure's own 3-column structure and
+    all 3 of its own examples (SIGMA_DEMO_EXAMPLES, with its own ellipsis
+    between examples 2 and 3, unlike an earlier 2-example version of this
+    inset) but every cell is now plain single-line text -- sequence and
+    responses comma-joined (_plot_sigma_demo_sequence_text's own
+    stacked=False mode / _plot_sigma_demo_responses_text) rather than a
+    plot -- so each row needs only a fraction of a real plot's height.
+    Column titles shortened to "sequence"/"responses"/"std" (per
+    instruction), and the closing equation uses "std_i" rather than
+    "sigma_i" -- consistent with the "std" column header now being a
+    plain word, not a sigma_i mathtext label. Bounds chosen from the
+    ACTUAL kde curve height in this panel's own x-range (queried directly,
+    not eyeballed), same approach as make_lambda_main's own inset.
+    """
+    groups = _sigma_demo_pid_groups(SIGMA_DEMO_PID)
+    rows = [groups[(groups["observation"] == obs) & (groups["qid"] == qid)].iloc[0]
+           for obs, qid in SIGMA_DEMO_EXAMPLES]
+
+    # x0=0.32 -- the curve has dropped to ~0.29 of this panel's own y-range
+    # by that point, so the bundle's own bottom (y_eq0 below, ~0.36) still
+    # clears it with margin. Column widths widened further (0.20/0.32/0.10)
+    # WITH an explicit gap between each -- an earlier version butted them
+    # together with zero gap and centered text, which overflowed each
+    # column's own narrow box and visibly collided with its neighbor
+    # (verified directly on a first render: "sequenceresponses" running
+    # together with no space at all).
+    x0, x_seq, x_resp, x_std, col_gap = 0.32, 0.20, 0.32, 0.10, 0.015
+    x_resp0 = x0 + x_seq + col_gap
+    x_std0 = x_resp0 + x_resp + col_gap
+    x_total = x_std0 + x_std - x0
+
+    # row_h shrunk (0.12 -> 0.10) to make room for a 4th full-width row
+    # (the ellipsis row, per instruction) without pushing the bundle's own
+    # bottom below this panel's real curve clearance.
+    row_h = 0.10
+    row_gap = 0.015
+    eq_gap = 0.05  # raised (0.03 -> 0.05) for more breathing room, per instruction
+    eq_h = 0.09
+
+    y_row1 = 0.93 - row_h
+    y_row2 = y_row1 - row_gap - row_h
+    y_ellipsis_row = y_row2 - row_gap - row_h
+    y_row3 = y_ellipsis_row - row_gap - row_h
+    y_eq0 = y_row3 - eq_gap - eq_h
+
+    ax_seqs, ax_resps, ax_stds = [], [], []
+    letters = ["a", "b", "c"]
+    # a1,a2,a3 / b1,b2 / c1,c2,c3,c4 -- exactly as first sketched (per
+    # instruction), NOT derived from each row's own real sequence length
+    # (2/3/4) as an earlier version of this placeholder did -- fully
+    # abstract now, so the counts don't need to track the real data at all.
+    seq_counts = [3, 2, 4]
+    for i, (row, y0) in enumerate(zip(rows, [y_row1, y_row2, y_row3])):
+        ax_seq = ax_host.inset_axes([x0, y0, x_seq, row_h])
+        ax_resp = ax_host.inset_axes([x_resp0, y0, x_resp, row_h])
+        ax_std = ax_host.inset_axes([x_std0, y0, x_std, row_h])
+        if SIGMA_DEMO_INSET_ABSTRACT:
+            # EXPERIMENTAL placeholder labels (per instruction) -- a1/a2../
+            # b1/b2../c1/c2.. per row (letter = that row's own index, count
+            # = seq_counts above), "r1..r4" for responses (n=4 every row,
+            # always), "std_x" matching that row's own letter. True
+            # mathtext subscripts (per instruction) -- same "plain base +
+            # bare $_x$" pattern the closing equation already uses (e.g.
+            # "std$_i$"), applied per list item here. Toggle
+            # SIGMA_DEMO_INSET_ABSTRACT back to False to restore the real
+            # numbers below instead -- see that flag's own comment for why
+            # this is a toggle rather than an actual git branch.
+            letter = letters[i]
+            seq_str = ",".join(f"{letter}$_{j + 1}$" for j in range(seq_counts[i]))
+            resp_str = ",".join(f"r$_{j + 1}$" for j in range(len(row["responses"])))
+            std_str = f"std$_{letter}$"
+            ax_seq.axis("off")
+            # Centered (per instruction) -- was right-anchored, matching
+            # the real-numbers branch's own overflow-avoidance need, which
+            # doesn't apply here since every row's placeholder text is a
+            # fixed, short pattern.
+            ax_seq.text(0.5, 0.5, seq_str, ha="center", va="center",
+                       fontsize=4, transform=ax_seq.transAxes)
+            ax_resp.axis("off")
+            # Centered (per instruction) -- was left-anchored, matching the
+            # real-numbers branch's own overflow-avoidance need, which
+            # doesn't apply here since every row's placeholder text is the
+            # same fixed "r1..r4" length.
+            ax_resp.text(0.5, 0.5, resp_str, ha="center", va="center",
+                        fontsize=4, transform=ax_resp.transAxes)
+            ax_std.axis("off")
+            ax_std.text(0.5, 0.5, std_str, ha="center", va="center",
+                       fontsize=4, transform=ax_std.transAxes)
+        else:
+            _plot_sigma_demo_sequence_text(ax_seq, row["sequence"], fontsize=4, stacked=False)
+            _plot_sigma_demo_responses_text(ax_resp, row["responses"], fontsize=4)
+            ax_std.axis("off")
+            ax_std.text(0.5, 0.5, f"{row['std']:.1f}", ha="center", va="center",
+                       fontsize=4, transform=ax_std.transAxes)
+        ax_seqs.append(ax_seq)
+        ax_resps.append(ax_resp)
+        ax_stds.append(ax_std)
+
+    # Short column titles (per instruction), above the top row only.
+    # "rep." abbreviates "repeated" (per instruction) -- explained in the
+    # caption text, not spelled out here.
+    # pad raised (2 -> 4) for a bit more breathing room above the table,
+    # per instruction.
+    ax_seqs[0].set_title("rep. sequence", fontsize=5, pad=4)
+    ax_resps[0].set_title("responses", fontsize=5, pad=4)
+    ax_stds[0].set_title("std", fontsize=5, pad=4)
+
+    # Ellipsis ROW between examples 2 and 3 (per instruction) -- a real row
+    # the same shape as the other three, with "..." in EACH of its 3
+    # columns, rather than a single small vertical-dots divider under just
+    # the responses column (that single-glyph "⋮" didn't format well at
+    # this scale). Reads as "more rows like this exist, not shown" the
+    # same way a truncated table would.
+    for x in (x0, x_resp0, x_std0):
+        w = {x0: x_seq, x_resp0: x_resp, x_std0: x_std}[x]
+        ax_dot_cell = ax_host.inset_axes([x, y_ellipsis_row, w, row_h])
+        ax_dot_cell.axis("off")
+        ax_dot_cell.text(0.5, 0.5, "...", ha="center", va="center",
+                         fontsize=4, transform=ax_dot_cell.transAxes)
+
+    ax_eq = ax_host.inset_axes([x0 - 0.02, y_eq0, x_total + 0.04, eq_h])
+    ax_eq.axis("off")
+    # "std_i" (per instruction), not "sigma_i" -- consistent with the
+    # "std" column's own plain-word header above. No trailing "=value"
+    # (per instruction) -- purely the abstract definition now, not tied
+    # to this one pid's own concrete result.
+    ax_eq.text(0.5, 0.5, rf"$\sigma$=mean(std$_i$)",
+               ha="center", va="center", fontsize=6.5, transform=ax_eq.transAxes)
+
+
+def _plot_sigma_demo_number_line(ax, responses: list, std: float, *,
+                                  compact: bool = False,
+                                  bump_height: float = SIGMA_DEMO_BUMP_HEIGHT) -> None:
+    """One example (observation, qid) group: its real response values as
+    short vertical dashes on a number line (NOT dots -- per instruction,
+    dots at close-together real values visually merged into one blob),
+    with a fitted Gaussian (mean/std of just those points) drawn above it
+    as a peak-normalized bump (see SIGMA_DEMO_BUMP_HEIGHT's own note). The
+    std value itself is now a separate column to this panel's right (see
+    _plot_sigma_demo_sigma_label), not drawn inside this axes at all.
+
+    `compact=True` (the sigma_main inset case) shrinks line weights and
+    tick labels further still, for legibility at that much smaller scale.
+    `bump_height` (also inset-only, per instruction) can be set LOWER than
+    the standalone figure's own SIGMA_DEMO_BUMP_HEIGHT, giving each mini
+    row a shorter/flatter-looking curve so its own row can claim less of
+    the host panel's limited vertical space overall."""
+    responses = np.asarray(responses, dtype=float)
+    mu, sigma = float(np.mean(responses)), std
+
+    x = np.linspace(SIGMA_DEMO_XLIM[0], SIGMA_DEMO_XLIM[1], 400)
+    if sigma > 1e-6:
+        bump = norm.pdf(x, mu, sigma)
+        bump = bump / bump.max() * bump_height
+    else:
+        # Degenerate (exactly-zero-variance) group -- no real bump to draw;
+        # not currently hit by SIGMA_DEMO_EXAMPLES, but guarded since pid 1
+        # does have such groups elsewhere in its own data (see chat).
+        bump = np.zeros_like(x)
+    ax.plot(x, bump, color=get_palette(6)[0], lw=1.0 if compact else 1.6, zorder=2)
+    ax.fill_between(x, 0, bump, color=get_palette(6)[0], alpha=0.15, zorder=1)
+
+    # Palette index 1 (2nd entry), thinner than before (1.3 -> 0.8) --
+    # per instruction.
+    ax.vlines(responses, -0.05, 0.05, color=get_palette(6)[1],
+              lw=0.5 if compact else 0.8, zorder=4, clip_on=False)
+
+    ax.set_xlim(*SIGMA_DEMO_XLIM)
+    ax.set_xticks([0, 50, 100] if compact else [0, 25, 50, 75, 100])
+    # Less top headroom than before (1.55 -> 1.15) -- the sigma label used
+    # to need room above the peak; now that it lives in its own column
+    # (see _plot_sigma_demo_sigma_label), only a small margin above the
+    # curve itself is needed.
+    ax.set_ylim(-0.12, bump_height * 1.15)
+    ax.set_yticks([])
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_position(("data", 0))
+    # labelsize shrunk from the ambient 8pt default -- at half this
+    # script's own standard figure width, 5 tick labels (2 of them
+    # 4-character negatives) crowd/overlap at the default size (verified
+    # directly: "-1.0"/"-0.5" visibly touching at 8pt). Shrunk further
+    # still for the compact/inset case (3 ticks, not 5).
+    ax.tick_params(axis="x", length=2 if compact else 3,
+                   labelsize=4.5 if compact else 6, pad=1 if compact else 3.5)
+
+
+def make_sigma_demo() -> Path:
+    """5-row GridSpec figure demoing HOW sigma (response noise) is
+    actually calculated, on one real soltani_numbers pid (SIGMA_DEMO_PID)
+    -- an intentionally concrete complement to sigma_main's own aggregate
+    panels, not a replacement for them. A SCHEMATIC ASSET, not a standalone
+    paper figure -- saved directly to figures/schematics/ (see below) for
+    manual insertion into other figures, per instruction; half this
+    script's own standard paper width, since it's meant to sit as an inset
+    rather than fill a full-width slot on its own.
+
+    Rows 1-2, 4 (of 5): one real (observation, qid) repeat group each
+    (SIGMA_DEMO_EXAMPLES) -- a narrow left-hand cell showing that group's
+    own real STIMULUS sequence (the trial values leading up to and
+    including that observation -- see _sigma_demo_pid_groups), then that
+    group's actual response values plotted as dots on a number line, with
+    a fitted Gaussian (mean/std of just those points) drawn above, its own
+    std written above its peak (not centered inside -- a tight curve's own
+    width can be narrower than the label itself, see
+    _plot_sigma_demo_number_line's own note). Deliberately a DIFFERENT qid
+    AND a DIFFERENT observation index each time (not three qids at the
+    same fixed slice) -- makes clear the real calculation pools across
+    both, not one fixed position. All three groups have the same real n=4
+    repeat count (soltani_numbers' own 32-trials/8-qids design gives
+    exactly 4 for every group, no exceptions -- verified directly, see
+    SIGMA_DEMO_EXAMPLES's own comment) -- the three curves' different
+    WIDTHS come entirely from their own real response spread, not from
+    differing sample sizes.
+
+    Row 3 (of 5): a vertical ellipsis between the 2nd and 3rd examples --
+    per instruction, standing in for the other 29 (of this pid's 32 total)
+    qualifying groups that get folded into the same average but aren't
+    drawn individually.
+
+    Row 5 (of 5): the actual calculation this pid's sigma reduces to --
+    mean of EVERY qualifying group's own std (not just the three shown),
+    written as sigma = mean(std1, std2, ..., std3) = <this pid's real
+    value> -- the "..." sits between std2 and std3 (matching row 3's own
+    position between those same two examples), not tacked on at the end.
+    No per-panel obs/qid title text on the example rows, per instruction --
+    the sequence text and the row-5 equation are what tie each example
+    back to its own real data and the overall number, respectively.
+    """
+    _apply_mode_style()
+    groups = _sigma_demo_pid_groups(SIGMA_DEMO_PID)
+    sigma_full = float(groups["std"].mean())
+
+    example_rows = []
+    for obs, qid in SIGMA_DEMO_EXAMPLES:
+        example_rows.append(groups[(groups["observation"] == obs)
+                                   & (groups["qid"] == qid)].iloc[0])
+
+    # Half FIGURE_SIZE[0] (per instruction) -- this is a schematic inset,
+    # not a full-width standalone figure. Height bumped slightly (0.9 ->
+    # 1.0) to make room for the new ellipsis row without shrinking the
+    # three main rows relative to the original 4-row layout.
+    fig = plt.figure(figsize=(FIGURE_SIZE[0] * 0.5, FIGURE_SIZE[1] * 1.0),
+                     constrained_layout=True)
+    # 3 columns now: sequence (narrow, stacked vertically so it stays
+    # narrow regardless of how many observations an example spans), the
+    # number line itself (widened per instruction), and the sigma label
+    # (narrow -- moved out of the plot itself, see
+    # _plot_sigma_demo_sigma_label).
+    gs = fig.add_gridspec(5, 3, width_ratios=[0.22, 1.25, 0.28],
+                          height_ratios=[1, 1, 0.35, 1, 1.1])
+
+    plot_rows = [0, 1, 3]  # row 2 (index 2) is the ellipsis divider
+    ax_plots = []
+    for i, row_idx in enumerate(plot_rows):
+        row = example_rows[i]
+        ax_seq = fig.add_subplot(gs[row_idx, 0])
+        ax_plot = fig.add_subplot(gs[row_idx, 1])
+        ax_sigma = fig.add_subplot(gs[row_idx, 2])
+        _plot_sigma_demo_sequence_text(ax_seq, row["sequence"])
+        _plot_sigma_demo_number_line(ax_plot, row["responses"], row["std"])
+        _plot_sigma_demo_sigma_label(ax_sigma, row["std"])
+        ax_plots.append(ax_plot)
+        if i == 0:
+            # Column titles, above row 1 only -- replaces the old bottom
+            # "Response" x-label (redundant with a top title saying the
+            # same thing) and gives the sequence/sigma columns their own
+            # header now that their per-row content is unlabeled numbers.
+            ax_seq.set_title("Repeated\nsequence", fontsize=7)
+            ax_plot.set_title("Responses", fontsize=8)
+            ax_sigma.set_title("standard\ndeviation\n" + r"$\sigma_i$", fontsize=7)
+
+    ax_dots = fig.add_subplot(gs[2, :])
+    _plot_sigma_demo_ellipsis(ax_dots)
+
+    ax_eq = fig.add_subplot(gs[4, :])
+    ax_eq.axis("off")
+    # Simplified abstract definition (per instruction) -- mean(sigma_i)
+    # rather than the explicit summation/division formula, still closing
+    # with this pid's own real computed value (raw 0-100 scale).
+    ax_eq.text(0.5, 0.5,
+               rf"$\sigma$ = mean($\sigma_i$) = {sigma_full:.1f}",
+               ha="center", va="center", fontsize=9, transform=ax_eq.transAxes)
+
+    out_path = FIGURES_DIR / "schematics" / "sigma_demo.svg"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path)
+    print(f"Saved {out_path}")
+    plt.close(fig)
+    return out_path
+
+
 
 # -- Model performance under the new NLL/quasi-MLE metric (all four tasks) --
 
@@ -2970,10 +3521,10 @@ def make_sigma_model_correlation() -> Path:
 # n_sims=100 per Optuna trial was presumably judged too expensive to run
 # yet.
 NLL_TASK_PANELS = [
-    ("snacks", "Value\nintegration"),
     ("balls", "Proportion\ninference"),
     ("colors", "Binary\nintegration"),
     ("numbers", "Continuous\nintegration"),
+    ("snacks", "Value\nintegration"),
 ]
 
 # An EARLIER roster (NLL_MODEL_ORDER/NLL_REFERENCE/NLL_LABELS/
@@ -5410,6 +5961,7 @@ FIGURES = {
     "sigma_reliability": make_sigma_reliability,
     "neural_main": make_neural_main,
     "sigma_model_correlation": make_sigma_model_correlation,
+    "sigma_demo": make_sigma_demo,
     "synaptic_main": make_synaptic_main,
     "models_overview_demo": make_models_overview_demo,
 }
