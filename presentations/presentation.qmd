@@ -54,7 +54,7 @@ bibliography: "references.bib"
 ![](figures/temporal_performance.svg){width="100%"}
 :::
 
-## Cognitive Heuristics
+## Cognitive Algorithms
 
 ::: {.image-card}
 ![](figures/complexity_1.svg){#theories-img width="100%"}
@@ -183,13 +183,13 @@ Neural Engineering Framework
 Eliasmith, Chris, and Charles H Anderson. 2003. Neural Engineering: Computation, Representation, and Dynamics in Neurobiological Systems. Cambridge, MA: MIT press.
 :::
 
-Balls Task / Data
+Proportion Inference Task / Data
 
 ::: {style="font-size: 0.6em;"}
 Prat-Carrabin, Arthur, and Michael Woodford. 2024. “Imprecise Probabilistic Inference from Sequential Data.” Psychological Review 131.
 :::
 
-Snacks Task / Data
+Value Integration Task / Data
 
 ::: {style="font-size: 0.6em;"}
 Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Display Consistent Recency and Primacy Effects in Behavior and Neural Activity Across Perceptual and Value-Based Judgments.” Cognitive, Affective, & Behavioral Neuroscience 25.
@@ -211,4 +211,10 @@ Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Displ
 
 ::: {.image-card}
 ![](figures/model_performance_nll.svg){width="100%"}
+:::
+
+## Proportion Inference: $\lambda=0$
+
+::: {.image-card}
+![](figures/lambda_balls.svg){width="100%"}
 :::

@@ -1935,6 +1935,13 @@ def make_lambda_balls() -> Path:
                  [df["observation"].max() for df in models.values() if len(df)])
     _draw_response_change_panel(ax, human_delta, models, include_models=True,
                                 ylabel="Median \u0394R", obs_max=obs_max)
+    # Overrides _draw_response_change_panel's own _four_xticks(obs_max) --
+    # that helper's evenly-SPACED (not evenly-valued) 4-tick rule reads
+    # fine at obs_max=15/30 (make_lambda_main's own panels) but produces
+    # uneven-looking whole numbers at this panel's obs_max=5 (e.g. [0, 2,
+    # 3, 5]). All 6 whole observations fit legibly at this task's short
+    # 5-observation length, so use them directly instead.
+    ax.set_xticks([0, 1, 2, 3, 4, 5])
     ax.set_title(title, color=TASK_COLORS["balls"])
     ax.set_ylim(bottom=0)
 
