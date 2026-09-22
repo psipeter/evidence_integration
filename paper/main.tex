@@ -61,82 +61,78 @@
 % Science Advances: abstract <=150 words, single paragraph, no citations
 % (science.org/content/page/science-advances-information-authors).
 \begin{abstract} \bfseries \boldmath
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+Some abstract text here
 \end{abstract}
 
-% Science Advances requires a named, numbered section structure in the main
-% text -- Title, Short title, Authors/Affiliations, Abstract, Introduction,
-% Results, Discussion, Materials and Methods, References, Acknowledgments
-% (science.org/content/page/science-advances-information-authors) -- unlike
-% Science (flagship), which uses one undivided "Main Text" block and keeps
-% Materials and Methods in the supplement. Do NOT move Methods back to the
-% supplement without checking that page again first.
+\section{Introduction}
 
-\section*{Introduction}
+A really good introduction
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua \cite{kalm2018visual}. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{moreno2011bayesian, doll2011dopaminergic}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+\section{Results}
 
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo \cite{dayan2005theoretical}. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
+\subsection{Cognitive tasks}
+overview of tasks
+Fig.~\ref{fig:tasks_overview}
 
-\section*{Results}
+\subsection{Discounted prediction error model}
+DPE model details
+capturing primacy and recency with a generative, plausible mechanism
+link to discussion of existing models with adaptive learning rates
+SNN model details
+Fig.~\ref{fig:models_overview}.
 
-\subsection*{Task battery and modeling framework}
-Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur (Fig.~\ref{fig:tasks_overview}, Fig.~\ref{fig:models_overview}).
+\subsection{Model performance}
+introduction of other models
+comparison of performance on RMSE
+link to NLL in SI
+Fig.~\ref{fig:model_performance}.
 
-\subsection*{Model comparison across tasks}
-Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur. At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident (Fig.~\ref{fig:model_performance}).
+\subsection{Decay in magnitude of response change}
+magnitude of abs delta R decays over time in three tasks (link to fourth task discussion in SI)
+DPE, SNN, PR capture this trend
+LI is flat and Mean has no individual variance
+fitting empirical lambda to human data
+individual differences in fitted lambda
+consistency within/across tasks (link to SI)
+recency dominance findings are consistent with yoo findings, but using a generative model
+fraction of participants that show significant decline in delta R
+how many participants are better fit by a power-law decay than by a linear decay
+Fig.~\ref{fig:lambda_main}.
 
-\subsection*{Individual differences in the learning-rate parameter}
-% TODO (Fig.~\ref{fig:lambda_main}): report, per task, (1) how many
-% participants show a statistically significant decline in |delta R|
-% across observations (needs a per-participant significance test, e.g.
-% Spearman/Pearson correlation between observation number and |delta R|,
-% with a defined alpha -- not yet run anywhere in the codebase), and (2)
-% how many participants are better fit by a power-law decay than by a
-% linear decay alternative (needs a per-participant model-comparison
-% criterion, e.g. AIC/BIC or nested F-test, between fit_power_law_params'
-% existing log-log power-law fit and a new linear-fit counterpart --
-% the linear alternative doesn't exist yet either). Neither analysis is
-% implemented yet; propose the exact test/threshold/comparison metric
-% before writing the fitting code (see CLAUDE.md's "Suggesting vs.
-% implementing changes").
-Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est omnis dolor repellendus (Fig.~\ref{fig:lambda_main}).
+\subsection{Response variability and noisy mental representations}
+definition of sigma and relation to carrabin excursions
+individual differences in sigma
+consistency within/across tasks (link to SI)
+response noise augmented models
+growth of noise over repeated initial sequence
+autocorrelation of deviations from typical response and decay with more lags
+only SNN captures these trends
+noise augmented models don't have persistent noise in internal states
+state noise findings are consistent with carrabin findings, but using a model that generalizes to other tasks
+Fig.~\ref{fig:sigma_main}.
 
-\subsection*{Individual differences in response noise}
-Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae. Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat (Fig.~\ref{fig:sigma_main}).
+\subsection{Neural network predictions}
+Reminder of how SNN implements DPE (functionally and anatomically)
+SNN fits OK and captures observed trends in lambda and sigma
+here we show SNN also makes novel testable predictions, linking behavioral and neural level of analysis)
+we use artificial experiments in this section for clarity
+outlier experiment, decoded PE responses, alpha dependence, behavioral covariance
+measured neural activity decline, lambda dependence, neural and behavioral covariance
+repeated sequence experiment, covariance definition, n neurons dependence, neural and behavioral covariance
+report covarnce r values and stars
+describe the required empirical measures and statistics for validation throughout this section
+Fig.~\ref{fig:neural_main}.
 
-\subsection*{Neural network predictions}
-% TODO (Fig.~\ref{fig:neural_main}): state the three covariation results
-% with their real numbers (verified this session, paired Pearson r,
-% stars): (A-C) peak decoded PE vs. PE decay rate, r=0.93****; (D-F)
-% weight-tuned error-neuron activity decay % vs. behavioral |delta
-% response| decay %, r=0.86****; (G-I) PE noise (coefficient of
-% variation, %) vs. sigma, r=0.68****. All three grids are SYNTHETIC
-% (155 virtual pids/replicates for D-F, an arbitrary center x deviation
-% x parameter grid for A-C/G-I) -- do NOT describe D-F as using real
-% participants (an earlier caption draft wrongly claimed this; checked
-% directly against neural_experiments.py's _param_scan_worker and the
-% actual collected filenames, which are trial_source=synthetic).
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur (Fig.~\ref{fig:neural_main}).
+\subsection{Synaptic versus recurrent implementations}
+describe synaptic vs wm model
+performance comparable to wm model (numbers task shown) (report statistical values)
+describe perturbation experiment: how we simulate, what real experimental perturbation it mimics
+dynamics plot shows example of noise during ITI causing drift but not synaptic learning
+dose response experiment confirms only WM growth statistically consistent
+more discussion of synaptic vs wm in discussion
+Fig.~\ref{fig:synaptic_main}.
 
-\subsection*{Synaptic versus recurrent implementations}
-% TODO (Fig.~\ref{fig:synaptic_main}): state the real numbers verified
-% this session.
-% B (RMSE-vs-human fit, soltani_numbers, both borrow NEF's own fitted
-%   alpha_0/lambda_): NEF (WM) median RMSE=0.088, NEF_synaptic
-%   median=0.096 -- NEF_synaptic is consistently a bit worse (wins for
-%   only 2/46 pids, median gap +0.0067, paired Wilcoxon p<1e-9), but both
-%   are far better than the classic math baselines (Fig.~\ref{fig:model_performance}:
-%   0.16-0.31) -- "comparable, with a small consistent cost" is the
-%   accurate framing, not "equal."
-% D (dose-response, shared alpha_0=0.5/lambda_=0.7, the setting
-%   docs/SCIENCE.md documents as tuned to minimize the model_type gap at
-%   strength=0): as strength goes 0->0.5, NEF's RMSE grows 0.053->0.099
-%   (+87%) and sigma grows 0.027->0.036 (+31%); NEF_synaptic is flat on
-%   both (RMSE 0.0600->0.0600, sigma 0.0284->0.0284).
-Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus, ut interdum tellus elit sed risus. Maecenas eget condimentum velit, sit amet feugiat lectus (Fig.~\ref{fig:synaptic_main}).
-
-\section*{Discussion}
+\section{Discussion}
 
 % TODO (Fig.~\ref{fig:neural_main}), two points to devote real space to:
 % 1. Why alpha_0 controls BOTH peak PE magnitude and decay rate (A-C) is
@@ -158,99 +154,75 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 %    grouping with point 2 rather than treating separately, since both
 %    figures make the same kind of claim (a testable dissociation, not a
 %    validated finding).
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+Lots of discussion
+\subsection{Limitations}
+Science Advances explicitly requires a limitations paragraph in Discussion
 
-% Science Advances explicitly requires a limitations paragraph in Discussion
-% (science.org/content/page/science-advances-information-authors) -- keep
-% this as its own clearly-marked paragraph, not folded into general discussion.
-\paragraph*{Limitations.}
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
-
-\section*{Materials and Methods}
+\section{Materials and Methods}
 
 \subsection*{Cognitive tasks}
-Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.
+more task details
 
 \subsection*{Computational models}
-Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur.
-
-\subsection*{General framework for information integration based on prediction error}
-Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga \cite{vassiliadis2024non}. Et harum quidem rerum facilis est et expedita distinctio.
+more model details, especially for baseline models
+further discussion of how current model relates to previous models
 
 \subsection*{Neural network model}
-% TODO: describe NEF_synaptic's architecture (Fig.~\ref{fig:synaptic_main}A)
-% precisely -- same architecture as NEF (recurrent/WM) except the
-% value-dynamics block: a background population (fires from bias only)
-% connects to value via a PES-learned connection, driven by error's
-% product signal through the learning rule, instead of a direct
-% multiplicative connection plus a value self-recurrence.
-% pes_learning_rate=4e-4 (fixed, _NEF_FIXED). Branches on nef_type
-% (derived from model_type, "synaptic" in model_type) inside
-% models.NEF.build_network itself. See docs/SCIENCE.md's NEF_synaptic
-% entry for the full account (incl. why it borrows NEF's own fitted
-% alpha_0/lambda_ rather than having its own Optuna fit).
-% Also describe the ITI-perturbation experiment (Fig.~\ref{fig:synaptic_main}C-D):
-% neural_experiments.py's iti_perturbation/iti_perturbation_dynamics,
-% gate_error_feedback=True variant (docs/DECISIONS.md), shared
-% alpha_0=0.5/lambda_=0.7 (tuned via a 25-candidate grid to minimize the
-% model_type RMSE/sigma gap at strength=0 -- see docs/SCIENCE.md), noise
-% injected on value's neurons during the ITI across strengths
-% 0.0-0.5, soltani_numbers only.
-Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.
+additional details on synaptic or working memory model (e.g. counting circuit)
 
-\subsection*{Response noise and parameter fitting}
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+\subsection*{Parameter fitting}
+RMSE and NLL variants
+cross validation
 
 
 %%%%%%%%%%%%%%%% MAIN TEXT FIGURES %%%%%%%%%%%%%%%
 % Per template: figures/tables go at the end of the main text, not inline.
 % Science Advances: <=10 figures and tables COMBINED in the main text; each
 % caption <=200 words (science.org/content/page/science-advances-information-authors).
-% Currently 7 figures, 0 tables -- room for up to 3 more before hitting the cap.
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/tasks_overview_paper.pdf}
 	\caption{\textbf{Evidence integration in four sequential estimation tasks.} In each task, participants make sequential observations and report a real-valued estimate after each one. Tasks differ in input type, sequence length, and repetition structure. (\textbf{A}) The \textit{Proportion Inference Task} \cite{prat2024imprecise} presents rings of two colors drawn randomly from a box and asks participants to report the hidden proportion of one color. Each trial includes 5 observations, leading to frequent repetition of color sub-sequences. (\textbf{B, C}) The \textit{Binary} and \textit{Continuous Integration Tasks} present binary (continuous) draws from a hidden distribution and ask participants to report a running estimate of the proportion (mean) of the sequence so far. Each trial includes 15 observations, and the first few are drawn from a small pool of fixed sub-sequences, producing partial repetition across trials. (\textbf{D}) The \textit{Value Integration Task} \cite{yoo2025people} presents pairs of snack items and asks participants to report the mean value difference between the accumulated snacks on the left vs right. Each trial includes 30 observations, and snack sequences are never repeated. }
 	\label{fig:tasks_overview}
 \end{figure}
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/models_overview_paper.pdf}
 	\caption{\textbf{The Discounted Prediction Error (DPE) model and its spiking neural network implementation.} (\textbf{A}) Using an error-driven update rule, the DPE model integrates each observation $I_n$ into its running estimate $V_n$ using a learning rate that decays as a power law of the observation count $n$. The discounting exponent $\lambda$ sets the resulting integration strategy (see Supplementary Text): $\lambda=1$ recovers the unweighted running mean, $\lambda<1$ slows the decay and over-weights recent observations (recency), and $\lambda>1$ steepens it and over-weights early observations (primacy). (\textbf{B}) A spiking neural network implements the same computation using multiple anatomically- and functionally-distinct neural populations. Each observation $I_n$ feeds into \textit{error}, which computes the (discounted) prediction error between the observation and the current value estimate. \textit{Error} then drives \textit{value}, which maintains a working memory of $V_n$ through recurrent excitation and feeds it back to \textit{error} for the next comparison. \textit{Count} tracks the observation number in working memory and decodes the discounting weight $\alpha(n)$ that modulates \textit{error}. (\textbf{C}) Spiking activity (rasters) and decoded traces from one example trial (four observations, shaded inter-trial intervals).}
 	\label{fig:models_overview}
 \end{figure}
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/model_performance.pdf}
 	\caption{\textbf{DPE outperforms other integration models on most tasks and the SNN implementation remains competitive despite spiking noise.} Each model was fit separately to every participant via cross-validated RMSE between predicted and human responses; boxplots show the resulting distribution across participants. Mean computes the unweighted running average \cite{degroot1974reaching}; LI uses prediction error to update its running estimate, but with a constant learning rate \cite{usher2001time, glaze2015normative}; PR up-weighs earlier and more recent observations via two free decay parameters \cite{pooley2011understanding, galdo2022quest}. DPE has significantly lower RMSE than all three baselines on the Value Integration (\textbf{A}) and Proportion Inference (\textbf{B}) tasks (stars: paired Wilcoxon vs.\ DPE), and than Mean and LI on Binary (\textbf{C}) and Continuous (\textbf{D}) Integration; PR ties DPE on Binary Integration and significantly outperforms it on Continuous Integration. SNN, which reproduces DPE's computation within a biologically plausible network, necessarily has higher RMSE than DPE due to spike noise and real-time dynamics, but remains comparable to the other models. Model comparisons were consistent when validated using a second fit metric, negative log-likelihood (see Supplementary Text).}
 	\label{fig:model_performance}
 \end{figure}
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/lambda_main.pdf}
 	\caption{\textbf{Magnitude of response change decays with evidence accumulated, and individuals differ systematically in how quickly.} (\textbf{A--C}) Human response change (gray) is the median (across participants) of each participant's $|\Delta R|$ -- the absolute change between one response and the next -- at each point in the sequence, averaged across all sequences. Response change reliably shrinks as people gather more evidence (except in the Proportion Inference task, see Supplementary Text). (\textbf{D--F}) Fitting a power-law curve to each participant's response-change curve reveals large individual differences in temporal discounting $\lambda$. Consistent with previous work \cite{yoo2025people}, most individuals show a moderate-to-strong recency bias in most tasks ($\lambda<1$), but a substantial minority show near-optimal discounting or even a primacy bias ($\lambda\geq1$). The distribution of $\lambda$ differs across tasks, but individuals show significant consistency in $\lambda$ both within and across tasks (see Supplementary Text). PR, DPE, and SNN all correctly predict this decay, but LI's response-change curve is nearly constant, and Mean cannot capture individual differences.}
 	\label{fig:lambda_main}
 \end{figure}
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/sigma_main.pdf}
 	\caption{\textbf{Only the spiking network reproduces the dynamics of human response variability.} (\textbf{A--C}) Response variability is measured with $\sigma$, the standard deviation of a participant's responses when repeatedly presented with the same short sequence, averaged across all such sequences. $\sigma$ differs systematically across individuals, with significant within- and across-task consistency (Value Integration is excluded because its sequences are never repeated; see Supplementary Text). To investigate the underlying mechanisms, we fit noise-augmented variants of the mathematical models and compared them to SNN and human data. (\textbf{D--F}) Response noise grows over the course of repeated sequences for humans and SNN, but not for the noise-augmented models. (\textbf{G--I}) Trial-wise deviations from a participant's typical response (measureable using repeated sequences) are strongly autocorrelated for subsequent responses in humans and SNN, but not for the noise-augmented models. These two dynamic signatures reflect the ``state noise'' inherent in neural representations, which arise from spike noise and propagate forward in time.}
 	\label{fig:sigma_main}
 \end{figure}
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/neural_main.pdf}
 	\caption{\textbf{SNN dynamics link neural activity to behavior, yielding novel testable predictions.} Columns show network dynamics for representative parameter values, how neural and behavioral measures of those dynamics scale with key model parameters, and how these measures covary directly, respectively. (\textbf{A--C}) After a run of three consistent observations, one outlier evokes a sharp rise in decoded prediction error (PE) that decays before the next observation; both the peak response and the PE decay rate scale with the synaptic learning rate $\alpha_0$. We predict that the peak PE response to a surprising observation will correlate with the subsequent rate of PE decay. (\textbf{D--F}). The activity of error-sensitive neurons decays as evidence accumulates, at a rate set by the synaptic discounting parameter $\lambda$. We predict that this neural decay rate will track a behavioral decline in response-change magnitude. (\textbf{G--I}) Spiking noise causes the decoded value estimate to drift across repeated presentations of an identical sequence at a rate proportional to the number of neurons that are engaged. We predict that a neural measure of this trial-to-trial variability (such as coefficient of variation) will correlate with behavioral response variance $\sigma$. All results are from simulations in the Continuous Integration Task.}
 	\label{fig:neural_main}
 \end{figure}
 
-\begin{figure} % Do NOT use \begin{figure*} -- single-column template
+\begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/synaptic_main.pdf}
 	\caption{\textbf{A biologically distinct synaptic-plasticity mechanism also fits behavior but predicts different responses to perturbation.} (\textbf{A}) An alternative SNN implements DPE using synaptic plasticity (rather than working memory, WM) via a dopamine-like error-driven learning rule that stores the value estimate in the weights of plastic synapses. (\textbf{B}) On the Continuous Integration task, this synaptic model captures individual human behavior nearly as well as the WM model. (\textbf{C}) Both models' decoding accuracy drops when a simulated perturbation is applied during the intertrial interval (e.g. a distractor task or transcranial stimulation), but only the WM model's disruption persists once the interval ends. (\textbf{D}) Across a range of perturbation strengths, the WM model's error (RMSE vs.\ running mean) and response variability ($\sigma$) both grow with the magnitude of disruption, while the synaptic model is largely unaffected -- a concrete, testable prediction for distinguishing the two candidate mechanisms empirically. This asymmetry reflects each mechanism's dependence on ongoing activity: the WM model needs continuous recurrent feedback to hold its estimate, which is disrupted directly by the perturbation; whereas the synaptic model only changes its stored value in response to a sustained, non-zero-mean error signal, which unstructured noise does not produce.}
@@ -274,9 +246,9 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor i
 
 \section*{Acknowledgments}
 \paragraph*{Funding:}
-TODO: list grants/fellowships that funded the research, with initials indicating which author(s) were supported by each.
+This work was supported by NSF CRCNS grant (BCS2423824) to A.S. We also thank Arthur Prat-Carrabin, Yaomin Jiang, and Ian Krajbich for sharing their empirical data or making them available online.
 \paragraph*{Author contributions:}
-Author One and Author Two designed the study; Author One performed the analysis; Author One and Author Two wrote the paper.
+P.D. and A.S. designed and performed the research; P.D. and A.S. conducted the analyses; A.D. developed the theoretical framework; P.D. built the models, ran simulations, and made the figures; P.D. and A.S. wrote the paper.
 \paragraph*{Competing interests:}
 There are no competing interests to declare.
 \paragraph*{Data, code and materials availability:}
@@ -284,10 +256,6 @@ Simulation and analysis code is available on GitHub: \url{https://github.com/psi
 
 %%%%%%%%%%%%%%%% SUPPLEMENT LIST %%%%%%%%%%%%%%%
 % Add a Tables line here if/when any supplementary tables are added.
-
-\subsection*{Supplementary materials}
-Supplementary Text\\
-Figures S1 to S3
 
 %%%%%%%%%%%%%%%% END OF MAIN TEXT %%%%%%%%%%%%%%%
 
@@ -328,7 +296,7 @@ Figures S1 to S3
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/lambda_sigma_reliability.pdf}
-	\caption{\textbf{Within- and across-task reliability of fitted $\lambda$ and response noise $\sigma$.} (\textbf{A}, \textbf{B}) Split-half (odd/even trial) reliability of fitted $\lambda$ for Binary Integration and Continuous Integration, respectively (human data only). (\textbf{C}) Across-task consistency of fitted $\lambda$, Binary Integration vs.\ Continuous Integration, for participants who completed both. (\textbf{D}--\textbf{F}) As in (A--C), for response noise $\sigma$ instead of $\lambda$.}
+	\caption{\textbf{Participants have consistent response change decay $\lambda$ and response noise $\sigma$ within and across tasks.} (\textbf{A}, \textbf{B}) Split-half (odd/even trial) reliability of fitted $\lambda$ for Binary Integration and Continuous Integration. (\textbf{C}) Across-task consistency of fitted $\lambda$, Binary Integration vs.\ Continuous Integration. (\textbf{D}--\textbf{F}) As in (A--C), for response noise $\sigma$ instead of $\lambda$.}
 	\label{fig:lambda_sigma_reliability}
 \end{figure}
 
@@ -350,7 +318,7 @@ Reference this figure from the main text once it exists.
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/model_performance_nll.pdf}
-	\caption{\textbf{Model comparison is consistent under a second fit metric, negative log-likelihood.} As Fig.~\ref{fig:model_performance}, but fit via negative log-likelihood (NLL) instead of RMSE, using each model's own response-noise variant (Mean, LeakyIntegrator (LI), PrimacyRecency (PR), DPE) so that a likelihood is well-defined (stars: paired Wilcoxon vs.\ DPE). (\textbf{A}) Proportion Inference, (\textbf{B}) Binary Integration, (\textbf{C}) Continuous Integration, (\textbf{D}) Value Integration. SNN is not shown: it has no NLL fit of its own, and fitting one via the same k-fold Optuna pipeline used for the other models would be prohibitively expensive to simulate. Rankings match Fig.~\ref{fig:model_performance}'s own RMSE-based comparison: DPE outperforms Mean/LI/PR on Value Integration (D) and Proportion Inference (A), ties PR on Binary Integration (B), and loses to PR on Continuous Integration (C).}
+	\caption{\textbf{Model performance rankings are consistent under a second fit metric, negative log-likelihood.} As Fig.~\ref{fig:model_performance}, but fit via negative log-likelihood (NLL) instead of RMSE, using each model's own response-noise variant (Mean, LeakyIntegrator (LI), PrimacyRecency (PR), DPE) so that a likelihood is well-defined (stars: paired Wilcoxon vs.\ DPE). (\textbf{A}) Proportion Inference, (\textbf{B}) Binary Integration, (\textbf{C}) Continuous Integration, (\textbf{D}) Value Integration. Rankings match Fig.~\ref{fig:model_performance}'s own RMSE-based comparison: DPE outperforms Mean/LI/PR on Value Integration and Proportion Inference, ties PR on Binary Integration, and loses to PR on Continuous Integration.}
 	\label{fig:model_performance_nll}
 \end{figure}
 
@@ -363,7 +331,7 @@ STUB: report the per-task distribution of fitted $\lambda$ underlying Fig.~\ref{
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/lambda_balls.pdf}
-	\caption{\textbf{Response-change decay is absent in the Proportion Inference task.} As Fig.~\ref{fig:lambda_main}A--C, but for the Proportion Inference (carrabin) task, alongside the same 5 models. Unlike the other three tasks, median $|\Delta R|$ does not decline across the trial's 5 observations.}
+	\caption{\textbf{Response-change decay is absent in the Proportion Inference task.} As Fig.~\ref{fig:lambda_main}A--C, but for the Proportion Inference task \cite{prat2024imprecise}. Unlike the other three tasks, median $|\Delta R|$ does not decline across the trial's 5 observations. This is likely due to the short sequences used in this task and the response format requested by the task's instructions (see Supplementary Text).}
 	\label{fig:lambda_balls}
 \end{figure}
 
@@ -375,11 +343,6 @@ STUB: report within-task split-half (odd/even trial) reliability of $\sigma$ for
 
 \subsubsection*{State noise vs.\ response noise: growth and autocorrelation of $\sigma$}
 STUB: report the actual numbers underlying Fig.~\ref{fig:sigma_main}D--I. Growth (D--F, last-observation/first-observation ratio of normalized $\sigma$): Human grows 1.3--1.9$\times$ across Proportion Inference/Binary/Continuous Integration; all four \texttt{\_resp\_noise} math models are flat (0.93--1.15$\times$, i.e.\ no growth, as expected for i.i.d.\ per-response noise by construction); SNN grows even more than human (2.0--3.2$\times$). Autocorrelation (G--I, lag-1 of the residual from a participant's own typical response): Human is strongly positive (0.40--0.62); all four math models are $\approx$0 (-0.04 to +0.04, pure noise); SNN is strongly positive (0.69--0.76), matching or exceeding human. Discuss \cite{prat2024imprecise}'s own state-vs-response-noise mixture analysis in more detail here, and how it motivated interpreting SNN's spiking noise as a state-noise mechanism.
-
-\subsubsection*{Example supplement heading}
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur \cite{vassiliadis2024non, trevismd_statannotations}. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
 
 \end{document}
 % End of main.tex
