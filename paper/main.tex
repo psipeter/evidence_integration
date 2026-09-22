@@ -77,7 +77,13 @@ Fig.~\ref{fig:tasks_overview}
 \subsection{Discounted prediction error model}
 DPE model details
 capturing primacy and recency with a generative, plausible mechanism
-link to discussion of existing models with adaptive learning rates
+one to two sentences relating DPE to previous models that weight/discount
+prediction error in some form (not only surprise-modulated adaptive-learning-rate
+models specifically) -- just enough to disambiguate the fixed power-law
+schedule from those models' state/surprise-dependent rate; save the
+substantive comparison (does a fixed schedule suffice, or does the data
+call for surprise-modulation) for Discussion, once lambda/sigma results
+are in hand
 SNN model details
 Fig.~\ref{fig:models_overview}.
 
@@ -134,26 +140,32 @@ Fig.~\ref{fig:synaptic_main}.
 
 \section{Discussion}
 
-% TODO (Fig.~\ref{fig:neural_main}), two points to devote real space to:
-% 1. Why alpha_0 controls BOTH peak PE magnitude and decay rate (A-C) is
-%    NOT a direct mathematical consequence of the DPE equation
-%    (Fig.~\ref{fig:models_overview}A) -- it depends on the specific
-%    neural implementation (how alpha_0 scales gain in the error/value
-%    circuit) and is not guaranteed to hold for any spiking
-%    implementation of the same equation. Worth explaining mechanistically
-%    rather than leaving as an unexplained empirical correlation.
-% 2. All of Fig.~\ref{fig:neural_main}'s predictions (and the SI
-%    corroborating SNR measure below) are NOVEL predictions, not
-%    validated findings -- we have no real neural recordings from this
-%    task to check them against. Worth stating explicitly and tying to
-%    Goal 4's framing (docs/SCIENCE.md) of testable predictions for
-%    future joint neural/behavioral work.
-% 3. Fig.~\ref{fig:synaptic_main}'s WM-vs-synaptic perturbation dissociation
-%    is ALSO a novel prediction (same Goal-4 framing as above, not yet
-%    tested against real neural/behavioral perturbation data) -- worth
-%    grouping with point 2 rather than treating separately, since both
-%    figures make the same kind of claim (a testable dissociation, not a
-%    validated finding).
+% TODO -- throughline for this Discussion is NOVELTY, front and center:
+% every relationship in Fig.~\ref{fig:neural_main} (rows 1-3) and
+% Fig.~\ref{fig:synaptic_main}'s WM-vs-synaptic perturbation dissociation
+% is a NOVEL, UNVALIDATED prediction -- no real neural recordings or
+% perturbation data exist for this task to check them against. State this
+% explicitly, once, covering both figures together (they make the same
+% kind of claim -- a testable dissociation/relationship, not yet a
+% validated finding), and tie it to Goal 4's framing (docs/SCIENCE.md) of
+% testable predictions for future joint neural/behavioral work. This is
+% the section's main point, not a caveat to bury at the end.
+% Secondary, still worth a sentence: why alpha_0 controls BOTH peak PE
+% magnitude and decay rate (Fig.~\ref{fig:neural_main}A-C) is a fact
+% about THIS neural implementation, not a direct mathematical consequence
+% of the DPE equation itself (Fig.~\ref{fig:models_overview}A) -- don't
+% leave it as an unexplained empirical correlation, but keep it
+% subordinate to the novelty framing above.
+%
+% TODO -- revisit DPE's relationship to previous weighted-prediction-error
+% models here (see Results' DPE subsection, which only disambiguates DPE
+% from surprise-modulated adaptive-learning-rate models in 1-2 sentences
+% and defers the real argument to here). Now that lambda/sigma results
+% are in hand: does a fixed power-law discount schedule suffice to
+% explain the observed individual differences and decay patterns, or does
+% the data actually call for a surprise/volatility-modulated rate the way
+% Behrens/Nassar/Yu-Dayan-style models assume? Make the argument with the
+% actual results, not just in the abstract.
 Lots of discussion
 \subsection{Limitations}
 Science Advances explicitly requires a limitations paragraph in Discussion
@@ -164,8 +176,12 @@ Science Advances explicitly requires a limitations paragraph in Discussion
 more task details
 
 \subsection*{Computational models}
-more model details, especially for baseline models
-further discussion of how current model relates to previous models
+more model details, especially for baseline models (Mean/LI/PR equations)
+formal/technical relationship to previous weighted-prediction-error
+models -- equations and shared vs.\ differing parameters, for the
+record. NOT interpretive (that's Discussion's job; see Results' DPE
+subsection note above and the Discussion note below) -- this subsection
+just needs to state the relationship precisely, not argue about it.
 
 \subsection*{Neural network model}
 additional details on synaptic or working memory model (e.g. counting circuit)
