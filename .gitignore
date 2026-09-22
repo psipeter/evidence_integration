@@ -93,6 +93,10 @@ paper/figures/*
 !paper/figures/lambda_sigma_reliability.pdf
 # Second supplemental figure (Fig. S2) -- same convention.
 !paper/figures/model_performance_nll.pdf
+# Third supplemental figure (Fig. S3) -- single-panel, no A/B/C labels
+# needed, but still a manual Inkscape export of the script's own .svg,
+# same as every other tracked figure PDF here.
+!paper/figures/lambda_balls.pdf
 
 # presentations/figures/ holds BOTH scripts/make_figures.py's --mode
 # presentation output (PDF+SVG pairs, only the SVG consumed by
