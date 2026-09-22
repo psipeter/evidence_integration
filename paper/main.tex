@@ -71,21 +71,26 @@ A really good introduction
 \section{Results}
 
 \subsection{Cognitive tasks}
-overview of tasks
-Fig.~\ref{fig:tasks_overview}
+To investigate different aspects of evidence integration and test the generalizability of our model, we studied four evidence-integration tasks (Fig.~\ref{fig:tasks_overview}). Each task presents a sequence of noisy observations and asks for a real-valued estimate after every observation, requiring participants to integrate all evidence observed so far in the trial. The four tasks collectively span multiple dimensions of task design, including input type, sequence length, repetition structure, and response format. Two of these tasks reanalyze previously published data \cite{prat2024imprecise, yoo2025people}, while two were conducted as part of the current study. Task procedures, stimuli, and participants are detailed in Materials and Methods.
 
 \subsection{Discounted prediction error model}
-DPE model details
-capturing primacy and recency with a generative, plausible mechanism
-one to two sentences relating DPE to previous models that weight/discount
-prediction error in some form (not only surprise-modulated adaptive-learning-rate
-models specifically) -- just enough to disambiguate the fixed power-law
-schedule from those models' state/surprise-dependent rate; save the
-substantive comparison (does a fixed schedule suffice, or does the data
-call for surprise-modulation) for Discussion, once lambda/sigma results
-are in hand
+In the Discounted Prediction Error (DPE) model, the learner maintains a running estimate $V_n$ and, after each observation, computes a prediction error between its current estimate and the new observation, which updates the estimate according to a time-dependent learning rate $\alpha(n)$ (Fig.~\ref{fig:models_overview}A):
+
+\begin{equation}
+    \label{eq:dpe_update}
+    V_n = V_{n-1} + \alpha(n) \bigl(I_n - V_{n-1}\bigr)
+\end{equation}
+
+\noindent The size of this update depends on both a baseline learning rate $\alpha_0$, the number of observations $n$ already accumulated and a discounting parameter $\lambda$:
+
+\begin{equation}
+    \label{eq:dpe_alpha}
+    \alpha(n) = \frac{\alpha_0}{n^\lambda}
+\end{equation}
+
+This single mechanism can reproduce a range of biases documented in the sequential-integration literature. When $\lambda=0$, Eq.~\ref{eq:dpe_alpha} recovers a constant learning rate $\alpha_0$, equivalent to a leaky integrator with fixed update size \cite{usher2001time, glaze2015normative}; when $\lambda=1$, it recovers the unweighted running mean, the statistically optimal estimator under stationary generative statistics. More generally, $\lambda<1$ slows the learning-rate decay and over-weights recent observations (a recency bias), while $\lambda>1$ steepens it and over-weights early observations (a primacy bias); see Supplementary Text for a mathematical proof. Unlike descriptive models that assign each observation its own weight via a post-hoc process (e.g., a weight curve fit directly to the data), DPE generates an impressive range of weighting patterns from a single generative process -- one which runs in real time and does not require a complete memory of past observations. This places DPE within a broader family of models that weight or discount prediction error when updating a running estimate \cite{behrens2007learning, piray2021model}. These models have been successful in explaining probabilistic reasoning and reward learning across a range of tasks and volatility regimes, but they have not yet been implemented in a biologically plausible network, applied to the simpler and more heterogeneous evidence-integration tasks studied here, or used to characterize systematic individual differences in integration strategy.
+
 SNN model details
-Fig.~\ref{fig:models_overview}.
 
 \subsection{Model performance}
 introduction of other models
