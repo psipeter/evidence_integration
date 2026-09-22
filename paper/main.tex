@@ -88,7 +88,7 @@ In the Discounted Prediction Error (DPE) model, the learner maintains a running 
     \alpha(n) = \frac{\alpha_0}{n^\lambda}
 \end{equation}
 
-This single mechanism can reproduce a range of biases documented in the sequential-integration literature. When $\lambda=0$, Eq.~\ref{eq:dpe_alpha} recovers a constant learning rate $\alpha_0$, equivalent to a leaky integrator with fixed update size \cite{usher2001time, glaze2015normative}; when $\lambda=1$, it recovers the unweighted running mean, the statistically optimal estimator under stationary generative statistics. More generally, $\lambda<1$ slows the learning-rate decay and over-weights recent observations (a recency bias), while $\lambda>1$ steepens it and over-weights early observations (a primacy bias); see Supplementary Text for a mathematical proof. Unlike descriptive models that assign each observation its own weight via a post-hoc process (e.g., a weight curve fit directly to the data), DPE generates an impressive range of weighting patterns from a single generative process -- one which runs in real time and does not require a complete memory of past observations. This places DPE within a broader family of models that weight or discount prediction error when updating a running estimate \cite{behrens2007learning, piray2021model}. These models have been successful in explaining probabilistic reasoning and reward learning across a range of tasks and volatility regimes, but they have not yet been implemented in a biologically plausible network, applied to the simpler and more heterogeneous evidence-integration tasks studied here, or used to characterize systematic individual differences in integration strategy.
+This single mechanism can reproduce a range of biases documented in the sequential-integration literature. When $\lambda=0$, Eq.~\ref{eq:dpe_alpha} recovers a constant learning rate $\alpha_0$, equivalent to a leaky integrator with fixed update size \cite{usher2001time, glaze2015normative}; when $\lambda=1$, it recovers the unweighted running mean, the statistically optimal estimator under stationary generative statistics. More generally, $\lambda<1$ slows the learning-rate decay and over-weights recent observations (a recency bias), while $\lambda>1$ steepens it and over-weights early observations (a primacy bias); see Supplementary Text for a mathematical proof. Unlike descriptive models that assign each observation its own weight via a post-hoc process (e.g., a weight curve fit directly to the data), DPE generates an impressive range of weighting patterns from a single generative process -- one which runs in real time and does not require a complete memory of past observations. This places DPE within a broader family of models that weight or discount prediction error when updating a running estimate \cite{behrens2007learning, piray2021model, nassar2010approximately, yu2008sequential, camerer1999experience}. These models have been successful in explaining probabilistic reasoning and reward learning across a range of tasks and volatility regimes, but they have not yet been implemented in a biologically plausible network, applied to the simpler and more heterogeneous evidence-integration tasks studied here, or used to characterize systematic individual differences in integration strategy.
 
 SNN model details
 
@@ -171,6 +171,22 @@ Fig.~\ref{fig:synaptic_main}.
 % the data actually call for a surprise/volatility-modulated rate the way
 % Behrens/Nassar/Yu-Dayan-style models assume? Make the argument with the
 % actual results, not just in the abstract.
+%
+% TODO -- EWA comparison (from prior reviewer correspondence, Reviewer #2):
+% EWA (Camerer & Ho 1999, \cite{camerer1999experience}) uses two independent
+% mechanisms -- experience weight rho (N(t) = rho*N(t-1) + 1, governing
+% accumulation/decay of past observations) and attraction decay phi
+% (A(t) ~ phi*A(t-1)) -- that together primarily produce a RECENCY effect;
+% primacy only emerges in the limiting case rho=1, phi=1 (no decay at all).
+% DPE, by contrast, produces a full primacy-to-recency continuum from a
+% single parameter (lambda) at every value, not just a limiting case --
+% DPE is NOT a special case of EWA, and exhibits richer primacy effects.
+% Also worth keeping from the reviewer response: EWA has mainly been
+% applied to economic/multi-agent games with counterfactual reasoning and
+% complex inter-choice dependencies, rarely to non-social RL tasks, and
+% (as far as we know) never to the sequential-estimation tasks studied
+% here -- genuine novelty, not just a reimplementation of an established
+% approach.
 Lots of discussion
 \subsection{Limitations}
 Science Advances explicitly requires a limitations paragraph in Discussion
