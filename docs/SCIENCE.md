@@ -539,3 +539,11 @@ testable with future spike-resolved recordings.
   its own (the RMSE-boxplot panel reads it via `_synaptic_model_fit_path`
   regardless, so this doesn't block the figure — just its long-term
   pipeline hygiene).
+- **Port existing ad hoc statistics into `scripts/paper_stats.py`** (started
+  this session with one new function, `test_response_change_decline`).
+  Every other statistic currently reported in `paper/main.tex` — split-half
+  reliabilities, lambda/sigma cross-task correlations, `neural_main`'s
+  covariance r-values, the NLL-vs-RMSE ranking comparison, etc. — is still
+  computed inline inside `make_figures.py`/`neural_experiments.py`, each in
+  its own ad hoc way, with no single findable source per reported number.
+  Not started; do one metric at a time rather than a single large refactor.

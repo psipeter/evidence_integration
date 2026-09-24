@@ -319,6 +319,17 @@ evidence_integration/
     inspect_participant.py, inspect_participant_temporal.py
     plot_sequences.py         — see .claude/skills/task-backend-sequences/SKILL.md
     neural_experiments.py
+    paper_stats.py            — central home for statistics reported directly
+                                in paper/main.tex (r values, p values, stars,
+                                fractions of participants meeting some
+                                criterion); NOT named statistics.py -- that
+                                shadows Python's own stdlib module (see the
+                                file's own docstring). Figure-annotation
+                                statistics (e.g. boxplot significance stars)
+                                stay inline in make_figures.py/
+                                neural_experiments.py for now — see
+                                docs/SCIENCE.md's "Future extensions" for the
+                                still-open task of porting those over too
     verify_ensemble_invariant.py, check_NEF_pipeline.py
   jobs/                       — generated SLURM scripts (gitignored)
   task_backend/        — online task (see task_backend/CLAUDE.md)
