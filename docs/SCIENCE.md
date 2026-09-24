@@ -48,14 +48,24 @@ the same mechanism. Behavioural: response trajectories, update
 magnitudes, individual λ and α₀. Neural: error-ensemble activity,
 prediction-error dynamics, and how both scale with architectural
 parameters (n_neurons, α₀, λ). Together these form a mechanistically
-coherent account testable at multiple levels of analysis.
+coherent account testable at multiple levels of analysis. This extends
+to the choice of neural implementation itself: `synaptic_main`'s
+recurrent-vs-synaptic comparison (`paper/main.tex` Section 2.7) asks
+whether the same joint behavioural/neural account is specific to a
+persistent-recurrent-activity circuit or holds under an alternative
+(synaptic-plasticity) implementation of the same computation.
 
 ### Goal 4 — Novel testable predictions
 Spiking noise produces state-persistent variability that differs
-qualitatively from response noise — distinguishing the NEF from
-NoisyCounting even at similar RMSE. Response and PE variability scale
+qualitatively from response noise. Response and PE variability scale
 with n_neurons and α₀. These are quantitative predictions for future
-empirical work.
+empirical work. `synaptic_main`'s ITI-perturbation dose-response
+(Section 2.7) is a further novel testable prediction in this same
+vein: only the recurrent, persistent-activity mechanism should show
+degraded accuracy/reliability under a transient disruption of ongoing
+neural activity during a working-memory delay, while a synaptic
+mechanism should be largely unaffected — a dissociation no existing
+neural or perturbation data has yet tested.
 
 ### Response noise mechanism
 
