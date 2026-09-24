@@ -71,7 +71,7 @@ A really good introduction
 \section{Results}
 
 \subsection{Cognitive tasks}
-To investigate different aspects of evidence integration and test the generalizability of our model, we studied four evidence-integration tasks (Fig.~\ref{fig:tasks_overview}). Each task presents a sequence of noisy observations and asks for a real-valued estimate after every observation, requiring participants to integrate all evidence observed so far in the trial. The four tasks collectively span multiple dimensions of task design, including input type, sequence length, repetition structure, and response format. Two of these tasks reanalyze previously published data \cite{prat2024imprecise, yoo2025people}, while two were conducted as part of the current study. Task procedures, stimuli, and participants are detailed in Materials and Methods.
+To investigate different aspects of evidence integration and test the generalizability of our model, we studied four evidence-integration tasks (Fig.~\ref{fig:tasks_overview}). Each task presents a sequence of noisy observations and asks for a real-valued estimate after every observation, requiring participants to integrate all evidence observed so far in the trial. The four tasks collectively span multiple dimensions of task design, including input type, sequence length, repetition structure, and estimated quantity. Two of these tasks reanalyze previously published data \cite{prat2024imprecise, yoo2025people}, while two were conducted as part of the current study. Task procedures, stimuli, and participants are detailed in Materials and Methods.
 
 \subsection{Discounted prediction error model}
 In the Discounted Prediction Error (DPE) model, the learner maintains a running estimate $V_n$ and, after each observation, computes a prediction error between its current estimate and the new observation, which updates the estimate according to a time-dependent learning rate $\alpha(n)$ (Fig.~\ref{fig:models_overview}A):
@@ -112,19 +112,15 @@ First, we measured how $\sigma$ grew across the observations comprising the sub-
 The models introduced so far produce a single, deterministic response to any given evidence sequence, and therefore cannot, by construction, account for the response variability just described. A standard solution is to introduce noise at the point of response generation, either by selecting among possible responses probabilistically (e.g., via a softmax action-selection rule \cite{sutton2018reinforcement}) or by adding independent noise directly to a model's continuous-valued response \cite{nassar2010approximately, piray2021model}. We implemented the latter for each of our mathematical models (Mean, LI, PR, and DPE), adding independent Gaussian noise to each model's predicted response and fitting each participant's own noise magnitude by maximizing the likelihood of their observed responses (negative log-likelihood); this noise term is thus fit to capture that participant's own overall response variance. Out of all the models tested, only SNN reproduced both the growth in $\sigma$ and the decaying positive autocorrelation (Fig.~\ref{fig:sigma_main}D--I, colors). This dissociation confirms that these dynamic behavioral signatures reflect genuine state noise, which naturally arises from spiking activity in SNN's persistent internal representations, but is absent from the math models' response-only noise. These findings are consistent with a noisy-state-based model that explains response variability in the Proportion Inference task \cite{prat2024imprecise}, but SNN grounds this noise in biologically plausible mechanisms and generalizes it across diverse tasks.
 
 \subsection{Neural network predictions}
-Reminder of how SNN implements DPE (functionally and anatomically)
-SNN fits OK and captures observed trends in lambda and sigma
-here we show SNN also makes novel testable predictions, linking behavioral and neural level of analysis)
-we use artificial experiments in this section for clarity
-outlier experiment, decoded PE responses, alpha dependence, behavioral covariance
-measured neural activity decline, lambda dependence, neural and behavioral covariance
-repeated sequence experiment, covariance definition, n neurons dependence, neural and behavioral covariance
-report covarnce r values and stars
-describe the required empirical measures and statistics for validation throughout this section
-Fig.~\ref{fig:neural_main}.
+To further link the neural mechanisms and behavioral phenomenon of evidence integration, and to generate novel predictions for future studies (see Discussion for how each could be empirically tested), we next ran several simulated experiments using SNN in the Continuous Integration Task. We first simulated an outlier paradigm, in which SNN observed a run of three consistent observations followed by one surprising outlier (e.g. 49, 51, 50, 65). Following the outlier, the decoded prediction error (PE) rose sharply before decaying back toward baseline prior to the next observation (Fig.~\ref{fig:neural_main}A). Both the peak PE response and its subsequent decay rate scaled with the network's synaptic learning rate $\alpha_0$ (Fig.~\ref{fig:neural_main}B; peak: $r$=0.91; decay rate: $r$=0.95; both $p$<0.0001). Consequently, the peak PE response strongly predicted the rate at which the PE signal subsequently decayed (Fig.~\ref{fig:neural_main}C; $r$=0.93, $p$<0.0001).
+
+We next asked how the discounting rate $\lambda$ influences SNN's spiking activity alongside its response change decay. We simulated SNN across a range of $\lambda$ values and measured how strongly the spiking activity of error-selective neurons declined across the trial (Fig.~\ref{fig:neural_main}D), quantifying this decline as the percent decrease from early to late observations within a trial. Both this neural activity decay and the network's own behavioral response-change decay became steeper as $\lambda$ increased (Fig.~\ref{fig:neural_main}E; activity decay: $r$=0.89; response-change decay: $r$=0.92; both $p$<0.0001). A decline in neural activity therefore predicted a decline in response change as more evidence was integrated within a trial (Fig.~\ref{fig:neural_main}F; $r$=0.86, $p$<0.0001).
+
+Finally, we tested whether spike noise in SNN is a direct source of behavioral response variability $\sigma$. Qualitatively, SNN's value estimate tracked the ideal target more closely in larger networks than in smaller ones, both within and across trials (Fig.~\ref{fig:neural_main}G). To quantify this relationship while controlling for value drift up to the current observation, we simulated another outlier experiment and computed the ``PE noise'', a coefficient-of-variation metric equal to the standard deviation of the decoded PE response (as a percentage of its own mean magnitude) at response time. We also measured the subsequent response variability $\sigma$. We repeated this experiment for multiple network sizes and random sequences, and found that both PE noise and $\sigma$ declined as network size increased (Fig.~\ref{fig:neural_main}H; PE noise: $r$=-0.69; $\sigma$: $r$=-0.88; both $p$<0.0001). PE noise thus directly predicted $\sigma$ across network sizes (Fig.~\ref{fig:neural_main}I; $r$=0.68, $p$<0.0001), confirming that spiking noise in error-selective neurons is a direct source of behavioral response variability.
 
 \subsection{Synaptic versus recurrent implementations}
-describe synaptic vs wm model
+Our SNN implementation of DPE maintains its running estimate $V_n$ through persistent recurrent activity in the \textit{value} population, consistent with one leading account of how the brain sustains information in working memory \cite{wang2002probabilistic, wang2008decision}. An influential alternative hypothesis, however, proposes that working memory can instead be maintained by synaptic plasticity, without requiring sustained spiking to hold information between observations \cite{mongillo2008synaptic, stokes2015activity}. These two candidate mechanisms can both plausibly implement DPE and are difficult to distinguish from behavior alone. In this section, we investigate which neural mechanism is more plausible using a synaptic variant of SNN. This network replaces \textit{value}'s persistent recurrent activity with a synaptic mechanism: a dopamine-like error-driven learning rule instead stores the running estimate $V_n$ in the weights of plastic synapses, updating it only in response to the prediction error signal (Fig.~\ref{fig:synaptic_main}A). These plastic synapses connect a new \textit{etc} population (which fires at a constant, non-selective rate) to \textit{value}, driving it according to a learned transformation. Aside from these differences, the two networks share an identical architecture (see Materials and Methods).
+
 performance comparable to wm model (numbers task shown) (report statistical values)
 describe perturbation experiment: how we simulate, what real experimental perturbation it mimics
 dynamics plot shows example of noise during ITI causing drift but not synaptic learning
@@ -150,6 +146,25 @@ Fig.~\ref{fig:synaptic_main}.
 % of the DPE equation itself (Fig.~\ref{fig:models_overview}A) -- don't
 % leave it as an unexplained empirical correlation, but keep it
 % subordinate to the novelty framing above.
+%
+% TODO -- per-experiment empirical validation recipes, MOVED OUT of
+% Results (Section 2.6 now reports only the simulated findings; per
+% instruction, each experiment's own "how this could be tested on real
+% data" sentence belongs here instead). Fold these three into the
+% novelty paragraph above, one per neural_main row, rather than losing
+% them:
+%   Row 1 (outlier / alpha_0): test by decoding spikes from error-
+%     sensitive neurons during the cue period of an evidence-integration
+%     task -- a larger PE response to a surprising observation should
+%     also show a faster subsequent decay of that response.
+%   Row 2 (activity decay / lambda): test by measuring firing rates of
+%     error-sensitive neurons at cue onset and the subsequent response
+%     changes after each observation -- individuals whose neural signal
+%     declines faster within a trial should also show a faster
+%     behavioral decline in response updating.
+%   Row 3 (spike noise / n_neurons): test by relating the trial-to-trial
+%     reliability of decoded neural signals to an individual's own
+%     behavioral response noise sigma.
 %
 % TODO -- revisit DPE's relationship to previous weighted-prediction-error
 % models here (see Results' DPE subsection, which only disambiguates DPE
@@ -230,7 +245,7 @@ cross validation
 \begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/lambda_main.pdf}
-	\caption{\textbf{Magnitude of response change decays with evidence accumulated, and individuals differ systematically in how quickly.} (\textbf{A--C}) Human response change (gray) is the median (across participants) of each participant's $|\Delta R|$ -- the absolute change between one response and the next -- at each point in the sequence, averaged across all sequences. Response change reliably shrinks as people gather more evidence (except in the Proportion Inference task, see Supplementary Text). (\textbf{D--F}) Fitting a power-law curve to each participant's response-change curve reveals large individual differences in temporal discounting $\lambda$. Consistent with previous work \cite{yoo2025people}, most individuals show a moderate-to-strong recency bias in most tasks ($\lambda<1$), but a substantial minority show near-optimal discounting or even a primacy bias ($\lambda\geq1$). The distribution of $\lambda$ differs across tasks, but individuals show significant consistency in $\lambda$ both within and across tasks (see Supplementary Text). PR, DPE, and SNN all correctly predict this decay, but LI's response-change curve is nearly constant, and Mean cannot capture individual differences.}
+	\caption{\textbf{Magnitude of response change decays with evidence accumulated, and individuals differ systematically in how quickly.} (\textbf{A--C}) Human response change (gray) is the median (across participants) of each participant's $|\Delta R|$ -- the absolute change between one response and the next -- at each point in the sequence, averaged across all sequences, for Binary, Continuous, and Value Integration tasks (Proportion Inference is excluded; see Fig.~\ref{fig:lambda_balls} and Supplementary Text). Response change reliably shrinks as people gather more evidence. (\textbf{D--F}) Fitting a power-law curve to each participant's response-change curve reveals large individual differences in temporal discounting $\lambda$. Consistent with previous work \cite{yoo2025people}, most individuals show a moderate-to-strong recency bias in most tasks ($\lambda<1$), but a substantial minority show near-optimal discounting or even a primacy bias ($\lambda\geq1$). The distribution of $\lambda$ differs across tasks, but individuals show significant consistency in $\lambda$ both within and across tasks (see Supplementary Text). PR, DPE, and SNN all correctly predict this decay, but LI's response-change curve is nearly constant, and Mean cannot capture individual differences.}
 	\label{fig:lambda_main}
 \end{figure}
 
@@ -244,7 +259,7 @@ cross validation
 \begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/neural_main.pdf}
-	\caption{\textbf{SNN dynamics link neural activity to behavior, yielding novel testable predictions.} Columns show network dynamics for representative parameter values, how neural and behavioral measures of those dynamics scale with key model parameters, and how these measures covary directly, respectively. (\textbf{A--C}) After a run of three consistent observations, one outlier evokes a sharp rise in decoded prediction error (PE) that decays before the next observation; both the peak response and the PE decay rate scale with the synaptic learning rate $\alpha_0$. We predict that the peak PE response to a surprising observation will correlate with the subsequent rate of PE decay. (\textbf{D--F}). The activity of error-sensitive neurons decays as evidence accumulates, at a rate set by the synaptic discounting parameter $\lambda$. We predict that this neural decay rate will track a behavioral decline in response-change magnitude. (\textbf{G--I}) Spiking noise causes the decoded value estimate to drift across repeated presentations of an identical sequence at a rate proportional to the number of neurons that are engaged. We predict that a neural measure of this trial-to-trial variability (such as coefficient of variation) will correlate with behavioral response variance $\sigma$. All results are from simulations in the Continuous Integration Task.}
+	\caption{\textbf{SNN dynamics link neural activity to behavior, yielding novel testable predictions.} Columns show network dynamics for representative parameter values, how neural and behavioral measures of those dynamics scale with key model parameters, and how these measures covary directly, respectively. (\textbf{A--C}) After a run of three consistent observations, one outlier evokes a sharp rise in decoded prediction error (PE) that decays before the next observation; both the peak response and the PE decay rate scale with the synaptic learning rate $\alpha_0$, and the peak PE response directly predicts the subsequent rate of PE decay. (\textbf{D--F}) The activity of error-sensitive neurons decays as evidence accumulates, at a rate set by the synaptic discounting parameter $\lambda$; this neural decay rate directly predicts the behavioral decline in response-change magnitude. (\textbf{G--I}) Spiking noise causes the decoded value estimate to drift across repeated presentations of an identical sequence, at a rate that decreases with the number of neurons engaged; PE noise within trials (normalized coefficient of variation) directly predicts behavioral response variability $\sigma$.}
 	\label{fig:neural_main}
 \end{figure}
 
@@ -339,7 +354,15 @@ n\_neurons=50, 100, 150, 200, 250) -- this is a fully decoder-free,
 purely-neural reliability measure (no decoded PE/value signal
 involved), so it corroborates Fig.~\ref{fig:neural_main}G--I's own
 PE-noise-vs-n\_neurons finding from a completely independent angle.
-Reference this figure from the main text once it exists.
+Reference this figure from the main text once it exists. TODO: when
+drafting this section, discuss the two reliability/noise metrics
+together explicitly -- decoded PE noise (coefficient of variation \%,
+Fig.~\ref{fig:neural_main}H--I) depends on the value/PE decoders and is
+the one reported in the main text, while this figure's split-half
+spike-count $r$ is decoder-free -- state plainly that they measure the
+same underlying phenomenon (more neurons $\rightarrow$ less spiking
+noise $\rightarrow$ more reliable signals) from two independent angles,
+one downstream of decoding and one upstream of it.
 
 \begin{figure} % Do NOT use \begin{figure*} -- single-column template
 	\centering

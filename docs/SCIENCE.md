@@ -547,3 +547,26 @@ testable with future spike-resolved recordings.
   computed inline inside `make_figures.py`/`neural_experiments.py`, each in
   its own ad hoc way, with no single findable source per reported number.
   Not started; do one metric at a time rather than a single large refactor.
+  Each still-unported group now has a documented `report_*()` stub in
+  `scripts/paper_stats.py` (`report_lambda_reliability`,
+  `report_sigma_reliability`, `report_sigma_dynamics`,
+  `report_neural_covariance`) — each stub's docstring names the exact
+  `make_figures.py`/`neural_experiments.py` function(s) currently doing
+  the computation and the `paper/main.tex` location the hand-copied
+  numbers live in, so a future porting pass has a findable starting point
+  per metric instead of starting from this bullet alone. The NLL-vs-RMSE
+  ranking comparison (`paper/main.tex`'s "Model comparison via negative
+  log-likelihood" SI stub) has no `report_*()` stub yet — it's a
+  qualitative ranking match, not an r/p value, so it didn't fit this
+  round's pattern; still open. `report_neural_covariance`'s docstring is
+  now filled in for all three `neural_main` rows (Section 2.6 is fully
+  drafted as of this session). One number had NO source anywhere in the
+  codebase at all — the SI's "Individual differences in temporal
+  discounting" STUB states each task's median fitted $\lambda$ and the
+  fraction with $\lambda \geq 1$ (the `lambda_main` caption itself only
+  makes the qualitative claim), with no corresponding print statement
+  anywhere — so `report_lambda_distribution` was added as a real
+  (non-stub) function rather than another reference, since it was cheap
+  to reproduce directly from `test_lambda_fit_quality`'s existing
+  per-participant fits;
+  verified to match the caption's numbers exactly.

@@ -23,7 +23,18 @@ already scattered through make_figures.py and neural_experiments.py (e.g.
 the split-half reliability numbers, lambda/sigma cross-task correlations,
 neural_main's covariance r-values) into this script, so every number that
 ends up in the paper has a single, findable source. Not started -- see
-docs/SCIENCE.md's "Future extensions" for the tracked entry.
+docs/SCIENCE.md's "Future extensions" for the tracked entry. Each still-
+unported group of numbers has its own report_*() stub below
+(report_lambda_reliability, report_sigma_reliability,
+report_sigma_dynamics, report_neural_covariance) -- each stub's docstring
+names the exact make_figures.py/neural_experiments.py function(s) that
+currently compute it and the paper/main.tex location the hand-copied
+numbers live in, so start there instead of grepping cold.
+report_lambda_distribution is the one exception -- NOT a stub, since its
+numbers (median fitted lambda_, fraction with lambda_>=1) had no source
+anywhere in the codebase at all (unlike every other number this file's
+audit checked) and were cheap to reproduce directly from
+test_lambda_fit_quality's already-computed per-participant fits.
 
 Run:
     venv/bin/python scripts/paper_stats.py
@@ -138,6 +149,39 @@ def test_lambda_fit_quality(task_key: str, r2_threshold: float = 0.5) -> pd.Data
     return pd.DataFrame(rows).set_index("pid")
 
 
+def report_lambda_distribution(task_key: str) -> dict:
+    """Per-task median fitted discounting rate lambda_ and the fraction
+    of participants with lambda_>=1 (near-optimal integration or a
+    primacy bias, vs. the more common lambda_<1 recency bias) -- the
+    quantitative version of the qualitative claim already in Fig.~
+    lambda_main's own caption ("most individuals show...a recency
+    bias...but a substantial minority show near-optimal discounting or
+    even a primacy bias"), with the actual medians/percentages
+    hand-copied into paper/main.tex's SI "Individual differences in
+    temporal discounting" STUB instead (not the caption itself, which
+    stays qualitative): medians: Binary 0.89, Continuous 0.33, Value
+    0.16; fraction lambda_>=1: 39%, 7%, 0%.
+
+    Unlike this file's four report_*() stubs above, this one is NOT a
+    stub -- these numbers had no source anywhere in the codebase at all
+    (not even an inline print in make_figures.py, unlike every other
+    stat this session's audit checked), so there was nothing to port
+    from; they were reproduced here directly from
+    test_lambda_fit_quality's own already-fitted lambda_ column (SAME
+    population: curve_fit succeeded, >=3 observations, no R^2/
+    significance filtering beyond that), and verified this session to
+    match paper/main.tex's existing numbers exactly.
+
+    Returns a dict: n, median_lambda, frac_lambda_ge1.
+    """
+    fit_quality = test_lambda_fit_quality(task_key)
+    return {
+        "n": len(fit_quality),
+        "median_lambda": float(fit_quality["lambda_"].median()),
+        "frac_lambda_ge1": float((fit_quality["lambda_"] >= 1).mean()),
+    }
+
+
 def test_lambda_significance(task_key: str, alpha: float = 0.05) -> pd.DataFrame:
     """Per-participant test for whether the fitted power-law discounting
     rate lambda_ is significantly different from 0 (i.e. whether ANY
@@ -221,6 +265,100 @@ def report_lambda_reliability() -> None:
         "reliability computations here -- see this function's docstring")
 
 
+def report_sigma_reliability() -> None:
+    """STUB -- not yet implemented here. Within-task split-half and
+    across-task (Binary vs. Continuous) reliability of response noise
+    (sigma) are currently computed inline in make_figures.py's
+    make_sigma_reliability (via _plot_sigma_splithalf_panel) and
+    make_lambda_sigma_crosstask's sigma panel (via
+    _plot_sigma_crosstask_panel), and their r/p values are hand-copied
+    into paper/main.tex's Supplementary Text (see the "Consistency of
+    response noise (sigma) within and across tasks" STUB there for the
+    current numbers: Proportion Inference r=0.95, Binary r=0.62,
+    Continuous r=0.92 within-task, all p<1e-5; Binary-vs-Continuous
+    cross-task r=0.70, p<1e-7). Porting those functions' computations
+    here -- so this script is the single source that both prints and
+    (eventually) writes the r/stars used in the SI text -- is tracked in
+    docs/SCIENCE.md's "Future extensions"; not started. Same porting
+    shape as report_lambda_reliability above -- do both together if ever
+    picked up, since they share the same qid-grouped-std/split-half
+    machinery, just on sigma instead of lambda_.
+    """
+    raise NotImplementedError(
+        "port make_sigma_reliability/make_lambda_sigma_crosstask's sigma "
+        "panel computations here -- see this function's docstring")
+
+
+def report_sigma_dynamics() -> None:
+    """STUB -- not yet implemented here. The growth of sigma across
+    observations within a repeated sub-sequence (Fig.~sigma_main D--F)
+    and the lag-decaying autocorrelation of each participant's residual
+    from their own typical response (Fig.~sigma_main G--I) are currently
+    computed inline in make_figures.py's make_sigma_main, rows 2 and 3
+    respectively (_load_variance_growth_data/_draw_variance_growth_panel
+    for growth; _load_variance_autocorr_data/_draw_variance_autocorr_panel
+    for autocorrelation), and their summary numbers are hand-copied into
+    paper/main.tex's Supplementary Text (see the "State noise vs.
+    response noise: growth and autocorrelation of sigma" STUB there for
+    the current numbers: growth 1.3-1.9x for Human vs. 0.93-1.15x for the
+    four `_resp_noise` math models vs. 2.0-3.2x for SNN, across
+    Proportion Inference/Binary/Continuous Integration; autocorrelation
+    0.40-0.62 for Human vs. approx. 0 (-0.04 to +0.04) for the math
+    models vs. 0.69-0.76 for SNN). Porting this here is tracked in
+    docs/SCIENCE.md's "Future extensions"; not started -- likely the
+    most involved of the four report_* stubs in this file, since both
+    loaders pull per-model NLL-fit response files
+    (_nll_resp_noise_responses_path) across all three tasks, not just
+    plain human data.
+    """
+    raise NotImplementedError(
+        "port make_sigma_main's row-2/row-3 (_load_variance_growth_data/"
+        "_load_variance_autocorr_data) computations here -- see this "
+        "function's docstring")
+
+
+def report_neural_covariance() -> None:
+    """STUB -- not yet implemented here. The three neural_main experiments'
+    parameter-vs-outcome r-values are currently computed inline via
+    scipy.stats.pearsonr calls scattered through make_figures.py's panel
+    helpers, reading pre-generated grids from neural_experiments.py's
+    `outlier`/`param_scan`/`n_neurons_snr` experiments (see
+    scripts/neural_experiments.py and .claude/skills/
+    neural-simulation-pipeline/SKILL.md for how those grids are produced
+    and generated/rechecked -- these grids ARE cluster-run/expensive to
+    regenerate, unlike the other three report_* stubs' plain human/model
+    response data, but once the .pkl grids already exist under
+    data/runs/neural_experiments/, recomputing these pearsonr values from
+    them locally is cheap -- confirmed directly by rerunning
+    `venv/bin/python scripts/make_figures.py neural_main --mode paper`,
+    which reads the cached grids and reprints every r/p value below
+    without resimulating anything):
+      Row 1 (alpha_0, outlier experiment) -- _plot_outlier_param_effect
+        (peak |PE| vs. alpha_0; PE decay rate vs. alpha_0) and
+        _plot_outlier_dv_scatter (peak |PE| vs. decay rate, direct).
+        Values already reported in paper/main.tex's Results (Section
+        2.6, first paragraph): peak r=0.91, decay rate r=0.95, direct
+        covariance r=0.93, all p<0.0001.
+      Row 2 (lambda_, param_scan experiment) -- _plot_neural_main_decay_vs_param
+        (activity decay % vs. lambda_; deltaR decay % vs. lambda_) and
+        _plot_param_scan_dv_scatter (activity decay % vs. deltaR decay
+        %, direct). Values reported in paper/main.tex's Results (Section
+        2.6, second paragraph): activity decay r=0.89, response-change
+        decay r=0.92, direct covariance r=0.86, all p<0.0001.
+      Row 3 (n_neurons, n_neurons_snr experiment) -- _plot_n_neurons_snr_pair
+        (PE noise CV% vs. n_neurons; sigma vs. n_neurons) and
+        _plot_n_neurons_snr_dv_scatter (PE noise CV% vs. sigma, direct).
+        Values reported in paper/main.tex's Results (Section 2.6, third
+        paragraph): PE noise r=-0.69, sigma r=-0.88, direct covariance
+        r=0.68, all p<0.0001.
+    Porting this here (even just row 1, which IS already in the text) is
+    tracked in docs/SCIENCE.md's "Future extensions"; not started.
+    """
+    raise NotImplementedError(
+        "port make_neural_main's per-row pearsonr computations here -- "
+        "see this function's docstring")
+
+
 def main() -> None:
     for task_key, title in LAMBDA_TASK_PANELS:
         decline = test_response_change_decline(task_key)
@@ -243,6 +381,11 @@ def main() -> None:
         print(f"{'':24s} {n_sig:3d}/{n_lam:3d} participants "
               f"({100 * n_sig / n_lam:.0f}%) have lambda significantly "
               f"different from 0 (p<0.05)")
+
+        dist = report_lambda_distribution(task_key)
+        print(f"{'':24s} median lambda={dist['median_lambda']:.2f}, "
+              f"{100 * dist['frac_lambda_ge1']:.0f}% have lambda>=1 "
+              f"(n={dist['n']})")
 
 
 if __name__ == "__main__":
