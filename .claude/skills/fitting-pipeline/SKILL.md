@@ -26,9 +26,12 @@ no longer the canonical source of anything any current figure script
 reads.
 
 ```bash
-# Submit (cluster) -- carrabin/yoo use n_trials=100, soltani 300 (established convention)
-venv/bin/python -m fitting.submit carrabin NEF --n_trials 100 --run_folder rmse --k 5
-venv/bin/python -m fitting.submit yoo NEF --run_folder rmse --n_trials 100 --k 5
+# Submit (cluster) -- n_trials=300 for all four tasks (verified against
+# data/runs/rmse/'s own _folds.pkl files: carrabin/yoo max trial_number=299,
+# same as soltani -- this doc previously said 100 for carrabin/yoo, which was
+# stale/wrong; corrected while drafting paper/main.tex's Parameter fitting section)
+venv/bin/python -m fitting.submit carrabin NEF --n_trials 300 --run_folder rmse --k 5
+venv/bin/python -m fitting.submit yoo NEF --run_folder rmse --n_trials 300 --k 5
 
 # Collect params and responses
 venv/bin/python -m fitting.collect rmse --type params
@@ -68,8 +71,8 @@ venv/bin/python -m fitting.collect rmse --type params
 venv/bin/python -m fitting.collect rmse --type responses
 ```
 
-Same loop works for `carrabin`/`yoo` (use `--n_trials 100`, still
-`--run_folder rmse`).
+Same loop works for `carrabin`/`yoo` (use `--n_trials 300`, same as
+soltani, still `--run_folder rmse`).
 
 NLL fits (add `--loss nll`; every model needs its own `_resp_noise`
 suffix — NEF's and `NoisyRL_lambda`'s own NLL branches are retired, see
