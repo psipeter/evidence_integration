@@ -349,8 +349,12 @@ def report_neural_covariance() -> None:
         (PE noise CV% vs. n_neurons; sigma vs. n_neurons) and
         _plot_n_neurons_snr_dv_scatter (PE noise CV% vs. sigma, direct).
         Values reported in paper/main.tex's Results (Section 2.6, third
-        paragraph): PE noise r=-0.69, sigma r=-0.88, direct covariance
-        r=0.68, all p<0.0001.
+        paragraph): PE noise r=-0.82, sigma r=-0.86, direct covariance
+        r=0.82, all p<0.0001 (rerun with cluster_spread=1.0, matching the
+        outlier experiment's own trial design -- an earlier version of
+        this grid used cluster_spread=15.0, wider than the outlier
+        deviation itself, which the M&M text now avoids describing as an
+        "outlier" trial; see chat).
     Porting this here (even just row 1, which IS already in the text) is
     tracked in docs/SCIENCE.md's "Future extensions"; not started.
     """

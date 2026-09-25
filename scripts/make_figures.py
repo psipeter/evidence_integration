@@ -5606,8 +5606,8 @@ def make_neural_main() -> Path | list[Path]:
         axes[2, 2].sharey(ax2_r3)
         # Fixed ticks (per instruction) -- propagates to H's own twin axis
         # too, since sharey joins them.
-        axes[2, 2].set_ylim(0.0, 0.2)
-        axes[2, 2].set_yticks([0.0, 0.1, 0.2])
+        axes[2, 2].set_ylim(0.0, 0.24)
+        axes[2, 2].set_yticks([0.0, 0.12, 0.24])
 
     out_path, _ = _save_fig(fig, "neural_main")
     plt.close(fig)
