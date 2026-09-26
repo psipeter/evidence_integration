@@ -97,6 +97,8 @@ paper/figures/*
 # needed, but still a manual Inkscape export of the script's own .svg,
 # same as every other tracked figure PDF here.
 !paper/figures/lambda_balls.pdf
+# Fourth supplemental figure (Fig. S4) -- 2-panel (A/B), same convention.
+!paper/figures/n_neurons_decoder_free.pdf
 
 # presentations/figures/ holds BOTH scripts/make_figures.py's --mode
 # presentation output (PDF+SVG pairs, only the SVG consumed by

@@ -1927,7 +1927,18 @@ def make_lambda_balls() -> Path:
     of a larger grid) differs.
     """
     _apply_mode_style()
-    fig, ax = plt.subplots(figsize=FIGURE_SIZE, constrained_layout=True)
+    # Native panel-scale canvas (PAPER_WIDTH/2, matching main.tex's own
+    # embed width) -- NOT the full-manuscript-width FIGURE_SIZE every
+    # multi-panel figure uses. This is a single panel, so rendering it at
+    # full width then shrinking the embed in main.tex scaled fonts/lines
+    # down along with it (looked ~65% the size of a real Fig. 4 panel at
+    # matching physical width -- see chat); rendering NATIVELY at this
+    # scale with apply_paper_style()'s own font sizes avoids that round
+    # trip entirely. Height fixed at 2in (per instruction), not
+    # FIGURE_SIZE[1] -- this panel doesn't need to match another figure's
+    # row height, just look reasonable on its own.
+    fig, ax = plt.subplots(figsize=(PAPER_WIDTH / 2, 2.0),
+                           constrained_layout=True)
 
     data = _load_response_change_data()
     human_delta, models, title = data["balls"]
@@ -1942,14 +1953,19 @@ def make_lambda_balls() -> Path:
     # 3, 5]). All 6 whole observations fit legibly at this task's short
     # 5-observation length, so use them directly instead.
     ax.set_xticks([0, 1, 2, 3, 4, 5])
-    ax.set_title(title, color=TASK_COLORS["balls"])
+    # TASK_PANELS' own "Proportion\ninference" is tuned for a narrow
+    # multi-panel column -- this panel has more of its own horizontal
+    # room, so drop the line break for a single-line title instead.
+    ax.set_title(title.replace("\n", " "), color=TASK_COLORS["balls"])
     ax.set_ylim(bottom=0)
 
     legend_handles = [Line2D([0], [0], color=HUMAN_COLOR, lw=2, label="Human")]
     legend_handles += [Line2D([0], [0], color=MODEL_COLORS[m], lw=2, label=MODEL_LABEL.get(m, m))
                        for m in ["Mean", "LeakyIntegrator", "PrimacyRecency", "RL_lambda", "NEF"]]
-    ax.legend(handles=legend_handles, fontsize=9, loc="upper right",
-              frameon=True, framealpha=0.9, ncol=1)
+    ax.legend(handles=legend_handles, fontsize=6.5, loc="upper right",
+              frameon=True, framealpha=0.9, ncol=2, handlelength=1.2,
+              handletextpad=0.4, columnspacing=0.8, labelspacing=0.3,
+              borderpad=0.4)
 
     out_path, _ = _save_fig(fig, "lambda_balls")
     plt.close(fig)
@@ -5381,6 +5397,128 @@ def _plot_param_scan_dv_scatter(ax, sweep_param: str, task: str = "soltani_numbe
     sns.despine(ax=ax, top=True, right=True)
 
 
+def _plot_n_neurons_splithalf_pair(ax, task: str = "soltani_numbers"):
+    """SI decoder-free-corroboration figure, panel 1: split-half spike-count
+    reliability (split_half_r_mean -- decoder-free, no decoded PE/value
+    signal involved) vs n_neurons, twin-axis with sigma (outlier response),
+    one point per (cluster_center, outlier_deviation, n_neurons) grid cell
+    -- SAME grid/helper as _plot_n_neurons_snr_pair (main text row 3, col 2),
+    just plotting split_half_r_mean directly (already a correlation, no
+    CV%/sqrt transform needed) instead of the decoded PE-noise column.
+    """
+    path = NEURAL_EXP_DIR / f"n_neurons_snr_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, "No n_neurons_snr data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return None
+    d = pd.read_pickle(path)
+    grid = d["grid"].copy()
+    grid["response_std"] = np.sqrt(grid["response_variance"])
+
+    # legend_labels=None here -- suppress _plot_neural_dual_vs_param's own
+    # built-in legend (fontsize=6/9, "upper right") in favor of a custom one
+    # matching lambda_balls' own compact styling, drawn after this call (see
+    # make_n_neurons_decoder_free).
+    ax2 = _plot_neural_dual_vs_param(
+        ax, grid, "n_neurons", "Neurons",
+        "split_half_r_mean", "response_std",
+        "Split-half spike-count r", "σ")
+    ax.set_xticks([50, 150, 250])
+    ax.set_ylim(0.7, 1.0)
+    ax.set_yticks([0.7, 0.85, 1.0])
+    # Inverted (not transformed) -- split_half_r_mean still INCREASES with
+    # n_neurons (unlike sigma, which decreases), so without this the two
+    # curves would visually diverge even though both reflect the same
+    # "more neurons -> more reliable" story. Flipping just this axis's
+    # display direction (real r values/ticks unchanged) makes both curves
+    # slope the same way, matching sigma's own downward trend, per
+    # instruction.
+    ax.invert_yaxis()
+    return ax2
+
+
+def _plot_n_neurons_splithalf_dv_scatter(ax, task: str = "soltani_numbers") -> None:
+    """SI decoder-free-corroboration figure, panel 2: split-half spike-count
+    reliability (x) vs sigma (y) plotted directly against each other, one
+    point per grid cell -- the decoder-free analogue of
+    _plot_n_neurons_snr_dv_scatter (main text row 3, col 3), corroborating
+    that PE-noise-vs-sigma relationship from a fully independent, purely-
+    neural angle (no decoded PE/value signal involved in either axis here).
+    """
+    path = NEURAL_EXP_DIR / f"n_neurons_snr_{task}.pkl"
+    if not path.exists():
+        ax.text(0.5, 0.5, "No n_neurons_snr data", ha="center", va="center",
+                transform=ax.transAxes, color="0.5", style="italic")
+        return
+    d = pd.read_pickle(path)
+    grid = d["grid"].copy()
+    grid["response_std"] = np.sqrt(grid["response_variance"])
+
+    color = get_palette(6)[0]
+    r, p = pearsonr(grid["split_half_r_mean"], grid["response_std"])
+    print(f"  [decoder_free, n_neurons_snr, split-half r vs σ] r={r:.3f} ({pvalue_to_stars(p)})")
+    ax.scatter(grid["split_half_r_mean"], grid["response_std"], color=color, s=8,
+              alpha=0.35, zorder=2)
+    sns.regplot(data=grid, x="split_half_r_mean", y="response_std", ax=ax, color=color, ci=95,
+               scatter=False, line_kws={"lw": 2.2, "zorder": 3})
+    ax.set_xlabel("Split-half spike-count r")
+    ax.set_ylabel("σ")
+    ax.set_xlim(0.7, 1.0)
+    ax.set_xticks([0.7, 0.85, 1.0])
+    ax.set_ylim(0.0, 0.24)
+    ax.set_yticks([0.0, 0.12, 0.24])
+    # Inverted (not transformed) -- the raw relationship is negative
+    # (higher r -> lower sigma); flipping the x-axis display direction only
+    # (real r values/ticks unchanged) makes the plotted trend read as
+    # positive, matching panel 1's own inverted-axis convention, per
+    # instruction.
+    ax.invert_xaxis()
+    sns.despine(ax=ax, top=True, right=True)
+
+
+def make_n_neurons_decoder_free() -> Path:
+    """Supplementary figure: a fully decoder-free corroboration of
+    neural_main's own row-3 (n_neurons) finding -- split-half spike-count
+    reliability of the raw error-population activity (no decoded PE/value
+    signal involved, unlike the main text's own PE-noise CV%) declines with
+    fewer neurons and directly predicts behavioral response variability
+    sigma, mirroring Fig.~neural_main H--I exactly but from an independent,
+    purely-neural angle (upstream of decoding rather than downstream of it).
+
+    2 panels (not 3x3 like neural_main), full manuscript width, height=2in
+    (per instruction) -- this is a single supplementary point, not a
+    standalone multi-row figure, so it doesn't need neural_main's own
+    demo-trace column (no equivalent "qualitative illustration" needed here;
+    the main text's own G already covers that role).
+    """
+    _apply_mode_style()
+    fig, axes = plt.subplots(1, 2, figsize=(PAPER_WIDTH, 2.0), constrained_layout=True)
+
+    ax2 = _plot_n_neurons_splithalf_pair(axes[0])
+    _plot_n_neurons_splithalf_dv_scatter(axes[1])
+    if ax2 is not None:
+        axes[1].sharey(ax2)
+        axes[1].set_ylim(0.0, 0.24)
+        axes[1].set_yticks([0.0, 0.12, 0.24])
+
+    # Custom compact legend (panel 1 only) -- matches lambda_balls' own
+    # tightened styling (fontsize/handlelength/spacing), per instruction,
+    # rather than _plot_neural_dual_vs_param's own built-in default.
+    pal = get_palette(6)
+    legend_handles = [
+        Line2D([0], [0], color=pal[0], lw=2.2, label="Split-half r"),
+        Line2D([0], [0], color=pal[1], lw=2.2, label="σ"),
+    ]
+    axes[0].legend(handles=legend_handles, fontsize=6.5, loc="upper right",
+                   frameon=True, framealpha=0.9, ncol=1, handlelength=1.2,
+                   handletextpad=0.4, columnspacing=0.8, labelspacing=0.3,
+                   borderpad=0.4)
+
+    out_path, _ = _save_fig(fig, "n_neurons_decoder_free")
+    plt.close(fig)
+    return out_path
+
+
 # Column identity for make_neural_main's 3x3 grid (per instruction) -- col 1
 # is each row's own raw trace/dynamics panel, col 2 links a swept parameter
 # to a behaviorally-relevant DV pair, col 3 plots that same DV pair directly
@@ -6244,6 +6382,7 @@ FIGURES = {
     "lambda_main": make_lambda_main,
     "lambda_metric": make_lambda_metric,
     "lambda_balls": make_lambda_balls,
+    "n_neurons_decoder_free": make_n_neurons_decoder_free,
     "lambda_reliability": make_lambda_reliability,
     "lambda_humanvmodel": make_lambda_humanvmodel,
     "lambda_sigma_crosstask": make_lambda_sigma_crosstask,

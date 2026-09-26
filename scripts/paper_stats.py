@@ -47,13 +47,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
-from scipy.stats import spearmanr
+from scipy.stats import pearsonr, spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.make_figures import (
     LAMBDA_TASK_PANELS,
     LAMBDA_N_OFFSET,
+    _fit_lambda_series,
     _load_lambda_delta,
     _human_data_path,
     _power_law,
@@ -246,75 +247,143 @@ def test_lambda_significance(task_key: str, alpha: float = 0.05) -> pd.DataFrame
     return pd.DataFrame(rows).set_index("pid")
 
 
-def report_lambda_reliability() -> None:
-    """STUB -- not yet implemented here. Within-task split-half and
-    across-task (colors vs. numbers) reliability of fitted lambda_ are
-    currently computed inline in make_figures.py's make_lambda_reliability
-    and make_lambda_sigma_crosstask, and their r/p values are hand-copied
-    into paper/main.tex's Supplementary Text (see the "Individual
-    differences in temporal discounting" STUB there for the current
-    numbers: Value r=0.92, Binary r=0.78, Continuous r=0.78 within-task;
-    Binary-vs-Continuous cross-task r=0.31, p=0.037). Porting those two
-    functions' computations here -- so this script is the single source
-    that both prints and (eventually) writes the r/stars used in the SI
-    text -- is tracked in docs/SCIENCE.md's "Future extensions"; not
-    started.
+def report_lambda_reliability() -> dict:
+    """Within-task split-half (odd/even trial) and across-task (colors vs.
+    numbers) reliability of fitted lambda_, across LAMBDA_TASK_PANELS's own
+    three tasks (Binary/Continuous/Value integration -- Proportion
+    Inference has no lambda fit at all, see report_lambda_distribution).
+    Ported from make_figures.py's make_lambda_reliability/
+    make_lambda_sigma_crosstask (_fit_lambda_split_half/
+    _plot_lambda_crosstask_panel), which compute the SAME numbers inline
+    for Fig.~lambda_sigma_reliability's own panels A-C; this function is
+    now the single source those SI numbers should match.
+
+    Returns {task_key: {"n", "r", "p"}} for the three within-task
+    split-half correlations, plus "crosstask" (colors vs. numbers, human
+    only, one point per pid who completed both).
     """
-    raise NotImplementedError(
-        "port make_lambda_reliability/make_lambda_sigma_crosstask's "
-        "reliability computations here -- see this function's docstring")
+    from scipy.stats import pearsonr
+
+    from scripts.make_figures import _fit_lambda_split_half
+
+    out = {}
+    for task_key, _ in LAMBDA_TASK_PANELS:
+        wide = _fit_lambda_split_half(task_key, _human_data_path(task_key))
+        if len(wide) < 3:
+            out[task_key] = {"n": len(wide), "r": float("nan"), "p": float("nan")}
+            continue
+        r, p = pearsonr(wide["odd"], wide["even"])
+        out[task_key] = {"n": len(wide), "r": float(r), "p": float(p)}
+
+    lam_colors = _fit_lambda_series(
+        _load_lambda_delta("colors", _human_data_path("colors")), LAMBDA_N_OFFSET["colors"])
+    lam_numbers = _fit_lambda_series(
+        _load_lambda_delta("numbers", _human_data_path("numbers")), LAMBDA_N_OFFSET["numbers"])
+    merged = pd.DataFrame({"colors": lam_colors, "numbers": lam_numbers}).dropna()
+    r, p = pearsonr(merged["colors"], merged["numbers"])
+    out["crosstask"] = {"n": len(merged), "r": float(r), "p": float(p)}
+    return out
 
 
-def report_sigma_reliability() -> None:
-    """STUB -- not yet implemented here. Within-task split-half and
-    across-task (Binary vs. Continuous) reliability of response noise
-    (sigma) are currently computed inline in make_figures.py's
-    make_sigma_reliability (via _plot_sigma_splithalf_panel) and
-    make_lambda_sigma_crosstask's sigma panel (via
-    _plot_sigma_crosstask_panel), and their r/p values are hand-copied
-    into paper/main.tex's Supplementary Text (see the "Consistency of
-    response noise (sigma) within and across tasks" STUB there for the
-    current numbers: Proportion Inference r=0.95, Binary r=0.62,
-    Continuous r=0.92 within-task, all p<1e-5; Binary-vs-Continuous
-    cross-task r=0.70, p<1e-7). Porting those functions' computations
-    here -- so this script is the single source that both prints and
-    (eventually) writes the r/stars used in the SI text -- is tracked in
-    docs/SCIENCE.md's "Future extensions"; not started. Same porting
-    shape as report_lambda_reliability above -- do both together if ever
-    picked up, since they share the same qid-grouped-std/split-half
-    machinery, just on sigma instead of lambda_.
+def report_sigma_reliability() -> dict:
+    """Within-task split-half (odd/even trial) and across-task (colors vs.
+    numbers) reliability of response noise (sigma), across
+    VARIABILITY_TASK_PANELS's own three tasks (Proportion Inference/
+    Binary/Continuous integration -- Value Integration has no repeated
+    sequences at all, see make_sigma_main's own docstring). Ported from
+    make_figures.py's make_sigma_reliability/make_lambda_sigma_crosstask's
+    sigma panel (_fit_sigma_split_half/_plot_sigma_crosstask_panel).
+
+    Returns a dict shaped like report_lambda_reliability's own: {task_key:
+    {"n", "r", "p"}} for the three within-task correlations, plus
+    "crosstask" (colors vs. numbers, human only).
     """
-    raise NotImplementedError(
-        "port make_sigma_reliability/make_lambda_sigma_crosstask's sigma "
-        "panel computations here -- see this function's docstring")
+    from scipy.stats import pearsonr
+
+    from scripts.make_figures import (
+        _fit_sigma_split_half,
+        _variability_qid_map,
+        _variability_series,
+    )
+
+    out = {}
+    for task_key in ["balls", "colors", "numbers"]:
+        qid_map, prefix = _variability_qid_map(task_key)
+        wide = _fit_sigma_split_half(task_key, _human_data_path(task_key), qid_map, prefix)
+        if len(wide) < 3:
+            out[task_key] = {"n": len(wide), "r": float("nan"), "p": float("nan")}
+            continue
+        r, p = pearsonr(wide["odd"], wide["even"])
+        out[task_key] = {"n": len(wide), "r": float(r), "p": float(p)}
+
+    qid_map_c, prefix_c = _variability_qid_map("colors")
+    qid_map_n, prefix_n = _variability_qid_map("numbers")
+    sigma_colors = _variability_series("colors", _human_data_path("colors"), qid_map_c, prefix_c)
+    sigma_numbers = _variability_series("numbers", _human_data_path("numbers"), qid_map_n, prefix_n)
+    merged = pd.DataFrame({"colors": sigma_colors, "numbers": sigma_numbers}).dropna()
+    r, p = pearsonr(merged["colors"], merged["numbers"])
+    out["crosstask"] = {"n": len(merged), "r": float(r), "p": float(p)}
+    return out
 
 
-def report_sigma_dynamics() -> None:
-    """STUB -- not yet implemented here. The growth of sigma across
-    observations within a repeated sub-sequence (Fig.~sigma_main D--F)
-    and the lag-decaying autocorrelation of each participant's residual
-    from their own typical response (Fig.~sigma_main G--I) are currently
-    computed inline in make_figures.py's make_sigma_main, rows 2 and 3
-    respectively (_load_variance_growth_data/_draw_variance_growth_panel
-    for growth; _load_variance_autocorr_data/_draw_variance_autocorr_panel
-    for autocorrelation), and their summary numbers are hand-copied into
-    paper/main.tex's Supplementary Text (see the "State noise vs.
-    response noise: growth and autocorrelation of sigma" STUB there for
-    the current numbers: growth 1.3-1.9x for Human vs. 0.93-1.15x for the
-    four `_resp_noise` math models vs. 2.0-3.2x for SNN, across
-    Proportion Inference/Binary/Continuous Integration; autocorrelation
-    0.40-0.62 for Human vs. approx. 0 (-0.04 to +0.04) for the math
-    models vs. 0.69-0.76 for SNN). Porting this here is tracked in
-    docs/SCIENCE.md's "Future extensions"; not started -- likely the
-    most involved of the four report_* stubs in this file, since both
-    loaders pull per-model NLL-fit response files
-    (_nll_resp_noise_responses_path) across all three tasks, not just
-    plain human data.
+def report_sigma_dynamics() -> dict:
+    """Growth of sigma across observations within a repeated sequence
+    (Fig.~sigma_main D--F) and the lag-1 autocorrelation of each
+    participant's residual from their own typical response (Fig.~
+    sigma_main G--I), for Human, each of the four noise-augmented math
+    models, and SNN, across all three RESID_TASK_PANELS tasks (Proportion
+    Inference/Binary/Continuous Integration). Ported from make_figures.py's
+    make_sigma_main row 2/3 loaders (_load_variance_growth_data/
+    _load_variance_autocorr_data), called with the EXACT SAME arguments
+    that figure itself uses, so this is guaranteed to match what's
+    plotted.
+
+    Growth is reported as the last-observation/first-observation ratio of
+    each source's own (unnormalized) per-observation mean residual SD --
+    equivalent to the normalized-curve's own endpoint, since normalizing
+    by the first observation's value and then reading the last point is
+    the same ratio. Autocorrelation is reported at lag 1 (the shortest lag
+    common to all three tasks' own RESID_LAGS).
+
+    Returns {task_key: {"growth": {source: ratio}, "autocorr_lag1":
+    {source: r}}}, source keys being "Human", each math model's own name,
+    and "SNN".
     """
-    raise NotImplementedError(
-        "port make_sigma_main's row-2/row-3 (_load_variance_growth_data/"
-        "_load_variance_autocorr_data) computations here -- see this "
-        "function's docstring")
+    from scripts.make_figures import (
+        NLL_RESP_NOISE_MODELS,
+        RESID_TASK_PANELS,
+        _load_variance_autocorr_data,
+        _load_variance_growth_data,
+        _nll_resp_noise_responses_path,
+    )
+
+    growth_data = _load_variance_growth_data(
+        models=NLL_RESP_NOISE_MODELS, responses_path_fn=_nll_resp_noise_responses_path)
+    autocorr_data = _load_variance_autocorr_data(
+        models=NLL_RESP_NOISE_MODELS, responses_path_fn=_nll_resp_noise_responses_path,
+        include_nef=True)
+
+    out = {}
+    for task_key, _ in RESID_TASK_PANELS:
+        human_stats, model_stats, nef_stats = growth_data[task_key]
+        growth = {}
+        h = human_stats.sort_values("observation")
+        growth["Human"] = float(h["mean"].iloc[-1] / h["mean"].iloc[0])
+        for m, s in model_stats.items():
+            s = s.sort_values("observation")
+            growth[m] = float(s["mean"].iloc[-1] / s["mean"].iloc[0])
+        if nef_stats is not None:
+            n = nef_stats.sort_values("observation")
+            growth["SNN"] = float(n["mean"].iloc[-1] / n["mean"].iloc[0])
+
+        human_res, model_results, lags = autocorr_data[task_key]
+        autocorr = {"Human": float(human_res[1][0])}
+        for m, res in model_results.items():
+            source = "SNN" if m == "NEF" else m
+            autocorr[source] = float(res[1][0])
+
+        out[task_key] = {"growth": growth, "autocorr_lag1": autocorr}
+    return out
 
 
 def report_neural_covariance() -> None:
@@ -363,6 +432,43 @@ def report_neural_covariance() -> None:
         "see this function's docstring")
 
 
+def report_decoder_free_reliability(task: str = "soltani_numbers") -> dict:
+    """Decoder-free corroboration of neural_main's own row-3 (n_neurons)
+    finding (Supplementary Text's "A decoder-free corroboration of the
+    neurons-vs-SNR result"): split-half spike-count reliability
+    (split_half_r_mean -- no decoded PE/value signal involved, unlike the
+    main text's own PE-noise CV%) vs. n_neurons, sigma vs. n_neurons (same
+    grid, restated here for convenience), and the direct covariance between
+    split-half reliability and sigma. All three read the SAME
+    n_neurons_snr grid make_figures.py's own
+    _plot_n_neurons_splithalf_pair/_plot_n_neurons_splithalf_dv_scatter
+    plot (one point per (cluster_center, outlier_deviation, n_neurons)
+    cell, 50 cells total for the production grid).
+
+    Returns {"n_cells": int, "by_n_neurons": {n_neurons: mean split-half r},
+    "split_half_vs_n_neurons": {"r", "p"}, "sigma_vs_n_neurons": {"r", "p"},
+    "split_half_vs_sigma": {"r", "p"}}.
+    """
+    from scripts.make_figures import NEURAL_EXP_DIR
+
+    path = NEURAL_EXP_DIR / f"n_neurons_snr_{task}.pkl"
+    grid = pd.read_pickle(path)["grid"].copy()
+    grid["response_std"] = np.sqrt(grid["response_variance"])
+
+    by_n = grid.groupby("n_neurons")["split_half_r_mean"].mean().to_dict()
+
+    r1, p1 = pearsonr(grid["n_neurons"], grid["split_half_r_mean"])
+    r2, p2 = pearsonr(grid["n_neurons"], grid["response_std"])
+    r3, p3 = pearsonr(grid["split_half_r_mean"], grid["response_std"])
+    return {
+        "n_cells": len(grid),
+        "by_n_neurons": {int(k): float(v) for k, v in by_n.items()},
+        "split_half_vs_n_neurons": {"r": float(r1), "p": float(p1)},
+        "sigma_vs_n_neurons": {"r": float(r2), "p": float(p2)},
+        "split_half_vs_sigma": {"r": float(r3), "p": float(p3)},
+    }
+
+
 def main() -> None:
     for task_key, title in LAMBDA_TASK_PANELS:
         decline = test_response_change_decline(task_key)
@@ -390,6 +496,43 @@ def main() -> None:
         print(f"{'':24s} median lambda={dist['median_lambda']:.2f}, "
               f"{100 * dist['frac_lambda_ge1']:.0f}% have lambda>=1 "
               f"(n={dist['n']})")
+
+    print()
+    lam_rel = report_lambda_reliability()
+    for task_key, _ in LAMBDA_TASK_PANELS:
+        r = lam_rel[task_key]
+        print(f"lambda split-half   {task_key:8s} r={r['r']:.2f} p={r['p']:.2g} (n={r['n']})")
+    ct = lam_rel["crosstask"]
+    print(f"lambda cross-task    colors-numbers r={ct['r']:.2f} p={ct['p']:.2g} (n={ct['n']})")
+
+    print()
+    sig_rel = report_sigma_reliability()
+    for task_key in ["balls", "colors", "numbers"]:
+        r = sig_rel[task_key]
+        print(f"sigma split-half     {task_key:8s} r={r['r']:.2f} p={r['p']:.2g} (n={r['n']})")
+    ct = sig_rel["crosstask"]
+    print(f"sigma cross-task     colors-numbers r={ct['r']:.2f} p={ct['p']:.2g} (n={ct['n']})")
+
+    print()
+    dynamics = report_sigma_dynamics()
+    for task_key, d in dynamics.items():
+        g = d["growth"]
+        print(f"sigma growth (last/first)  {task_key:8s} " +
+              " ".join(f"{k}={v:.2f}" for k, v in g.items()))
+    for task_key, d in dynamics.items():
+        a = d["autocorr_lag1"]
+        print(f"sigma autocorr lag-1       {task_key:8s} " +
+              " ".join(f"{k}={v:.3f}" for k, v in a.items()))
+
+    print()
+    df = report_decoder_free_reliability()
+    print(f"decoder-free split-half r by n_neurons (n={df['n_cells']} cells): " +
+          " ".join(f"{k}={v:.2f}" for k, v in sorted(df["by_n_neurons"].items())))
+    for label, key in [("split-half r vs n_neurons", "split_half_vs_n_neurons"),
+                       ("sigma vs n_neurons", "sigma_vs_n_neurons"),
+                       ("split-half r vs sigma", "split_half_vs_sigma")]:
+        r = df[key]
+        print(f"  {label:26s} r={r['r']:.3f} p={r['p']:.2g}")
 
 
 if __name__ == "__main__":
