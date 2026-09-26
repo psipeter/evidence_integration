@@ -693,6 +693,46 @@ a displayed number.
 
 ---
 
+## Row 3's `n_neurons_snr` grid redone with `cluster_spread=1.0` (was `15.0`), to actually BE an outlier
+
+**Decision:** reran the entire 50-cell `n_neurons_snr` grid (5 cluster
+centers x 2 outlier directions x 5 network sizes, 10 seeds each) with
+`--cluster_spread 1.0` instead of the original `15.0`, matching row 1's
+own `outlier` experiment design exactly. PE noise (CV%) and sigma's own
+`n_neurons` relationships, and the M&M/Results text describing this row
+(`paper/main.tex` Section 2.6 P3, Section 4.8), were all updated to the
+new numbers.
+
+**Why:** drafting the Materials and Methods text for this row surfaced
+that `cluster_spread=15.0` was wider than the outlier deviation itself
+(`oddball_deviation=10.0`) -- so for e.g. `cluster_center=50`, the three
+"consistent" observations were `{35, 50, 65}` and the "outlier" was
+`60`, which sits *inside* that range, not outside it. Mechanically the
+DV still worked (PE = observation minus the network's own running
+estimate, not minus the cluster's raw numeric range), but calling this
+an "outlier" was misleading, and row 1's own grid already used a
+genuinely tight cluster (`cluster_spread=1.0`) with a clearly-outside
+deviation. Considered leaving the data as-is and just reframing the
+row-3 text (cheaper, no rerun needed), but decided a rerun was worth it
+for internal consistency between the two rows sharing the same
+"outlier" framing and figure design.
+
+**What changed / what didn't:** only `--cluster_spread` changed (to
+`1.0`); every other CLI argument (centers, deviations, network sizes,
+seeds, alpha_0, lambda_) is identical to the original grid. The
+qualitative finding is unchanged -- PE noise and sigma both still
+decline monotonically with `n_neurons`, split-half spike-count
+reliability still rises -- only the exact r/p values shifted slightly
+(PE noise r=-0.69->-0.82; sigma r=-0.88->-0.86; direct covariance
+r=0.68->0.82; see `paper/main.tex`'s current Results 2.6 P3 for the
+numbers actually reported).
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (data regeneration + text update, nothing
+retired).
+
+---
+
 ## ITI silencing: gated `value→gate→error` population, not a weaker direct inhibition
 
 **Decision:** added `gate_error_feedback` (`models.NEF.build_network`,

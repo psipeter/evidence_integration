@@ -5,6 +5,14 @@ that argument currently stands, and what the figures have found so far.
 For code/architecture conventions, see CLAUDE.md. For the reasoning
 behind past methodology choices, see docs/DECISIONS.md.
 
+**Paper status:** `paper/main.tex` (the Science Advances submission
+draft) now has fully drafted Results (2.1-2.7), Materials and Methods
+(4.1-4.8), and Supplementary Text (all four SI sections). Introduction,
+Abstract, and Discussion are still placeholders. Every number reported
+in the main text or SI has a real, re-runnable source in
+`scripts/paper_stats.py` -- see "Future extensions" below for exactly
+which `report_*()` functions are done vs. still stubs.
+
 ---
 
 ## Scientific goals
@@ -100,9 +108,9 @@ docs/DECISIONS.md).
 - **Row 3 (n_neurons) — a different underlying experiment, settled after
   extensive exploration** (a convergence hypothesis tested and not
   supported cleanly; a Fano-factor purely-neural SNR measure tried and
-  abandoned; split-half population reliability tried and kept). Column 1
-  (toy trace demo) is built and iterated to final form; the remaining
-  columns are the current frontier.
+  abandoned; split-half population reliability tried and kept). All
+  three columns are now built and in the paper (see "PE noise CV%
+  wired in, n_neurons_snr grid redone with cluster_spread=1.0" below).
 
 **Recently settled, feeding into the current thread:** NEF network sizes
 bumped to `n_neurons=500` across all datasets (see docs/DECISIONS.md); a
@@ -299,6 +307,33 @@ trend holds at this setting. The RMSE-boxplot panel (r1c3) also had its
 outlier dots hidden and y-limits pulled to the whisker extent
 (`(0.05, 0.25)`) for a tighter layout. `synaptic_main` added to the
 figure panel inventory below.
+
+**Settled in a later session (paper-writing pass): PE noise CV% wired
+in, `n_neurons_snr` grid redone with `cluster_spread=1.0`.** Row 3's
+`pe_cv_pct` metric (designed and verified earlier, see the entry above)
+is now fully wired into `neural_main`'s own H/I panels and reported in
+`paper/main.tex` (Results 2.6 ¶3, M&M 4.8). While drafting the M&M text
+for this row, found that the production grid's own `cluster_spread=15.0`
+was wider than the outlier deviation itself (`10.0`), so the "outlier"
+observation actually landed *inside* the three-observation cluster's own
+range rather than outside it -- undermining the row's own "outlier"
+framing (row 1's own grid uses `cluster_spread=1.0`, genuinely tighter
+than its own deviation). Reran the full 50-cell grid with
+`cluster_spread=1.0` instead, matching row 1's design exactly; the
+qualitative finding is unchanged (PE noise and sigma both still decline
+with `n_neurons`, r=-0.82/-0.86), only the numbers shifted slightly (see
+`docs/DECISIONS.md`).
+
+Also added this session: a fully decoder-free corroboration of this same
+row-3 finding (`n_neurons_decoder_free`, a new 2-panel supplementary
+figure) -- split-half reliability of the raw, non-weight-tuned `error`
+population's own spike counts (no decoded PE/value signal involved)
+rises with `n_neurons` (r=0.93) and predicts sigma directly (r=-0.94),
+an even tighter relationship than the decoded PE-noise-vs-sigma one in
+the main text. See `paper/main.tex`'s Supplementary Text ("A
+decoder-free corroboration of the neurons-vs-SNR result") and
+`scripts/make_figures.py`'s `_plot_n_neurons_splithalf_pair`/
+`_plot_n_neurons_splithalf_dv_scatter`.
 
 **Not yet started:** the "Future extensions" below (ablation/statistical
 validation of `neural_main`'s parameter-vs-outcome relationships) and
@@ -500,6 +535,10 @@ testable with future spike-resolved recordings.
   simulated neurons; individuals with the most inconsistent post-outlier
   error-population readouts are predicted to show the most response
   variability.
+- **Supplementary: a decoder-free corroboration of Row 3.** Split-half
+  reliability of the raw, non-weight-tuned `error` population's own
+  spike counts (no decoded PE/value signal involved) -- `n_neurons_
+  decoder_free`, a 2-panel SI figure mirroring row 3's own H/I design.
 
 ---
 
@@ -526,6 +565,7 @@ testable with future spike-resolved recordings.
 | `sigma_main` | 3.1 + 3.2 + 3.3 composite | 3×3 |
 | `neural_main` | 4. Neural predictions | 3×3 |
 | `synaptic_main` | Synaptic vs. working-memory | 2×3 |
+| `n_neurons_decoder_free` | Supplementary (decoder-free corroboration) | 1×2 |
 
 ---
 
@@ -549,34 +589,24 @@ testable with future spike-resolved recordings.
   its own (the RMSE-boxplot panel reads it via `_synaptic_model_fit_path`
   regardless, so this doesn't block the figure — just its long-term
   pipeline hygiene).
-- **Port existing ad hoc statistics into `scripts/paper_stats.py`** (started
-  this session with one new function, `test_response_change_decline`).
-  Every other statistic currently reported in `paper/main.tex` — split-half
-  reliabilities, lambda/sigma cross-task correlations, `neural_main`'s
-  covariance r-values, the NLL-vs-RMSE ranking comparison, etc. — is still
-  computed inline inside `make_figures.py`/`neural_experiments.py`, each in
-  its own ad hoc way, with no single findable source per reported number.
-  Not started; do one metric at a time rather than a single large refactor.
-  Each still-unported group now has a documented `report_*()` stub in
-  `scripts/paper_stats.py` (`report_lambda_reliability`,
-  `report_sigma_reliability`, `report_sigma_dynamics`,
-  `report_neural_covariance`) — each stub's docstring names the exact
-  `make_figures.py`/`neural_experiments.py` function(s) currently doing
-  the computation and the `paper/main.tex` location the hand-copied
-  numbers live in, so a future porting pass has a findable starting point
-  per metric instead of starting from this bullet alone. The NLL-vs-RMSE
-  ranking comparison (`paper/main.tex`'s "Model comparison via negative
-  log-likelihood" SI stub) has no `report_*()` stub yet — it's a
-  qualitative ranking match, not an r/p value, so it didn't fit this
-  round's pattern; still open. `report_neural_covariance`'s docstring is
-  now filled in for all three `neural_main` rows (Section 2.6 is fully
-  drafted as of this session). One number had NO source anywhere in the
-  codebase at all — the SI's "Individual differences in temporal
-  discounting" STUB states each task's median fitted $\lambda$ and the
-  fraction with $\lambda \geq 1$ (the `lambda_main` caption itself only
-  makes the qualitative claim), with no corresponding print statement
-  anywhere — so `report_lambda_distribution` was added as a real
-  (non-stub) function rather than another reference, since it was cheap
-  to reproduce directly from `test_lambda_fit_quality`'s existing
-  per-participant fits;
-  verified to match the caption's numbers exactly.
+- **Port existing ad hoc statistics into `scripts/paper_stats.py`**
+  (started with `test_response_change_decline`/`report_lambda_
+  distribution`; substantially advanced in a later paper-writing
+  session). Real, verified, non-stub functions now exist for:
+  `report_lambda_distribution`, `report_lambda_reliability` (within-
+  and across-task lambda split-half/cross-task correlations),
+  `report_sigma_reliability` (same, for sigma), `report_sigma_dynamics`
+  (sigma growth and lag-1 autocorrelation, human + 4 math models + SNN,
+  all 3 tasks), and `report_decoder_free_reliability` (the new
+  decoder-free corroboration numbers, see "Current thread" above). All
+  five are wired into `paper_stats.py`'s own `main()` printout and
+  verified to match what's written in `paper/main.tex`.
+  **Still a stub:** `report_neural_covariance` (the three `neural_main`
+  rows' own parameter-vs-outcome r-values, Results 2.6) -- its docstring
+  already documents the exact numbers and where they're read from, just
+  not yet ported to real code. **Not attempted at all:** the NLL-vs-RMSE
+  ranking comparison in the "Model comparison via negative
+  log-likelihood" SI section -- its own p-values were verified via a
+  one-off script during drafting (not saved as a reusable function), so
+  the specific numbers in the paper ARE verified, just not through a
+  standing `report_*()` function the way the others are.
