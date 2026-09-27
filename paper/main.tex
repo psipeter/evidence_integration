@@ -125,57 +125,16 @@ The synaptic model also captured individual human behavior on the Continuous Int
 
 \section{Discussion}
 
-% TODO -- opening summary paragraph (no subsection header), ~1 paragraph.
-% Restate why sequential evidence integration under uncertainty matters,
-% and why individual differences in HOW people do it are underexplored.
-% Then state the three headline results, in this order (builds to the
-% SNN as climax, matching the section's own ordering below):
-%   (1) DPE captures human behavior and individual differences across
-%       four structurally distinct tasks;
-%   (2) humans show secondary behavioral signatures (lambda, sigma, and
-%       their growth/autocorrelation) that are stable within- and
-%       across-task, and constrain the underlying mechanism beyond what
-%       raw response-matching can;
-%   (3) the SNN implementation explains the neural mechanism, is the
-%       only model tested that reproduces the noise dynamics, and yields
-%       several falsifiable predictions for future work.
-% One sentence flagging the order of what follows (secondary metrics ->
-% DPE's place in its model class -> the SNN as synthesis).
+People constantly form and revise beliefs from a stream of uncertain evidence: they estimate hidden quantities from repeated observations, judge how much to trust a source over repeated interactions, and track the feedback from repeated actions. Given the complexity and prevalence of evidence integration, it is not surprising that individuals solve this problem in markedly different ways. To understand the computational and neural basis of individual variability, we first tested a simple error-driven model based on a discounted prediction error (DPE) across four distinct evidence integration tasks. DPE captured not only average human behavior but also the substantial individual differences in how people weight new evidence against prior belief. We further characterized this variability using two additional signatures of the integration process: the rate at which people discount older evidence ($\lambda$, which reveals whether people exhibit a primacy or recency bias) and the variability of people's responses ($\sigma$, which reveals how consistently people represent and update their beliefs). Both $\sigma$ and $\lambda$ varied substantially between individuals, indicating that people differ not only in the conclusions they reach but in their cognitive strategies and precision. We next situated DPE within a broader family of prediction-error-based integration models, and argued that its relative simplicity allows for generalization across tasks and a plausible implementation in the brain, which is known to use prediction-error signals for this kind of computation in other domains. We defended these claims by implementing DPE in a biologically plausible spiking neural network (SNN) and applying it across our diverse task suite. This SNN reproduced human behavior and individual differences, was alone among the models we tested in reproducing the growth and persistence of response noise across a repeated sequence, and yielded several concrete, falsifiable predictions linking neural activity to behavior. Together, these results suggest that a simple, error-driven mechanism, implemented in spiking neurons, offers a plausible and generative account of both the shared and idiosyncratic ways people integrate evidence over time.
 
-\subsection{Individual differences in evidence integration}
-% TODO -- two distinct contributions here, not one blended discussion:
-%
-% Contribution A -- generalizing secondary metrics beyond single-task
-% literature. Carrabin/yoo established lambda/sigma as meaningful, but
-% each only within one task. Our two new, deliberately different tasks
-% (binary vs. continuous input, repeated vs. non-repeated sequences --
-% Results 2.1) test whether these signatures hold across those task
-% features prior work couldn't vary. Honest treatment of where
-% generalization broke down: the Proportion Inference flat-|Delta R|
-% result (Supplementary Text's "Response-change decay: the Proportion
-% Inference exception") -- genuinely flat across all 5 observations, not
-% explained by repetition/anchoring effects or by short-trial artifacts
-% (Mean/PR/DPE all predict a clear decline when fit to this same 5-
-% observation window) -- stated as a real failure of this signature to
-% generalize to this task, not explained away. Leading candidate floated
-% in the SI (not yet argued in depth): the task's very short, binary
-% evidence stream may not engage the same gradual confidence-accumulation
-% process the other three (longer, more numerous observation) tasks
-% recruit -- worth a real paragraph here, not just a passing mention.
-%
-% Contribution B -- individual differences as a stable trait, not
-% session noise. Within-task split-half reliability of lambda and sigma
-% (all tasks, all p<1e-5) supports treating these as person-level traits.
-% Cross-task reliability is the harder, more novel claim: sigma transfers
-% reasonably well (r=0.70, p<1e-7); lambda is weaker (raw r=0.31,
-% p=0.037). Honest framing of that weak result: partly attenuation from
-% measurement noise at this sample size (disattenuated estimate ~=0.40,
-% 95% CI on the raw r=0.31 (n=46) = [0.02, 0.55]) -- a real, quantifiable
-% part of the story -- but also a live possibility that different tasks
-% recruit genuinely different integration strategies, which the
-% disattenuation correction doesn't resolve. Consider whether sequence
-% noise itself (independent of true reliability) makes this comparison
-% harder at these sample sizes, as an additional candidate explanation.
+\subsection{Individual differences in discounting and precision}
+Studying evidence integration through overall fit quality alone, as typically measured by response error or likelihood, risks conflating models that reach similar predictions through very different underlying processes. Two models can match human responses equally well on average while implying sharply different update rules, memory demands, or noise sources -- a form of model mimicry that aggregate response-matching alone cannot resolve \cite{palminteri2017falsification, wilson2019ten}. In addition to matching behavioral responses directly, it can therefore be useful to examine secondary behavioral signatures that emerge as a consequence of the underlying update mechanism; doing so provides a complementary test of whether a model captures the underlying cognitive process, and not merely its output.
+
+Such investigations have already proven useful in evidence integration tasks similar to our own. Yoo et al. \cite{yoo2025people} showed that participants' response updates decline in magnitude as more evidence is observed within a trial, a discounting signature that reveals whether an individual weights early observations more heavily than later ones (primacy) or the reverse (recency). Separately, Prat-Carrabin and Woodford \cite{prat2024imprecise} showed that participants' responses to an exactly repeated evidence sequence vary systematically across repetitions, and used this variability to argue that response noise arises from an internal, compounding state representation rather than from noise added only at the point of response. However, each of these signatures has only been examined within a single task: it is unclear whether they reflect general properties of the integration process or artifacts of a particular task's design. We addressed this directly by measuring both signatures, the discounting rate $\lambda$ and the response variability $\sigma$, across four tasks that deliberately varied along several relevant task dimensions: input type, sequence length, repetition structure, and estimated quantity.
+
+The decline in response-change magnitude and the compounding response variability under repetition both generalized to our two new tasks, replicating and extending Yoo et al.'s \cite{yoo2025people} and Prat-Carrabin and Woodford's \cite{prat2024imprecise} findings. Furthermore, both $\lambda$ and $\sigma$ reveal genuine, stable individual differences rather than overfitting to a single task or dataset: within each task, split-half reliability was high for both parameters (Supplementary Text), indicating that most participants occupy a consistent position along the primacy-to-recency continuum, and a consistent level of response precision, across different subsets of their own trials. This consistency extended across tasks: an individual's $\sigma$, and to a lesser extent their $\lambda$, in one task predicted their value of that same parameter in the other (Binary and Continuous Integration, which share a within-subject design), suggesting that both reflect fundamental, individualized signatures of evidence integration in the brain.
+
+Despite these successes, several open questions remain. Unlike the other three tasks, Prat-Carrabin and Woodford's original Proportion Inference showed no reliable decline in response-change magnitude (Supplementary Text). Neither repetition itself nor the brevity of the sequence, considered alone, explains this exception: the decline was equally absent for first-occurrence and repeat trials alike, and many of the simulated models predict a substantial decline over this window when fit to this task's data. One possibility is that this short, binary evidence stream does not engage the same gradual confidence-accumulation process the other three, longer tasks recruit. Another is that asking participants to infer the value of an unknown quantity (especially with fewer samples) invites a categorically different strategy than the continuous, incrementally-diminishing updates that our models predict. Finally, $\lambda$'s own cross-task transfer was modest: the discounting rate correlated only weakly between Binary and Continuous Integration. While we suspect that increasing the sample size (more participants, more trials, and/or more observations) would reveal individually-stable, task-independent discounting biases more robustly, we acknowledge that different tasks may inspire distinct discounting strategies.
 
 \subsection{DPE among prediction-error-based models}
 % TODO -- one family, one spectrum, not two separate categories: models
