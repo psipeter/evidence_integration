@@ -125,108 +125,216 @@ The synaptic model also captured individual human behavior on the Continuous Int
 
 \section{Discussion}
 
-% TODO -- throughline for this Discussion is NOVELTY, front and center:
-% every relationship in Fig.~\ref{fig:neural_main} (rows 1-3) and
-% Fig.~\ref{fig:synaptic_main}'s WM-vs-synaptic perturbation dissociation
-% is a NOVEL, UNVALIDATED prediction -- no real neural recordings or
-% perturbation data exist for this task to check them against. State this
-% explicitly, once, covering both figures together (they make the same
-% kind of claim -- a testable dissociation/relationship, not yet a
-% validated finding), and tie it to Goal 4's framing (docs/SCIENCE.md) of
+% TODO -- opening summary paragraph (no subsection header), ~1 paragraph.
+% Restate why sequential evidence integration under uncertainty matters,
+% and why individual differences in HOW people do it are underexplored.
+% Then state the three headline results, in this order (builds to the
+% SNN as climax, matching the section's own ordering below):
+%   (1) DPE captures human behavior and individual differences across
+%       four structurally distinct tasks;
+%   (2) humans show secondary behavioral signatures (lambda, sigma, and
+%       their growth/autocorrelation) that are stable within- and
+%       across-task, and constrain the underlying mechanism beyond what
+%       raw response-matching can;
+%   (3) the SNN implementation explains the neural mechanism, is the
+%       only model tested that reproduces the noise dynamics, and yields
+%       several falsifiable predictions for future work.
+% One sentence flagging the order of what follows (secondary metrics ->
+% DPE's place in its model class -> the SNN as synthesis).
+
+\subsection{Individual differences in evidence integration}
+% TODO -- two distinct contributions here, not one blended discussion:
+%
+% Contribution A -- generalizing secondary metrics beyond single-task
+% literature. Carrabin/yoo established lambda/sigma as meaningful, but
+% each only within one task. Our two new, deliberately different tasks
+% (binary vs. continuous input, repeated vs. non-repeated sequences --
+% Results 2.1) test whether these signatures hold across those task
+% features prior work couldn't vary. Honest treatment of where
+% generalization broke down: the Proportion Inference flat-|Delta R|
+% result (Supplementary Text's "Response-change decay: the Proportion
+% Inference exception") -- genuinely flat across all 5 observations, not
+% explained by repetition/anchoring effects or by short-trial artifacts
+% (Mean/PR/DPE all predict a clear decline when fit to this same 5-
+% observation window) -- stated as a real failure of this signature to
+% generalize to this task, not explained away. Leading candidate floated
+% in the SI (not yet argued in depth): the task's very short, binary
+% evidence stream may not engage the same gradual confidence-accumulation
+% process the other three (longer, more numerous observation) tasks
+% recruit -- worth a real paragraph here, not just a passing mention.
+%
+% Contribution B -- individual differences as a stable trait, not
+% session noise. Within-task split-half reliability of lambda and sigma
+% (all tasks, all p<1e-5) supports treating these as person-level traits.
+% Cross-task reliability is the harder, more novel claim: sigma transfers
+% reasonably well (r=0.70, p<1e-7); lambda is weaker (raw r=0.31,
+% p=0.037). Honest framing of that weak result: partly attenuation from
+% measurement noise at this sample size (disattenuated estimate ~=0.40,
+% 95% CI on the raw r=0.31 (n=46) = [0.02, 0.55]) -- a real, quantifiable
+% part of the story -- but also a live possibility that different tasks
+% recruit genuinely different integration strategies, which the
+% disattenuation correction doesn't resolve. Consider whether sequence
+% noise itself (independent of true reliability) makes this comparison
+% harder at these sample sizes, as an additional candidate explanation.
+
+\subsection{DPE among prediction-error-based models}
+% TODO -- one family, one spectrum, not two separate categories: models
+% that update a running estimate via a weighted prediction error,
+% V_n = V_{n-1} + alpha_n(I_n - V_{n-1}) (behrens2007learning,
+% piray2021model, nassar2010approximately, yu2008sequential,
+% camerer1999experience). The family is defined by DYNAMIC WEIGHTING --
+% how much alpha_n is allowed to vary, and to depend on the evidence
+% itself -- not by a fixed/dynamic dichotomy. Where members sit on that
+% spectrum:
+%   - LeakyIntegrator: alpha_n = constant. The spectrum's zero point --
+%     and literally DPE's own lambda=0 special case (Supplementary Text
+%     proof), not a separate model family.
+%   - DPE: alpha_n = alpha_0/n^lambda (Eq.~\ref{eq:dpe_alpha}), a
+%     deterministic function of the observation count n alone, fit once
+%     per participant and held constant across a trial. Genuinely
+%     dynamic (weight changes every observation), but DATA-INDEPENDENT --
+%     the quality/content of the evidence stream never enters. The
+%     simple end of the time-varying part of the spectrum, not a
+%     "fixed" category apart from it.
+%   - EWA (Camerer \& Ho 1999, \cite{camerer1999experience}): two
+%     independent mechanisms -- experience weight rho (N(t) =
+%     rho*N(t-1) + 1) and attraction decay phi (A(t) ~ phi*A(t-1)) --
+%     still not directly data-dependent, but structurally richer than
+%     DPE's single parameter. Keep the existing mathematical point: EWA's
+%     primacy effect only emerges in the limiting case rho=1, phi=1 (no
+%     decay at all), whereas DPE produces a full primacy-to-recency
+%     continuum from a single parameter (lambda) at every value -- DPE
+%     is NOT a restricted special case of EWA, and exhibits richer
+%     primacy effects with fewer parameters. Also worth keeping: EWA has
+%     mainly been applied to economic/multi-agent games with
+%     counterfactual reasoning and complex inter-choice dependencies,
+%     rarely to non-social RL tasks, and (as far as we know) never to the
+%     sequential-estimation tasks studied here.
+%   - Behrens/Nassar/Yu-Dayan-style volatility-modulated models: the
+%     fully data-dependent end -- alpha_n computed online as a function
+%     of observed surprise or an evolving volatility estimate, so it can
+%     rise or fall from one observation to the next based on what's
+%     actually been observed.
+% Now that lambda/sigma results are in hand, make this argument with the
+% actual data, not just in the abstract: does a fixed power-law discount
+% schedule suffice to explain the observed individual differences and
+% decay patterns, or does the data actually call for a volatility-
+% modulated rate? A stable, per-person discount schedule (Contribution B
+% above) arguably fits a fixed-parameter story more naturally than one
+% requiring online re-estimation from volatility -- but state this as an
+% argument to be made, not a settled conclusion.
+% Extensibility (new argument, not yet resolved): DPE's simplicity is a
+% deliberate starting point, not an architectural ceiling -- a separate
+% module estimating volatility/surprise online could modulate alpha(t)
+% further without restructuring the core update rule. Open question for
+% when this section is drafted: could EWA's own rho/phi mechanisms
+% themselves be captured as a more complex alpha(t) within this same DPE
+% framework, rather than treating EWA as categorically separate?
+% Close with the three-part empirical case, bridging into the next
+% subsection: DPE (a) fits comparably to or better than standard
+% alternatives across all four tasks; (b) captures individual
+% differences, reliably (previous subsection); (c) is the only member of
+% this family actually implemented in a biologically plausible spiking
+% network, in two distinct circuit architectures (next subsection).
+% NEEDS VERIFICATION before claiming (c) as stated: a proper literature
+% check that no other member of this family has an existing spiking/
+% biophysical implementation -- believed true, not yet confirmed.
+
+\subsection{Neural network predictions}
+% TODO -- throughline is NOVELTY, front and center: every relationship in
+% Fig.~\ref{fig:neural_main} (rows 1-3) and Fig.~\ref{fig:synaptic_main}'s
+% WM-vs-synaptic perturbation dissociation is a NOVEL, UNVALIDATED
+% prediction -- no real neural recordings or perturbation data exist for
+% this task to check them against. State this once, covering both
+% figures together, tied to Goal 4's framing (docs/SCIENCE.md) of
 % testable predictions for future joint neural/behavioral work. This is
 % the section's main point, not a caveat to bury at the end.
-% Secondary, still worth a sentence: why alpha_0 controls BOTH peak PE
-% magnitude and decay rate (Fig.~\ref{fig:neural_main}A-C) is a fact
-% about THIS neural implementation, not a direct mathematical consequence
-% of the DPE equation itself (Fig.~\ref{fig:models_overview}A) -- don't
-% leave it as an unexplained empirical correlation, but keep it
-% subordinate to the novelty framing above.
+% Frame: DPE's minimality (previous subsection) is what made this
+% implementation possible; the SNN reproduces (a)/(b) above while also
+% capturing secondary/noise metrics no other tested model reproduces --
+% direct callback to the sigma-growth/autocorrelation dissociation
+% (Section 2.5), now corroborated by an independent neural mechanism. No
+% member of this broader PE-model family has an existing spiking/
+% biophysical implementation (pending the lit check above) -- this
+% begins to fill that gap, echoing the old paper's own framing of why
+% mechanistic/neural grounding matters versus purely descriptive models.
 %
-% TODO -- per-experiment empirical validation recipes, MOVED OUT of
-% Results (Section 2.6 now reports only the simulated findings; per
-% instruction, each experiment's own "how this could be tested on real
-% data" sentence belongs here instead). Fold these three into the
-% novelty paragraph above, one per neural_main row, rather than losing
-% them:
-%   Row 1 (outlier / alpha_0): test by decoding spikes from error-
-%     sensitive neurons during the cue period of an evidence-integration
-%     task -- a larger PE response to a surprising observation should
-%     also show a faster subsequent decay of that response.
-%   Row 2 (activity decay / lambda): test by measuring firing rates of
-%     error-sensitive neurons at cue onset and the subsequent response
-%     changes after each observation -- individuals whose neural signal
-%     declines faster within a trial should also show a faster
-%     behavioral decline in response updating.
-%   Row 3 (spike noise / n_neurons): test by relating the trial-to-trial
-%     reliability of decoded neural signals to an individual's own
-%     behavioral response noise sigma.
-%   synaptic_main (recurrent vs. synaptic ITI perturbation, Section 2.7):
-%     test by applying a distractor task or non-invasive brain stimulation
-%     during a working-memory delay in a real evidence-integration
-%     experiment and asking whether decoding accuracy recovers once the
-%     delay ends (consistent with a recurrent, persistent-activity
-%     mechanism) or persists disrupted/unaffected throughout (consistent
-%     with a synaptic mechanism).
+% Four predictions, each stated FIRST as a pure neural/behavioral
+% correlation (matching neural_main/synaptic_main's own column-3 panels),
+% THEN unpacked mechanistically via the relevant model parameter -- do
+% not lead with the abstract parameter:
+%   1. (Fig.~\ref{fig:neural_main}A--C) A population's transient error
+%      response following a surprising observation predicts how fast
+%      that response then decays back to baseline (r=0.93, p<0.0001).
+%      Account: both are jointly set by the network's synaptic learning
+%      rate alpha_0 -- a fact about THIS neural implementation, not a
+%      direct mathematical consequence of the DPE equation itself
+%      (Fig.~\ref{fig:models_overview}A); don't leave it as an
+%      unexplained empirical correlation. Test: decode spikes from
+%      error-sensitive neurons during the cue period of an evidence-
+%      integration task -- a larger PE response to a surprising
+%      observation should also show a faster subsequent decay.
+%   2. (Fig.~\ref{fig:neural_main}D--F) The rate of within-trial decline
+%      in error-selective neural activity predicts the rate of decline in
+%      trial-by-trial response updates |Delta R| (r=0.86, p<0.0001) -- a
+%      purely neural decay predicting a purely behavioral one. Account:
+%      both governed by the discounting parameter lambda. Test: measure
+%      firing rates of error-sensitive neurons at cue onset and the
+%      subsequent response changes after each observation -- individuals
+%      whose neural signal declines faster within a trial should also
+%      show a faster behavioral decline in response updating.
+%   3. (Fig.~\ref{fig:neural_main}G--I) Trial-to-trial noise/reliability
+%      of the population error signal predicts behavioral response
+%      variability sigma (r=0.82, p<0.0001; see Supplementary Text for a
+%      second, decoder-free reliability metric that corroborates this
+%      relationship). Account: both are set by the signal-to-noise ratio
+%      of the PE representation itself, which is influenced by
+%      biological factors such as neural recruitment (number of neurons
+%      engaged) -- n_neurons is one lever on that SNR, not the only
+%      conceivable one. Test: relate the trial-to-trial reliability of
+%      decoded neural signals to an individual's own behavioral response
+%      noise sigma.
+%   4. (Fig.~\ref{fig:synaptic_main}C--D) Perturbing activity during a
+%      working-memory delay (no new evidence shown) increases subsequent
+%      response error and variability in a dose-dependent way for one
+%      circuit implementation (recurrent: RMSE r=0.77, sigma r=0.58, both
+%      p<0.0001) but not the other (synaptic: both r~=0, p>0.9), despite
+%      indistinguishable baseline behavior (Fig.~\ref{fig:synaptic_main}B;
+%      Wilcoxon p<0.0001). Account: only the recurrent, persistent-
+%      activity implementation stores the running estimate in ongoing
+%      spiking activity a delay-period perturbation can corrupt; the
+%      synaptic (plasticity-based) implementation stores it in synaptic
+%      weights a transient current can't reach. Test: apply a distractor
+%      task or non-invasive brain stimulation during a working-memory
+%      delay in a real evidence-integration experiment and ask whether
+%      decoding accuracy recovers once the delay ends (recurrent
+%      signature) or persists disrupted/unaffected throughout (synaptic
+%      signature).
 %
-% TODO -- revisit DPE's relationship to previous weighted-prediction-error
-% models here (see Results' DPE subsection, which only disambiguates DPE
-% from surprise-modulated adaptive-learning-rate models in 1-2 sentences
-% and defers the real argument to here). Now that lambda/sigma results
-% are in hand: does a fixed power-law discount schedule suffice to
-% explain the observed individual differences and decay patterns, or does
-% the data actually call for a surprise/volatility-modulated rate the way
-% Behrens/Nassar/Yu-Dayan-style models assume? Make the argument with the
-% actual results, not just in the abstract.
-% FORMAL STATEMENT (drafted for M&M's "Computational models" subsection,
-% then pulled per instruction -- not interpretive, so it belongs here
-% instead, as raw material for the argument above rather than a
-% restatement of it): DPE belongs to a broader family of models that
-% update a running estimate via a weighted prediction error, V_n =
-% V_{n-1} + alpha_n(I_n - V_{n-1}) (behrens2007learning, piray2021model,
-% nassar2010approximately, yu2008sequential, camerer1999experience).
-% These share DPE's basic update form but differ in how alpha_n itself
-% is computed: adaptive-learning-rate models estimate alpha_n online as
-% a function of observed surprise or an evolving volatility estimate, so
-% it can rise or fall from one observation to the next; DPE instead
-% fixes alpha_n = alpha_0/n^lambda (Eq.~\ref{eq:dpe_alpha}) as a
-% deterministic function of the observation count n alone, via two
-% parameters fit once per participant and held constant across a trial,
-% rather than an online, surprise-dependent rule with its own separate
-% parameters and dynamics. That contrast is exactly the raw material for
-% this TODO's own question (does a fixed schedule suffice, or does the
-% data call for a volatility-modulated rate) -- state the mechanism
-% difference plainly before making the argument.
-%
-% TODO -- EWA comparison (from prior reviewer correspondence, Reviewer #2):
-% EWA (Camerer & Ho 1999, \cite{camerer1999experience}) uses two independent
-% mechanisms -- experience weight rho (N(t) = rho*N(t-1) + 1, governing
-% accumulation/decay of past observations) and attraction decay phi
-% (A(t) ~ phi*A(t-1)) -- that together primarily produce a RECENCY effect;
-% primacy only emerges in the limiting case rho=1, phi=1 (no decay at all).
-% DPE, by contrast, produces a full primacy-to-recency continuum from a
-% single parameter (lambda) at every value, not just a limiting case --
-% DPE is NOT a special case of EWA, and exhibits richer primacy effects.
-% Also worth keeping from the reviewer response: EWA has mainly been
-% applied to economic/multi-agent games with counterfactual reasoning and
-% complex inter-choice dependencies, rarely to non-social RL tasks, and
-% (as far as we know) never to the sequential-estimation tasks studied
-% here -- genuine novelty, not just a reimplementation of an established
-% approach.
-%
-% TODO -- revisit the Proportion Inference exception (Supplementary Text's
-% "Response-change decay: the Proportion Inference exception"): human
-% |Delta R| is flat across this task's 5 observations even though Mean/PR/
-% DPE all predict a clear decline when fit to it, so the task's own
-% generative statistics don't explain the exception -- something about
-% human behavior specifically on this short, purely binary task does.
-% Leading candidate floated in the SI (not yet argued in depth): the task's
-% very short, binary evidence stream may not engage the same gradual
-% confidence-accumulation process the other three (longer, more numerous
-% observation) tasks recruit. Worth a real paragraph here once the
-% Discussion's own structure is drafted, not just a passing mention.
-Lots of discussion
+% Distinct from an RNN account: [TODO -- draft with this section itself;
+% candidate argument already on the table: spiking noise here is
+% emergent from representing a scalar in a finite spiking population,
+% governed by one parameter (n_neurons) with independent biological
+% meaning, vs. an RNN's noise being an arbitrary injected/fitted choice].
+% Extensibility: NEF's population-coding approach is modular, alpha(t)
+% computed in real time from local circuit dynamics rather than hand-
+% coded -- suggesting the architecture could extend beyond single-value
+% integration to more complex tasks/cognitive operations.
+
 \subsection{Limitations}
-Science Advances explicitly requires a limitations paragraph in Discussion
+% Science Advances explicitly requires a limitations paragraph here.
+% TODO:
+%   - No real neural data (spikes, imaging, or perturbation) exists to
+%     validate any of the four predictions above -- every neural claim
+%     in this Discussion is prospective, not yet tested.
+%   - Narrower task diversity than the old paper: four structurally
+%     similar sequential-estimation tasks, no social-choice/strategic
+%     paradigm -- generalization claims are bounded to this task family.
+%   - Genuinely unresolved items, stated once (not repeated from above):
+%     the mechanistic cause of the Proportion Inference flat-|Delta R|
+%     result, and whether the weak cross-task lambda correlation
+%     reflects true low reliability or a real difference in integration
+%     strategy across task types.
 
 \section{Materials and Methods}
 
