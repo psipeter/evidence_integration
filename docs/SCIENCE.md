@@ -7,11 +7,16 @@ behind past methodology choices, see docs/DECISIONS.md.
 
 **Paper status:** `paper/main.tex` (the Science Advances submission
 draft) now has fully drafted Results (2.1-2.7), Materials and Methods
-(4.1-4.8), and Supplementary Text (all four SI sections). Introduction,
-Abstract, and Discussion are still placeholders. Every number reported
-in the main text or SI has a real, re-runnable source in
-`scripts/paper_stats.py` -- see "Future extensions" below for exactly
-which `report_*()` functions are done vs. still stubs.
+(4.1-4.8), Supplementary Text (all four SI sections), and Discussion
+(opening summary, three body subsections -- individual differences in
+discounting/precision, DPE positioned within its model class, and
+neural network predictions/the case against a generic RNN -- plus a
+dedicated Limitations subsection consolidating open questions previously
+scattered across the other three). Introduction and Abstract are still
+placeholders. Every number reported in the main text or SI has a real,
+re-runnable source in `scripts/paper_stats.py` -- see "Future
+extensions" below for exactly which `report_*()` functions are done vs.
+still stubs.
 
 ---
 

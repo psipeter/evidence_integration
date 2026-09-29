@@ -21,15 +21,15 @@ platform decisions is in **[`docs/DECISIONS.md`](docs/DECISIONS.md)**.
 |------|---|-------------|--------|
 | carrabin | 21 | Binary inputs; 5 obs/trial; sequences repeat (qid); true_p known | Active |
 | yoo | 38 | Continuous inputs; 30 obs/trial; no sequence repetition | Active |
-| numbers | live | Continuous inputs; 15 obs/trial; Normal(mean, std); 8x4=32 trials, per-participant pool of 200 | **Piloting** (task_backend) |
-| colors | live | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 32 trials/participant, per-participant pool of 200 | **Piloting** (task_backend) |
+| numbers | 46 | Continuous inputs; 15 obs/trial; Normal(mean, std); 8x4=32 trials, per-participant pool of 200 | Active |
+| colors | 46 | Binary inputs (blue/red); 15 obs/trial; Bernoulli(p); 32 trials/participant, per-participant pool of 200 | Active |
 
-numbers and colors are designed to be completed within-subject (same
-participants recruited via Prolific allowlist), unlocking cross-task
+numbers and colors were completed within-subject (same 46 participants
+recruited via Prolific allowlist, after exclusion), unlocking cross-task
 individual-differences analysis. See
 **[`task_backend/CLAUDE.md`](task_backend/CLAUDE.md)** for the online
-task's schema, deployment, and testing — Prolific cutover is done, real
-pilot rounds have run.
+task's schema, deployment, and testing — data collection is complete and
+these two datasets are now used throughout `paper/main.tex`.
 
 ---
 

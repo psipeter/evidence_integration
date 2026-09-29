@@ -913,3 +913,36 @@ the codebase -- the per-model-params machinery was removed as dead code,
 not archived, since it's a small, easily-reconstructed CLI change, not a
 standalone feature).
 
+---
+
+## Discussion's "first spiking implementation" claim narrowed after a literature check
+
+**Decision:** `paper/main.tex`'s Discussion ("Neural network predictions")
+states our SNN is "the first biologically-plausible, PE-based
+implementation that reproduces human behavior (especially individual
+differences) in evidence integration" -- deliberately narrower than an
+earlier draft's blanket claim that no spiking implementation of any
+model in the DPE/EWA/adaptive-learning-rate family existed at all.
+
+**Why:** a literature search during Discussion drafting turned up two
+close precedents implementing Kalman-filter-style adaptive weighting
+(the fully data-dependent end of the same model family) in spiking or
+rate-coded networks: Millidge et al. 2021, "Neural Kalman Filtering"
+(rate-coded integrate-and-fire neurons, not true spiking; validated only
+on a synthetic tracking task) and Adamiat et al. 2025, "A Spiking Neural
+Network Implementation of Gaussian Belief Propagation" (genuine LIF
+spiking with population coding; validated only on synthetic Kalman-
+filtering/Bayesian-regression tasks). Neither implements DPE or EWA
+specifically, and neither is applied to or evaluated against real
+behavioral data -- so the claim was narrowed to what the search actually
+supports: not "no spiking implementation of any member of this family
+exists," but "no such implementation has been shown to reproduce human
+behavioral individual differences." Both papers are now cited
+(`millidge2021neural`, `adamiat2025spiking` in `paper/bibliography.bib`)
+as the closest existing precedents, immediately followed by this
+narrower claim.
+
+**Full investigation:** this session's chat; no separate
+`archive/HISTORY_*.md` entry (a manuscript-writing research finding, not
+a retired codebase feature).
+
