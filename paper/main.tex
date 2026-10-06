@@ -325,7 +325,7 @@ To causally dissociate the recurrent and synaptic mechanisms' reliance on ongoin
 \begin{figure}
 	\centering
 	\includegraphics[width=1.0\textwidth]{figures/tasks_overview_paper.pdf}
-	\caption{\textbf{Evidence integration in four sequential estimation tasks.} In each task, participants make sequential observations and report a real-valued estimate after each one. Tasks differ in input type, sequence length, and repetition structure. (\textbf{A}) The \textit{Proportion Inference Task} \cite{prat2024imprecise} presents rings of two colors drawn randomly from a box and asks participants to report the hidden proportion of one color. Each trial includes 5 observations, leading to frequent repetition of color sequences. (\textbf{B, C}) The \textit{Binary} and \textit{Continuous Integration Tasks} present binary (continuous) draws from a hidden distribution and ask participants to report a running estimate of the proportion (mean) of the sequence so far. Each trial includes 15 observations, and the first few are drawn from a small pool of fixed sequences, producing partial repetition across trials. (\textbf{D}) The \textit{Value Integration Task} \cite{yoo2025people} presents pairs of snack items and asks participants to report the mean value difference between the accumulated snacks on the left vs right. Each trial includes 30 observations, and snack sequences are never repeated. }
+	\caption{\textbf{Evidence integration in four sequential estimation tasks.} In each task, participants make sequential observations and report a real-valued estimate after each one. Tasks differ in input type, sequence length, repetition structure, and estimated quantity. (\textbf{A}) The \textit{Proportion Inference Task} \cite{prat2024imprecise} presents rings of two colors drawn randomly from a box and asks participants to report the hidden proportion of one color. Each trial includes 5 observations, leading to frequent repetition of color sequences. (\textbf{B, C}) The \textit{Binary} and \textit{Continuous Integration Tasks} present binary (continuous) draws from a hidden distribution and ask participants to report a running estimate of the proportion (mean) of the sequence so far. Each trial includes 15 observations, and the first few are drawn from a small pool of fixed sequences, producing partial repetition across trials. (\textbf{D}) The \textit{Value Integration Task} \cite{yoo2025people} presents pairs of snack items and asks participants to report the mean value difference between the accumulated snacks on the left vs right. Each trial includes 30 observations, and snack sequences are never repeated. }
 	\label{fig:tasks_overview}
 \end{figure}
 
@@ -345,8 +345,9 @@ To causally dissociate the recurrent and synaptic mechanisms' reliance on ongoin
 
 \begin{table}
 	\centering
-	\caption{\textbf{Best-fitting model (lowest RMSE) per participant, by task.} For each task, the number (and percentage) of participants for whom each model achieved the lowest RMSE, restricted to participants with a valid fit for every model in that task (see Materials and Methods). Bold indicates the model with the most wins in each task.}
+	\caption{\textbf{Best-fitting model (lowest RMSE) per participant, by task.} For each task, the number (and percentage) of participants for whom each model achieved the lowest RMSE (see Materials and Methods). Bold indicates the model with the most wins in each task.}
 	\label{tab:best_fit}
+    \vspace{10pt}
 	\begin{tabular}{lccccc}
 		\hline
 		Task ($n$) & Mean & LI & PR & DPE & SNN \\
