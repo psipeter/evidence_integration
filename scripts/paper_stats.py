@@ -432,6 +432,65 @@ def report_neural_covariance() -> None:
         "see this function's docstring")
 
 
+def report_dpe_pr_effect_size() -> dict:
+    """Per-participant RMSE and NLL differences between DPE (RL_lambda) and
+    PR (PrimacyRecency) on Binary and Continuous Integration -- the two
+    tasks where Table~tab:best_fit (moved to Supplementary Text) shows PR as
+    the modal best-fitting individual model (67% Binary, 70% Continuous).
+    Quantifies how large that gap actually is, for the effect-size sentence
+    now in paper/main.tex's Results ("Model performance") and the table's
+    own caption, so the "wins" table isn't read as DPE losing outright.
+
+    RMSE reads the same data/runs/rmse/ fits _model_fit_path/_get_loss load
+    for Fig.~model_performance. NLL reads the noise-augmented variants'
+    fits from data/runs/nll/ via _nll_resp_noise_perf_path, matching
+    Fig.~model_performance_nll (ST). Both metrics are merged on pid (inner
+    join -- only participants with a valid fit for both models), matching
+    _best_fit_counts' own "fair head-to-head" convention. A paired Wilcoxon
+    signed-rank test (same test used everywhere else in this paper for
+    model comparisons) checks whether the difference is reliable at all,
+    separately from its magnitude.
+
+    Returns {task_key: {"rmse": {...}, "nll": {...}}} for task_key in
+    ("colors", "numbers"), each metric dict holding: n, median_dpe,
+    median_pr, median_diff (PR minus DPE -- positive means DPE is lower/
+    better), median_pct (median_diff as a percentage of DPE's own median),
+    wilcoxon_p.
+    """
+    from scipy.stats import wilcoxon
+
+    from scripts.make_figures import _get_loss, _model_fit_path, _nll_resp_noise_perf_path
+
+    def _load(path_fn, model: str, task_key: str) -> pd.DataFrame:
+        perf = pd.read_pickle(path_fn(task_key, model))
+        return pd.DataFrame({"pid": perf["pid"], "loss": _get_loss(perf)})
+
+    def _compare(path_fn, task_key: str) -> dict:
+        dpe = _load(path_fn, "RL_lambda", task_key)
+        pr = _load(path_fn, "PrimacyRecency", task_key)
+        merged = dpe.merge(pr, on="pid", suffixes=("_dpe", "_pr"))
+        diff = merged["loss_pr"] - merged["loss_dpe"]
+        stat = wilcoxon(merged["loss_pr"], merged["loss_dpe"])
+        median_dpe = float(merged["loss_dpe"].median())
+        median_diff = float(diff.median())
+        return {
+            "n": len(merged),
+            "median_dpe": median_dpe,
+            "median_pr": float(merged["loss_pr"].median()),
+            "median_diff": median_diff,
+            "median_pct": 100.0 * median_diff / median_dpe,
+            "wilcoxon_p": float(stat.pvalue),
+        }
+
+    return {
+        task_key: {
+            "rmse": _compare(_model_fit_path, task_key),
+            "nll": _compare(_nll_resp_noise_perf_path, task_key),
+        }
+        for task_key in ["colors", "numbers"]
+    }
+
+
 def report_decoder_free_reliability(task: str = "soltani_numbers") -> dict:
     """Decoder-free corroboration of neural_main's own row-3 (n_neurons)
     finding (Supplementary Text's "A decoder-free corroboration of the

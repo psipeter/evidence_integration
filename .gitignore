@@ -206,3 +206,8 @@ paper/*.run.xml
 # not tracked; got committed by accident (both at the repo root and under
 # presentations/) when first installed.
 _extensions/
+
+# Internal resubmission handoff notes (reviewer complaints, action-item
+# tracking) -- a working doc for the editing session, not part of the
+# submission package; never committed.
+paper/resubmission_plan.md
