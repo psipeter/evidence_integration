@@ -456,6 +456,19 @@ def report_dpe_pr_effect_size() -> dict:
     median_pr, median_diff (PR minus DPE -- positive means DPE is lower/
     better), median_pct (median_diff as a percentage of DPE's own median),
     wilcoxon_p.
+
+    WARNING: the "nll" branch's own median_pct is not meaningful as a
+    percentage -- NLL losses here are negative (see Eq.~eq:nll's own
+    log(sigma) term, typically the dominant one at this response scale), so
+    dividing a (positive-when-DPE-is-better) difference by a NEGATIVE
+    median_dpe flips its sign relative to the "rmse" branch's own
+    convention. Only ever report the "rmse" branch's median_pct in the
+    paper; the "nll" branch exists here only for its wilcoxon_p (whether the
+    NLL difference is reliable at all), matching how main.tex's own prose
+    already uses it ("negative log-likelihood showing the same pattern").
+    Not fixed outright since nothing currently reads nll's median_pct --
+    fix properly (flip the sign, or drop the field) before any future caller
+    relies on it.
     """
     from scipy.stats import wilcoxon
 
@@ -488,6 +501,68 @@ def report_dpe_pr_effect_size() -> dict:
             "nll": _compare(_nll_resp_noise_perf_path, task_key),
         }
         for task_key in ["colors", "numbers"]
+    }
+
+
+def report_model_effect_sizes() -> dict:
+    """Per-participant RMSE differences between DPE (RL_lambda) and each of
+    four comparison models (Mean, LeakyIntegrator, PrimacyRecency, NEF),
+    across all four tasks -- the full effect-size table in Supplementary
+    Text (Table S1), referenced from Results ("Model performance") to show
+    that PR's two narrow wins (Binary, Continuous Integration; 0.4% and
+    2.4%) are small beside DPE's own margin over the other models, whose
+    median across the 14 comparisons DPE wins is 14.2%. Note the ranges
+    overlap at the low end -- LeakyIntegrator on Value Integration is only
+    2.3% -- so report the MEDIAN margin, never the range, when contrasting
+    the two; 13 of those 14 comparisons exceed PR's own 2.4%.
+
+    RMSE only -- see report_dpe_pr_effect_size's own docstring for why an
+    NLL percentage is not meaningful here (NLL losses are negative at this
+    response scale, so a percentage difference is sign-flipped relative to
+    RMSE's own convention). Reads the same data/runs/rmse/ fits
+    _model_fit_path/_get_loss load for Fig.~model_performance, merged on pid
+    per (task, model) PAIR against DPE (inner join -- not requiring every
+    model to have a fit for a given pid, matching this file's own pairwise
+    convention elsewhere rather than _best_fit_counts' stricter
+    all-models-at-once convention).
+
+    Returns {task_key: {model: {"n", "median_dpe", "median_other",
+    "median_diff", "median_pct", "wilcoxon_p"}}} for task_key in ("balls",
+    "colors", "numbers", "snacks") and model in ("Mean", "LeakyIntegrator",
+    "PrimacyRecency", "NEF"). median_diff is the other model's loss minus
+    DPE's (positive means DPE is lower/better); median_pct expresses that as
+    a percentage of DPE's own median RMSE.
+    """
+    from scipy.stats import wilcoxon
+
+    from scripts.make_figures import _get_loss, _model_fit_path
+
+    def _load(model: str, task_key: str) -> pd.DataFrame:
+        perf = pd.read_pickle(_model_fit_path(task_key, model))
+        return pd.DataFrame({"pid": perf["pid"], "loss": _get_loss(perf)})
+
+    def _compare(task_key: str, model: str) -> dict:
+        dpe = _load("RL_lambda", task_key)
+        other = _load(model, task_key)
+        merged = dpe.merge(other, on="pid", suffixes=("_dpe", "_other"))
+        diff = merged["loss_other"] - merged["loss_dpe"]
+        stat = wilcoxon(merged["loss_other"], merged["loss_dpe"])
+        median_dpe = float(merged["loss_dpe"].median())
+        median_diff = float(diff.median())
+        return {
+            "n": len(merged),
+            "median_dpe": median_dpe,
+            "median_other": float(merged["loss_other"].median()),
+            "median_diff": median_diff,
+            "median_pct": 100.0 * median_diff / median_dpe,
+            "wilcoxon_p": float(stat.pvalue),
+        }
+
+    tasks = ["balls", "colors", "numbers", "snacks"]
+    models = ["Mean", "LeakyIntegrator", "PrimacyRecency", "NEF"]
+    return {
+        task_key: {model: _compare(task_key, model) for model in models}
+        for task_key in tasks
     }
 
 

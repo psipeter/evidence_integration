@@ -1,0 +1,146 @@
+% response_to_reviewers.tex
+%
+% Point-by-point response to the reviewers of MSID aeg0788, to accompany the
+% resubmission of paper/main.tex to Science Advances. The editor's appeal
+% response asked for this document explicitly ("include a point-by-point
+% response to reviewers with your submission"), alongside a cover letter
+% noting the previous manuscript number.
+%
+% Standalone document -- compiles independently of main.tex:
+%     latexmk -pdf -interaction=nonstopmode response_to_reviewers.tex
+% paper/*.pdf is gitignored, so the compiled PDF is a build artifact; rebuild
+% it immediately before uploading so it matches this source.
+%
+% Section/figure/equation/table references in this file refer to the REVISED
+% main.tex, not the original submission. Keep them in sync when main.tex's
+% numbering changes.
+%
+% Document order (agreed): opening -> summary of changes -> Reviewer 1 ->
+% Reviewer 2 -> the two flagged deviations (removed social-learning task,
+% removed fMRI comparison) -> closing.
+
+\documentclass[11pt]{article}
+
+\usepackage{newtxtext,newtxmath}
+\usepackage[letterpaper,margin=1in]{geometry}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.7em}
+
+% Reviewer comments are quoted in this environment; our response follows as
+% ordinary body text beneath each one.
+\newenvironment{revcomment}
+	{\begin{quote}\itshape\small}
+	{\end{quote}}
+
+\newcommand{\changeitem}[1]{\textbf{#1}}
+
+\date{}
+
+\begin{document}
+
+\begin{center}
+	{\large\bfseries Response to Reviewers}
+
+	\vspace{0.6em}
+
+	Manuscript: \textit{Individual differences in evidence integration arise
+	from discounted prediction errors in neural networks}
+
+	Previous submission: MSID aeg0788, \textit{Generalized Information
+	Integration through Weighted Prediction Error}
+\end{center}
+
+\vspace{0.8em}
+
+\hrule
+
+\vspace{0.8em}
+
+We thank both reviewers for their careful and constructive evaluations of our
+original submission. Their comments identified three gaps in that manuscript:
+the case for our neural network as an advance over existing mathematical and
+RNN models was underdeveloped; our reporting of model fit quality was neither
+sufficiently transparent nor sufficiently central; and our neural analyses
+stopped short of the quantitative, testable claims a network model should
+support. The editor indicated that a revised manuscript should include
+``additional experiments'' and address the reviewers' concerns. In response, we
+designed and collected two new behavioral experiments, added four simulated
+neural experiments that generate falsifiable predictions, and substantially
+rewrote the manuscript. We believe the resulting paper is considerably
+stronger, and we are grateful to both reviewers for pushing it in that
+direction.
+
+Because the manuscript has been extensively revised, all section, figure,
+equation, and table references below refer to the \textbf{new} version.
+
+\section*{Summary of changes}
+
+\begin{enumerate}
+
+\item \changeitem{Two new behavioral experiments.} We designed and collected
+two new tasks completed by the same Prolific participants ($n=46$).
+These tasks use a within-subject design that tests whether individual differences
+reflect stable traits, include trials that are long enough
+to estimate the discounting rate reliably, and specify repeated sequences
+for detailed analysis of response variability. The manuscript now spans four
+tasks (Fig.~1).
+
+\item \changeitem{Model comparison moved to the main text, with effect sizes
+and significance reported directly.} Trial-by-trial fits are now reported as
+per-participant distributions with paired Wilcoxon tests (Fig.~3), accompanied
+by per-participant best-fit counts and the median effect size of every pairwise
+comparison (Tables~S1--S2). We also replicated the entire comparison using an
+independent fit metric, negative log-likelihood (Fig.~S1).
+
+\item \changeitem{Four falsifiable neural predictions.} We ran four simulated
+neural experiments relating the network's spiking dynamics to observable
+behavior, and state each as an explicit prediction with a proposed empirical
+measurement (Figs.~6--7).
+
+\item \changeitem{A causal perturbation experiment during the inter-trial
+interval.} To dissociate two candidate neural mechanisms for working memory, we
+injected noise into the \textit{value} population during the interval between
+observations. Only the recurrent, persistent-activity implementation was
+disrupted by it in a dose-dependent manner; the synaptic, activity-silent implementation was not
+(Fig.~7C--D).
+
+\item \changeitem{An expanded case for the network's novelty.} We extended our
+argument for what DPE and its spiking implementation offer in comparison to the
+alternative models cited by the reviewers: against the mathematical models, the
+comparison focuses on neural plausibility rather than fit quality; against
+recurrent neural networks, the comparison focuses on the capacity to generate
+interpretable neural predictions rather than to maximize behavioral fit
+(Discussion, ``A generative, extensible mechanism for evidence integration''
+and ``Novelty and predictions of the neural network'').
+
+\end{enumerate}
+
+% ============================================================
+% TODO: Reviewer 1 -- eight comments. Weight sits on 1.1 (novelty / advance
+% over existing implementations) and 1.7 (transparency of goodness-of-fit
+% reporting). 1.5 carries the ITI-length -> perturbation substitution and
+% credits R1 for prompting it; 1.8 admits the value-task-specific predictions
+% were not added and offers a mapping paragraph.
+% ============================================================
+
+% ============================================================
+% TODO: Reviewer 2 -- four comments. Weight sits on 2.1 (EWA) and 2.2 (new
+% observations / structures / constraints / predictions, answered in R2's own
+% four categories). 2.3 absorbs the "direct fits were relegated to the SI while
+% the main text relied on reduced-form summary measures" concession.
+% ============================================================
+
+% ============================================================
+% TODO: Two changes we wish to flag directly -- (a) the social-learning task
+% removed because Delta-R and sigma are undefined for a binary directional
+% choice; (b) the PFC/ACC fMRI comparison removed rather than expanded, since
+% it came from that task. Keep (b) short; Sec. 1.8 carries the detail.
+% ============================================================
+
+% ============================================================
+% TODO: Closing -- thank the editor and both reviewers for the opportunity to
+% resubmit.
+% ============================================================
+
+\end{document}
