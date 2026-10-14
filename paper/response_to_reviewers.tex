@@ -6,115 +6,228 @@
 % response to reviewers with your submission"), alongside a cover letter noting
 % the previous manuscript number.
 %
-% STRUCTURE. A General response (G1-G6) states each new result and argument
-% ONCE; the twelve per-comment replies then concede where owed, point to the
-% relevant part, and restate the conclusion for that reviewer's concern. This
-% replaced an earlier conventional point-by-point in which every major argument
-% was made twice, once per reviewer -- that version is archived at
-% archive/paper/response_to_reviewers_v1.tex (git history preserved via git mv).
+% STRUCTURE. "General concerns" (C1-C4) restates the reviewers' and editor's
+% core concerns IN THEIR TERMS, concedes each, and shows the manuscript text
+% and figures that address it. The per-comment replies under Reviewer 1 and
+% Reviewer 2 then do the same again for each specific comment.
 %
 % Rules that shaped the current structure, worth keeping if it is edited:
-%   - CONCLUSIONS STAY INLINE, EVIDENCE MOVES. A pointer must never stand in
-%     for an answer: every comment gets its conclusion stated where the
-%     reviewer reads it. Only supporting numbers/machinery live in G1-G6.
-%     Pointing to G1-G6 is safe because both reviewers read it; pointing from
-%     one reviewer's section INTO the other's is not, and is never done.
-%   - EACH REVIEWER'S LEAD OBJECTION (1.1 for R1, 2.1 for R2) keeps a
-%     substantive inline answer. A terse pointer there reads as a brush-off.
+%
+%   - DUPLICATE RATHER THAN CROSS-REFERENCE. Wherever a reply would otherwise
+%     say "see C3" or "see our response to 1.7", paste the material again
+%     instead. The reviewer must see what answers their question immediately
+%     after we restate it, without turning to another part of this letter or
+%     opening the manuscript. The General concerns section is read mainly by
+%     the editor; R1 and R2 read their own sections. Material therefore
+%     appears two or three times BY DESIGN -- that is not redundancy to be
+%     cleaned up later. (Alireza's house style; the exemplar is Farashahi &
+%     Soltani's 2021 rebuttal, which re-presents the same figure under a new
+%     local number in a second reviewer's section rather than pointing across.)
+%     Cross-referencing INTO the Supplement is fine, and so is a pointer
+%     between C-sections, since the editor reads those continuously.
+%
+%   - PASTE THE MANUSCRIPT'S OWN TEXT AND FIGURES, don't describe them. Show
+%     the actual caption, passage or figure that answers the comment, not a
+%     summary of it. Abridge freely, but do not paraphrase into new prose that
+%     then has to be kept true to the manuscript.
+%
+%   - PASTED MANUSCRIPT TEXT IS DARK BLUE (msblue) AND \small -- prose inside
+%     \begin{ms}...\end{ms}, captions and tabulars blue and small too. No
+%     indentation: figures and tables cannot be indented to match, so an
+%     indent-based scheme was visibly inconsistent exactly where the pasted
+%     material was most prominent. Colour alone carries the distinction, and
+%     it survives a page break mid-block, which indentation does too but
+%     \small alone would not.
+%
+%   - NO MACROS, NO FLOATS. Paste plain LaTeX inline: \begin{center}
+%     \includegraphics{figures/<stem>.pdf} \end{center} followed by
+%     {\small\textbf{Figure~\ref{<label>}.} <pasted caption>\par}. Floats would
+%     renumber from 1 and collide with the manuscript numbers \ref pulls from
+%     main.aux, and would drift away from the comment they answer. Wrap a
+%     table's caption and its tabular together in a \begin{minipage}{\textwidth}
+%     or LaTeX will break the page between them.
+%
+%   - WHEN PASTING, rewrite main.tex's \cite{} as \citep{}: main.tex uses
+%     scicite (numeric superscripts), this file uses natbib/apalike, where a
+%     bare \cite is the TEXTUAL form and renders "...no free parameters
+%     DeGroot (1974)".
+%
+%   - PASTED PROSE IS COPIED, NOT LINKED. If main.tex's wording changes, the
+%     excerpts here go stale silently. Re-check every pasted block against
+%     main.tex before the final build. (Only the NUMBERS are live, via xr.)
+%
+%   - ECHO THE POSITIVE COMMENTS. Both reviewers opened approvingly and
+%     several individual comments concede something before objecting. Quote
+%     that praise where it is relevant, not only once per reviewer.
+%
+%   - REVIEWER TEXT IS ALWAYS ITALIC, wherever it appears. \rc's second
+%     argument does this automatically; a standalone quote needs
+%     \textit{\small ``...''} by hand. Our own text is never italic, so the
+%     distinction carries meaning. (Quotations that are NOT reviewer text --
+%     Yoo et al.'s paper in 1.1, our own scare quotes -- stay upright.)
+%
+%   - NO DIRECT REVIEWER QUOTES IN C1-C4. The General concerns section states
+%     the concerns in our own words; quoting is saved for R1/R2, where each
+%     comment is quoted at the point it is answered.
+%
 %   - ABRIDGE the quoted comments to the sentence(s) the response answers, but
 %     always QUOTE rather than paraphrase: the editor reads this against the
 %     original review.
+%
 %   - Abbreviations are defined at first use and the opening paragraph has
 %     none. The network is "SNN" throughout, never "our network".
+%
 %   - Present tense for results and model behavior; past tense only for
 %     actions we took (designed, collected, renamed, removed).
+%
+% HISTORY. Two earlier drafts are superseded. The first was a conventional
+% point-by-point, archived at archive/paper/response_to_reviewers_v1.tex (git
+% history preserved via git mv). The second used a "General response" (G1-G6)
+% stating each argument once and cross-referenced from R1/R2; its pointers were
+% mechanically remapped into C1-C4 when this reorganization began
+% (G1,G2->C4  G3->C1  G4,G5->C3  G6->C2), so a bare "(C3)" pointer in an R1/R2
+% reply is LEFTOVER from that scheme and still needs replacing with pasted
+% material per the duplication rule above.
 %
 % Build: latexmk -pdf -interaction=nonstopmode response_to_reviewers.tex
 % paper/*.pdf is gitignored; rebuild immediately before uploading.
 
 % ===================================================================
-% COVERAGE CHECKLIST -- every substantive claim carried over from the archived
-% v1 draft. Kept as an audit trail; the NOTE lines flag places where cutting
-% text would silently drop a claim that exists nowhere else.
-
+% COVERAGE LEDGER -- every substantive claim the letter must make. [x] means
+% the claim is present SOMEWHERE; it no longer means "present exactly once."
+% Under the duplication rule most of these should end up stated two or three
+% times, so this is a floor, not an inventory.
 %
 % FRONT MATTER
-%   [x] three gaps conceded; editor's "additional experiments" quote
+%   [x] four concerns conceded; editor's "additional experiments" request
 %   [x] references refer to the revised manuscript
-% GENERAL RESPONSE
+% C1 -- MODEL FIT QUALITY
+%   [x] main.tex Results "Comparing performance across models and tasks" pasted
+%       in full; Fig 3 + Tables S1/S2 embedded with their own captions
+%   [x] full win/loss account: DPE beats all baselines on Proportion Inference
+%       and Value Integration (modal best 86%/76%); PR ties on Binary and wins
+%       on Continuous (modal best 67%/70%)
+%   [x] 14.2% median margin (range 2.3-74.8%) vs PR's 0.4% (ns, p=0.40) and
+%       2.4% (p=0.004)
+%   [x] SNN 2nd of 5 on Proportion Inference (+5.6%) and Value Integration
+%       (+4.9%), 4th on Binary (+30.7%), 5th on Continuous (+27.9%)
+%   [x] no best-fit claim anywhere in the revised manuscript
+%   [x] NLL replication cross-referenced (Fig S1) rather than pasted
+%   [ ] PORT TO MAIN.TEX: "PR's advantage is confined to those two tasks:
+%       elsewhere it fits 30.0% and 9.4% worse than DPE and is best for no
+%       participant at all." Verified against Tables S1/S2. This is the letter's
+%       sharpest answer to 1.7 and main.tex has no equivalent -- once it is in
+%       main.tex it arrives here automatically with the pasted section.
+% C2 -- NEW PREDICTIONS FROM THE NETWORK
+%   [x] four predictions enumerated, each with a mechanism and a measurement
+%   [x] predictions are circuit-specific, not consequences of the DPE equation
+%   [ ] NOTE prediction 4 is deliberately QUALITATIVE so it matches predictions
+%       1-3, which carry no numbers; its statistics (r=0.77 / 0.58, r~0,
+%       p>0.9) are commented out here and appear live only in 1.5. Under the
+%       duplication rule this is a live choice to revisit.
+%   [ ] TODO paste Figs 6 and 7 themselves + captions
+% C3 -- ADVANCE OVER EXISTING MATHEMATICAL AND RNN MODELS
+%   [x] novelty on dynamic weighting disclaimed; DPE situated in that family
+%   [x] plausibility criterion as the spine (memory / operations / origin of
+%       bias), with every model evaluated against each in turn
+%   [x] PR, EWA, exact Bayesian each fail at least one; none realized in a
+%       circuit, and we suggest that is not incidental
+%   [x] DPE recovers the optimal running average at lambda=1; bias arises as
+%       imprecise departure from it, not by design
+%   [x] five grounds vs RNNs (interpretable / LIF / compositional / emergent
+%       noise / validated on human behavior)
+% C4 -- ADDITIONAL EXPERIMENTS AND THE FINDINGS THEY PRODUCED
 %   [x] two new tasks, n=46, within-subject, trial length, repetition
 %   [x] four tasks vary on four dimensions, share response format
 %   [x] Delta-R per-participant: 85/59/68%, power-law 98/77/72% (Fig 4)
 %   [x] sigma growth 1.3-1.9x, autocorr r=0.40-0.62 (Fig 5D-I)
 %   [x] split-half lambda 0.77-0.92, sigma 0.62-0.95; cross-task 0.70 / 0.31
-%   [x] Fig 3 + Tables S1/S2 + Fig S1
-%   [x] full win/loss account: DPE beats all baselines on Proportion Inference
-%       and Value Integration (modal best for 86%/76%); PR ties on Binary and
-%       wins on Continuous (modal best 67%/70%) but is modal best for NO
-%       participant on the other two, fitting 30.0%/9.4% worse there
-%   [x] 14.2% median margin (range 2.3-74.8% over the 14 wins) vs 0.4%/2.4%
-%   [x] SNN ranks 2nd of 5 on Proportion Inference (+5.6%) and Value
-%       Integration (+4.9%), 4th on Binary (+30.7%), 5th on Continuous (+27.9%)
-%   [x] no best-fit claim anywhere in the revised manuscript
-%   [x] plausibility criterion, now the spine of G4 (memory / operations /
-%       origin of bias), with every model evaluated against each in turn
-%   [x] PR, EWA, exact Bayesian each fail at least one; none realized in a
-%       circuit, and we suggest that is not incidental
-%   [x] DPE recovers the optimal running average at lambda=1; bias arises as
-%       imprecise departure from it, not by design
 %   [x] SNN reproduces sigma dynamics (2.0-3.2x, r=0.69-0.76) with NO fitted
 %       noise parameter; math models fail both (0.93-1.15x, ~0) despite each
-%       being given one -- now in G2, with its inference
-%   [x] five grounds vs RNNs, as a bulleted list in G5 (interpretable / LIF /
-%       compositional / emergent noise -> G2 / validated on human behavior)
-%   [x] four predictions enumerated in G6, each with a measurement
-%   [x] predictions are circuit-specific, not consequences of the DPE equation
-%   [x] perturbation dissociation stated qualitatively in G6's prediction 4;
-%       statistics deliberately omitted to match predictions 1-3 -- G7 is gone
-%   [x] "two biologically distinct circuits" -> now in 2.2 (NEW STRUCTURES)
-%   [x] PR == Yoo Eq. 1; Yoo's fixed-weights qualification -> now in 1.1
-%   [x] EWA's strategic-interaction domain -> now in 2.1
-%   [x] Prat-Carrabin contribution -> now in 2.2 (NEW CONSTRAINTS)
+%       being given one -- with its inference (noise is in the state, not the
+%       response stage)
+%   [ ] TODO paste Figs 1, 4, 5 themselves + captions
+%   [ ] NOTE the heading still reads as the editor's request only, while the
+%       section's back half carries the three new behavioral findings -- which
+%       are also the direct answer to R2's "new observations". Rename.
 % REVIEWER 1
+%   [x] opening praise quoted (rigor of the modeling; ambition across tasks)
 %   [x] 1.1 novelty -- substantive inline answer
+%   [x]     PR == Yoo Eq. 1; Yoo's fixed-weights qualification
 %   [x] 1.2 Laplace n/(n+2), Eq 7, why only this task
 %   [x] 1.3 Fig 2 redrawn A/B/C, inset and undefined symbols gone
 %   [x] 1.4 recurrent has no such population; synaptic's renamed background
 %   [x] 1.5 perturbation substituted for ITI-duration; three design reasons;
-%           informal testing; offer to add ITI-duration analysis. NOTE: 1.5 is
-%           the only place the perturbation STATISTICS appear (r=0.77 / 0.58,
-%           r~0, p>0.9) -- G6's prediction 4 is deliberately qualitative, so do
-%           not cut them here or they vanish from the letter entirely.
+%           informal testing; offer to add ITI-duration analysis. Holds the
+%           only live copy of the perturbation statistics -- see C2's NOTE.
 %   [x] 1.6 legends confirmed clear; evaluation restructured
-%   [x] 1.7 concession + what RMSE misses; the enumerated losses and
-%           effect sizes deliberately left to G3, which R1 reads first
+%   [x] 1.7 concession + what RMSE misses
 %   [x] 1.8 premature claim removed; four predictions; no Value-task section
 %           (predictions 1 and 3 need outliers/repetition); fMRI pointer
 % REVIEWER 2
-%   [x] 2.1 EWA -- substantive inline answer; carries the domain argument
-%           that G4's EWA memory bullet depends on, plus the note that
-%           applying EWA here would require substantial reformulation
-%   [x] 2.2 four categories, answered in R2's own terms. Carries two things
-%           that exist nowhere else: the two biologically distinct circuits
-%           (NEW STRUCTURES -- G6's prediction 4 no longer states them) and the
-%           Prat-Carrabin contribution claim (under NEW CONSTRAINTS). Do not
-%           cut either. Perturbation statistics stay out here, matching G6.
+%   [x] opening praise quoted (unified framework; bridging heterogeneity to
+%       biological properties in a SNN)
+%   [x] 2.1 EWA -- substantive inline answer; carries the strategic-interaction
+%           domain argument that C3's EWA memory bullet depends on, plus the
+%           note that applying EWA here would require substantial reformulation
+%   [x] 2.2 four categories, answered in R2's own terms
+%   [x]     NEW STRUCTURES: two biologically distinct circuits
+%   [x]     NEW CONSTRAINTS: the Prat-Carrabin contribution claim
 %   [x] 2.3 fits were in SI; defense of Delta-R/sigma as dynamical signatures;
 %           perseveration / confirmation bias / choice-history citations
 %   [x] 2.4 "neural correlates" removed; Limitations added
 % REMOVAL SECTION
 %   [x] three tasks -> four; Delta-R and sigma undefined for a binary choice
+%   [x] per-stage weighting required an ad-hoc component with no counterpart
 %   [x] fMRI comparison came from that task (Jiang et al. 2023)
 % CLOSING
 %   [x] thanks; new experiments and predictions exist because of these reviews
 %
-% ALL ITEMS PLACED.
+% OUTSTANDING: the [ ] items above, plus every bare "(C1)".."(C4)" pointer in
+% an R1/R2 reply, which is leftover cross-referencing to be replaced with
+% pasted material.
 % ===================================================================
 
 \documentclass[11pt]{article}
 
 \usepackage{newtxtext,newtxmath}
 \usepackage[letterpaper,margin=1in]{geometry}
+
+% Figures are the SAME PDFs main.tex embeds -- this file lives in paper/, so
+% \includegraphics{figures/<stem>.pdf} resolves to the person's own
+% hand-panel-labeled export. Never copy a figure PDF to a separate location.
+\usepackage{graphicx}
+
+% Manuscript text pasted into this letter is set in DARK BLUE. That is the
+% only cue -- no indentation, no size change for prose -- because figures and
+% tables cannot be indented to match, so an indent-based scheme was visibly
+% inconsistent. Colour also survives a page break mid-block, which matters:
+% the pasted sections are long enough to straddle pages, and the reader must
+% still be able to tell whose voice they are reading three paragraphs in.
+% Three voices, three treatments: ours upright black, the REVIEWERS' italic
+% (see \rc), the MANUSCRIPT's blue.
+% main.tex itself stays untouched -- we submit a clean manuscript, so there is
+% no marked-up copy to keep in sync with this colouring.
+\usepackage{xcolor}
+\definecolor{msblue}{RGB}{10,61,145}
+% \begin{ms} ... \end{ms} -- a block of pasted manuscript prose.
+\newenvironment{ms}{\par\addvspace{0.3em}\begingroup\color{msblue}\small}
+                   {\par\endgroup\addvspace{0.3em}}
+
+% Figure/table/equation NUMBERS come from main.tex via its .aux file, so they
+% cannot drift when the manuscript is renumbered. Use \ref{<main.tex label>},
+% never a literal number:
+%     \ref{fig:model_performance}      -> 3
+%     \ref{fig:model_performance_nll}  -> S1   (S-prefix carries over)
+%     \ref{tab:effect_sizes}           -> S1
+%     \ref{eq:laplace}                 -> 7
+% Requires main.tex to have been compiled first (reads main.aux). A label that
+% disappears from main.tex prints "??" and warns -- it fails visibly.
+% EXCEPTION: figure numbers inside a QUOTED reviewer comment refer to the
+% ORIGINAL submission and must stay literal (1.3's "Figure 2", 1.6's "Figure 5"
+% and "5F"). Those are what the reviewer wrote; they are not our labels.
+\usepackage{xr}
+\externaldocument{main}
 
 \usepackage{natbib}
 \bibliographystyle{apalike}
@@ -160,40 +273,83 @@
 
 \vspace{0.8em}
 
-We thank both reviewers for their careful and constructive evaluations of our original submission. Their comments identified three gaps in that manuscript: (C1) our reporting of model fit quality was neither sufficiently transparent nor sufficiently central; (C2) our neural analyses stopped short of the quantitative, testable claims a network model should support; and (C3) the case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped. Additionally, the editor requested that a revised manuscript include (C4) additional experiments. In response, we substantially rewrote the manuscript to emphasize fit quality and our advances over existing models, added four simulated neural experiments that generate falsifiable predictions, designed and collected two new behavioral experiments, and analyzed additional behavioral signatures of individual variability. We first summarize how these changes address the reviewer's core concerns, then address each comment individually in greater detail, referencing new text and figures in the manuscript directly.
+We thank both reviewers for their careful and constructive evaluations of our original submission. Their comments identified three gaps in that manuscript: (C1) our reporting of model fit quality was neither sufficiently transparent nor sufficiently central; (C2) our neural analyses stopped short of the quantitative, testable claims a network model should support; and (C3) the case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped. Additionally, the editor requested that a revised manuscript include (C4) additional experiments. In response, we substantially rewrote the manuscript to emphasize fit quality and our advances over existing models, added four simulated neural experiments that generate falsifiable predictions, designed and collected two new behavioral experiments, and analyzed additional behavioral signatures of individual variability. We first summarize how these changes address the reviewers' core concerns, then address each comment individually in greater detail, referencing new text and figures in the manuscript directly.
 
 \section*{General concerns}
 
 \subsection*{C1. Reporting of model fit quality was not transparent or central}
 
-Per-participant, observation-by-observation fitting is now a central analysis
-that appears in the main text. Figure~3 shows the full root-mean-squared error
-(RMSE) distribution across
-participants for every model on every task, with paired Wilcoxon signed-rank
-tests against DPE marked on the figure. Table~S1 reports the median
-per-participant effect size for every pairwise comparison, Table~S2 the number
-of participants for whom each model achieves the lowest RMSE, and Figure~S1
-replicates the entire comparison under negative log-likelihood, yielding the
-same pattern of wins, ties, and losses.
+Both reviewers asked for a more transparent account of how well each model
+actually fits the data, and we agree that the original submission fell short.
+The trial-by-trial model comparison was present, but it sat in supplementary
+material while the main text led with summary measures drawn from the source
+studies. We have changed how model performance is reported throughout the
+manuscript. Per-participant, observation-by-observation fitting is now a
+central analysis that appears immediately in the Results; we no longer claim
+that DPE is the best available fit to these data in a pure goodness-of-fit
+sense; and where it loses, we say so and give the number. We replicated the
+entire comparison under a second fit metric, negative log-likelihood, using
+each model's response-noise variant so that a likelihood is well defined, and
+the pattern of wins, ties, and losses is unchanged
+(Fig.~\ref{fig:model_performance_nll}). We do also argue that aggregate fit
+quality should not be the only criterion deciding between these models, since
+it does not capture the dynamical signatures that distinguish their mechanisms;
+we set that argument out under C3.
 
-To review these results: DPE fits significantly better than all three baselines
-on Proportion Inference and Value Integration, where it is the best-fitting
-model for 86\% and 76\% of participants. On Binary and Continuous Integration it
-still beats Mean and LeakyIntegrator (LI), but PR matches it on
-the former and outperforms it on the latter, and is the modal best-fitting model
-on both (67\% and 70\%). The effect sizes put these on a common scale
-(Table~S1): DPE's margin over the other models is 2.3--74.8\% across the
-fourteen comparisons it wins (median 14.2\%), whereas PR edges it out by only
-0.4\% (not significant) and 2.4\%. PR's advantage is also confined to those two
-tasks: elsewhere it fits 30.0\% and 9.4\% worse than DPE and is best for no
-participant at all.
+% PASTED from main.tex, Results: "Comparing performance across models and
+% tasks". \cite -> \citep. Re-check against main.tex before the final build.
+\begin{ms}
+\textbf{Results: \textit{Comparing performance across models and tasks}}
 
-Our spiking network fits worse than DPE everywhere, as expected given spike
-noise and real-time dynamics, but by very different amounts: second-best of five
-on Proportion Inference and Value Integration (5.6\% and 4.9\% behind), fourth
-and fifth on Binary and Continuous (30.7\% and 27.9\%). The revised manuscript
-drops any claim that DPE is the best available fit to these data in a pure
-goodness-of-fit sense, and we state these findings plainly in the Results.
+We assessed how well each model accounts for human behavior by fitting its free parameters separately to every participant and computing the root-mean-squared error (RMSE) between each model's predicted responses and the participant's actual responses. We compared DPE and its SNN implementation against three baseline models spanning a range of integration strategies: Mean, which computes the optimal running average with no free parameters \citep{degroot1974reaching}; LeakyIntegrator (LI), which uses the same error-driven update but with a constant learning rate \citep{usher2001time, glaze2015normative}; and PrimacyRecency (PR), which up-weights early and late observations via two independently fit decay parameters \citep{pooley2011understanding, galdo2022quest, yoo2025people}. Model equations and fitting procedures are detailed in Materials and Methods, and were unchanged across tasks; only free parameters were allowed to vary.
+
+DPE achieved the best, or among the best, fit to human behavior on every task (Fig.~\ref{fig:model_performance}). It had significantly lower RMSE than all three baseline models on both Proportion Inference and Value Integration, where it was also the single best-fitting model for the large majority of participants (86\% and 76\%, respectively). On Binary and Continuous Integration, DPE significantly outperformed Mean and LI, but PR matched it on the former and significantly outperformed it on the latter, making PR the modal best-fitting individual model on both (67\% and 70\%, respectively; see Table~\ref{tab:best_fit}). However, these per-participant win counts overstate the size of this gap: the median RMSE difference between DPE and PR was negligible on Binary Integration (0.4\%, not significant, $p$=0.40) and modest even where reliable on Continuous Integration (2.4\% lower for PR, $p$=0.004), with negative log-likelihood showing the same pattern (see Supplementary Text). Table~\ref{tab:effect_sizes} places this in context: DPE's median margin over the other models across all four tasks is 14.2\% (range 2.3--74.8\%), substantially larger than the 0.4\% and 2.4\% by which PR edges it out. PR's advantage was also confined to these two tasks: on Proportion Inference and Value Integration it fit 30.0\% and 9.4\% worse than DPE, and was the best-fitting model for no participant at all. The SNN fit worst of all five models on Continuous Integration and worse than two of the three baselines on Binary Integration, but remained close to the baselines on Proportion Inference (+5.6\%) and Value Integration (+4.9\%), reflecting the added cost of spike noise and real-time dynamics.
+\end{ms}
+
+% The SAME figure PDF main.tex embeds; caption PASTED from its \caption{}.
+\begin{center}
+	\includegraphics[width=1.0\textwidth]{figures/model_performance.pdf}
+\end{center}
+\vspace{-0.4em}
+{\small\color{msblue}\textbf{Figure~\ref{fig:model_performance}.} \textbf{Discounted Prediction Error outperforms other integration models on most tasks and the Spiking Neural Network implementation remains competitive despite spiking noise.} Each model was fit separately to every participant by minimizing RMSE between predicted and human responses; boxplots show the resulting RMSE distribution across participants. Mean computes the unweighted running average \citep{degroot1974reaching}; Leaky Integrator (LI) uses prediction error to update its running estimate, but with a constant learning rate \citep{usher2001time, glaze2015normative}; PrimacyRecency (PR) up-weighs earlier and more recent observations via two free decay parameters \citep{pooley2011understanding, galdo2022quest}. DPE has significantly lower RMSE than all three baselines on the Proportion Inference (\textbf{A}) and Value Integration (\textbf{D}) tasks (stars: paired Wilcoxon vs.\ DPE), and than Mean and LI on Binary (\textbf{B}) and Continuous (\textbf{C}) Integration; PR ties DPE on Binary Integration and significantly outperforms it on Continuous Integration. Effect sizes for every model comparison are in Table~\ref{tab:effect_sizes}. SNN, which reproduces DPE's computation within a biologically plausible network, necessarily has higher RMSE than DPE due to spike noise and real-time dynamics, fitting worst of all five models on Continuous Integration and worse than two of three baselines on Binary Integration, though it remains close to the baselines on the other two tasks. Model comparisons were consistent when validated using a second fit metric, negative log-likelihood (see Supplementary Text).\par}
+
+% Tables PASTED from main.tex. The minipage keeps each caption with its own
+% table; without it LaTeX will break the page between them.
+\vspace{0.6em}
+\noindent\begin{minipage}{\textwidth}\color{msblue}\small
+{\textbf{Table~\ref{tab:effect_sizes}.} \textbf{DPE's fit advantage vs.\ other models, by task.} For each task and comparison model, the median per-participant percentage difference in RMSE relative to DPE (positive favors DPE), with paired Wilcoxon signed-rank significance (see Materials and Methods). DPE significantly beats all other models by 2.3--74.8\% (median 14.2\%), except for negligible losses to PR on Binary Integration (0.4\%, ns) and Continuous Integration (2.4\%, **). ***$p<0.001$, **$p<0.01$, ns not significant.\par}
+\vspace{0.4em}
+\begin{center}
+\begin{tabular}{lcccc}
+		\hline
+		Task ($n$) & Mean & LI & PR & SNN \\
+		\hline
+		Proportion Inference (21) & +31.6\%*** & +14.3\%*** & +30.0\%*** & +5.6\%*** \\
+		Binary Integration (46) & +7.4\%*** & +74.8\%*** & $-$0.4\% ns & +30.7\%*** \\
+		Continuous Integration (46) & +14.2\%*** & +6.6\%*** & $-$2.4\%** & +27.9\%*** \\
+		Value Integration (38; 37 for SNN) & +29.8\%*** & +2.3\%*** & +9.4\%*** & +4.9\%*** \\
+		\hline
+	\end{tabular}
+\end{center}
+\end{minipage}
+
+\vspace{0.6em}
+\noindent\begin{minipage}{\textwidth}\color{msblue}\small
+{\textbf{Table~\ref{tab:best_fit}.} \textbf{Best-fitting model (lowest RMSE) per participant, by task.} For each task, the number (and percentage) of participants for whom each model achieved the lowest RMSE (see Materials and Methods). Bold indicates the model with the most wins in each task. These win counts should be read alongside Table~\ref{tab:effect_sizes}, which shows that PR's higher win count on Binary and Continuous Integration reflects only a small and/or unreliable fit advantage.\par}
+\vspace{0.4em}
+\begin{center}
+\begin{tabular}{lccccc}
+		\hline
+		Task ($n$) & Mean & LI & PR & DPE & SNN \\
+		\hline
+		Proportion Inference (21) & 0 (0\%) & 2 (10\%) & 0 (0\%) & \textbf{18 (86\%)} & 1 (5\%) \\
+		Binary Integration (46) & 0 (0\%) & 0 (0\%) & \textbf{31 (67\%)} & 15 (33\%) & 0 (0\%) \\
+		Continuous Integration (46) & 0 (0\%) & 3 (7\%) & \textbf{32 (70\%)} & 9 (20\%) & 2 (4\%) \\
+		Value Integration (37) & 0 (0\%) & 7 (19\%) & 0 (0\%) & \textbf{28 (76\%)} & 2 (5\%) \\
+		\hline
+	\end{tabular}
+\end{center}
+\end{minipage}
 
 
 \subsection*{C2. No new predictions from the neural network model}
@@ -205,16 +361,16 @@ each with the mechanism that generates it and a specific proposed measurement:
 
 \item Following a surprising observation, the peak transient prediction-error
 response predicts how quickly that response decays back to baseline. Both effects are explained 
-by how the error response scales with the baseline learning rate $\alpha_0$ (Fig.~6A--C).
+by how the error response scales with the baseline learning rate $\alpha_0$ (Fig.~\ref{fig:neural_main}A--C).
 
 \item The within-trial decline in error-selective firing predicts the decline in the magnitude of
 response updates. Both effects are explained by how error neuron activity scales
-with the discounting rate $\lambda$ during trials with many observations (Fig.~6D--F).
+with the discounting rate $\lambda$ during trials with many observations (Fig.~\ref{fig:neural_main}D--F).
 
 \item The signal-to-noise ratio of the decoded error signal predicts behavioral
-response variability $\sigma$ (Fig.~6G--I). Both effects are explained by limited reprsentational capacity
+response variability $\sigma$ (Fig.~\ref{fig:neural_main}G--I). Both effects are explained by limited representational capacity
 in the error population, a result that we corroborated by a decoder-free
-split-half spike-count measure (Fig.~S4).
+split-half spike-count measure (Fig.~\ref{fig:decoder_free}).
 
 \item Perturbation during the inter-trial interval (ITI), which mimics a distractor task or
 non-invasive stimulation delivered during a working-memory delay, increases response error and
@@ -222,8 +378,8 @@ variability in a dose-dependent way. However, this only occurs in networks
 that rely on activity-dependent working memory;
 % ($r_{error}$~=~0.77, $r_{\sigma}$~=~0.58, both $p<0.0001$)
 networks that rely on synaptic plasticity quickly recover from such perturbation
-(Fig.~7C--D).
-%  (both $r \approx 0$, $p>0.9$, Fig.~7C--D).
+(Fig.~\ref{fig:synaptic_main}C--D).
+%  (both $r \approx 0$, $p>0.9$, Fig.~\ref{fig:synaptic_main}C--D).
 % This effect is explained by
 % how noise interacts with the neural mechanisms of working memory in
 % each network implementation: the WM model needs continuous recurrent feedback
@@ -241,7 +397,7 @@ noise does not produce.
 
 \end{enumerate}
 
-\subsection*{C3. The case for our neural network as an advance over existing mathematical and recurrent neural network model was underdeveloped}
+\subsection*{C3. The case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped}
 
 Dynamic weighting of past evidence has a long history, and the manuscript no
 longer claims novelty on that basis. It situates DPE within that family instead:
@@ -323,7 +479,7 @@ retrained from scratch.
 \item \textbf{Its noise is emergent rather than fitted}, following unavoidably
 from representing a continuous value in a finite spiking population, whereas an
 RNN's noise is injected or fit as a free parameter. This property produces the
-variability result in G2.
+variability result in C4.
 
 \item \textbf{It is validated against real human behavior}, whereas the closest
 neural models have only been tested on synthetic tracking or regression tasks
@@ -339,11 +495,11 @@ existing tasks did not: a within-subject design that tests whether individual
 differences are stable traits rather than task-specific artifacts; trials long
 enough (15 observations) to estimate a discounting rate reliably; and
 deliberately repeated sequences, which make response variability measurable. The
-manuscript now spans four tasks (Fig.~1), which vary in input type, sequence
+manuscript now spans four tasks (Fig.~\ref{fig:tasks_overview}), which vary in input type, sequence
 length, repetition structure, and estimated quantity while sharing one response
 format: a continuous, real-valued estimate reported after every observation.
 
-As a direct result of analyzing these experiments, we report three new behavioral findings
+As a direct result of analyzing these experiments, we report three new behavioral findings:
 
 \textbf{Response change declines within a trial.} The magnitude of response
 change ($\Delta R$) declines within a trial, and does so reliably at the level of individual participants rather than only in
@@ -351,7 +507,7 @@ the aggregate: a per-participant rank correlation between $\Delta R$ and
 observation number is significantly negative for 85\%, 59\%, and 68\% of
 participants in Binary, Continuous, and Value Integration, and a fitted
 power-law discounting rate $\lambda$ differs significantly from zero for 98\%,
-77\%, and 72\% (Fig.~4). This decline is the behavioral signature of a learning
+77\%, and 72\% (Fig.~\ref{fig:lambda_main}). This decline is the behavioral signature of a learning
 rate that decays as evidence accumulates; only models with the associated
 mechanisms --- Discounted Prediction Error (DPE), PrimacyRecency (PR), and our
 spiking neural network (SNN) ---
@@ -361,7 +517,7 @@ can reproduce individual variability in this signature.
 responses to an exactly repeated sequence grow more variable as the sequence
 progresses (1.3--1.9$\times$ from first to last observation), and
 response residuals are positively autocorrelated across consecutive responses
-($r$~=~0.40--0.62 at lag~1; Fig.~5D--I). Only the SNN
+($r$~=~0.40--0.62 at lag~1; Fig.~\ref{fig:sigma_main}D--I). Only the SNN
 reproduces these signatures (2.0--3.2$\times$; $r$~=~0.69--0.76), and it does so
 without any fitted noise parameter; every alternative model we tested captures
 neither (0.93--1.15$\times$; autocorrelation $\approx$~0) despite each being
@@ -372,7 +528,7 @@ in a persistent, evolving state representation rather than arising during the re
 An individual's discounting rate ($\lambda$) and response precision ($\sigma$)
 are both reliable within task (split-half $r$~=~0.77--0.92 and
 $r$~=~0.62--0.95 respectively) and transfer across tasks ($\sigma$: $r$~=~0.70,
-$p<10^{-7}$; $\lambda$: $r$~=~0.31, $p$~=~0.037; Fig.~S2), indicating that they
+$p<10^{-7}$; $\lambda$: $r$~=~0.31, $p$~=~0.037; Fig.~\ref{fig:lambda_sigma_reliability}), indicating that they
 reflect stable individual traits. The weaker cross-task correlation of $\lambda$
 suggests that this property may also reflect task-specific strategy.
 
@@ -385,9 +541,9 @@ building a model that can tackle quite different tasks.''}
 
 We thank the reviewer for these comments, and have tried to extend both
 qualities in revision: the task suite has grown from three tasks to four, two of
-which we designed and collected for this study (G1), and per-participant model
+which we designed and collected for this study (C4), and per-participant model
 fitting is now central to the Results rather than confined to supplementary
-material (G3).
+material (C1).
 
 \rc{1.1 Novelty, and whether the network advances the state of the
 art}{I do question the novelty of the approach. Reinforcement learning is
@@ -401,9 +557,9 @@ We agree with the premise, and the revised manuscript no longer claims
 otherwise. It situates DPE within the family of dynamic-weighting models and
 compares those models on whether their weighting of past evidence could be
 computed by a brain in real time, rather than on the novelty of the weighting
-scheme itself (G4). We also agree that the ADM was underweighted in the original submission, and
+scheme itself (C3). We also agree that the ADM was underweighted in the original submission, and
 have addressed that by fitting its temporal weighting scheme as a baseline model
-on all four tasks (renamed PrimacyRecency, PR), where it is a strong competitor (G3). We
+on all four tasks (renamed PrimacyRecency, PR), where it is a strong competitor (C1). We
 should be explicit about what that baseline is: our PR model implements
 \citet{yoo2025people}'s Eq.~1 exactly,
 \[
@@ -422,18 +578,18 @@ specify that this holds ``when the weight on each IE is fixed and does not
 change over time'' --- that is, precisely when it is not producing the temporal
 weighting that gives it its primacy and recency behavior. Once the weights
 change as evidence accumulates, the estimate must be recomputed from the full
-observation history, which is the memory cost set out in G4.
+observation history, which is the memory cost set out in C3.
 
 On whether the network advances on existing neural implementations, we set out
-five differences from the RNNs typically fit to behavioral data (G5), and four
+five differences from the RNNs typically fit to behavioral data (C3), and four
 falsifiable predictions that follow from our particular circuit rather than from
-the DPE equation itself (G6).
+the DPE equation itself (C2).
 
 \rc{1.2 ``Certain assumptions about the prior''}{What are the ``certain
 assumptions about the prior'' for the Bayesian case? (line 334)}
 
 This was too vague, and is now stated explicitly in Materials and Methods. Every model's raw estimate on
-that task is rescaled by $n/(n+2)$ (Eq.~7), a Laplace-smoothing correction
+that task is rescaled by $n/(n+2)$ (Eq.~\ref{eq:laplace}), a Laplace-smoothing correction
 equivalent to the optimal Bayesian estimate of a probability under a uniform
 prior. We also now state why this task alone requires the transform: unlike
 the other three, it asks participants to infer a property of an unknown
@@ -444,7 +600,7 @@ observations presented so far.
 panel\ldots{} ``b'' and ``f'' and ``transform'' were not defined\ldots{}}
 
 The figure has been entirely redrawn and the inset removed.
-% Figure~2 is now organized into three labeled panels: (A)~the DPE update rule and the effect of
+% Figure~\ref{fig:models_overview} is now organized into three labeled panels: (A)~the DPE update rule and the effect of
 % the discounting exponent $\lambda$ on the resulting integration strategy;
 % (B)~the network architecture, with each population's function stated in the
 % caption; and (C)~spiking rasters and decoded traces from a single example trial.
@@ -474,7 +630,7 @@ original label was misleading; we have renamed it \textit{background}. It fires
 at a constant, non-selective rate and carries no information about the
 observation or the running estimate. Its role is to supply presynaptic activity
 for the plastic connection onto \textit{value}: its spikes enter the Prescribed
-Error Sensitivity learning rule (Eq.~8) as the presynaptic activity term $a_i$,
+Error Sensitivity learning rule (Eq.~\ref{eq:pes}) as the presynaptic activity term $a_i$,
 which the decoded error signal multiplies against when the weights are updated.
 Precisely because that spiking carries no information, the entire estimate ends
 up stored in the weights rather than in ongoing activity --- the
@@ -489,10 +645,10 @@ This comment prompted what is now one of the central results of the paper, and
 we thank the reviewer for it. We addressed the underlying question --- whether
 the two mechanisms differ in their dependence on ongoing neural activity during
 the delay --- with a causal perturbation during the ITI rather than a variation
-in its length (G6, prediction~4). Across perturbation strengths, the recurrent
+in its length (C2, prediction~4). Across perturbation strengths, the recurrent
 model's error and response variability both grow reliably ($r$~=~0.77 and
 $r$~=~0.58 respectively, both $p<0.0001$), while the synaptic model is
-unaffected (both $r \approx 0$, $p>0.9$; Fig.~7C--D).
+unaffected (both $r \approx 0$, $p>0.9$; Fig.~\ref{fig:synaptic_main}C--D).
 We chose this design over an ITI-duration manipulation for three reasons. First, it
 yields a graded dose--response relationship and a sharper test of
 the dissociation. Second, it maps directly onto a feasible human experiment: a
@@ -509,7 +665,7 @@ data. Could the authors comment on these misfits?}
 
 All figures have been regenerated for this submission, and we have confirmed
 that no legend occludes data in any of them. We have also restructured the model
-evaluation throughout the manuscript (G2, G3), and now report where each model
+evaluation throughout the manuscript (C1, C4), and now report where each model
 fails on each measure.
 
 % ============================================================
@@ -522,14 +678,14 @@ models in Study 3.}
 The reviewer was right, and we have changed how model performance is reported
 throughout the manuscript: per-participant fits are now a central analysis in
 the main text, with effect sizes and significance for every pairwise comparison,
-and we state our losses plainly rather than summarizing them (G3). The revised
+and we state our losses plainly rather than summarizing them (C1). The revised
 manuscript drops any claim that DPE is the best available fit to these data in a
 pure goodness-of-fit sense. We also argue that aggregate fit is not the only criterion that should decide
 between these models. Fit quality does not capture the dynamical signatures that
 distinguish the models' mechanisms: for example, the SNN is the only model that reproduces
 the growth and autocorrelation of human response variability, despite fitting
-worse than DPE on every task (G2). We therefore compare models on neural
-plausibility as well as on fit (G4).
+worse than DPE on every task (C4). We therefore compare models on neural
+plausibility as well as on fit (C3).
 
 \rc{1.8 Neural comparisons and predictions}{\ldots{}this part of the article is
 underdeveloped\ldots{} the authors should revisit that article's fMRI
@@ -542,7 +698,7 @@ We agree the claim was premature, and have removed it; the manuscript no longer
 asserts anywhere that the model reproduces neural data. In its place, the
 Discussion now contains a dedicated section stating four falsifiable
 predictions, each with the mechanism that generates it and a specific proposed
-measurement (G6). We did not add a section specific to predictions about the Value Integration
+measurement (C2). We did not add a section specific to predictions about the Value Integration
 task, because predictions 1 and 3 rely on sequences with outliers and/or
 repetition, which that task does not offer. We would be glad to add a paragraph
 making this mapping explicit if the reviewer would find it useful. 
@@ -573,16 +729,16 @@ We take this point seriously, and it prompted a substantial revision of the
 relevant Discussion section. We do not dispute that EWA is a more general and
 more flexible framework for weighted updating, nor that dynamic weighting of
 past evidence has a long history; the manuscript no longer claims novelty on
-that basis, and situates DPE within that family instead (G4). We instead make
+that basis, and situates DPE within that family instead (C3). We instead make
 the narrower claims that DPE captures human behavior and individual differences
 across four heterogeneous tasks and can be realized in a biologically plausible
-spiking circuit, unlike EWA and the other alternatives we discuss (G4).
+spiking circuit, unlike EWA and the other alternatives we discuss (C3).
 
 Regarding the applicability of EWA to evidence integration, EWA was developed
 for repeated strategic interaction, where a player faces other agents over a
 defined strategy space and can weigh the foregone payoff of strategies not
 chosen. That setting is what motivates its machinery, including the
-per-strategy bookkeeping described in G4. Our tasks include neither choices nor
+per-strategy bookkeeping described in C3. Our tasks include neither choices nor
 foregone payoffs: participants report a continuous estimate of a quantity, with
 no alternatives to compare and nothing counterfactual to evaluate. So far as we
 are aware, EWA has not been applied to non-social sequential estimation of the
@@ -607,7 +763,7 @@ structures, constraints, or testable predictions.}
 This comment drove the largest additions to the manuscript, and we answer it in
 the reviewer's own terms.
 
-\textbf{New observations (G2).} These include the within-trial decay of response
+\textbf{New observations (C4).} These include the within-trial decay of response
 change, reliable at the level of individual participants rather than only in the
 aggregate; the growth and autocorrelation of response variability under exact
 sequence repetition; and the cross-task stability of both discounting rate and
@@ -616,32 +772,32 @@ response precision.
 \textbf{New constraints.} First, the SNN's representational precision is
 limited by the finite, heterogeneous population of spiking neurons that encodes
 each quantity. One consequence of this
-constraint is that the SNN reproduces both variability signatures (Fig.~5D--I)
+constraint is that the SNN reproduces both variability signatures (Fig.~\ref{fig:sigma_main}D--I)
 without fitting dedicated noise parameters, whereas every
 response-noise-augmented mathematical model we tested fails to reproduce them.
 This implies that response-stage noise is insufficient, and that the noise must
-reside in a persistent, evolving state representation (G2).
+reside in a persistent, evolving state representation (C4).
 \citet{prat2024imprecise} reached a similar conclusion by comparing
 mathematical models with and without compounding state noise against behavioral
 data, but did not specify what mechanism produces that noise; our contribution
 is to ground state noise in a neural process and show that it generalizes across tasks.
 Second, DPE's power-law decay is a strong constraint on the form of dynamic PE
 weighting, and reflects constraints on how such functions are computed by
-the brain in real time (G4). The alternatives apply different constraints: PR must retain
+the brain in real time (C3). The alternatives apply different constraints: PR must retain
 the full observation history and recompute every weight as each observation
 arrives; EWA requires per-strategy bookkeeping over a choice set; and exact
 Bayesian tracking requires an unbounded posterior. Third, our implementation is
 constrained in ways RNNs are not: leaky integrate-and-fire neurons,
-anatomically distinct populations, and emergent representaitonal noise (G5).
+anatomically distinct populations, and emergent representational noise (C3).
 
 \textbf{New structures.} We implement DPE in two biologically distinct circuits
 --- one storing the running estimate in persistent recurrent activity, the other
 in plastic synaptic weights updated by an error-driven learning rule. They fit
 human behavior comparably but are causally dissociable by perturbation during
-the inter-trial interval (G6, prediction~4).
+the inter-trial interval (C2, prediction~4).
 
 \textbf{New testable predictions.} We list four new predictions, alongside the
-mechanisms that generate them and proposed empirical measurements to validate them (G6).
+mechanisms that generate them and proposed empirical measurements to validate them (C2).
 
 % ============================================================
 \rc{2.3 Reduced-form measures of behavior}{The use of a reduced-form measure for
@@ -654,7 +810,7 @@ studies. In the revised manuscript, per-participant, observation-by-observation
 fits are a central analysis that appears immediately in the Results, with effect
 sizes and significance for every comparison; the behavioral signatures we report
 alongside them are likewise computed per participant rather than only in the
-aggregate (G2, G3). We would add, though, that those aggregate measures are doing different work
+aggregate (C1, C4). We would add, though, that those aggregate measures are doing different work
 from summary statistics. Response change and response variability under
 repetition are dynamical signatures of the integration process, and they are
 informative precisely because the fitting procedure does not target them. A
@@ -676,7 +832,7 @@ We agree entirely, and have removed this framing. The phrase no longer appears
 anywhere in the manuscript, and we no longer claim that the model reproduces
 neural data. Every statement relating network activity to the brain is now
 framed as a prediction, with the measurement that would test it stated
-explicitly (G6). The Discussion now closes with a Limitations section stating
+explicitly (C2). The Discussion now closes with a Limitations section stating
 plainly that no spiking, imaging, or perturbation recordings exist for these
 tasks, so each of our neural predictions remains prospective.
 
@@ -688,15 +844,23 @@ reason. The revised paper emphasizes two behavioral signatures of the integratio
 process: the magnitude of response change between consecutive observations
 ($\Delta R$), and the variability of responses to an exactly repeated sequence
 ($\sigma$). Neither is defined for the social-learning task, which collected a
-binary choice rather than a continuous estimate, and involved non-repeatable social interaction [also mention the per-stage weighting, which required an ad-hoc model component].
+binary choice rather than a continuous estimate, and involved non-repeatable
+social interaction. The task also sat awkwardly with the rest of the model
+suite: because evidence arrived in discrete social-exchange stages rather than
+as a stream of comparable observations, fitting it required an ad-hoc component
+with a separate free weight for each stage, which has no counterpart in the
+other three tasks and no principled analogue in DPE's single discounting
+exponent.
 Unfortunately, removing the task also removed the associated fMRI comparison \citep{jiang2023neurocomputational}.
 We believe the replacement is an improvement: rather than a post-hoc comparison to one
 published result, the manuscript now makes four quantitative neural-behavioral
-predictions (G6), specifies the measurements needed to validate them,
+predictions (C2), specifies the measurements needed to validate them,
 and states the prospective nature of these predictions plainly in the Limitations section. 
-We would rather make falsifiable claims about
-neural activity [specifically spike data rather than fMRI data] than draw a high-level correspondence to measurements collected
-under tasks outside our core paradigm.
+We would rather make falsifiable claims at the level our model
+actually operates at --- spiking activity in identified populations, which is
+what the network produces --- than draw a high-level correspondence between
+the model and BOLD measurements collected under a task outside our core
+paradigm.
 
 \section*{Conclusion}
 We thank the editor and both reviewers for the time they have given this work,
