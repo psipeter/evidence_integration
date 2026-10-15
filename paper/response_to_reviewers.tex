@@ -699,7 +699,18 @@ Figure~\ref{fig:models_overview} has been entirely redrawn and the inset removed
 \vspace{-0.4em}
 {\scriptsize\color{mscap}\textbf{Figure~\ref{fig:models_overview}.} \textbf{The Discounted Prediction Error (DPE) model and its spiking neural network implementation.} (\textbf{A}) Using an error-driven update rule, the DPE model integrates each observation $I_n$ into its running estimate $V_n$ using a learning rate that decays as a power law of the observation count $n$. The discounting exponent $\lambda$ sets the resulting integration strategy (see Supplementary Text): $\lambda=1$ recovers the unweighted running mean, $\lambda<1$ slows the decay and over-weights recent observations (recency), and $\lambda>1$ steepens it and over-weights early observations (primacy). (\textbf{B}) A spiking neural network implements the same computation using multiple anatomically- and functionally-distinct neural populations. Each observation $I_n$ feeds into \textit{error}, which computes the (discounted) prediction error between the observation and the previous value estimate $V_{n-1}$. \textit{Error} then drives \textit{value}, which maintains a working memory of $V_n$ through recurrent excitation and feeds it back to \textit{error} for the next comparison. \textit{Count} tracks the observation number in working memory and decodes the discounting weight $\alpha(n)$ that modulates \textit{error}. (\textbf{C}) Spiking activity (rasters) and decoded traces from one example trial (four observations, shaded inter-trial intervals).\par}
 
-On the ``context'' population: our default (recurrent) implementation contains no such population. It comprises the three components shown above, and a single connection from \textit{error} to \textit{value} computes the product of \textit{error}'s two represented dimensions, which is the weighted prediction error that drives each update. No baseline population is required to represent signed prediction errors, since a Neural Engineering Framework (NEF) population represents positive and negative values alike. The synaptic implementation (Fig.~\ref{fig:synaptic_main}A, shown under C2) does use such a population, and here we agree the original label was misleading; we have renamed it \textit{background}. Materials and Methods now sets out both implementations in full:
+On the ``context'' population: our default (recurrent) implementation contains no such population. Materials and Methods sets out both implementations in full:
+
+% PASTED from main.tex, Materials and Methods: "Recurrent implementation".
+% 1.3 pasted the SYNAPTIC implementation but paraphrased this one, which is
+% the circuit R1's question is actually about.
+\begin{ms}
+\textbf{Materials and Methods: \textit{Recurrent implementation}}
+
+We implemented DPE (Eqs.~\ref{eq:dpe_update}--\ref{eq:dpe_alpha}) as a spiking neural network (SNN) using the NEF. The network comprises populations of spiking leaky-integrate-and-fire (LIF) neurons connected via current-based synapses, two mechanisms widely regarded as a compromise between biological realism and computational efficiency \citep{eliasmith2013build, duggins2022constructing, gerstner2014neuronal, dayan2005theoretical}. In its default (recurrent) configuration, the network comprises three main populations (Fig.~\ref{fig:models_overview}B): \textit{error}, \textit{value}, and a counting network, \textit{count} (described below). \textit{Error} is two-dimensional, representing the discounting weight $\alpha(n)$ (received from \textit{count}) and the raw prediction error $I_n - V_{n-1}$ (received from the current observation and feedback from \textit{value}). A single connection from \textit{error} to \textit{value} computes the product of these two represented dimensions, $\alpha(n)(I_n-V_{n-1})$ (the weighted prediction error of Eq.~\ref{eq:dpe_update}), and adds it into \textit{value}'s input. \textit{Value} is one-dimensional and represents the running estimate $V_n$. In this recurrent implementation, \textit{value} maintains $V_n$ via a recurrent connection (synaptic time constant $\tau_{fb}=0.2$s), so that $V_n$ persists as ongoing recurrent activity between observations.
+\end{ms}
+
+No baseline population is required to represent signed prediction errors, since a Neural Engineering Framework (NEF) population represents positive and negative values alike. The synaptic implementation (Fig.~\ref{fig:synaptic_main}A, shown under C2) does use such a population, and here we agree the original label was misleading; we have renamed it \textit{background}:
 
 % REVERT COPY of the hand-written version this block replaced, kept in case the pasted Methods
 % section reads as too much detail for this comment: The synaptic implementation
@@ -746,6 +757,12 @@ This comment prompted what is now one of the central results of the paper, and w
 \rc{1.5 Figure 5 legends and model misfits}{\ldots{}move the legends so they don't block the data. Also\ldots{} the model fits in 5F miss some aspects of the data. Could the authors comment on these misfits?}
 
 All figures have been regenerated for this submission, and we have confirmed that no legend occludes data in any of them. The analysis the reviewer refers to, response change as a function of observation number in the value comparison task, is now Fig.~\ref{fig:lambda_main}C and~F, and is presented differently: in place of model fits to three example participants, we now show the population median trajectory with a bootstrap confidence interval, together with the distribution of per-participant discounting rates.
+
+\begin{center}
+	\includegraphics[width=1.0\textwidth]{figures/lambda_main.pdf}
+\end{center}
+\vspace{-0.4em}
+{\scriptsize\color{mscap}\textbf{Figure~\ref{fig:lambda_main}.} \textbf{Magnitude of response change decays with evidence accumulated, and individuals differ systematically in how quickly.} $\Delta R$ is the absolute change between one response and the next, measured at each point in the sequence. (\textbf{A--C}) Each participant's $\Delta R$ is averaged across trials to form one trajectory per participant; lines show the population median of these trajectories, with shaded regions showing a 95\% bootstrap confidence interval of the median. $\Delta R$ reliably shrinks as people gather more evidence. (\textbf{D--F}) Fitting a power-law curve to each participant's $\Delta R$ trajectory yields a discounting rate $\lambda$ per participant. The resulting distributions of $\lambda$ across participants reveal large individual differences, with most individuals showing a moderate-to-strong recency bias ($\lambda<1$), but a substantial minority showing near-optimal discounting or even a primacy bias ($\lambda\geq1$). Importantly, individuals show significant consistency in $\lambda$ both within and across tasks (see Supplementary Text). The models PR, DPE, and SNN all correctly predict this decay, but LI's $\Delta R$ trajectory is nearly constant, and Mean cannot capture individual differences.\par}
 
 % ============================================================
 \rc{1.6 Transparency about goodness of fit}{\ldots{}I understand that we need not put too much weight on goodness-of-fit here, but the authors should still be more transparent about this. The reality is that the LIF model does significantly better than the Bayesian model in Study 1, significantly worse than the DeGroot and RL models in Study 2, and no different than the other models in Study 3.}
@@ -797,16 +814,32 @@ We agree the claim was premature and have removed it; the manuscript no longer a
 % neural measurements are feasible -- which is what R1 opens this comment by
 % naming as the strength of the approach.
 \begin{ms}
-\textbf{Discussion: \textit{Novelty and predictions of the neural network}}
+\textbf{Discussion: \textit{Novelty and predictions of the neural network} (excerpt)}
 
 We leveraged our SNN to generate four testable predictions relating neural activities to observable behavioral measures, then explained how each prediction arises from a specific biological mechanism. Importantly, all of these measures are either directly observable (population spiking activity recorded with high-temporal-resolution methods, response change and variability, etc.) or recoverable using well-established decoding techniques from the neural literature (population-vector decoding \citep{georgopoulos1986neuronal, wu2006bayesian}). Note that all four effects emerge from our particular circuit implementation, and are not a direct mathematical consequence of the DPE equation itself, making them network-specific, falsifiable predictions.
-\end{ms}
 
-The simulated experiments behind these predictions, with their statistics and figures, are set out under C2.
+First, following a surprising observation, the size of a population's transient PE response predicts how quickly that response subsequently decays back to baseline (Fig.~\ref{fig:neural_main}A--C). Because $\alpha(n)$ scales both the magnitude of the error response and the speed with which it drives PE updates, individuals with a stronger baseline learning rate ($\alpha_0$) will both react more strongly and adapt faster to unexpected observations (outliers). This can be tested by decoding spikes from error-sensitive neurons during the cue period and correlating the maximum PE response to the subsequent PE decay before the next cue.
+
+Second, the firing-rate decline of error-selective neurons within a trial predicts the decay rate of response updates (Fig.~\ref{fig:neural_main}D--F). Because $\alpha(n)$ scales the dynamic firing rate of error neurons that in turn discount value updates, individuals with higher discounting $\lambda$ will show progressively weaker error responses and smaller response updates as more evidence accumulates within a trial. This can be tested by measuring the activity of error-sensitive neurons after each observation and correlating it with the magnitude of response updates.
+
+Third, the signal-to-noise ratio (SNR) in the decoded error signal predicts the resulting behavioral response variability $\sigma$ (Fig.~\ref{fig:neural_main}G--I). The error population's representational capacity -- and thus how consistently it supports integration -- is shaped by biological factors such as the number of neurons recruited to represent the signal. This can be tested by measuring either spike-based or signal-based PE SNR (see Supplementary Text) and correlating it with $\sigma$ over repeated sequences.
+
+Fourth, perturbing the network during the intertrial interval (ITI) increases subsequent response error and variability in a dose-dependent way for networks that rely on activity-dependent working memory, but not for networks that rely on synaptic (activity-silent) working memory (Fig.~\ref{fig:synaptic_main}C--D). The recurrent circuit maintains the running estimate in ongoing spiking activity that a delay-period perturbation can corrupt, while the synaptic circuit stores it in synaptic weights a transient current cannot reach. This can be tested by applying a distractor task or non-invasive brain stimulation during the ITI and asking whether decoding accuracy recovers once the delay ends. More broadly, whether the brain relies on persistent, resource-intensive working memory or on more efficient, plasticity-based strategies is a question that extends well beyond evidence integration -- some have argued the brain shifts from the former to the latter as task demands increase \citep{collins2012much, westbrook2025striatal}. A similar synaptic-versus-working-memory comparison, in reward learning during foraging, reached a conclusion resembling ours: mechanisms relying on persistent activity were more sensitive to external perturbation than synaptic ones \citep{pereira2024brain}.
+\end{ms}
 
 We did not add a section specific to predictions about the Value Integration task, because predictions 1 and 3 rely on sequences with outliers and/or repetition, which that task does not offer. We would be glad to add a paragraph making this mapping explicit if the reviewer would find it useful.
 
-Finally, the fMRI measurements the reviewer asks us to revisit came from the social-learning task, which is no longer part of the paper. The revised paper emphasizes two behavioral signatures of the integration process: the magnitude of response change between consecutive observations ($\Delta R$), and the variability of responses to an exactly repeated sequence ($\sigma$). Neither is defined for the social-learning task, which collected a binary choice rather than a continuous estimate, and involved non-repeatable social interaction. The task also sat awkwardly with the rest of the model suite: because evidence arrived in discrete social-exchange stages rather than as a stream of comparable observations, fitting it required an ad-hoc component with a separate free weight for each stage, which has no counterpart in the other three tasks and no principled analogue in DPE's single discounting exponent. Unfortunately, removing the task also removed the associated fMRI comparison \citep{jiang2023neurocomputational}. We believe the replacement is an improvement: rather than a post-hoc comparison to one published result, the manuscript now makes four quantitative neural-behavioral predictions (C2), specifies the measurements needed to validate them, and states the prospective nature of these predictions plainly in the Limitations section. We would rather make falsifiable claims at the level our model actually operates at, namely the spiking activity the network produces, than draw a high-level correspondence between the model and BOLD measurements collected under a task outside our core paradigm.
+Finally, the fMRI measurements the reviewer asks us to revisit came from the social-learning task, which is no longer part of the paper. The revised paper emphasizes two behavioral signatures of the integration process: the magnitude of response change between consecutive observations ($\Delta R$), and the variability of responses to an exactly repeated sequence ($\sigma$). Neither is defined for the social-learning task, which collected a binary choice rather than a continuous estimate, and involved non-repeatable social interaction. The task also sat awkwardly with the rest of the model suite: because evidence arrived in discrete social-exchange stages rather than as a stream of comparable observations, fitting it required an ad-hoc component with a separate free weight for each stage, which has no counterpart in the other three tasks and no principled analogue in DPE's single discounting exponent. Unfortunately, removing the task also removed the associated fMRI comparison \citep{jiang2023neurocomputational}. We believe the replacement is an improvement: rather than a post-hoc comparison to one published result, the manuscript now makes four quantitative neural-behavioral predictions, specifies the measurements needed to validate them, and states their prospective nature plainly:
+
+% PASTED from main.tex, Discussion: "Limitations", final sentence. Also pasted
+% in 2.4, which R1 never reads.
+\begin{ms}
+\textbf{Discussion: \textit{Limitations} (excerpt)}
+
+Finally, none of the neural predictions above have yet been tested against real neural data: no spiking, imaging, or perturbation recordings exist for these tasks to confirm or falsify them, so each of our predictions remains prospective.
+\end{ms}
+
+We would rather make falsifiable claims at the level our model actually operates at, namely the spiking activity the network produces, than draw a high-level correspondence between the model and BOLD measurements collected under a task outside our core paradigm.
 
 % ============================================================
 \section*{Reviewer 2}
@@ -819,22 +852,112 @@ We thank the reviewer, and have worked to strengthen exactly this bridge. Four s
 
 This comment drove the largest additions to the manuscript, and we answer it in the reviewer's own terms.
 
-\textbf{New observations (C4).} These include the within-trial decay of response change, reliable at the level of individual participants rather than only in the aggregate; the growth and autocorrelation of response variability under exact sequence repetition; and the cross-task stability of both discounting rate and response precision.
+% REVERT COPY of the our-voice statistics paragraph this block replaced: \textbf{New
+% observations (C4).} Response change declines within a trial, and does so per participant
+% rather than only in the aggregate: a per-participant rank correlation between $\Delta R$ and
+% observation number is significantly negative for 85\%, 59\%, and 68\% of participants across
+% the three tasks long enough to measure it, and a fitted power-law discounting rate differs
+% from zero for 98\%, 77\%, and 72\%. Responses to an exactly repeated sequence grow more
+% variable as the sequence proceeds (1.3--1.9$\times$), and their residuals are autocorrelated
+% at lag~1 ($r$~=~0.40--0.62). Both $\lambda$ and $\sigma$ are reliable within a task (split-
+% half $r$~=~0.77--0.92 and $r$~=~0.62--0.95) and transfer across tasks ($\sigma$: $r$~=~0.70;
+% $\lambda$: $r$~=~0.31).
+\textbf{New observations (C4).} The Discussion states what these amount to; the statistics behind them are inserted from the Results and Supplementary Text, which is where the manuscript reports them.
 
-\textbf{New structures (C2).} We implement DPE in two biologically distinct circuits, one storing the running estimate in persistent recurrent activity, the other in plastic synaptic weights updated by an error-driven learning rule. They fit human behavior nearly as well as one another, but are causally dissociable by perturbation during the inter-trial interval.
+% PASTED from main.tex, Discussion: "Individual differences in discounting and
+% precision", paragraph 2, with four bracketed inserts carrying the numbers.
+% The Discussion states these qualitatively, and the eight statistics are
+% scattered over four paragraphs in three sections, so each insert is a
+% contiguous slice of ITS OWN source and is labelled with that source.
+\begin{ms}
+\textbf{Discussion: \textit{Individual differences in discounting and precision} (excerpt)}
 
-\textbf{New constraints.} First, the SNN's representational precision is limited by the finite, heterogeneous population of spiking neurons that encodes each quantity. One consequence of this constraint is that the SNN reproduces both variability signatures (Fig.~\ref{fig:sigma_main}D--I) without fitting dedicated noise parameters, whereas every response-noise-augmented mathematical model we tested fails to reproduce them. This implies that response-stage noise is insufficient, and that the noise must reside in a persistent, evolving state representation (C4). \citet{prat2024imprecise} reached a similar conclusion by comparing mathematical models with and without compounding state noise against behavioral data, but did not specify what mechanism produces that noise; our contribution is to ground state noise in a neural process and show that it generalizes across tasks. Second, DPE's power-law decay is a strong constraint on the form of dynamic PE weighting, and reflects constraints on how such functions are computed by the brain in real time (C3). The alternatives apply different constraints: PR must retain the full observation history and recompute every weight as each observation arrives; EWA requires per-strategy bookkeeping over a choice set; and exact Bayesian tracking requires an unbounded posterior. Third, our implementation is constrained in ways RNNs are not: leaky integrate-and-fire neurons, anatomically distinct populations, and emergent representational noise (C3).
+The decline in response change magnitude ($\Delta R$) and the compounding response variability under repetition both generalized to our two new tasks, replicating and extending Yoo et al.'s \citep{yoo2025people} and Prat-Carrabin and Woodford's \citep{prat2024imprecise} findings. \textit{[from Results: a per-participant Spearman rank correlation between $\Delta R$ and observation number was significantly negative ($p<0.05$) for 85\% of participants in Binary Integration, 59\% in Continuous Integration, and 68\% in Value Integration]} \textit{[from Results: Human $\sigma$ grew substantially larger as more of the repeated sequence was observed (1.3--1.9$\times$ from first to last observation, Fig.~\ref{fig:sigma_main}D--F, gray)]} Furthermore, both $\lambda$ and $\sigma$ reveal genuine, stable individual differences rather than overfitting to a single task or dataset: split-half reliability was high for both parameters (Supplementary Text), indicating that, within a given task, most participants have a consistent bias towards primacy or recency and a consistent level of response precision. \textit{[from Supplementary Text: split-half (odd/even trial) correlations of fitted $\lambda$ were $r=0.78$ (Binary Integration), $r=0.77$ (Continuous Integration), and $r=0.92$ (Value Integration), all $p<10^{-9}$ (Fig.~\ref{fig:lambda_sigma_reliability}A--B). Similarly, the response variability $\sigma$ shown in Fig.~\ref{fig:sigma_main}A--C varied widely across participants and tasks, but $\sigma$ was also reliable for most participants within a given task: split-half correlations of fitted $\sigma$ were $r=0.95$ (Proportion Inference), $r=0.62$ (Binary Integration), and $r=0.91$ (Continuous Integration), all $p<10^{-5}$ (Fig.~\ref{fig:lambda_sigma_reliability}D--E)]} This consistency also extended across tasks: within-subject, an individual's $\sigma$, and to a lesser extent their $\lambda$, in one task predicted their value of that same parameter in the other, suggesting that both reflect fundamental, individualized signatures of evidence integration in the brain. \textit{[from Supplementary Text: We found that $\lambda$ was weakly but significantly correlated across tasks ($r=0.31$, $p=0.037$; Fig.~\ref{fig:lambda_sigma_reliability}C), while $\sigma$'s cross-task correlation was considerably stronger ($r=0.70$, $p<10^{-7}$; Fig.~\ref{fig:lambda_sigma_reliability}F)]}
+\end{ms}
 
-\textbf{New testable predictions.} We report four, each with the mechanism that generates it and a measurement that would test it (C2). The manuscript also sets out what makes them testable:
+% REVERT COPY of the our-voice summary this block replaced: \textbf{New structures (C2).} We
+% implement DPE in two biologically distinct circuits, one storing the running estimate in
+% persistent recurrent activity, the other in plastic synaptic weights updated by an error-
+% driven learning rule. They fit human behavior nearly as well as one another, but are causally
+% dissociable: perturbing the network during the inter-trial interval degrades the recurrent
+% circuit's error and response variability ($r$~=~0.77 and $r$~=~0.58) while leaving the
+% synaptic circuit unaffected (both $r \approx 0$, $p>0.9$).
+\textbf{New structures (C2).} We implement DPE in two biologically distinct circuits and dissociate them:
+
+% PASTED from main.tex, Results: "Distinguishing two neural mechanisms for
+% integration" -- the COMPLETE section, both paragraphs, so no excerpt label and
+% no insert is needed: para 1 says why there are two candidate mechanisms (the
+% field's two competing accounts of working memory, 'difficult to distinguish
+% from behavior alone'), para 2 carries the fit comparison and the dissociation
+% statistics our summary used to state. Also pasted in C2.
+\begin{ms}
+\textbf{Results: \textit{Distinguishing two neural mechanisms for integration}}
+
+Having established a neural mechanism that jointly accounts for behavioral and neural signatures of evidence integration, we asked whether these conclusions depend on the specific circuit implementation of DPE, or whether they generalize to a different neural substrate. Our SNN implementation of DPE maintains its running estimate $V_n$ through persistent recurrent activity in the \textit{value} population, consistent with one leading account of how the brain sustains information in working memory \citep{wang2002probabilistic, wang2008decision}. An influential alternative hypothesis, however, proposes that working memory can instead be maintained by synaptic plasticity, without requiring sustained spiking to hold information between observations \citep{mongillo2008synaptic, stokes2015activity}. These two candidate mechanisms can both plausibly implement DPE and are difficult to distinguish from behavior alone. We investigated which neural mechanism is more plausible using a synaptic variant of SNN. This network replaces \textit{value}'s persistent recurrent activity with a synaptic mechanism: a dopamine-like error-driven learning rule instead stores the running estimate $V_n$ in the weights of plastic synapses, updating it only in response to the prediction error signal (Fig.~\ref{fig:synaptic_main}A). These plastic synapses connect a new \textit{background} population (which fires at a constant, non-selective rate) to \textit{value}, driving it according to a learned transformation (see Materials and Methods).
+
+The synaptic model also captured individual human behavior on the Continuous Integration task, but performed slightly worse than the recurrent model (Fig.~\ref{fig:synaptic_main}B; Wilcoxon $p$<0.0001). To further dissociate the two neural mechanisms, we ran a simulated experiment with a causal perturbation, then compared each model's decoded value trajectory. We injected noise into the \textit{value} population during the inter-trial interval (ITI; see Materials and Methods), mimicking a distractor task or non-invasive brain stimulation delivered during a working-memory delay. Example single-trial dynamics show that both models' decoded estimates are disrupted while the perturbation is active, but only the recurrent model's disruption persists once the ITI ends (Fig.~\ref{fig:synaptic_main}C). Across a range of perturbation strengths, the recurrent model's error (RMSE, relative to the running mean) and response variability ($\sigma$) both grew reliably with perturbation strength (RMSE: $r$=0.77; $\sigma$: $r$=0.58; both $p$<0.0001), while the synaptic model showed no such relationship (both $r\approx0$, $p$>0.9) (Fig.~\ref{fig:synaptic_main}D), confirming that only the recurrent, persistent-activity-based mechanism is vulnerable to a transient disruption of ongoing neural activity.
+\end{ms}
+
+\textbf{New constraints.} The SNN's representational precision is limited by the finite, heterogeneous population of spiking neurons that encodes each quantity. One consequence is that it reproduces both variability signatures without any fitted noise parameter, whereas every response-noise-augmented mathematical model we tested fails to:
+
+% 0.9, matching C4.1's copy of the same figure. LAYOUT TUNING IS DEFERRED
+% until the content settles; this slot has already moved four times.
+\begin{center}
+	\includegraphics[width=0.9\textwidth]{figures/sigma_main.pdf}
+\end{center}
+\vspace{-0.4em}
+{\scriptsize\color{mscap}\textbf{Figure~\ref{fig:sigma_main}.} \textbf{Only the spiking network reproduces the dynamics of human response variability.} Response variability is measured with $\sigma$, the standard deviation of a participant's responses when repeatedly presented with the same short sequence, averaged across all such sequences. To investigate the underlying mechanisms, we fit noise-augmented variants of the mathematical models and compared them to SNN and human data. (\textbf{A--C}) $\sigma$ differs systematically across individuals, with significant within- and across-task consistency (see Supplementary Text). (\textbf{D--F}) $\sigma$ grows over the course of repeated sequences for humans and SNN, but not for the noise-augmented models. (\textbf{G--I}) Trial-wise deviations from a participant's typical response (measureable using repeated sequences) are strongly autocorrelated for subsequent responses in humans and SNN, but not for the noise-augmented models. These two dynamic signatures reflect the ``state noise'' inherent in neural representations, which arise from spike noise and propagate forward in time.\par}
+
+Response-stage noise is therefore insufficient to explain this phenomenon: the noise must reside in a persistent, evolving state representation, a constraint implicit in our SNN architecture.
+
+Furthermore, DPE's power-law decay constrains the form dynamic weighting can take if it is to be computed in real time, and the alternatives relax it in different ways: PR must retain the full observation history and recompute every weight as each observation arrives; EWA requires per-strategy bookkeeping over a choice set; and exact Bayesian tracking requires an unbounded posterior. To our knowledge, none of the three has been realized in a neural circuit.
+
+
+% REVERT COPY of the compacted one-sentence version this paste replaced: Finally, our neural
+% implementation is constrained in ways RNNs are not: it is built from leaky integrate-and-fire
+% neurons rather than units performing several gating operations at once, from anatomically
+% distinct populations rather than an undifferentiated hidden layer, from components that
+% compose without retraining, and from representational noise that emerges from finite spiking
+% populations rather than being injected as a free parameter.
+Finally, our neural implementation is constrained in ways RNNs are not:
 
 % PASTED from main.tex, Discussion: "Novelty and predictions of the neural
-% network", paragraph 3. Also pasted in 1.7; R2 never reads R1, and C2 carries
-% only this paragraph's closing sentence as a bracketed note, so this is the
-% one place a pointer could not substitute for R2.
+% network", the RNN comparison. Begins LATE, after the sentence "Four key
+% features distinguish our SNN from the recurrent neural networks...", which
+% would clash with our framing of these as CONSTRAINTS rather than features.
+% Beginning late is permitted; nothing is skipped inside.
 \begin{ms}
-\textbf{Discussion: \textit{Novelty and predictions of the neural network}}
+\textbf{Discussion: \textit{Novelty and predictions of the neural network} (excerpt)}
+
+Our network is built from distinct populations that each perform specific functional computations, such as calculating discounted PE, maintaining the running value estimate, or tracking elapsed observations. This structure makes our network's predictions directly comparable to recordings from functionally or anatomically distinct cortical areas. An RNN's undifferentiated hidden layer, by contrast, mixes these computations together with no natural mapping onto specific brain regions or cell types, and requires post-hoc decomposition to identify the active representations and computations.
+
+Many RNN architectures commonly used to fit behavioral choice data, such as gated recurrent units \citep{jian2025discovering}, rely on individual ``neurons'' that perform several nonlinear gating operations at once, a level of computational complexity implausible for a single biological neuron. Our network instead uses simple leaky integrate-and-fire neurons, widely regarded as a reasonable compromise between biological realism and computational tractability \citep{eliasmith2013build, gerstner2014neuronal, dayan2005theoretical}. Simple units also compose: the NEF's compositional approach to unified cognitive modelling can be used to build large-scale models spanning many distinct cognitive tasks from a shared set of reusable neural components \citep{choo2018spaun}. An RNN, by contrast, typically must be retrained from scratch for each new task, since nothing in its architecture encourages its representations to be generalizable across tasks.
+
+Spiking noise in our network is an emergent, unavoidable consequence of representing a continuous value in a finite population of spiking neurons: population size, neural gain, and tuning-curve heterogeneity all combine to set its magnitude. Each of these parameters is a biologically meaningful, independently measurable quantity rather than a free parameter fit only to match behavior. An RNN's noise, if included at all, must instead be injected or fit as a free parameter with no such interpretation, making any match to human $\sigma$ dynamics an artifact of fitting rather than an emergent property of the network's representation. While RNNs have achieved excellent fits to behavioral data in their own right, these features make our SNN a fundamentally different kind of model -- one built to generate anatomically- and mechanistically-grounded neural predictions, rather than simply to maximize behavioral fit.
+\end{ms}
+
+\textbf{New testable predictions (C2).} The Discussion states four, each with the mechanism that generates it and the measurement that would test it:
+
+% PASTED from main.tex, Discussion: "Novelty and predictions of the neural
+% network", paragraphs 3-7: the framing plus all four predictions, contiguous.
+% This is exactly the span C3's block elides with [\ldots], so between the two
+% places the section appears whole. Copying in full rather than summarising is
+% deliberate: R2's charge is 'limited evidence of ... testable predictions'.
+% The closing Pereira sentence is KEPT here (it was cut from C2): it is
+% independent corroboration that persistent-activity mechanisms are more
+% perturbation-sensitive, and R2 sees it nowhere else.
+\begin{ms}
+\textbf{Discussion: \textit{Novelty and predictions of the neural network} (excerpt)}
 
 We leveraged our SNN to generate four testable predictions relating neural activities to observable behavioral measures, then explained how each prediction arises from a specific biological mechanism. Importantly, all of these measures are either directly observable (population spiking activity recorded with high-temporal-resolution methods, response change and variability, etc.) or recoverable using well-established decoding techniques from the neural literature (population-vector decoding \citep{georgopoulos1986neuronal, wu2006bayesian}). Note that all four effects emerge from our particular circuit implementation, and are not a direct mathematical consequence of the DPE equation itself, making them network-specific, falsifiable predictions.
+
+First, following a surprising observation, the size of a population's transient PE response predicts how quickly that response subsequently decays back to baseline (Fig.~\ref{fig:neural_main}A--C). Because $\alpha(n)$ scales both the magnitude of the error response and the speed with which it drives PE updates, individuals with a stronger baseline learning rate ($\alpha_0$) will both react more strongly and adapt faster to unexpected observations (outliers). This can be tested by decoding spikes from error-sensitive neurons during the cue period and correlating the maximum PE response to the subsequent PE decay before the next cue.
+
+Second, the firing-rate decline of error-selective neurons within a trial predicts the decay rate of response updates (Fig.~\ref{fig:neural_main}D--F). Because $\alpha(n)$ scales the dynamic firing rate of error neurons that in turn discount value updates, individuals with higher discounting $\lambda$ will show progressively weaker error responses and smaller response updates as more evidence accumulates within a trial. This can be tested by measuring the activity of error-sensitive neurons after each observation and correlating it with the magnitude of response updates.
+
+Third, the signal-to-noise ratio (SNR) in the decoded error signal predicts the resulting behavioral response variability $\sigma$ (Fig.~\ref{fig:neural_main}G--I). The error population's representational capacity -- and thus how consistently it supports integration -- is shaped by biological factors such as the number of neurons recruited to represent the signal. This can be tested by measuring either spike-based or signal-based PE SNR (see Supplementary Text) and correlating it with $\sigma$ over repeated sequences.
+
+Fourth, perturbing the network during the intertrial interval (ITI) increases subsequent response error and variability in a dose-dependent way for networks that rely on activity-dependent working memory, but not for networks that rely on synaptic (activity-silent) working memory (Fig.~\ref{fig:synaptic_main}C--D). The recurrent circuit maintains the running estimate in ongoing spiking activity that a delay-period perturbation can corrupt, while the synaptic circuit stores it in synaptic weights a transient current cannot reach. This can be tested by applying a distractor task or non-invasive brain stimulation during the ITI and asking whether decoding accuracy recovers once the delay ends. More broadly, whether the brain relies on persistent, resource-intensive working memory or on more efficient, plasticity-based strategies is a question that extends well beyond evidence integration -- some have argued the brain shifts from the former to the latter as task demands increase \citep{collins2012much, westbrook2025striatal}. A similar synaptic-versus-working-memory comparison, in reward learning during foraging, reached a conclusion resembling ours: mechanisms relying on persistent activity were more sensitive to external perturbation than synaptic ones \citep{pereira2024brain}.
 \end{ms}
 
 \rc{2.2 Reduced-form measures of behavior}{The use of a reduced-form measure for behavior in relatively complex tasks results in oversimplifying the findings.}
