@@ -125,6 +125,15 @@
 %     always QUOTE rather than paraphrase: the editor reads this against the
 %     original review.
 %
+%   - OBVIOUS TYPOS IN REVIEWER TEXT ARE CORRECTED SILENTLY, never marked
+%     [sic] -- [sic] on a reviewer reads as point-scoring. Two so far: R1's
+%     "missfits" -> "misfits" (1.5) and R2's "specific biologically
+%     properties" -> "biological" (R2 header). A quote checker against
+%     Downloads/old_paper/old_paper_review.pdf will flag both, plus
+%     "well-established", which only differs because pdftotext hyphenated it
+%     across a line break in the source. Those three are the expected
+%     mismatches; anything else is a real divergence.
+%
 %   - Abbreviations are defined at first use and the opening paragraph has
 %     none. The network is "SNN" throughout, never "our network".
 %
@@ -282,18 +291,46 @@
 %           reviewer who asked about the fMRI comparison. Quote extended to
 %           carry "another obvious strength ... is the ability to tie the
 %           model parameters to neural measurements".
-% REVIEWER 2
-%   [x] opening praise quoted (unified framework; bridging heterogeneity to
-%       biological properties in a SNN)
-%   [x] 2.1 EWA -- substantive inline answer; carries the strategic-interaction
-%           domain argument that C3's EWA memory bullet depends on, plus the
-%           note that applying EWA here would require substantial reformulation
-%   [x] 2.2 four categories, answered in R2's own terms
-%   [x]     NEW STRUCTURES: two biologically distinct circuits
-%   [x]     NEW CONSTRAINTS: the Prat-Carrabin contribution claim
-%   [x] 2.3 fits were in SI; defense of Delta-R/sigma as dynamical signatures;
-%           perseveration / confirmation bias / choice-history citations
-%   [x] 2.4 "neural correlates" removed; Limitations added
+% REVIEWER 2  (REORDERED: the review's own order was EWA, new insights,
+%               reduced-form, neural correlates. The section now opens and
+%               closes on comments we fully resolve and buries the one we do
+%               not. Numbering follows the NEW order, as in R1, so it does not
+%               track the review's paragraph order. NOTE 2.1 and 2.2 are a
+%               SINGLE paragraph in the original review, split into two
+%               comments -- they must stay adjacent and in this order.)
+%   [x] opening praise quoted, extended into R2's summary paragraph so the
+%       reply can say the population-size/sigma link they noticed is now
+%       quantified; the social-learning removal is named here because the full
+%       explanation lives in 1.7, which R2 never reads
+%   [x] 2.1 (was 2.2) four categories, in R2'S OWN ORDER (observations,
+%           structures, constraints, predictions). Mostly POINTERS, not pastes:
+%           R2 reads C1-C4, where the observations (C4.1), the two circuits
+%           (C2) and the state-noise constraint (C4.1) are already pasted. The
+%           single paste is Discussion para 3 under "testable predictions" --
+%           it says WHICH neural measurements are feasible, and otherwise
+%           appears only in 1.7. NOTE flagged as reading summary-heavy; not yet
+%           addressed.
+%   [x]     NEW STRUCTURES: two circuits, "nearly as well as one another" --
+%           NOT "comparably", which contradicts Fig 7's pasted caption and
+%           main.tex's Wilcoxon p<0.0001.
+%   [x]     NEW CONSTRAINTS: the Prat-Carrabin contribution claim. Our wording
+%           is RICHER than main.tex's (it names the method), so it stays in our
+%           voice rather than being replaced by the pasted sentence in C4.1.
+%   [x] 2.2 (was 2.3) fits were in SI; Discussion para 1 of "Individual
+%           differences" pasted -- answers "reduced-form" by showing the
+%           signatures are Yoo's and Prat-Carrabin's own established measures,
+%           each previously examined in only ONE task, generalised here to
+%           four. Closing paragraph keeps the perseveration / confirmation-bias
+%           / choice-history citations, which the paste does not carry.
+%   [x] 2.3 (was 2.1) EWA. Quote extended to include "in social and non-social
+%           settings", which we had abridged out and then argued against.
+%           The answer is now STRUCTURAL: EWA indexes attractions by strategy,
+%           so it needs a discrete choice set, which our continuous response
+%           does not provide. Do not reinstate the claim that EWA is untested
+%           outside strategic games -- R2 says otherwise and is right.
+%   [x] 2.4 "neural correlates" removed; quote extended to include R2's
+%           suggested rename, so the reply can say we went further. Limitations
+%           pasted as a one-sentence excerpt that begins late.
 % CLOSING
 %   [x] thanks; new experiments and predictions exist because of these reviews
 %
@@ -390,7 +427,7 @@
 
 \vspace{0.8em}
 
-We thank both reviewers for their careful and constructive evaluations of our original submission. Their comments identified three gaps in that manuscript: (C1) our reporting of model fit quality was neither sufficiently transparent nor sufficiently central; (C2) our neural analyses stopped short of the quantitative, testable claims a network model should support; and (C3) the case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped. Additionally, the editor requested that a revised manuscript include (C4) additional experiments. In response, we (1) substantially rewrote the manuscript to emphasize fit quality and our advances over existing models; (2) added three simulated neural experiments that link network activity to individual differences, then added a fourth that perturbs the network during the inter-trial interval to dissociate two candidate neural mechanisms of evidence integration; and (4) designed and collected two new behavioral experiments, then analyzed additional behavioral signatures of individual variability. We first summarize how these changes address the reviewers' core concerns, then address each comment individually in greater detail, referencing new text and figures in the manuscript directly.
+We thank both reviewers for their careful and constructive evaluations of our original submission. Their comments identified three gaps in that manuscript: (C1) our reporting of model fit quality was neither sufficiently transparent nor sufficiently central; (C2) our neural analyses stopped short of the quantitative, testable claims a network model should support; and (C3) the case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped. Additionally, the editor requested that a revised manuscript include (C4) additional experiments. In response, we (1) substantially rewrote the manuscript to emphasize fit quality and our advances over existing models; (2) added three simulated neural experiments that link network activity to individual differences; (3) added a fourth that perturbs the network during the inter-trial interval to dissociate two candidate neural mechanisms of evidence integration; and (4) designed and collected two new behavioral experiments, then analyzed additional behavioral signatures of individual variability. We first summarize how these changes address the reviewers' core concerns, then address each comment individually in greater detail, reproducing the relevant text and figures from the manuscript directly.
 
 \section*{General concerns}
 
@@ -454,7 +491,7 @@ DPE achieved the best, or among the best, fit to human behavior on every task (F
 
 \subsection*{C2. The neural network made no new, testable predictions}
 
-Both reviewers felt that the simulated neural results in the original submission were underdeveloped. Reviewer~1 judged that we had claimed more than we had shown and asked for a dedicated treatment of what the network actually predicts. Reviewer~2 asked what the model offers beyond an account of individual variability, and found little evidence of new structures, constraints, or testable predictions. We agree on both counts. We have removed the premature claim that the model reproduces neural data and replaced it with four simulated experiments that produce four novel predictions, each presented alongside the biological mechanism that generates it and the specific measurement that would test it.
+Both reviewers felt that the simulated neural results in the original submission were underdeveloped. Reviewer~1 judged that we had claimed more than we had shown and asked for a dedicated treatment of what the network actually predicts. Reviewer~2 asked what the model offers beyond an account of individual variability, and found limited evidence of new observations, structures, constraints, or testable predictions. We agree on both counts. We have removed the premature claim that the model reproduces neural data and replaced it with four simulated experiments that produce four novel predictions, each presented alongside the biological mechanism that generates it and the specific measurement that would test it.
 
 % PASTED from main.tex, Results: "Neural network predictions".
 \begin{ms}
@@ -609,7 +646,7 @@ Three simulated experiments use the SNN to connect a neural measurement to a beh
 
 \subsubsection*{C4.3 A causal perturbation during the inter-trial interval}
 
-Reviewer~1 asked whether the two candidate neural mechanisms for evidence integration (persistent activity and synaptic plasticity) make different predictions about behavior across the inter-trial interval. We addressed this with a simulated perturbation: noise injected into the \textit{value} population during the ITI, mimicking a distractor task or non-invasive brain stimulation delivered during a working-memory delay. The recurrent model's error and response variability both grow with perturbation strength while the synaptic model is unaffected, so only the persistent-activity mechanism is vulnerable to a transient disruption of ongoing activity. The experiment, its statistics, and Fig.~\ref{fig:synaptic_main} are given under C2.
+Reviewer~1 asked whether the two candidate neural mechanisms for evidence integration (persistent activity and synaptic plasticity) make different predictions about behavior across the inter-trial interval. We addressed this by injecting noise into the \textit{value} population during the ITI, a stand-in for a distractor task or brain stimulation during a working-memory delay. The recurrent model's error and response variability both grow with perturbation strength while the synaptic model is unaffected, so only the persistent-activity mechanism is vulnerable to a transient disruption of ongoing activity. The experiment, its statistics, and Fig.~\ref{fig:synaptic_main} are given under C2.
 
 \section*{Reviewer 1}
 
@@ -627,9 +664,9 @@ We also agree that the ADM was underweighted in the original submission, and hav
 \]
 with $\eta$ fixed at 0.01, together with the weighted average over stored observations that forms the ADM's decision variable. We omit only the diffusion process, which our continuously reported estimates do not require, and we name the model for the weighting scheme it implements rather than for the diffusion model it was embedded in \citep{pooley2011understanding, galdo2022quest}. We found that PR is the strongest of the three baselines: it matches DPE on Binary Integration (0.4\% lower, $p$=0.40) and beats it on Continuous Integration (2.4\% lower, $p$=0.004). On the other two tasks DPE beats PR by 30.0\% and 9.4\%, and PR is the best-fitting model for no participant at all (Tables~\ref{tab:effect_sizes} and~\ref{tab:best_fit}, shown under C1).
 
-The passage the reviewer quotes, however, makes a claim about mechanism rather than fit, and there the ADM is on weaker ground. \citet{yoo2025people} note that the ADM can be rewritten as a running update of the current estimate, but specify that this holds ``when the weight on each IE is fixed and does not change over time'' --- that is, precisely when it is not producing the temporal weighting that gives it its primacy and recency behavior. Once the weights change as evidence accumulates, the estimate must be recomputed from the full observation history, which is the memory cost that disqualifies it on neural-plausibility grounds (C3).
+The passage the reviewer quotes, however, makes a claim about mechanism rather than fit, and there the ADM is on weaker ground. \citet{yoo2025people} note that the ADM can be rewritten as a running update of the current estimate, but specify that this holds ``when the weight on each IE is fixed and does not change over time'': precisely when it is not producing the temporal weighting that gives it its primacy and recency behavior. Once the weights change as evidence accumulates, the estimate must be recomputed from the full observation history, which is the memory cost that disqualifies it on neural-plausibility grounds (C3).
 
-On whether the network advances on existing neural implementations, the Discussion now makes that case directly. Most existing neural models of this computation use Kalman-filter-style Bayesian updating and have been validated only on synthetic tracking or regression tasks; to our knowledge ours is the first biologically plausible, prediction-error-based implementation that reproduces human behavior, including individual differences. Four further features distinguish it from the recurrent networks typically fit to behavioral data --- an anatomically interpretable architecture, leaky integrate-and-fire units, a compositional structure, and representational noise that is inherent rather than fitted --- and it yields four falsifiable predictions that follow from the circuit rather than from the DPE equation itself (C2, C3).
+On whether the network advances on existing neural implementations, the Discussion now makes that case directly. Most existing neural models of this computation use Kalman-filter-style Bayesian updating and have been validated only on synthetic tracking or regression tasks; to our knowledge ours is the first biologically plausible, prediction-error-based implementation that reproduces human behavior, including individual differences. Four further features distinguish it from the recurrent networks typically fit to behavioral data: an anatomically interpretable architecture, leaky integrate-and-fire units, a compositional structure, and representational noise that is inherent rather than fitted. It also yields four falsifiable predictions that follow from the circuit rather than from the DPE equation itself (C2, C3).
 
 \rc{1.2 ``Certain assumptions about the prior''}{What are the ``certain assumptions about the prior'' for the Bayesian case? (line 334)}
 
@@ -650,7 +687,7 @@ On the Proportion Inference task, every model's raw estimate $V_n$ was additiona
 a Laplace-smoothing correction equivalent to the optimal Bayesian estimate of a probability under a uniform prior (adding one pseudo-observation of each outcome before dividing), reflecting this task's distinct estimand (see Cognitive Tasks).
 \end{ms}
 
-The transform applies to this task alone because it is the only one that asks participants to infer a property of an unknown distribution --- the proportion of red rings in the box --- rather than to summarize the observations presented so far, which is what the other three ask.
+The transform applies to this task alone because it is the only one that asks participants to infer a property of an unknown distribution (the proportion of red rings in the box) rather than to summarize the observations presented so far, which is what the other three ask.
 
 \rc{1.3 Figure 2, the inset, and the ``context'' population}{\ldots{}move the ``inset'' to a separate panel\ldots{} ``b'' and ``f'' and ``transform'' were not defined\ldots{} It would be helpful if the authors could say more about the purpose of the ``context'' population. Is its purpose simply to provide a baseline against which we can represent both positive and negative prediction errors? The label ``context'' is potentially confusing because it implies that it represents something about the choice environment.}
 
@@ -705,15 +742,15 @@ This comment prompted what is now one of the central results of the paper, and w
 \vspace{-0.4em}
 {\scriptsize\color{mscap}\textbf{Figure~\ref{fig:synaptic_main}.} \textbf{A biologically distinct synaptic-plasticity mechanism also fits behavior but predicts different responses to perturbation.} (\textbf{A}) An alternative SNN implements DPE using synaptic plasticity (rather than working memory, WM) via a dopamine-like error-driven learning rule that stores the value estimate in the weights of plastic synapses. (\textbf{B}) On the Continuous Integration task, this synaptic model captures individual human behavior nearly as well as the WM model. (\textbf{C}) Both models' decoding accuracy drops when a simulated perturbation is applied during the intertrial interval (e.g. a distractor task or transcranial stimulation), but only the WM model's disruption persists once the interval ends. (\textbf{D}) Across a range of perturbation strengths, the WM model's error (RMSE vs.\ running mean) and response variability ($\sigma$) both grow with the magnitude of disruption, while the synaptic model is largely unaffected, confirming that only the recurrent, persistent-activity-based mechanism is vulnerable to this kind of transient disruption. This asymmetry reflects each mechanism's dependence on ongoing activity: the WM model needs continuous recurrent feedback to hold its estimate, which is disrupted directly by the perturbation; whereas the synaptic model only changes its stored value in response to a sustained, non-zero-mean error signal, which unstructured noise does not produce.\par}
 
- 
+
 \rc{1.5 Figure 5 legends and model misfits}{\ldots{}move the legends so they don't block the data. Also\ldots{} the model fits in 5F miss some aspects of the data. Could the authors comment on these misfits?}
 
-All figures have been regenerated for this submission, and we have confirmed that no legend occludes data in any of them. The analysis the reviewer refers to, response change as a function of observation number in the value comparison task, is now Fig.~\ref{fig:lambda_main}C and~F, and is presented differently: in place of model fits to three example participants, we now show the population median trajectory with a bootstrap confidence interval, together with the distribution of per-participant discounting rates. We have also restructured the model evaluation throughout the manuscript (C1, C4), and now report where each model fails on each measure.
+All figures have been regenerated for this submission, and we have confirmed that no legend occludes data in any of them. The analysis the reviewer refers to, response change as a function of observation number in the value comparison task, is now Fig.~\ref{fig:lambda_main}C and~F, and is presented differently: in place of model fits to three example participants, we now show the population median trajectory with a bootstrap confidence interval, together with the distribution of per-participant discounting rates.
 
 % ============================================================
 \rc{1.6 Transparency about goodness of fit}{\ldots{}I understand that we need not put too much weight on goodness-of-fit here, but the authors should still be more transparent about this. The reality is that the LIF model does significantly better than the Bayesian model in Study 1, significantly worse than the DeGroot and RL models in Study 2, and no different than the other models in Study 3.}
 
-The reviewer was right, and we have changed how model performance is reported throughout the manuscript: per-participant fits are now a central analysis in the main text, with effect sizes and significance for every pairwise comparison, and we state our losses plainly rather than summarizing them (C1). The Results now set out where DPE wins and loses against each baseline on each task, for what percentage of participants, and by what margin. We also agree with the reviewer's qualification that goodness-of-fit need not carry too much weight here, and have tried to earn that rather than assume it. Fit quality does not capture the dynamical signatures that distinguish these models' mechanisms: the SNN is the only model that reproduces the growth and autocorrelation of human response variability, despite fitting worse than DPE on every task (C4). We therefore compare models on neural plausibility as well as on fit (C3).
+The reviewer was right, and we have reorganized how fit is reported: per-participant fits are now a central analysis in the main text, with effect sizes and significance for every pairwise comparison, and we state our losses plainly rather than summarizing them (C1). The two tables below give that account in full. We also agree with the reviewer's qualification that goodness-of-fit need not carry too much weight here, and have tried to earn that rather than assume it. Fit quality does not capture the dynamical signatures that distinguish these models' mechanisms: the SNN is the only model that reproduces the growth and autocorrelation of human response variability, despite fitting worse than DPE on every task (C4). We therefore compare models on neural plausibility as well as on fit (C3).
 
 \vspace{0.6em}
 \noindent\begin{minipage}{\textwidth}\color{mscap}\scriptsize
@@ -769,44 +806,80 @@ The simulated experiments behind these predictions, with their statistics and fi
 
 We did not add a section specific to predictions about the Value Integration task, because predictions 1 and 3 rely on sequences with outliers and/or repetition, which that task does not offer. We would be glad to add a paragraph making this mapping explicit if the reviewer would find it useful.
 
-Finally, the fMRI measurements the reviewer asks us to revisit came from the social-learning task, which is no longer part of the paper. The revised paper emphasizes two behavioral signatures of the integration process: the magnitude of response change between consecutive observations ($\Delta R$), and the variability of responses to an exactly repeated sequence ($\sigma$). Neither is defined for the social-learning task, which collected a binary choice rather than a continuous estimate, and involved non-repeatable social interaction. The task also sat awkwardly with the rest of the model suite: because evidence arrived in discrete social-exchange stages rather than as a stream of comparable observations, fitting it required an ad-hoc component with a separate free weight for each stage, which has no counterpart in the other three tasks and no principled analogue in DPE's single discounting exponent. Unfortunately, removing the task also removed the associated fMRI comparison \citep{jiang2023neurocomputational}. We believe the replacement is an improvement: rather than a post-hoc comparison to one published result, the manuscript now makes four quantitative neural-behavioral predictions (C2), specifies the measurements needed to validate them, and states the prospective nature of these predictions plainly in the Limitations section. We would rather make falsifiable claims at the level our model actually operates at --- spiking activity in identified populations, which is what the network produces --- than draw a high-level correspondence between the model and BOLD measurements collected under a task outside our core paradigm.
+Finally, the fMRI measurements the reviewer asks us to revisit came from the social-learning task, which is no longer part of the paper. The revised paper emphasizes two behavioral signatures of the integration process: the magnitude of response change between consecutive observations ($\Delta R$), and the variability of responses to an exactly repeated sequence ($\sigma$). Neither is defined for the social-learning task, which collected a binary choice rather than a continuous estimate, and involved non-repeatable social interaction. The task also sat awkwardly with the rest of the model suite: because evidence arrived in discrete social-exchange stages rather than as a stream of comparable observations, fitting it required an ad-hoc component with a separate free weight for each stage, which has no counterpart in the other three tasks and no principled analogue in DPE's single discounting exponent. Unfortunately, removing the task also removed the associated fMRI comparison \citep{jiang2023neurocomputational}. We believe the replacement is an improvement: rather than a post-hoc comparison to one published result, the manuscript now makes four quantitative neural-behavioral predictions (C2), specifies the measurements needed to validate them, and states the prospective nature of these predictions plainly in the Limitations section. We would rather make falsifiable claims at the level our model actually operates at, namely the spiking activity the network produces, than draw a high-level correspondence between the model and BOLD measurements collected under a task outside our core paradigm.
 
 % ============================================================
 \section*{Reviewer 2}
 
-{\small\color{revred}``I appreciate the authors' ambition to develop a unified framework that captures seemingly disparate choice strategies within a common computational account, and the efforts to bridge behavioral heterogeneity with specific biologically properties in a SNN.''}
+{\small\color{revred}``They demonstrate that individual differences can be linked to specific properties in the SNN, including neuron population sizes and synaptic weight distributions.\ldots{} I appreciate the authors' ambition to develop a unified framework that captures seemingly disparate choice strategies within a common computational account, and the efforts to bridge behavioral heterogeneity with specific biological properties in a SNN.''}
 
-We thank the reviewer, and have worked to strengthen exactly this bridge in revision.
+We thank the reviewer, and have worked to strengthen exactly this bridge. Four simulated experiments now link a specific neural measurement to a specific behavioral one, three of them connecting individual differences in learning rate, discounting, and response precision to properties of the network (C2). The link between population size and response variability that the reviewer notes is among them, and is now quantified across network sizes rather than illustrated with example participants. The task suite has also changed: it spans four tasks, two of which we designed and collected for this study, and the social-learning task has been removed (C4).
 
-\rc{2.1 Relationship to Experience-Weighted Attraction}{\ldots{}the idea of nesting strategies by weighted updates is not new\ldots{} The proposed formulation appears closely related to the Experience-Weighted Attraction model by Colin Camerer and colleagues\ldots{} The EWA model has also been widely applied and empirically tested across behavioral and neuroscience contexts. In this light, the current model seems to constitute a simplified variant of an already well-established approach.}
-
-We take this point seriously, and it prompted a substantial revision of the relevant Discussion section. We do not dispute that EWA is a more general and more flexible framework for weighted updating, nor that dynamic weighting of past evidence has a long history; the manuscript no longer claims novelty on that basis, and situates DPE within that family instead (C3). We instead make the narrower claims that DPE captures human behavior and individual differences across four heterogeneous tasks and can be realized in a biologically plausible spiking circuit, unlike EWA and the other alternatives we discuss (C3).
-
-Regarding the applicability of EWA to evidence integration, EWA was developed for repeated strategic interaction, where a player faces other agents over a defined strategy space and can weigh the foregone payoff of strategies not chosen. That setting is what motivates its machinery, including the per-strategy bookkeeping described in C3. Our tasks include neither choices nor foregone payoffs: participants report a continuous estimate of a quantity, with no alternatives to compare and nothing counterfactual to evaluate. So far as we are aware, EWA has not been applied to non-social sequential estimation of the sort studied here, nor tested outside strategic games. Applying it here would require substantial reformulation (e.g., defining a strategy set and a payoff function where our tasks have neither) and it is not clear that the flexibility and empirical coverage the reviewer describes would survive that reformulation, since the machinery responsible for them has no counterpart in a task with a single continuous response. Such an exploration is beyond the scope of this study. Nonetheless, we have added citations to the EWA literature, including the self-tuning variant \citep{camerer1999experience, ho2007selftuning}.
-
-% ============================================================
-\rc{2.2 New insights, observations, structures, constraints, and predictions}{\ldots{}it remains unclear whether the proposed model yields genuinely new insights into the mechanisms of information aggregation\ldots{} Beyond demonstrating that the model can account for individual variability, it provides limited evidence of new observations, structures, constraints, or testable predictions.}
+\rc{2.1 New insights, observations, structures, constraints, and predictions}{\ldots{}it remains unclear whether the proposed model yields genuinely new insights into the mechanisms of information aggregation\ldots{} Beyond demonstrating that the model can account for individual variability, it provides limited evidence of new observations, structures, constraints, or testable predictions.}
 
 This comment drove the largest additions to the manuscript, and we answer it in the reviewer's own terms.
 
 \textbf{New observations (C4).} These include the within-trial decay of response change, reliable at the level of individual participants rather than only in the aggregate; the growth and autocorrelation of response variability under exact sequence repetition; and the cross-task stability of both discounting rate and response precision.
 
+\textbf{New structures (C2).} We implement DPE in two biologically distinct circuits, one storing the running estimate in persistent recurrent activity, the other in plastic synaptic weights updated by an error-driven learning rule. They fit human behavior nearly as well as one another, but are causally dissociable by perturbation during the inter-trial interval.
+
 \textbf{New constraints.} First, the SNN's representational precision is limited by the finite, heterogeneous population of spiking neurons that encodes each quantity. One consequence of this constraint is that the SNN reproduces both variability signatures (Fig.~\ref{fig:sigma_main}D--I) without fitting dedicated noise parameters, whereas every response-noise-augmented mathematical model we tested fails to reproduce them. This implies that response-stage noise is insufficient, and that the noise must reside in a persistent, evolving state representation (C4). \citet{prat2024imprecise} reached a similar conclusion by comparing mathematical models with and without compounding state noise against behavioral data, but did not specify what mechanism produces that noise; our contribution is to ground state noise in a neural process and show that it generalizes across tasks. Second, DPE's power-law decay is a strong constraint on the form of dynamic PE weighting, and reflects constraints on how such functions are computed by the brain in real time (C3). The alternatives apply different constraints: PR must retain the full observation history and recompute every weight as each observation arrives; EWA requires per-strategy bookkeeping over a choice set; and exact Bayesian tracking requires an unbounded posterior. Third, our implementation is constrained in ways RNNs are not: leaky integrate-and-fire neurons, anatomically distinct populations, and emergent representational noise (C3).
 
-\textbf{New structures.} We implement DPE in two biologically distinct circuits --- one storing the running estimate in persistent recurrent activity, the other in plastic synaptic weights updated by an error-driven learning rule. They fit human behavior comparably but are causally dissociable by perturbation during the inter-trial interval (C2, prediction~4).
+\textbf{New testable predictions.} We report four, each with the mechanism that generates it and a measurement that would test it (C2). The manuscript also sets out what makes them testable:
 
-\textbf{New testable predictions.} We list four new predictions, alongside the mechanisms that generate them and proposed empirical measurements to validate them (C2).
+% PASTED from main.tex, Discussion: "Novelty and predictions of the neural
+% network", paragraph 3. Also pasted in 1.7; R2 never reads R1, and C2 carries
+% only this paragraph's closing sentence as a bracketed note, so this is the
+% one place a pointer could not substitute for R2.
+\begin{ms}
+\textbf{Discussion: \textit{Novelty and predictions of the neural network}}
+
+We leveraged our SNN to generate four testable predictions relating neural activities to observable behavioral measures, then explained how each prediction arises from a specific biological mechanism. Importantly, all of these measures are either directly observable (population spiking activity recorded with high-temporal-resolution methods, response change and variability, etc.) or recoverable using well-established decoding techniques from the neural literature (population-vector decoding \citep{georgopoulos1986neuronal, wu2006bayesian}). Note that all four effects emerge from our particular circuit implementation, and are not a direct mathematical consequence of the DPE equation itself, making them network-specific, falsifiable predictions.
+\end{ms}
+
+\rc{2.2 Reduced-form measures of behavior}{The use of a reduced-form measure for behavior in relatively complex tasks results in oversimplifying the findings.}
+
+This describes a real problem with how the original submission was organized: we led with the summary measures each source study had used, and left our own trial-by-trial fits in the supplement. In the revised manuscript, per-participant, observation-by-observation fits are a central analysis that appears immediately in the Results, with effect sizes and significance for every comparison; the behavioral signatures we report alongside them are likewise computed per participant rather than only in the aggregate (C1, C4).
+
+We would add that those signatures are not reductions of the behavior but measures of the integration process itself, informative precisely because the fitting procedure does not target them. The Discussion makes this case:
+
+% PASTED from main.tex, Discussion: "Individual differences in discounting and
+% precision", paragraph 1. Answers "reduced-form" on three levels: the
+% signatures are Yoo's and Prat-Carrabin's own established measures, each had
+% been examined in only ONE task, and we generalised both across four.
+\begin{ms}
+\textbf{Discussion: \textit{Individual differences in discounting and precision}}
+
+Studying evidence integration through overall fit quality alone risks conflating models that reach similar predictions through different underlying processes; examining secondary behavioral signatures that emerge from a model's update mechanism provides a complementary test of whether it captures the underlying cognitive process, not merely its output \citep{palminteri2017falsification, wilson2019ten}. Such signatures have already proven useful in evidence integration tasks similar to ours: Yoo et al. \citep{yoo2025people} showed that response updates decline in magnitude as more evidence accumulates within a trial, revealing whether an individual shows a primacy or recency bias; and Prat-Carrabin and Woodford \citep{prat2024imprecise} showed that responses to an exactly repeated sequence vary systematically across repetitions, arguing that this reflects an internal, compounding state representation rather than noise added only at the point of response. However, each signature has only been examined within a single task, leaving open whether it reflects a general property of integration or an artifact of that task's design. We addressed this directly by measuring both signatures -- the discounting rate $\lambda$ and the response variability $\sigma$ -- across four tasks that deliberately varied along several relevant dimensions, including input type, sequence length, and estimated quantity.
+\end{ms}
+
+The concern generalizes beyond our paradigm: a model that minimizes error can still misrepresent qualitative features of the process that generated the data, including perseveration \citep{katahira2018statistical}, confirmation bias \citep{palminteri2017confirmation, palminteri2022computational}, and sequential choice-history effects \citep{yu2008sequential, zhang2014sequential}. Reporting $\Delta R$ and $\sigma$ alongside RMSE is how we identify where a model succeeds for the wrong reasons.
+
+\rc{2.3 Relationship to Experience-Weighted Attraction}{\ldots{}the idea of nesting strategies by weighted updates is not new, and has been extensively explored in prior work. The proposed formulation appears closely related to the Experience-Weighted Attraction model by Colin Camerer and colleagues, which provides a general framework that nests Bayesian, RL, DeGroot, and various recency/primacy-weighted rules, in social and non-social settings. The EWA model has also been widely applied and empirically tested across behavioral and neuroscience contexts. In this light, the current model seems to constitute a simplified variant of an already well-established approach.}
+
+We take this point seriously, and it prompted a substantial revision of the relevant Discussion section. We do not dispute that EWA is a more general and more flexible framework for weighted updating, nor that dynamic weighting of past evidence has a long history; the manuscript no longer claims novelty on that basis, and situates DPE within that family instead (C3). We instead make the narrower claims that DPE captures human behavior and individual differences across four heterogeneous tasks and can be realized in a biologically plausible spiking circuit, unlike EWA and the other alternatives we discuss (C3).
+
+Regarding the applicability of EWA to evidence integration, the reviewer is right that EWA has been applied in non-social as well as social settings, but the constraint we have in mind is not social versus non-social. EWA maintains an attraction and a foregone payoff for every strategy, so it needs a discrete set of alternatives to work at all. That requirement, together with the parallel computation across alternatives needed to select a response, is what makes EWA costly to implement in a circuit (C3). Our tasks present no such set: participants report a continuous estimate, with no alternatives to compare and nothing counterfactual to evaluate. So far as we are aware, EWA has not been applied to continuous sequential estimation of this kind, and doing so would require defining a strategy set and a payoff function where our tasks have neither. It is not clear that the flexibility and empirical coverage the reviewer describes would survive that reformulation, since the machinery responsible for them would have nothing to operate on. Nonetheless, we have added citations to the EWA literature, including the self-tuning variant \citep{camerer1999experience, ho2007selftuning}.
 
 % ============================================================
-\rc{2.3 Reduced-form measures of behavior}{The use of a reduced-form measure for behavior in relatively complex tasks results in oversimplifying the findings.}
 
-This describes a real problem with how the original submission was organized: the trial-by-trial model comparison was present, but it sat in supplementary material while the main text led with summary measures drawn from the source studies. In the revised manuscript, per-participant, observation-by-observation fits are a central analysis that appears immediately in the Results, with effect sizes and significance for every comparison; the behavioral signatures we report alongside them are likewise computed per participant rather than only in the aggregate (C1, C4). We would add, though, that those aggregate measures are doing different work from summary statistics. Response change and response variability under repetition are dynamical signatures of the integration process, and they are informative precisely because the fitting procedure does not target them. A model fit to minimize error can match a participant's responses closely while failing to reproduce qualitative features of the underlying process --- perseveration \citep{katahira2018statistical}, confirmation bias \citep{palminteri2017confirmation, palminteri2022computational}, or sequential choice-history effects \citep{yu2008sequential, zhang2014sequential}. We make this argument explicitly in the Results and again in the Discussion, following prior work urging exactly this kind of complementary test \citep{palminteri2017falsification, wilson2019ten}.
+\rc{2.4 ``Neural correlates'' terminology}{\ldots{}the paper frequently refers to ``neural correlates'' when discussing SNN activity, which could be misleading, particularly for a broad readership. It may be more precise to refer to them as ``simulated neural correlates'' or ``correlates of the SNN''. There is a significant inferential leap between a SNN model and the actual biological implementation in humans.}
 
-\rc{2.4 ``Neural correlates'' terminology}{\ldots{}the paper frequently refers to ``neural correlates'' when discussing SNN activity, which could be misleading\ldots{} There is a significant inferential leap between a SNN model and the actual biological implementation in humans.}
+We agree entirely. The reviewer suggests a more precise label; we have gone further and removed the framing altogether. The phrase ``neural correlates'' no longer appears anywhere in the manuscript, and we no longer claim that the model reproduces neural data. Every statement relating network activity to the brain is now framed as a prediction, with the measurement that would test it stated explicitly (C2). The Discussion now closes by stating that gap plainly:
 
-We agree entirely, and have removed this framing. The phrase no longer appears anywhere in the manuscript, and we no longer claim that the model reproduces neural data. Every statement relating network activity to the brain is now framed as a prediction, with the measurement that would test it stated explicitly (C2). The Discussion now closes with a Limitations section stating plainly that no spiking, imaging, or perturbation recordings exist for these tasks, so each of our neural predictions remains prospective.
+% PASTED from main.tex, Discussion: "Limitations", final sentence. An EXCERPT
+% that begins late, which the rules permit; nothing is skipped inside it.
+% Limitations runs two paragraphs, the first on the Delta-R/lambda analyses and
+% the second mostly on task-suite scope -- pasting either whole would bury R2's
+% concern under material that does not address it.
+\begin{ms}
+\textbf{Discussion: \textit{Limitations} (excerpt)}
+
+Finally, none of the neural predictions above have yet been tested against real neural data: no spiking, imaging, or perturbation recordings exist for these tasks to confirm or falsify them, so each of our predictions remains prospective.
+\end{ms}
 
 % ============================================================
+
 \section*{Conclusion}
 We thank the editor and both reviewers for the time they have given this work, and for the opportunity to resubmit. The two new experiments and the four neural predictions described above exist because of these reviews. We would be glad to make further revisions.
 % Work from v1's text, cutting to concession + pointer + conclusion, except
