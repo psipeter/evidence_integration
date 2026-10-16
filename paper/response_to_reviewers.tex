@@ -427,11 +427,11 @@
 
 \vspace{0.8em}
 
-We thank both reviewers for their careful and constructive evaluations of our original submission. Their comments identified three gaps in that manuscript: (C1) our reporting of model fit quality was neither sufficiently transparent nor sufficiently central; (C2) our neural analyses stopped short of the quantitative, testable claims a network model should support; and (C3) the case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped. Additionally, the editor requested that a revised manuscript include (C4) additional experiments. In response, we (1) substantially rewrote the manuscript to emphasize fit quality and our advances over existing models; (2) added three simulated neural experiments that link network activity to individual differences; (3) added a fourth that perturbs the network during the inter-trial interval to dissociate two candidate neural mechanisms of evidence integration; and (4) designed and collected two new behavioral experiments, then analyzed additional behavioral signatures of individual variability. We first summarize how these changes address the reviewers' core concerns, then address each comment individually in greater detail, reproducing the relevant text and figures from the manuscript directly.
+We thank both reviewers for their careful and constructive evaluations of our original submission. Their comments identified three main gaps in the manuscript: (C1) the reporting of model fit quality was neither sufficiently transparent nor sufficiently central; (C2) the neural analyses stopped short of the quantitative, testable claims a network model should support; and (C3) the case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped. Additionally, the editor requested that a revised manuscript include (C4) additional experiments. In response to these criticisms, we have: (1) substantially rewritten the manuscript to emphasize fit quality and our advances over existing models; (2) added three simulated neural experiments that link network activity to individual differences; (3) added a fourth experiment that perturbs the network during the inter-trial interval to dissociate two candidate neural mechanisms of evidence integration; and (4) designed and collected two new behavioral experiments, then analyzed additional behavioral signatures of individual variability. Below, we summarize how these changes address the reviewers' core concerns, then address each comment individually in greater detail, reproducing the relevant text and figures from the manuscript directly.
 
-\section*{General concerns}
+\section*{General criticisms and our responses}
 
-\subsection*{C1. Reporting of model fit quality was not transparent or central}
+\subsection*{Criticism 1: Reporting of model fit quality was not transparent or central}
 
 Both reviewers asked for a more transparent account of how well each model actually fits the data, and we agree that the original submission fell short. The trial-by-trial model comparison was present, but it sat in supplementary material while the main text led with summary measures drawn from the source studies. We have changed how model performance is reported throughout the manuscript. Per-participant, observation-by-observation fitting is now a central analysis that appears immediately in the Results, which set out in detail where DPE wins and loses against each baseline on each task, for what percentage of participants, and by what margin. We replicated the entire comparison under a second fit metric, negative log-likelihood, using each model's response-noise variant so that a likelihood is well defined, and the pattern of wins, ties, and losses is unchanged (Fig.~\ref{fig:model_performance_nll}). We do also argue that aggregate fit quality should not be the only criterion deciding between these models, since it does not capture the dynamical signatures that distinguish their mechanisms; we set that argument out under C3.
 
@@ -489,7 +489,7 @@ DPE achieved the best, or among the best, fit to human behavior on every task (F
 \end{minipage}
 
 
-\subsection*{C2. The neural network made no new, testable predictions}
+\subsection*{Criticism 2: The neural network made no new, testable predictions}
 
 Both reviewers felt that the simulated neural results in the original submission were underdeveloped. Reviewer~1 judged that we had claimed more than we had shown and asked for a dedicated treatment of what the network actually predicts. Reviewer~2 asked what the model offers beyond an account of individual variability, and found limited evidence of new observations, structures, constraints, or testable predictions. We agree on both counts. We have removed the premature claim that the model reproduces neural data and replaced it with four simulated experiments that produce four novel predictions, each presented alongside the biological mechanism that generates it and the specific measurement that would test it.
 
@@ -530,7 +530,7 @@ The synaptic model also captured individual human behavior on the Continuous Int
 
 
 
-\subsection*{C3. The case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped}
+\subsection*{Criticism 3: The case for our neural network as an advance over existing mathematical and recurrent neural network models was underdeveloped}
 
 Both reviewers questioned whether DPE represents a genuine advance. Reviewer~1 noted that neither reinforcement learning nor the idea of learning rates that decline with experience is new, and that it was unclear what our model adds to those existing accounts. Reviewer~2 raised the same concern from a different direction, observing that DPE is one instance of an established class of models that use weighted updating. We accept both premises. Dynamic weighting of past evidence has a long history, and we no longer claim novelty on that basis. Our claim is narrower: among the models in this family, DPE is simple enough to be computed by a brain in real time, and to our knowledge it is the only one that has actually been realized in a spiking circuit and tested against human behavior.
 % It is also generative rather than descriptive --- primacy and recency
@@ -578,7 +578,7 @@ Spiking noise in our network is an emergent, unavoidable consequence of represen
 \end{ms}
 
 
-\subsection*{C4. Request for additional experiments and new findings}
+\subsection*{Criticism 4: Request for additional experiments and new findings}
 
 The editor invited a resubmission containing additional experiments. We added six. Two are new behavioral experiments, collected for this study, which together supply a within-subject design, longer trials, and deliberately repeated sequences, extending the cross-task scope Reviewer~1 praised and supplying the kind of new observations Reviewer~2 found lacking. Three are simulated neural experiments linking the network's spiking activity to individual differences in learning rate, discounting, and response precision, which answer Reviewer~2's request for testable predictions and Reviewer~1's for a dedicated treatment of what the network predicts. The sixth is a simulated perturbation experiment, prompted by Reviewer~1's question about the differences between the recurrent and synaptic implementations of DPE during the inter-trial interval. We also removed one task from the original submission, the social-learning task, for which neither of the two behavioral signatures emphasized in the revised paper is defined.
 
@@ -648,7 +648,7 @@ Three simulated experiments use the SNN to connect a neural measurement to a beh
 
 Reviewer~1 asked whether the two candidate neural mechanisms for evidence integration (persistent activity and synaptic plasticity) make different predictions about behavior across the inter-trial interval. We addressed this by injecting noise into the \textit{value} population during the ITI, a stand-in for a distractor task or brain stimulation during a working-memory delay. The recurrent model's error and response variability both grow with perturbation strength while the synaptic model is unaffected, so only the persistent-activity mechanism is vulnerable to a transient disruption of ongoing activity. The experiment, its statistics, and Fig.~\ref{fig:synaptic_main} are given under C2.
 
-\section*{Reviewer 1}
+\section*{Point-by-Point Response to Reviewer \#1's Comments}
 
 {\small\color{revred}``I applaud the rigor of the modeling exercise\ldots{} they actually fit the models to the data. I also applaud the authors' ambitions of building a model that can tackle quite different tasks. That certainly demonstrates the power for this approach. This has the potential to be a useful model for studying all sorts of learning tasks.''}
 
@@ -656,7 +656,7 @@ We thank the reviewer for these comments, and have tried to extend both qualitie
 
 \rc{1.1 Novelty, and whether the network advances the state of the art}{I do question the novelty of the approach. Reinforcement learning is obviously not new and neither is the notion of learning rates that decrease over time\ldots{} the Yoo et al.\ (2025) article does describe how their ADM ``can represent a process in which subjects maintain their current estimate of AE and update it with each new IE.'' The real contribution here is the neural network model, but again, others have used neural network models to implement RL. It's unclear to me whether the authors' model represents a substantial advancement over those existing implementations. I would like to see the authors make a stronger case for how their model goes beyond the current state of the art for neural network models of RL.}
 
-We are grateful that the reviewer identifies the neural network as the real contribution, and we agree with the premise of the criticism: neither error-driven updating nor a learning rate that declines with experience is new, and we no longer claim novelty on that basis. That narrows the question to the one the reviewer poses: whether the network advances on existing mathematical and neural implementations.
+We are grateful that the reviewer identifies the neural network as a real contribution, and we agree with the premise of the criticism: neither error-driven updating nor a learning rate that declines with experience is new, and we no longer claim novelty on that basis. That narrows the question to the one the reviewer poses: whether the network advances on existing mathematical and neural implementations.
 
 We also agree that the ADM was underweighted in the original submission, and have addressed that by fitting its temporal weighting scheme as a baseline model on all four tasks (renamed PrimacyRecency, PR). Our PR model implements \citet{yoo2025people}'s Eq.~1 exactly,
 \[
@@ -842,7 +842,7 @@ Finally, none of the neural predictions above have yet been tested against real 
 We would rather make falsifiable claims at the level our model actually operates at, namely the spiking activity the network produces, than draw a high-level correspondence between the model and BOLD measurements collected under a task outside our core paradigm.
 
 % ============================================================
-\section*{Reviewer 2}
+\section*{Point-by-Point Response to Reviewer \#2's Comments}
 
 {\small\color{revred}``They demonstrate that individual differences can be linked to specific properties in the SNN, including neuron population sizes and synaptic weight distributions.\ldots{} I appreciate the authors' ambition to develop a unified framework that captures seemingly disparate choice strategies within a common computational account, and the efforts to bridge behavioral heterogeneity with specific biological properties in a SNN.''}
 
