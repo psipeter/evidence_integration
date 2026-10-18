@@ -1,0 +1,36 @@
+% Figure, table and equation numbers imported from main.tex.
+%
+% WHY THIS FILE EXISTS. The letter used to pull these with
+%   \usepackage{xr} + \externaldocument{main}
+% which reads main.aux. That works locally, where main.aux sits beside
+% main.tex after a compile, but NOT on Overleaf: paper/*.aux is gitignored
+% so main.aux is never pushed, and the main.aux Overleaf generates when it
+% compiles main.tex goes to the compile output, not to the source tree the
+% other document reads. Every \ref rendered as ?? there, however many times
+% main.tex was recompiled.
+%
+% REGENERATE whenever a figure, table or equation is added, removed or
+% reordered in main.tex. Compile main.tex locally, then from paper/:
+%
+%   grep -hE '\\newlabel\{(fig|tab|eq):' main.aux | sort > /tmp/labels
+%
+% and reconcile with the list below. The numbers are {number}{page}; only
+% the first is used here. If they go stale, the letter prints WRONG numbers
+% rather than ??, so this file is the one place that cannot silently rot --
+% check it before every submission build.
+%
+% Last synced to main.aux: 2026-10-18
+
+\newlabel{eq:dpe_alpha}{{2}{4}}
+\newlabel{eq:dpe_update}{{1}{3}}
+\newlabel{fig:lambda_main}{{4}{34}}
+\newlabel{fig:lambda_sigma_reliability}{{S2}{S7}}
+\newlabel{fig:model_performance}{{3}{33}}
+\newlabel{fig:model_performance_nll}{{S1}{S6}}
+\newlabel{fig:models_overview}{{2}{32}}
+\newlabel{fig:neural_main}{{6}{36}}
+\newlabel{fig:sigma_main}{{5}{35}}
+\newlabel{fig:synaptic_main}{{7}{37}}
+\newlabel{fig:tasks_overview}{{1}{31}}
+\newlabel{tab:best_fit}{{S2}{S7}}
+\newlabel{tab:effect_sizes}{{S1}{S6}}

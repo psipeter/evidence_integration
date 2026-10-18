@@ -401,8 +401,12 @@
 % EXCEPTION: figure numbers inside a QUOTED reviewer comment refer to the
 % ORIGINAL submission and must stay literal (1.3's "Figure 2", 1.6's "Figure 5"
 % and "5F"). Those are what the reviewer wrote; they are not our labels.
-\usepackage{xr}
-\externaldocument{main}
+% Figure/table/equation numbers are imported from main_labels.tex, which
+% replaced xr + \externaldocument{main}: xr cannot work on Overleaf, where
+% main.aux is never part of the source tree. See that file's own header.
+% \newlabel is preamble-only -- \begin{document} disables it after reading
+% the .aux -- so this \input must stay here, above \begin{document}.
+\input{main_labels}
 
 % NUMERIC citations, sorted and compressed: the pasted manuscript passages
 % carry up to five references in one parenthesis, and author-year made them
