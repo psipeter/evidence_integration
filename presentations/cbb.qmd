@@ -68,23 +68,24 @@ bibliography: "references.bib"
 ## Cognitive Models
 
 ::: {.image-card}
-![](figures/cognitive_models_1.svg){#theories-img width="100%"}
+![](figures/cognitive_models_0.svg){#theories-img width="100%"}
 :::
-
-[]{.fragment fragment-index="1" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_2.svg" data-swap-prev="figures/cognitive_models_1.svg"}
-[]{.fragment fragment-index="2" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_3.svg" data-swap-prev="figures/cognitive_models_2.svg"}
-[]{.fragment fragment-index="3" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_4.svg" data-swap-prev="figures/cognitive_models_3.svg"}
-[]{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_5.svg" data-swap-prev="figures/cognitive_models_4.svg"}
+[]{.fragment fragment-index="1" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_1.svg" data-swap-prev="figures/cognitive_models_0.svg"}
+[]{.fragment fragment-index="2" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_2.svg" data-swap-prev="figures/cognitive_models_1.svg"}
+[]{.fragment fragment-index="3" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_3.svg" data-swap-prev="figures/cognitive_models_2.svg"}
+[]{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_4.svg" data-swap-prev="figures/cognitive_models_3.svg"}
+[]{.fragment fragment-index="5" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_5.svg" data-swap-prev="figures/cognitive_models_4.svg"}
 
 
 ## DPE Theory and Network
 
 ::: {.image-card}
-![](figures/models_overview_presentation_1.svg){#models-overview-img width="100%"}
+![](figures/models_overview_presentation_0.svg){#models-overview-img width="100%"}
 :::
 
-[]{.fragment fragment-index="1" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_2.svg" data-swap-prev="figures/models_overview_presentation_1.svg"}
-[]{.fragment fragment-index="2" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_3.svg" data-swap-prev="figures/models_overview_presentation_2.svg"}
+[]{.fragment fragment-index="1" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_1.svg" data-swap-prev="figures/models_overview_presentation_0.svg"}
+[]{.fragment fragment-index="2" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_2.svg" data-swap-prev="figures/models_overview_presentation_1.svg"}
+[]{.fragment fragment-index="3" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_3.svg" data-swap-prev="figures/models_overview_presentation_2.svg"}
 
 ## Model Captures Behavior
 
@@ -134,16 +135,16 @@ bibliography: "references.bib"
 ![](figures/neural_main_alpha0.svg){width="100%"}
 :::
 
-## Neural and Behavioral Noise
-
-::: {.image-card}
-![](figures/neural_main_n_neurons.svg){width="100%"}
-:::
-
 ## Decline in Updating
 
 ::: {.image-card}
 ![](figures/neural_main_lambda.svg){width="100%"}
+:::
+
+## Neural and Behavioral Noise
+
+::: {.image-card}
+![](figures/neural_main_n_neurons.svg){width="100%"}
 :::
 
 ## Neural Mechanisms of WM
