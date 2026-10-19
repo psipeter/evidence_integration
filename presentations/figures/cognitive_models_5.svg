@@ -24,8 +24,8 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
      inkscape:zoom="0.69041106"
-     inkscape:cx="464.2162"
-     inkscape:cy="372.24201"
+     inkscape:cx="335.30749"
+     inkscape:cy="283.88885"
      inkscape:window-width="1920"
      inkscape:window-height="939"
      inkscape:window-x="0"
@@ -251,13 +251,24 @@
        xml:space="preserve"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#cc78bc;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
        x="118.49885"
-       y="55.52166"
+       y="50.759155"
        id="text1-3-6-4"><tspan
          sodipodi:role="line"
          style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#cc78bc;fill-opacity:1;stroke:none;stroke-width:0.626117"
          x="118.49885"
-         y="55.52166"
+         y="50.759155"
          id="tspan116439">Discounted Prediction Error</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#cc78bc;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="116.33849"
+       y="73.473183"
+       id="text1-3-6-4-4"><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#cc78bc;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="116.33849"
+         y="73.473183"
+         id="tspan116439-6">DPE</tspan></text>
     <path
        style="fill:none;stroke:#ff7f0e;stroke-width:3.52778;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
        d="m 10.295037,85.374275 h 22.20591"

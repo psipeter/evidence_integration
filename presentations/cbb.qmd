@@ -77,7 +77,7 @@ bibliography: "references.bib"
 []{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_5.svg" data-swap-prev="figures/cognitive_models_4.svg"}
 
 
-## Theory and Model
+## DPE Theory and Network
 
 ::: {.image-card}
 ![](figures/models_overview_presentation_1.svg){#models-overview-img width="100%"}
