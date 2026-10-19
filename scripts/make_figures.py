@@ -3090,6 +3090,109 @@ def _make_lambda_sigma_reliability_split() -> list[Path]:
     return [path1, path2]
 
 
+def _set_min_mid_max_ticks(ax, axis: str = "y", n_mid: int = 1) -> None:
+    """Reduce an axis's ticks (x or y, per `axis`) to its current
+    xlim/ylim's min/max plus n_mid evenly-spaced midpoint(s) -- the
+    project's standing "min/max/1-2 midpoints" convention for a
+    compressed/shared-scale panel (already used e.g. via neural_main's
+    hand-set [0, 25, 50]-style yticks). Reads the axis's ALREADY-SET
+    xlim/ylim (fixed or autoscaled, doesn't matter which -- the
+    panel-drawing call above this has already run) rather than the data's
+    own range directly.
+
+    Tick VALUES are rounded to a "nice" number of decimals derived from the
+    axis's own span (e.g. a ~1.5 span rounds to 1 decimal: 0.7887 -> 0.8; a
+    ~23 span rounds to whole numbers) -- raw evenly-spaced fractions of an
+    arbitrary xlim/ylim otherwise land on ugly values like 0.7887."""
+    lo, hi = ax.get_xlim() if axis == "x" else ax.get_ylim()
+    span = hi - lo
+    if span <= 0:
+        return
+    decimals = max(0, 1 - int(np.floor(np.log10(span))))
+    fracs = np.linspace(0, 1, n_mid + 2)
+    ticks = [round(lo + span * f, decimals) for f in fracs]
+    ax.set_xticks(ticks) if axis == "x" else ax.set_yticks(ticks)
+
+
+def _set_binary_continuous_crosstask_title(ax) -> None:
+    """Combined-figure-only override of the crosstask panel's own
+    "Colors vs Numbers" title (set by _plot_lambda_crosstask_panel/
+    _plot_sigma_crosstask_panel) -- renamed to "Binary vs Continuous" (the
+    task STRUCTURE each column represents, per instruction). Plain single
+    color (no per-word coloring -- reverted per instruction, to be hand-
+    colored manually like the paper figures' panel labels). Scoped to THIS
+    combined figure only, applied as a post-processing step AFTER
+    _draw_lambda_reliability_row/_draw_sigma_reliability_row have already
+    run -- the shared panel-drawing functions themselves are untouched, so
+    the split/paper-mode figures that call them keep "Colors vs Numbers".
+    Only applied to row 1 (lambda); row 2 (sigma) keeps its title cleared,
+    matching the existing "row 1 already names every column" convention
+    (_draw_sigma_reliability_row's own show_titles=False).
+
+    Fontsize matches col 1-2's own titles (rcParams["axes.titlesize"]) --
+    NOT the hardcoded 14pt _plot_lambda_crosstask_panel/
+    _plot_sigma_crosstask_panel use for their standalone "Colors vs
+    Numbers" title, which _draw_lambda_reliability_row/
+    _draw_sigma_reliability_row already override back down via
+    `axes_row[2].title.set_fontsize(...)` right after drawing -- passing
+    14pt again here would silently undo that and look smaller/mismatched
+    against col 1-2 once drawn over it.
+    """
+    ax.set_title("Binary vs Continuous", color="0.3",
+                 fontsize=plt.rcParams["axes.titlesize"])
+
+
+def _set_crosstask_axis_labels(ax, symbol: str) -> None:
+    """Combined-figure-only override of the crosstask panel's own
+    "{symbol} (colors)"/"{symbol} (numbers)" axis labels (set by
+    _plot_lambda_crosstask_panel/_plot_sigma_crosstask_panel) -- relabeled
+    to "(binary)"/"(continuous)" to match the renamed title above. Scoped
+    to THIS combined figure only, same reasoning as
+    _set_binary_continuous_crosstask_title."""
+    ax.set_xlabel(f"{symbol} (binary)")
+    ax.set_ylabel(f"{symbol} (continuous)")
+
+
+def _make_lambda_sigma_reliability_combined() -> Path:
+    """Presentation-mode-only companion to _make_lambda_sigma_reliability_split
+    above: the SAME 2-row, 3-column layout as paper mode's combined
+    make_lambda_sigma_reliability below, just sized for one reveal.js slide
+    at presentation width/style instead of paper's narrower column width --
+    for a deck (cbb.qmd) that wants this as ONE consolidated slide rather
+    than the split pair. Saved under its own stem ("lambda_sigma_consistency"),
+    distinct from both the split files above and paper mode's own
+    "lambda_sigma_reliability" (already a different directory via
+    MODE_CONFIG's figures_dir, but kept name-distinct here too to avoid
+    confusion browsing presentations/figures/ alongside the split pair).
+
+    Height (5.5in, down from an initial 6.5in -- too tall for one slide) is
+    a hand-picked value, not derived from FIGURE_SIZE by formula -- per
+    CLAUDE.md's "Figure modes" convention, retune by eye if it still
+    overflows or looks cramped on the actual slide. Y-ticks are thinned to
+    min/max/1-midpoint (_set_min_mid_max_ticks) on every panel, and row 2
+    (sigma)'s x-ticks get the same treatment -- row 1 (lambda)'s x-axis
+    keeps its default ticks since its fixed [0, 1.5] range (LAMBDA_XLIM)
+    never had the ugly-float problem row 2's autoscaled sigma range does.
+    Scoped to THIS figure only -- the shared _plot_*_panel helpers' own
+    tick behavior is untouched, so the split/paper-mode figures that reuse
+    them are unaffected by this compression.
+    """
+    lambda_pairs, sigma_pairs = _lambda_sigma_reliability_task_panels()
+    fig, axes = plt.subplots(2, 3, figsize=(FIGURE_SIZE[0], 5.5), constrained_layout=True)
+    _draw_lambda_reliability_row(list(axes[0]), lambda_pairs)
+    _draw_sigma_reliability_row(list(axes[1]), sigma_pairs, show_titles=False)
+    for ax in list(axes[0]) + list(axes[1]):
+        _set_min_mid_max_ticks(ax, axis="y")
+    for ax in axes[1]:
+        _set_min_mid_max_ticks(ax, axis="x")
+    _set_binary_continuous_crosstask_title(axes[0, 2])
+    _set_crosstask_axis_labels(axes[0, 2], "λ")
+    _set_crosstask_axis_labels(axes[1, 2], "σ")
+    out_path, _ = _save_fig(fig, "lambda_sigma_consistency")
+    plt.close(fig)
+    return out_path
+
+
 def make_lambda_sigma_reliability() -> Path | list[Path]:
     """2-row, 3-column supplementary figure combining pieces of
     make_lambda_reliability, make_sigma_reliability, and
@@ -3108,11 +3211,14 @@ def make_lambda_sigma_reliability() -> Path | list[Path]:
     dropped here, since neither has a crosstask partner for col 3 (see
     _lambda_sigma_reliability_task_panels's own docstring).
 
-    PRESENTATION MODE ONLY: split into two separate 1-row figures/slides
-    (see _make_lambda_sigma_reliability_split) instead of this one 2-row
-    composite -- one per row -- per instruction, matching
-    make_lambda_main/make_sigma_main's own split convention. Paper mode
-    keeps the combined layout below unchanged.
+    PRESENTATION MODE ONLY: returns THREE files -- the two split 1-row
+    figures/slides (see _make_lambda_sigma_reliability_split, still used by
+    presentation.qmd's own two separate consistency slides) PLUS one
+    combined 2-row slide-sized figure (see
+    _make_lambda_sigma_reliability_combined, used by cbb.qmd's single
+    consolidated consistency slide) -- one `--mode presentation` run
+    produces whichever of the three a given deck actually embeds. Paper
+    mode keeps the combined layout below unchanged.
 
     No shared/dedicated legend row -- unlike make_lambda_main/
     make_sigma_main, every panel here is human-only (a single regression
@@ -3122,7 +3228,7 @@ def make_lambda_sigma_reliability() -> Path | list[Path]:
     """
     _apply_mode_style()
     if _MODE == "presentation":
-        return _make_lambda_sigma_reliability_split()
+        return _make_lambda_sigma_reliability_split() + [_make_lambda_sigma_reliability_combined()]
 
     lambda_pairs, sigma_pairs = _lambda_sigma_reliability_task_panels()
     fig, axes = plt.subplots(2, 3, figsize=(FIGURE_SIZE[0], FIGURE_SIZE[1] * 1.2),
@@ -5526,16 +5632,22 @@ def make_n_neurons_decoder_free() -> Path:
 NEURAL_MAIN_COLUMN_TITLES = ["Model Dynamics", "Link to Behavior", "Predictions"]
 
 
+# Lowercase column headers for the presentation-mode split figures only
+# (per instruction) -- distinct from NEURAL_MAIN_COLUMN_TITLES, which stays
+# Title Case for paper mode's single combined 3x3 figure below.
+_NEURAL_MAIN_SPLIT_COLUMN_TITLES = ["model dynamics", "link to behavior", "predictions"]
+
+
 def _make_neural_main_split() -> list[Path]:
     """Presentation-mode-only: make_neural_main's 3 rows (alpha_0/outlier,
     lambda_/param_scan, n_neurons/n_neurons_snr) as THREE separate 1x3
     figures/slides instead of one 3x3 composite -- per instruction, one
-    row per slide. NEURAL_MAIN_COLUMN_TITLES ("Model Dynamics"/"Link to
-    Behavior"/"Predictions") are dropped -- each row now gets its own
-    slide with its own descriptive title, so repeating the column headers
-    on every row would be redundant. Paper mode is untouched (still the
-    single combined make_neural_main below) -- this split is
-    presentation-only.
+    row per slide. Each figure repeats the column headers
+    (_NEURAL_MAIN_SPLIT_COLUMN_TITLES: "model dynamics"/"link to
+    behavior"/"predictions") since, unlike the combined paper figure, no
+    other row is visible on the same slide to carry that context. Paper
+    mode is untouched (still the single combined make_neural_main below)
+    -- this split is presentation-only.
 
     Each figure reuses the exact same panel-drawing helpers as the
     combined layout, including the col-2/col-3 shared-y-axis tick fixups
@@ -5552,6 +5664,8 @@ def _make_neural_main_split() -> list[Path]:
         axes1[2].sharey(ax2_1)
         axes1[2].set_ylim(0, 50)
         axes1[2].set_yticks([0, 25, 50])
+    for ax, header in zip(axes1, _NEURAL_MAIN_SPLIT_COLUMN_TITLES):
+        ax.set_title(header, pad=16)
     path1, _ = _save_fig(fig1, "neural_main_alpha0")
     plt.close(fig1)
     paths.append(path1)
@@ -5565,6 +5679,8 @@ def _make_neural_main_split() -> list[Path]:
         axes2[2].sharey(ax2_2)
         axes2[2].set_ylim(20, 100)
         axes2[2].set_yticks([20, 60, 100])
+    for ax, header in zip(axes2, _NEURAL_MAIN_SPLIT_COLUMN_TITLES):
+        ax.set_title(header, pad=16)
     path2, _ = _save_fig(fig2, "neural_main_lambda")
     plt.close(fig2)
     paths.append(path2)
@@ -5578,6 +5694,8 @@ def _make_neural_main_split() -> list[Path]:
         axes3[2].sharey(ax2_3)
         axes3[2].set_ylim(0.0, 0.2)
         axes3[2].set_yticks([0.0, 0.1, 0.2])
+    for ax, header in zip(axes3, _NEURAL_MAIN_SPLIT_COLUMN_TITLES):
+        ax.set_title(header, pad=16)
     path3, _ = _save_fig(fig3, "neural_main_n_neurons")
     plt.close(fig3)
     paths.append(path3)

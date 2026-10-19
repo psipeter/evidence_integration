@@ -26,14 +26,14 @@
      inkscape:document-units="pt"
      showgrid="false"
      inkscape:zoom="1.061772"
-     inkscape:cx="758.63745"
-     inkscape:cy="249.58277"
+     inkscape:cx="510.93832"
+     inkscape:cy="273.12832"
      inkscape:window-width="1920"
-     inkscape:window-height="939"
-     inkscape:window-x="0"
-     inkscape:window-y="32"
+     inkscape:window-height="1043"
+     inkscape:window-x="1920"
+     inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="axes_3" />
+     inkscape:current-layer="g37442" />
   <metadata
      id="metadata194260">
     <rdf:RDF>
@@ -2391,23 +2391,14 @@
            id="path194950" />
         <g
            id="g37442"
-           transform="translate(-5.4996034,4.6947235)">
-          <rect
-             style="fill:#f9f9f9;stroke:#000000;stroke-width:0.665778;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-             id="rect84770"
-             width="167.6982"
-             height="77.919716"
-             x="588.33081"
-             y="35.035187"
-             rx="7.7964458"
-             ry="7.7964458" />
+           transform="translate(-245.78419,4.9243659)">
           <g
              id="axes_4-9"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-2.2360609)"
+             transform="matrix(2.2017315,0,0,2.2017315,-258.36144,-3.7214736)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_24-9"
-               transform="translate(0,1.5)">
+               transform="translate(5.450256,1.5)">
               <!-- a$_1$,a$_2$,a$_3$ -->
               <g
                  style="fill:#262626"
@@ -2487,7 +2478,7 @@
             </g>
             <g
                id="text_25-8"
-               transform="translate(-5.6891297,0.15128154)">
+               transform="translate(-0.23887374,0.15128154)">
               <!-- rep. sequence -->
               <g
                  style="fill:#262626"
@@ -2577,7 +2568,7 @@
           </g>
           <g
              id="axes_6-3"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-2.2360609)"
+             transform="matrix(2.2017315,0,0,2.2017315,-270.36144,-3.7214736)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_28"
@@ -2668,7 +2659,7 @@
           </g>
           <g
              id="axes_7-1"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-2.2360609)"
+             transform="matrix(2.2017315,0,0,2.2017315,-246.36144,-3.7214736)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_30">
@@ -2729,7 +2720,7 @@
           </g>
           <g
              id="axes_8-0"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-2.2360609)"
+             transform="matrix(2.2017315,0,0,2.2017315,-258.36144,-3.7214736)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_31">
@@ -2830,7 +2821,7 @@
           </g>
           <g
              id="axes_9-3"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-2.2360609)"
+             transform="matrix(2.2017315,0,0,2.2017315,-270.36144,-3.7214736)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_32">
@@ -2883,7 +2874,7 @@
           </g>
           <g
              id="axes_10-4"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-10.821184)"
+             transform="matrix(2.2017315,0,0,2.2017315,-246.36144,-13.629267)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_33">
@@ -2984,7 +2975,7 @@
           </g>
           <g
              id="axes_11-0"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-10.821184)"
+             transform="matrix(2.2017315,0,0,2.2017315,-258.36144,-13.629267)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_34">
@@ -3085,7 +3076,7 @@
           </g>
           <g
              id="axes_12"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-10.821184)"
+             transform="matrix(2.2017315,0,0,2.2017315,-270.36144,-13.629267)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_35">
@@ -3138,7 +3129,7 @@
           </g>
           <g
              id="axes_13"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-7.9594765)"
+             transform="matrix(2.2017315,0,0,2.2017315,-246.36144,-10.32667)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_36">
@@ -3175,7 +3166,7 @@
           </g>
           <g
              id="axes_14"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-7.9594765)"
+             transform="matrix(2.2017315,0,0,2.2017315,-258.36144,-10.32667)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_37">
@@ -3212,7 +3203,7 @@
           </g>
           <g
              id="axes_15"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,-7.9594765)"
+             transform="matrix(2.2017315,0,0,2.2017315,-270.36144,-10.32667)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_38">
@@ -3249,7 +3240,7 @@
           </g>
           <g
              id="axes_16"
-             transform="matrix(1.907805,0,0,1.907805,-132.19211,-10.202368)"
+             transform="matrix(2.2017315,0,0,2.2017315,-255.12736,3.7226727)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <g
                id="text_39">
@@ -3382,7 +3373,7 @@
           </g>
           <g
              id="text_26-3"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,0.62564686)"
+             transform="matrix(2.2017315,0,0,2.2017315,-258.36144,-0.41887631)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <!-- r$_1$,r$_2$,r$_3$,r$_4$ -->
             <g
@@ -3480,7 +3471,7 @@
           </g>
           <g
              id="text_27"
-             transform="matrix(1.907805,0,0,1.907805,-130.02723,3.4873546)"
+             transform="matrix(2.2017315,0,0,2.2017315,-258.36144,2.8837212)"
              style="stroke-linecap:butt;stroke-linejoin:round">
             <!-- responses -->
             <g

@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="10.599999in"
+   height="5in"
+   viewBox="0 0 269.24001 127"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="cognitive_models_4.svg"
+   inkscape:version="1.1.2 (0a00cf5339, 2022-02-04)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.69041106"
+     inkscape:cx="439.59319"
+     inkscape:cy="292.57932"
+     inkscape:window-width="1920"
+     inkscape:window-height="939"
+     inkscape:window-x="0"
+     inkscape:window-y="32"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1"
+     showgrid="false"
+     inkscape:pageshadow="2"
+     units="in"
+     inkscape:snap-global="false" />
+  <defs
+     id="defs1">
+    <marker
+       style="overflow:visible"
+       id="marker2"
+       refX="0"
+       refY="0"
+       orient="auto"
+       inkscape:stockid="Stop"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:none;stroke:context-stroke;stroke-width:1"
+         d="M 0,4 V -4"
+         id="path2" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Stop"
+       refX="0"
+       refY="0"
+       orient="auto"
+       inkscape:stockid="Stop"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:none;stroke:context-stroke;stroke-width:1"
+         d="M 0,4 V -4"
+         id="path23" />
+    </marker>
+    <clipPath
+       id="p342a562464">
+      <rect
+         x="90"
+         y="8.6400003"
+         width="558"
+         height="55.439999"
+         id="rect1-1" />
+    </clipPath>
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-0.59840804,-27.088797)">
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.76388889;stroke-opacity:1;marker-start:url(#marker2);marker-end:url(#Stop);stroke-miterlimit:4;stroke-dasharray:none"
+       d="M 7.30833,90.187459 H 265.54149"
+       id="path1"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;stroke:#1f77b4;stroke-width:3.52778;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m 238.69702,85.404291 h 22.20591"
+       id="path1-9"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;stroke:#2ca02c;stroke-width:3.52778;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m 200.92388,85.53577 h 33.93068"
+       id="path1-9-1"
+       sodipodi:nodetypes="cc" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#1f77b4;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="249.90547"
+       y="73.737946"
+       id="text1-3"><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#1f77b4;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="249.90547"
+         y="73.737946"
+         id="tspan47646">Mean</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#1f77b4;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="238.67094"
+       y="140.60025"
+       id="text1-3-9-8"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#1f77b4;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="238.67094"
+         y="140.60025">perfect memory</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#2ca02c;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="165.09586"
+       y="140.79395"
+       id="text1-3-9-8-0"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-6"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#2ca02c;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="165.09586"
+         y="140.79395">perfect memory</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#2ca02c;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="165.13385"
+       y="151.6326"
+       id="text1-3-9-8-0-4"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-6-6"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#2ca02c;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="165.13385"
+         y="151.6326">bias parameters</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#1f77b4;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="254.26704"
+       y="150.85912"
+       id="text1-3-9-8-2"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-1"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#1f77b4;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="254.26704"
+         y="150.85912">flexible</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#00ff00;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="187.18677"
+       y="98.883461"
+       id="text1-3-9-9"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-2"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00ff00;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="187.18677"
+         y="98.883461">accurate</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="29.456606"
+       y="99.448639"
+       id="text1-3-9-9-7"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-2-7"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#ff0000;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="29.456606"
+         y="99.448639">inaccurate</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="241.92213"
+       y="98.705772"
+       id="text1-3-9-9-2"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-2-4"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#ff0000;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="241.92213"
+         y="98.705772">implausible</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="212.12157"
+       y="98.862289"
+       id="text1-3-9-9-2-9"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-2-4-1"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="212.12157"
+         y="98.862289">but</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="57.310104"
+       y="99.640831"
+       id="text1-3-9-9-2-9-9"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-2-4-1-6"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="57.310104"
+         y="99.640831">but</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#00ff00;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="81.92672"
+       y="100.03767"
+       id="text1-3-9-9-2-5"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-2-4-4"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#00ff00;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="81.92672"
+         y="100.03767">plausible</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#2ca02c;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="188.15536"
+       y="73.425995"
+       id="text1-3-3"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-3"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#2ca02c;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="188.15536"
+         y="73.425995">Primacy-Recency</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff7f0e;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="47.608078"
+       y="73.168762"
+       id="text1-3-6"><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.4353px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#ff7f0e;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="47.608078"
+         y="73.168762"
+         id="tspan48284">Leaky Integrator</tspan></text>
+    <path
+       style="fill:none;stroke:#ff7f0e;stroke-width:3.52778;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m 10.295037,85.374275 h 22.20591"
+       id="path48366"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;stroke:#cccccc;stroke-width:3.52778;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M 35.814915,85.563959 H 196.9255"
+       id="path48366-2"
+       sodipodi:nodetypes="cc" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff7f0e;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="41.887184"
+       y="142.56335"
+       id="text1-3-9-8-1"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-0"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#ff7f0e;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="41.887184"
+         y="142.56335">single state estimate</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ff7f0e;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="46.678047"
+       y="152.38211"
+       id="text1-3-9-8-1-8"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-0-5"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#ff7f0e;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="46.678047"
+         y="152.38211">prediction error update</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#808080;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="116.60062"
+       y="124.04072"
+       id="text1-3-9-8-1-8-5"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-0-5-8"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#808080;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="116.60062"
+         y="124.04072">weighted prediction error update</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#808080;fill-opacity:1;stroke:none;stroke-width:0.626117;stroke-dasharray:none;stroke-opacity:1"
+       x="116.6976"
+       y="114.25166"
+       id="text1-3-9-8-1-8-5-6"><tspan
+         sodipodi:role="line"
+         id="tspan1-9-60-0-0-5-8-2"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.82646px;font-family:Inter;-inkscape-font-specification:'Inter, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#808080;fill-opacity:1;stroke:none;stroke-width:0.626117"
+         x="116.6976"
+         y="114.25166">few internal states</tspan></text>
+  </g>
+</svg>

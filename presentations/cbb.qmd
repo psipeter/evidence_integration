@@ -1,0 +1,243 @@
+---
+title: "Evidence Integration"
+subtitle: "Individual differences, prediction error, and neural networks"
+author: "Peter Duggins"
+date: "October 20, 2026"
+date-format: "MMMM D, YYYY"
+format: 
+  revealjs:
+    theme: [default, cbb.scss]
+    logo: figures/logo.svg
+    incremental: true 
+    highlight-style: github
+    slide-number: true
+    html-math-method: katex
+    include-after-body: include-scripts.html
+    # embed-resources: true
+    revealjs-plugins:
+      - pointer
+bibliography: "references.bib"
+
+---
+
+## Requested Feedback
+
+::: {.nonincremental}
+* Gaps in the analysis?
+* Which results/methods to emphasize?
+:::
+
+## Cognitive Neuroscience
+
+:::: {.columns}
+
+::: {.column width="50%"}
+::: {.image-card}
+![](figures/cognitive_science_loop.svg){style="height: 480px; width: auto;"}
+:::
+:::
+
+::: {.column width="50%"}
+::: {.image-card}
+![](figures/brain_model_behavior.svg){style="height: 480px; width: auto;"}
+:::
+:::
+
+::::
+
+## Evidence Integration
+
+::: {.image-card}
+![](figures/poker_cartoon.jpeg){width="100%"}
+:::
+
+## Behavioral Experiments
+
+::: {.image-card}
+![](figures/tasks_overview_presentation.svg){width="100%"}
+:::
+
+<!--
+## People Learn as they Gather Data
+
+::: {.image-card}
+![](figures/temporal_performance.svg){width="100%"}
+:::
+-->
+
+## Cognitive Models
+
+::: {.image-card}
+![](figures/cognitive_models_1.svg){#theories-img width="100%"}
+:::
+
+[]{.fragment fragment-index="1" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_2.svg" data-swap-prev="figures/cognitive_models_1.svg"}
+[]{.fragment fragment-index="2" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_3.svg" data-swap-prev="figures/cognitive_models_2.svg"}
+[]{.fragment fragment-index="3" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_4.svg" data-swap-prev="figures/cognitive_models_3.svg"}
+[]{.fragment fragment-index="4" data-swap-target="theories-img" data-swap-src="figures/cognitive_models_5.svg" data-swap-prev="figures/cognitive_models_4.svg"}
+
+
+## Theory and Model
+
+::: {.image-card}
+![](figures/models_overview_presentation_1.svg){#models-overview-img width="100%"}
+:::
+
+[]{.fragment fragment-index="1" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_2.svg" data-swap-prev="figures/models_overview_presentation_1.svg"}
+[]{.fragment fragment-index="2" data-swap-target="models-overview-img" data-swap-src="figures/models_overview_presentation_3.svg" data-swap-prev="figures/models_overview_presentation_2.svg"}
+
+## Model Captures Behavior
+
+::: {.image-card}
+![](figures/model_performance.svg){width="100%"}
+:::
+
+
+## Smaller Updates Over Time ($\lambda$)
+
+::: {.image-card}
+![](figures/lambda_response_change_e.svg){#lambda-response-change-img width="100%"}
+:::
+
+[]{.fragment fragment-index="1" data-swap-target="lambda-response-change-img" data-swap-src="figures/lambda_response_change.svg" data-swap-prev="figures/lambda_response_change_e.svg"}
+
+## Individual Differences in $\lambda$
+
+::: {.image-card}
+![](figures/lambda_distributions_e.svg){width="100%"}
+:::
+
+## People have Noisy Responses ($\sigma$)
+
+::: {.image-card}
+![](figures/sigma_distributions_e.svg){width="100%"}
+:::
+
+## Response Noise Dynamics
+
+::: {.image-card}
+![](figures/sigma_growth_autocorr_e2.svg){#sigma-growth-autocorr-img width="100%"}
+:::
+
+[]{.fragment fragment-index="1" data-swap-target="sigma-growth-autocorr-img" data-swap-src="figures/sigma_growth_autocorr_e.svg" data-swap-prev="figures/sigma_growth_autocorr_e2.svg"}
+[]{.fragment fragment-index="2" data-swap-target="sigma-growth-autocorr-img" data-swap-src="figures/sigma_growth_autocorr.svg" data-swap-prev="figures/sigma_growth_autocorr_e.svg"}
+
+## $\lambda$/$\sigma$ Consistent in/across Tasks
+
+::: {.image-card}
+![](figures/lambda_sigma_consistency_e.svg){width="100%"}
+:::
+
+## Outlier Experiment
+
+::: {.image-card}
+![](figures/neural_main_alpha0.svg){width="100%"}
+:::
+
+## Neural and Behavioral Noise
+
+::: {.image-card}
+![](figures/neural_main_n_neurons.svg){width="100%"}
+:::
+
+## Decline in Updating
+
+::: {.image-card}
+![](figures/neural_main_lambda.svg){width="100%"}
+:::
+
+## Neural Mechanisms of WM
+
+::: {.image-card}
+![](figures/synaptic_overview_presentation.svg){width="100%"}
+:::
+
+## Non-Invasive Stimulation
+
+::: {.image-card}
+![](figures/synaptic_iti_perturbation.svg){width="100%"}
+:::
+
+## Future Work
+
+:::: {.columns style="display: flex; gap: 2em;"}
+
+::: {.column width="33%"}
+::: {.image-card}
+![](figures/foraging_screenshot.png){style="height: 200px; width: 200px; object-fit: cover;"}
+:::
+
+::: {style="text-align: center;"}
+**Naturalistic VR Foraging**
+:::
+
+::: {.nonincremental style="font-size: 0.7em;"}
+* Continuous time & space
+* Multidimensional stimuli
+* Explore vs exploit
+:::
+:::
+
+::: {.column width="33%" .fragment}
+::: {.image-card}
+![](figures/super_saiyan_robot.jpeg){style="height: 200px; width: 200px; object-fit: cover;"}
+:::
+
+::: {style="text-align: center;"}
+**Sophisticated Neural Agent**
+:::
+
+::: {.nonincremental style="font-size: 0.7em;"}
+* Episodic memory
+* Successor representations
+* Retrospective learning
+:::
+:::
+
+::: {.column width="33%" .fragment}
+::: {.image-card}
+![](figures/android_vs_human.jpeg){style="height: 200px; width: 200px;"}
+:::
+
+::: {style="text-align: center;"}
+**Neural Analysis**
+:::
+
+::: {.nonincremental style="font-size: 0.7em;"}
+* Recordings during task
+* Agent vs human activity
+* Profit
+:::
+:::
+
+::::
+
+
+## Acknowledgments {.smaller}
+
+::: {style="display: flex; justify-content: space-evenly; width: 100%; min-width: 100%; box-sizing: border-box;"}
+![Alireza Soltani](figures/alireza.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Peter Duggins](figures/peter.jpg){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![Claude](figures/claude_ai_icon.svg){style="height: 110px; width: 110px; object-fit: contain;"}
+![Dartmouth logo](figures/logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+![NSF logo](figures/nsf_logo.png){style="height: 110px; width: 110px; object-fit: cover; border-radius: 8px;"}
+:::
+
+
+Neural Engineering Framework
+
+::: {style="font-size: 0.6em;"}
+Eliasmith, Chris, and Charles H Anderson. 2003. Neural Engineering: Computation, Representation, and Dynamics in Neurobiological Systems. Cambridge, MA: MIT press.
+:::
+
+Proportion Inference Task / Data
+
+::: {style="font-size: 0.6em;"}
+Prat-Carrabin, Arthur, and Michael Woodford. 2024. “Imprecise Probabilistic Inference from Sequential Data.” Psychological Review 131.
+:::
+
+Value Integration Task / Data
+
+::: {style="font-size: 0.6em;"}
+Yoo, Minhee, Giwon Bahg, Brandon Turner, and Ian Krajbich. 2025. “People Display Consistent Recency and Primacy Effects in Behavior and Neural Activity Across Perceptual and Value-Based Judgments.” Cognitive, Affective, & Behavioral Neuroscience 25.
+:::
