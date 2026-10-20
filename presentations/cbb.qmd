@@ -27,6 +27,8 @@ bibliography: "references.bib"
 * Which results/methods to emphasize?
 :::
 
+<!--
+
 ## Cognitive Neuroscience
 
 :::: {.columns}
@@ -44,6 +46,8 @@ bibliography: "references.bib"
 :::
 
 ::::
+-->
+
 
 ## Evidence Integration
 
@@ -108,13 +112,13 @@ bibliography: "references.bib"
 ![](figures/lambda_distributions_e.svg){width="100%"}
 :::
 
-## People have Noisy Responses ($\sigma$)
+## Noisy Responses ($\sigma$)
 
 ::: {.image-card}
 ![](figures/sigma_distributions_e.svg){width="100%"}
 :::
 
-## Response Noise Dynamics
+## Paterns in Noise Dynamics
 
 ::: {.image-card}
 ![](figures/sigma_growth_autocorr_e2.svg){#sigma-growth-autocorr-img width="100%"}
@@ -129,13 +133,13 @@ bibliography: "references.bib"
 ![](figures/lambda_sigma_consistency_e.svg){width="100%"}
 :::
 
-## Outlier Experiment
+## Outliers and Prediction Error
 
 ::: {.image-card}
 ![](figures/neural_main_alpha0.svg){width="100%"}
 :::
 
-## Decline in Updating
+## Decline in Update Size
 
 ::: {.image-card}
 ![](figures/neural_main_lambda.svg){width="100%"}
@@ -147,7 +151,7 @@ bibliography: "references.bib"
 ![](figures/neural_main_n_neurons.svg){width="100%"}
 :::
 
-## Neural Mechanisms of WM
+## Neural Mechanisms
 
 ::: {.image-card}
 ![](figures/synaptic_overview_presentation.svg){width="100%"}
